@@ -1,0 +1,155 @@
+{
+  "schemaVersion": "1.0",
+  "name": "UAV_Full_Fault_Injection_Model_Blueprint",
+  "purpose": "A complete platform model blueprint for showing all UAV flight-control fault types in one hierarchical model.",
+  "signalGroups": [
+    "command",
+    "controller",
+    "control_allocation",
+    "actuator_motor",
+    "vehicle_dynamics",
+    "sensor_measurement",
+    "estimator",
+    "protocol_link",
+    "instrumentation"
+  ],
+  "stateVector": [
+    "x",
+    "y",
+    "z",
+    "vx",
+    "vy",
+    "vz",
+    "phi",
+    "theta",
+    "psi",
+    "p",
+    "q",
+    "r",
+    "motor_1_speed",
+    "motor_2_speed",
+    "motor_3_speed",
+    "motor_4_speed",
+    "battery_voltage"
+  ],
+  "subsystems": [
+    {
+      "id": "sub_command",
+      "name": "Command and Mission Source",
+      "role": "generate pilot or mission commands",
+      "outputs": ["roll_cmd", "pitch_cmd", "yaw_cmd", "altitude_cmd", "velocity_cmd"],
+      "faultInjectionPoints": ["command_tamper", "command_delay", "command_packet_loss", "command_interrupt"]
+    },
+    {
+      "id": "sub_controller",
+      "name": "Flight Controller",
+      "role": "attitude, altitude, and yaw control",
+      "inputs": ["state_estimate", "command"],
+      "outputs": ["virtual_control", "motor_command"],
+      "faultInjectionPoints": ["gain_bias", "gain_step", "yaw_gain_anomaly", "control_sign_flip"]
+    },
+    {
+      "id": "sub_allocation",
+      "name": "Control Allocation",
+      "role": "map virtual control to motor commands",
+      "inputs": ["virtual_control"],
+      "outputs": ["motor_1_cmd", "motor_2_cmd", "motor_3_cmd", "motor_4_cmd"],
+      "faultInjectionPoints": ["allocation_matrix_bias", "allocation_matrix_sign_error"]
+    },
+    {
+      "id": "sub_actuator",
+      "name": "Actuator and Motor",
+      "role": "convert motor commands into thrust and torque",
+      "inputs": ["motor_command", "battery_voltage"],
+      "outputs": ["thrust", "torque", "motor_speed"],
+      "faultInjectionPoints": ["motor_efficiency_loss", "single_motor_lock", "thrust_saturation", "battery_voltage_drift"]
+    },
+    {
+      "id": "sub_vehicle",
+      "name": "Vehicle Dynamics",
+      "role": "compute nonlinear UAV motion",
+      "inputs": ["thrust", "torque", "wind"],
+      "outputs": ["true_state"],
+      "faultInjectionPoints": ["mass_bias", "inertia_bias", "drag_jump", "aero_drag_increase"]
+    },
+    {
+      "id": "sub_sensors",
+      "name": "Sensor Measurement Chain",
+      "role": "generate IMU, barometer, GPS, and attitude measurements",
+      "inputs": ["true_state"],
+      "outputs": ["gyro", "accel", "baro", "gps_position", "gps_velocity", "euler_measurement"],
+      "faultInjectionPoints": ["gyro_bias", "gyro_noise", "baro_drift", "gps_freeze", "accel_scale", "attitude_sign_flip"]
+    },
+    {
+      "id": "sub_protocol",
+      "name": "Protocol and Data Link",
+      "role": "transmit commands and measurements",
+      "inputs": ["sensor_packet", "command_packet"],
+      "outputs": ["received_sensor_packet", "received_command_packet"],
+      "faultInjectionPoints": ["fixed_delay", "jitter_delay", "packet_loss", "burst_loss", "payload_tamper", "link_interrupt"]
+    },
+    {
+      "id": "sub_estimator",
+      "name": "Estimator and Residual Generator",
+      "role": "estimate state and compute residuals against reference branch",
+      "inputs": ["received_sensor_packet"],
+      "outputs": ["state_estimate", "residual_vector", "fault_indicators"],
+      "faultInjectionPoints": ["estimator_parameter_bias", "measurement_delay_response"]
+    },
+    {
+      "id": "sub_instruments",
+      "name": "Instrumentation",
+      "role": "observe waveforms, logs, spectra, and multi-signal flow",
+      "inputs": ["normal_branch", "fault_branch", "residual_vector", "protocol_metrics"],
+      "outputs": ["scope_view", "logger_csv", "spectrum_bins", "flow_graph_metrics"],
+      "faultInjectionPoints": []
+    }
+  ],
+  "recommendedPlatformNodes": [
+    "subsystem_block",
+    "simulation_block with Python binding",
+    "middle_var_assign",
+    "fault_parameter_bias",
+    "fault_gain_scale",
+    "fault_drift_ramp",
+    "fault_step_jump",
+    "fault_saturation",
+    "fault_freeze_hold",
+    "fault_noise_configurable",
+    "fault_delay_buffer",
+    "fault_packet_loss",
+    "fault_payload_tamper",
+    "instrument_scope",
+    "instrument_logger",
+    "instrument_spectrum",
+    "instrument_multi_signal_flow"
+  ],
+  "comparisonBranchPattern": {
+    "normalBranch": "command -> controller -> allocation -> actuator -> vehicle -> sensors -> protocol -> estimator",
+    "faultBranch": "command -> controller -> allocation -> actuator/faults -> vehicle/faults -> sensors/faults -> protocol/faults -> estimator",
+    "residual": "faultBranch.outputs - normalBranch.outputs",
+    "minimumInstruments": ["Normal vs Fault Scope", "Residual Logger", "Residual Spectrum", "Multi-Signal Flow Graph"]
+  },
+  "multiSignalFlowIntegration": {
+    "platformView": "canvas dataflow tab",
+    "instrumentNode": "instrument_signal_flow",
+    "sourceOfTruth": "workbenchSnapshot.modelNodes + workbenchSnapshot.modelEdges + importedFaultModels",
+    "edgeMetricSchema": {
+      "signalName": "source node output port display name",
+      "currentValue": "latest SIM.actual node output sample when simulation has run",
+      "residual": "latest residual node output when edge terminates at residual/sum node",
+      "latency": "protocol fault delay_seconds/base_delay/jitter, formatted as ms or s",
+      "dropRate": "protocol fault drop_rate/start_probability/loss_rate",
+      "burstLength": "protocol burst_length",
+      "faultActive": "true when the edge, source node, or target node carries injected fault metadata"
+    },
+    "visualRules": [
+      "normal edges remain blue",
+      "fault-active edges become red and stronger in dataflow view",
+      "protocol/CAN edges use purple dashed emphasis",
+      "residual-related edges use orange emphasis",
+      "selecting an edge opens signal diagnostics in the property inspector"
+    ],
+    "implementationStatus": "platform_runtime_integrated"
+  }
+}

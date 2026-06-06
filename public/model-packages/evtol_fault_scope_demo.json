@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "packageType": "flight-control-model",
+  "systemFamily": "uav-flight-control",
+  "supportedFaultLibraries": ["uav-flight-control-faults"],
+  "modelId": "evtol-fault-scope-demo",
+  "modelName": "eVTOL Fault Scope Demo",
+  "description": "Compact pre-injected fault demo. Import this package, initialize/step the simulation, then open the demo oscilloscope to compare the commanded signal and the faulted motor response.",
+  "source": {
+    "origin": "workbench-demo",
+    "notes": "Small first-screen example for verifying pre-injected fault waveform viewing."
+  },
+  "pythonModules": [],
+  "faultLibrary": [
+    {
+      "id": "motor_efficiency_loss",
+      "name": "Motor Efficiency Loss",
+      "layer": "electrical",
+      "desc": "Preloaded motor-side efficiency loss for waveform demonstration.",
+      "defaultValue": 0.55,
+      "moduleTargets": [
+        "motor_model"
+      ],
+      "parameter": "efficiency",
+      "tags": [
+        "demo",
+        "motor",
+        "electrical",
+        "preloaded"
+      ],
+      "createdAt": "2026-04-28",
+      "origin": "demo"
+    }
+  ],
+  "workbenchSnapshot": {
+    "version": 1,
+    "modelNodes": [
+      {
+        "id": "demo-command",
+        "type": "signal_source",
+        "x": 120,
+        "y": 190,
+        "w": 164,
+        "h": 84,
+        "props": {
+          "name": "Demo Command",
+          "waveType": "正弦",
+          "amplitude": "1.0",
+          "frequency": "0.5",
+          "outputFormat": "标量"
+        },
+        "pythonBinding": null
+      },
+      {
+        "id": "demo-motor",
+        "type": "simulation_block",
+        "x": 390,
+        "y": 170,
+        "w": 180,
+        "h": 104,
+        "props": {
+          "name": "Faulted Motor Model",
+          "moduleType": "actuators",
+          "inputs": [
+            {
+              "name": "Motor Command",
+              "type": "scalar"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Faulted Motor Response",
+              "type": "scalar"
+            }
+          ],
+          "middleVars": [
+            {
+              "name": "internal_state",
+              "type": "scalar"
+            }
+          ]
+        },
+        "pythonBinding": null,
+        "injectedFault": {
+          "modelId": "motor_efficiency_loss",
+          "name": "Motor Efficiency Loss",
+          "layer": "electrical",
+          "parameter": "efficiency",
+          "value": 0.55,
+          "desc": "Motor response is scaled to 55% in the actual simulation channel.",
+          "tags": [
+            "demo",
+            "preloaded"
+          ]
+        }
+      },
+      {
+        "id": "demo-scope",
+        "type": "instrument_scope",
+        "x": 690,
+        "y": 170,
+        "w": 160,
+        "h": 84,
+        "props": {
+          "name": "Demo Fault Scope",
+          "instrumentType": "示波器",
+          "sampleRate": "10Hz",
+          "signal": "CH1 故障响应 / CH2 指令输入"
+        },
+        "pythonBinding": null
+      }
+    ],
+    "modelEdges": [
+      {
+        "id": "demo-edge-command-motor",
+        "sourceNodeId": "demo-command",
+        "targetNodeId": "demo-motor",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "demo-edge-motor-scope-ch1",
+        "sourceNodeId": "demo-motor",
+        "targetNodeId": "demo-scope",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "demo-edge-command-scope-ch2",
+        "sourceNodeId": "demo-command",
+        "targetNodeId": "demo-scope",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 1,
+        "lineType": "normal"
+      }
+    ],
+    "nodeSeq": 3,
+    "edgeSeq": 3,
+    "activeLineType": "normal",
+    "faultedBlks": [
+      "demo-motor"
+    ],
+    "importedFaultModels": [
+      {
+        "id": "motor_efficiency_loss",
+        "name": "Motor Efficiency Loss",
+        "layer": "electrical",
+        "desc": "Preloaded motor-side efficiency loss for waveform demonstration.",
+        "defaultValue": 0.55,
+        "moduleTargets": [
+          "motor_model"
+        ],
+        "parameter": "efficiency",
+        "tags": [
+          "demo",
+          "motor",
+          "electrical",
+          "preloaded"
+        ],
+        "createdAt": "2026-04-28",
+        "origin": "demo"
+      }
+    ]
+  }
+}

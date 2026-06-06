@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "packageType": "flight-control-model",
+  "modelId": "evtol-small-nonlinear",
+  "modelName": "eVTOL Small Nonlinear Flight Control",
+  "description": "Manually decomposed eVTOL flight-control reference package derived from the Simulink validation model",
+  "source": {
+    "origin": "manual-from-slx",
+    "slxFile": "eVTOL_Small_nonandlin_algorithm_validation.slx",
+    "notesDoc": "常见飞控模型故障梳理(1).docx"
+  }
+}

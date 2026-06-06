@@ -1,0 +1,154 @@
+<div class="canvas-wrap" id="cw">
+  <div class="canvas-grid"></div>
+
+  <div class="canvas-chrome" aria-label="画布工具栏">
+    <div class="canvas-sim-dock" aria-label="仿真任务控制">
+      <div class="simbar" id="simbar">
+        <div class="simbar-title">
+          <span class="simbar-title__kicker">任务控制</span>
+          <span class="simbar-title__name">仿真参数</span>
+        </div>
+        <div class="simbar-params">
+          <div class="sim-field">
+            <span class="sim-field-lbl">数据集名称</span>
+            <input class="sim-field-inp" id="sim-name" value="test" style="width:68px;text-align:left;">
+          </div>
+          <div class="sim-field">
+            <span class="sim-field-lbl">仿真时长</span>
+            <input class="sim-field-inp" id="sim-dur" value="1000" type="number" min="1">
+          </div>
+          <div class="sim-field" style="border-right:none;margin-right:0;">
+            <span class="sim-field-lbl">仿真步长</span>
+            <input class="sim-field-inp" id="sim-step" value="0.1" type="number" min="0.001" step="0.01">
+          </div>
+        </div>
+        <div class="simbar-rt">
+          <span class="simbar-rt-lbl">实时模式</span>
+          <label class="toggle-wrap">
+            <input type="checkbox" id="sim-rt" onchange="onRtToggle(this)" checked>
+            <div class="toggle-track"></div>
+            <div class="toggle-thumb"></div>
+          </label>
+        </div>
+        <div class="simbar-btns">
+          <button class="sim-btn sim-btn-disabled" id="sbtn-init" onclick="simInit()" title="初始化">
+            <span class="sim-btn-icon">&#8635;</span>
+            <span class="sim-btn-lbl">初始化</span>
+          </button>
+          <button class="sim-btn sim-btn-run sim-btn-disabled" id="sbtn-run" onclick="simRun()" title="运行">
+            <span class="sim-btn-icon" id="run-icon">&#9654;</span>
+            <span class="sim-btn-lbl" id="run-lbl">运行</span>
+          </button>
+          <button class="sim-btn sim-btn-disabled" id="sbtn-step" onclick="simStep()" title="步进">
+            <span class="sim-btn-icon">&#9197;</span>
+            <span class="sim-btn-lbl">步进</span>
+          </button>
+          <button class="sim-btn sim-btn-disabled" id="sbtn-pause" onclick="simPause()" title="暂停">
+            <span class="sim-btn-icon">&#10074;&#10074;</span>
+            <span class="sim-btn-lbl" id="pause-lbl">暂停</span>
+          </button>
+          <button class="sim-btn sim-btn-stop sim-btn-disabled" id="sbtn-stop" onclick="simStop()" title="终止">
+            <span class="sim-btn-icon">&#9632;</span>
+            <span class="sim-btn-lbl">终止</span>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="canvas-tabs">
+      <button type="button" class="canvas-tab is-active" data-canvas-view="canvas">画布</button>
+      <button type="button" class="canvas-tab" data-canvas-view="components">&#25925;&#38556;&#35270;&#22270;</button>
+      <button type="button" class="canvas-tab" data-canvas-view="dataflow">多信号流图</button>
+      <button type="button" class="canvas-tab" data-canvas-view="dmatrix">D矩阵</button>
+    </div>
+    <div class="fault-view-tools" data-fault-view-tools>
+      <button type="button" data-toggle-fault-view-testpoints aria-pressed="false">显示测点</button>
+    </div>
+    <div class="canvas-tools">
+      <button type="button" class="canvas-tool is-active" title="选择" data-canvas-command="select">⌖</button>
+      <button type="button" class="canvas-tool" title="平移" data-canvas-command="pan">✥</button>
+      <button type="button" class="canvas-tool" title="放大" data-canvas-command="zoom-in">＋</button>
+      <button type="button" class="canvas-tool" title="缩小" data-canvas-command="zoom-out">－</button>
+      <span class="canvas-tools__divider"></span>
+      <button type="button" class="canvas-tool" title="自动整理" data-canvas-command="auto-arrange">⇄</button>
+      <button type="button" class="canvas-tool" title="模型检查" data-canvas-command="model-check">✓</button>
+      <span class="canvas-tools__spacer"></span>
+      <button type="button" class="canvas-tool" title="撤销" data-canvas-command="undo" disabled>↶</button>
+      <button type="button" class="canvas-tool" title="重做" data-canvas-command="redo" disabled>↷</button>
+      <div class="canvas-tools__zoom">
+        <button type="button" onclick="handleCanvasZoomOut()">－</button>
+        <span id="canvas-toolbar-zoom">100%</span>
+        <button type="button" onclick="handleCanvasZoomIn()">＋</button>
+      </div>
+      <button type="button" class="canvas-tool" title="全屏" data-canvas-command="fullscreen">⛶</button>
+    </div>
+  </div>
+
+    <div class="canvas-breadcrumbs" id="canvas-breadcrumbs" data-testid="canvas-breadcrumbs"></div>
+    <div class="dataflow-panel" id="dataflow-panel" aria-live="polite">
+      <div class="dataflow-panel__empty">切换到数据流视图后，将显示多信号流图、边状态和故障传播指标。</div>
+    </div>
+    <div class="d-matrix-panel" id="d-matrix-panel" aria-live="polite">
+      <div class="d-matrix-panel__empty">切换到D矩阵后，将显示故障类型与固定测点的可检测关系。</div>
+    </div>
+
+    <div class="empty-state" id="empty">
+    <div class="empty-icon">模型</div>
+    <div class="empty-txt">可导入系统模型，也可新建空白模型后开始建模</div>
+    <div class="empty-sub">点击右上角“导入系统模型”或“新建空白模型”开始。</div>
+  </div>
+
+  <div class="diagram" id="diagram">
+    <div class="diagram-guide">
+      <div class="diagram-guide-title">系统故障传播建模画布</div>
+      <div class="diagram-guide-sub">拖拽组件进入画布后可移动节点；通过端口连线建立信号流；支持画布缩放、节点拖动以及节点和连线的单独删除。</div>
+    </div>
+    <div class="diagram-placeholder" id="diagram-placeholder">
+      <div class="diagram-placeholder-card">
+        <div class="diagram-placeholder-icon">拖入</div>
+        <div class="diagram-placeholder-title">将组件拖拽到此处</div>
+        <div class="diagram-placeholder-sub">建议先放置信号源、流程块和仿真块，再通过输出端口与输入端口完成连线。</div>
+      </div>
+    </div>
+    <div class="canvas-floating">
+      <div class="canvas-group-actions">
+        <button type="button" class="canvas-wrap__button" id="canvas-wrap-selection" onclick="wrapSelectionIntoSubsystem()" disabled>封装为子系统</button>
+        <button type="button" class="canvas-arrange__button" onclick="autoArrangeCanvas()">一键整理</button>
+        <button type="button" class="canvas-check__button" onclick="runModelCheck()">模型检查</button>
+      </div>
+      <div class="canvas-mode">
+        <span class="canvas-mode__label">当前连接</span>
+        <span class="canvas-mode__chip" id="line-mode-chip">普通连接线</span>
+      </div>
+      <div class="canvas-zoom">
+        <button type="button" class="canvas-zoom__button" onclick="handleCanvasZoomOut()">-</button>
+        <div class="canvas-zoom__track">
+          <span class="canvas-zoom__fill" id="canvas-zoom-fill" style="width:100%"></span>
+        </div>
+        <button type="button" class="canvas-zoom__button" onclick="handleCanvasZoomIn()">+</button>
+        <button type="button" class="canvas-zoom__reset" id="canvas-zoom-reset" onclick="handleCanvasZoomReset()">100%</button>
+      </div>
+    </div>
+    <div class="canvas-viewport" id="canvas-viewport">
+      <div class="canvas-stage" id="canvas-stage">
+        <div class="canvas-stage-grid"></div>
+        <svg class="edge-layer" id="edge-layer" viewBox="0 0 2400 1500" preserveAspectRatio="none">
+          <defs>
+            <marker id="edge-arrow-normal" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+              <path d="M1 1L8 5L1 9" fill="none" stroke="#84aee0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </marker>
+            <marker id="edge-arrow-can" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+              <path d="M1 1L8 5L1 9" fill="none" stroke="#8c7cf6" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+            </marker>
+            <marker id="edge-arrow-fault" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+              <path d="M1 1L8 5L1 9" fill="none" stroke="#dc2626" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </marker>
+          </defs>
+          <g id="edge-group"></g>
+          <path id="edge-preview" class="edge-preview" d="" style="display:none"></path>
+        </svg>
+        <div class="node-layer" id="node-layer"></div>
+        <div class="scope-window-layer" id="scope-window-layer" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+</div>

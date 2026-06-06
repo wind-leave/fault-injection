@@ -1,0 +1,20 @@
+<aside class="rpanel">
+  <div class="ph">
+    <div class="ph-title">属性面板</div>
+    <div class="ph-sub">当前选择 · 配置参数</div>
+  </div>
+  <div class="props-tabs" aria-label="属性面板标签">
+    <button type="button" class="props-tab is-active" data-props-tab="overview">属性</button>
+    <button type="button" class="props-tab" data-props-tab="parameters">参数配置</button>
+    <button type="button" class="props-tab" data-props-tab="faults">故障设置</button>
+    <button type="button" class="props-tab" data-props-tab="outputs">输出配置</button>
+  </div>
+  <div class="props-body">
+    <div class="props-empty" id="pe">
+      <div style="font-size:24px;opacity:0.22">属性</div>
+      <div>点击组件或连线查看属性</div>
+      <div style="font-size:11px;color:var(--textd)">信号源、仿真块、仪器和 CAN 边会显示不同的配置项</div>
+    </div>
+    <div id="pd" style="display:none"></div>
+  </div>
+</aside>

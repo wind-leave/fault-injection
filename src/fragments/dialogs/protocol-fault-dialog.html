@@ -1,0 +1,33 @@
+<div class="overlay" id="ov-proto">
+  <div class="modal" style="width:860px;height:540px">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--blue)">CAN 协议层故障注入</div>
+      <button class="mclose" onclick="closeOv('ov-proto')">×</button>
+    </div>
+    <div class="mbody einj-body einj-protocol">
+      <div class="einj-side">
+        <div class="einj-side-head">
+          <div class="einj-side-title">已导入模型</div>
+          <div class="einj-side-sub">这里显示通过“导入故障模型”进入工作区的 CAN 协议层故障。</div>
+        </div>
+        <div class="einj-import-list" id="pinj-import-list"></div>
+      </div>
+      <div class="einj-main">
+        <div class="einj-target" id="pinj-target"></div>
+        <div class="einj-grid" id="pinj-template-grid"></div>
+      </div>
+      <div class="einj-detail">
+        <div class="einj-detail-head">
+          <div class="einj-detail-title">模型详情</div>
+          <div class="einj-detail-sub">当前仅支持对 CAN 总线注入协议层故障。</div>
+        </div>
+        <div class="einj-detail-body" id="pinj-detail-body"></div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <div style="flex:1;font-size:11px;color:var(--textm)" id="pinj-foot-hint">请选择一个 CAN 协议层故障模型。</div>
+      <button class="btn-cancel" onclick="closeOv('ov-proto')">取消</button>
+      <button class="btn-ok btn-ok-b" onclick="confirmProtocolFaultInjection()">导入并注入</button>
+    </div>
+  </div>
+</div>

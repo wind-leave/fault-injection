@@ -1,0 +1,61 @@
+<section class="workbench-taskbar" data-testid="task-control-layer">
+  <div class="task-project">
+    <div class="project-select">
+      <span class="project-select__label">当前项目</span>
+      <span class="project-select__name">飞控系统仿真项目</span>
+    </div>
+    <span class="project-favorite">☆</span>
+    <span class="project-state">已保存</span>
+  </div>
+
+  <div class="simbar" id="simbar">
+    <div class="simbar-title">
+      <span class="simbar-title__kicker">任务控制</span>
+      <span class="simbar-title__name">仿真参数</span>
+    </div>
+    <div class="simbar-params">
+      <div class="sim-field">
+        <span class="sim-field-lbl">数据集名称</span>
+        <input class="sim-field-inp" id="sim-name" value="test" style="width:68px;text-align:left;">
+      </div>
+      <div class="sim-field">
+        <span class="sim-field-lbl">仿真时长</span>
+        <input class="sim-field-inp" id="sim-dur" value="1000" type="number" min="1">
+      </div>
+      <div class="sim-field" style="border-right:none;margin-right:0;">
+        <span class="sim-field-lbl">仿真步长</span>
+        <input class="sim-field-inp" id="sim-step" value="0.1" type="number" min="0.001" step="0.01">
+      </div>
+    </div>
+    <div class="simbar-rt">
+      <span class="simbar-rt-lbl">实时模式</span>
+      <label class="toggle-wrap">
+        <input type="checkbox" id="sim-rt" onchange="onRtToggle(this)" checked>
+        <div class="toggle-track"></div>
+        <div class="toggle-thumb"></div>
+      </label>
+    </div>
+    <div class="simbar-btns">
+      <button class="sim-btn sim-btn-disabled" id="sbtn-init" onclick="simInit()" title="初始化">
+        <span class="sim-btn-icon">&#8635;</span>
+        <span class="sim-btn-lbl">初始化</span>
+      </button>
+      <button class="sim-btn sim-btn-run sim-btn-disabled" id="sbtn-run" onclick="simRun()" title="运行">
+        <span class="sim-btn-icon" id="run-icon">&#9654;</span>
+        <span class="sim-btn-lbl" id="run-lbl">运行</span>
+      </button>
+      <button class="sim-btn sim-btn-disabled" id="sbtn-step" onclick="simStep()" title="步进">
+        <span class="sim-btn-icon">&#9197;</span>
+        <span class="sim-btn-lbl">步进</span>
+      </button>
+      <button class="sim-btn sim-btn-disabled" id="sbtn-pause" onclick="simPause()" title="暂停">
+        <span class="sim-btn-icon">&#10074;&#10074;</span>
+        <span class="sim-btn-lbl" id="pause-lbl">暂停</span>
+      </button>
+      <button class="sim-btn sim-btn-stop sim-btn-disabled" id="sbtn-stop" onclick="simStop()" title="终止">
+        <span class="sim-btn-icon">&#9632;</span>
+        <span class="sim-btn-lbl">终止</span>
+      </button>
+    </div>
+  </div>
+</section>

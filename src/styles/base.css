@@ -1,0 +1,44 @@
+body{font-family:var(--font-ui);background:linear-gradient(180deg,#f8fbff 0%,var(--bg-base) 100%);color:var(--text);height:100vh;overflow:hidden;}
+html,body,#app{height:100%;}
+body{margin:0;}
+.gz-app{
+  --workbench-left-w:192px;
+  --workbench-right-w:320px;
+  --workbench-status-h:100px;
+  --workbench-taskbar-h:74px;
+  --layout-resizer-size:6px;
+  height:100%;
+  display:grid;
+  grid-template-rows:auto var(--workbench-taskbar-h) minmax(0,1fr);
+  overflow:hidden;
+}
+.gz-app > main{
+  min-height:0;
+  display:grid;
+  grid-template-columns:var(--workbench-left-w) var(--layout-resizer-size) minmax(560px,1fr) var(--layout-resizer-size) var(--workbench-right-w);
+  grid-template-rows:minmax(0,1fr) var(--layout-resizer-size) var(--workbench-status-h);
+  overflow:hidden;
+}
+
+@media (max-width:980px){
+  .gz-app{
+    height:auto;
+    min-height:100%;
+    overflow:visible;
+  }
+
+  .gz-app > main{
+    display:flex;
+    flex-direction:column;
+    min-height:0;
+    overflow:visible;
+    grid-template-columns:none;
+    grid-template-rows:none;
+  }
+}
+
+@media (max-width:640px){
+  .gz-app > main{
+    min-width:0;
+  }
+}

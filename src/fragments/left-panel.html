@@ -1,0 +1,132 @@
+<aside class="lpanel">
+  <div class="lscroll">
+    <div class="lgroup-head lgroup-head--system" data-palette-group="signals" onclick="toggleGroup('g-signals')">
+      <span class="lgroup-icon">信</span>
+      <span class="lgroup-label">系统信号</span>
+      <span class="lgroup-arrow open" id="arr-g-signals">&#9654;</span>
+    </div>
+    <div class="lgroup-body" id="g-signals" data-palette-body="signals">
+      <div class="citem citem-draggable" draggable="true" data-component="signal_source">
+        <span class="citem-icon-badge citem-icon-badge--source">S</span>
+        <span class="citem-label">信号源</span>
+      </div>
+      <div class="citem citem-draggable" draggable="true" data-component="middle_var_assign">
+        <span class="citem-icon-badge citem-icon-badge--middle">中</span>
+        <span class="citem-label">中间变量赋值块</span>
+      </div>
+    </div>
+
+    <div class="lgroup-head lgroup-head--system" data-palette-group="signal-ops" onclick="toggleGroup('g-signal-ops')">
+      <span class="lgroup-icon">算</span>
+      <span class="lgroup-label">信号运算</span>
+      <span class="lgroup-arrow open" id="arr-g-signal-ops">&#9654;</span>
+    </div>
+    <div class="lgroup-body" id="g-signal-ops" data-palette-body="signal-ops">
+      <div class="citem citem-draggable" draggable="true" data-component="flow_block" title="统一输入输出的数据类型和格式">
+        <span class="citem-icon-badge citem-icon-badge--flow">F</span>
+        <span class="citem-label">信号适配块</span>
+      </div>
+      <div class="citem citem-draggable" draggable="true" data-component="gain_block" title="对输入信号做比例缩放">
+        <span class="citem-icon-badge citem-icon-badge--gain">&times;</span>
+        <span class="citem-label">增益块</span>
+      </div>
+      <div class="citem citem-draggable" draggable="true" data-component="sum_block" title="显式汇入多路输入并进行求和">
+        <span class="citem-icon-badge citem-icon-badge--sum">+</span>
+        <span class="citem-label">求和块</span>
+      </div>
+      <div class="citem citem-draggable" draggable="true" data-component="mux_block" title="将多路输入打包为向量输出">
+        <span class="citem-icon-badge citem-icon-badge--mux">M</span>
+        <span class="citem-label">Mux 块</span>
+      </div>
+    </div>
+
+    <div class="lgroup-head lgroup-head--system" data-palette-group="simulation" onclick="toggleGroup('g-simulation')">
+      <span class="lgroup-icon">仿</span>
+      <span class="lgroup-label">仿真组件</span>
+      <span class="lgroup-arrow open" id="arr-g-simulation">&#9654;</span>
+    </div>
+    <div class="lgroup-body" id="g-simulation" data-palette-body="simulation">
+      <div class="citem citem-draggable" draggable="true" data-component="simulation_block" title="快速放置一个可绑定 Python 接口的仿真模块">
+        <span class="citem-icon-badge citem-icon-badge--simulation">P</span>
+        <span class="citem-label">通用仿真块</span>
+      </div>
+      <button
+        type="button"
+        class="citem citem-authoring-action"
+        data-open-component-authoring
+        onclick="window.dispatchEvent(new CustomEvent('gz:open-component-authoring',{detail:{}}))"
+      >
+        <span class="citem-icon-badge citem-icon-badge--simulation">新</span>
+        <span class="citem-label">新增组件</span>
+      </button>
+    </div>
+
+    <div class="lgroup-head lgroup-head--system" data-palette-group="subsystem" onclick="toggleGroup('g-subsystem')">
+      <span class="lgroup-icon">子</span>
+      <span class="lgroup-label">子系统</span>
+      <span class="lgroup-arrow open" id="arr-g-subsystem">&#9654;</span>
+    </div>
+    <div class="lgroup-body" id="g-subsystem" data-palette-body="subsystem">
+      <div class="citem citem-draggable" draggable="true" data-component="subsystem_block" title="双击进入子系统画布">
+        <span class="citem-icon-badge citem-icon-badge--subsystem">子</span>
+        <span class="citem-label">子系统块</span>
+      </div>
+    </div>
+
+    <div class="lgroup-head lgroup-head--fault" data-palette-group="faults" onclick="toggleGroup('g-faults')">
+      <span class="lgroup-icon">故</span>
+      <span class="lgroup-label">故障组件</span>
+      <span class="lgroup-arrow open" id="arr-g-faults">&#9654;</span>
+    </div>
+    <div class="lgroup-body" id="g-faults" data-palette-body="faults">
+      <div class="citem citem-fault citem-draggable" draggable="true" data-component="physical_fault_injector">
+        <span class="citem-icon-badge citem-icon-badge--fault">F</span>
+        <span class="citem-label">物理层注入</span>
+      </div>
+      <div class="citem citem-fault citem-draggable" draggable="true" data-component="electrical_fault_injector">
+        <span class="citem-icon-badge citem-icon-badge--fault">E</span>
+        <span class="citem-label">电气层注入</span>
+      </div>
+      <div class="citem citem-fault citem-draggable" draggable="true" data-component="protocol_fault_injector">
+        <span class="citem-icon-badge citem-icon-badge--fault">P</span>
+        <span class="citem-label">协议层注入</span>
+      </div>
+    </div>
+
+    <div class="lgroup-head lgroup-head--instrument" data-palette-group="instruments" onclick="toggleGroup('g-instruments')">
+      <span class="lgroup-icon">测</span>
+      <span class="lgroup-label">测量仪器</span>
+      <span class="lgroup-arrow open" id="arr-g-instruments">&#9654;</span>
+    </div>
+    <div class="lgroup-body" id="g-instruments" data-palette-body="instruments">
+      <div class="citem citem-scope citem-draggable" draggable="true" data-component="instrument_scope" title="接入信号后可双击查看波形">
+        <span class="citem-icon-badge citem-icon-badge--scope">波</span>
+        <span class="citem-label">示波器</span>
+      </div>
+      <div class="citem citem-draggable" draggable="true" data-component="instrument_spectrum" style="color:var(--teal);border:1px solid #a5f3fc;background:#ecfeff;">
+        <span class="citem-icon-badge citem-icon-badge--spectrum">谱</span>
+        <span class="citem-label">频谱分析仪</span>
+      </div>
+      <div class="citem citem-draggable" draggable="true" data-component="instrument_logger" style="color:var(--blue);border:1px solid #93c5fd;background:#eff6ff;">
+        <span class="citem-icon-badge citem-icon-badge--logger">记</span>
+        <span class="citem-label">数据记录仪</span>
+      </div>
+    </div>
+
+    <div class="lgroup-head lgroup-head--link" data-palette-group="can-lines" onclick="toggleGroup('g-can-lines')">
+      <span class="lgroup-icon">线</span>
+      <span class="lgroup-label">连接线</span>
+      <span class="lgroup-arrow open" id="arr-g-can-lines">&#9654;</span>
+    </div>
+    <div class="lgroup-body" id="g-can-lines" data-palette-body="can-lines">
+      <div class="citem citem-line-tool active" data-line-type="normal" onclick="setConnectionTool('normal')" style="color:var(--text2);">
+        <div style="width:18px;height:2px;background:var(--border-dark);border-radius:1px;flex-shrink:0;"></div>
+        普通连接线
+      </div>
+      <div class="citem citem-can citem-line-tool" data-line-type="can" onclick="setConnectionTool('can')">
+        <div style="width:18px;height:3px;background:var(--purple);border-radius:1px;flex-shrink:0;border:1px solid var(--purple);"></div>
+        CAN 总线
+      </div>
+    </div>
+  </div>
+</aside>

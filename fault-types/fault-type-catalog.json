@@ -1,0 +1,347 @@
+{
+  "schemaVersion": "1.0",
+  "source": "无人机飞控系统故障.pdf",
+  "modelFamily": "UAV flight-control fault injection",
+  "faultTypes": [
+    {
+      "id": "physical_parameter_bias",
+      "name": "物理层参数偏置",
+      "layer": "physical",
+      "modelClass": "偏差故障",
+      "formula": "p_fault = p_nominal + delta_p 或 p_fault = k * p_nominal",
+      "typicalTargets": ["UAV_Mass", "Ixx", "Iyy", "Izz", "Cd", "Controller_Gain"],
+      "defaultParameters": { "delta_p": 0.1, "scale": 1.1, "start": 0, "duration": null },
+      "platformImplementation": {
+        "currentSupport": "partial",
+        "existingModule": "injectedFault on simulation_block",
+        "recommendedModule": "fault_parameter_bias",
+        "pythonFunction": "parameter_bias 或 parameter_scale"
+      },
+      "observableSignals": ["attitude_error", "altitude_error", "control_output", "residual"],
+      "displayPlan": "参数卡片显示 nominal/fault 值，画布支路显示正常模型与故障模型输出残差。"
+    },
+    {
+      "id": "physical_parameter_drift",
+      "name": "物理层参数渐变",
+      "layer": "physical",
+      "modelClass": "渐变故障",
+      "formula": "p_fault(t) = p0 + rate * max(t - t0, 0)",
+      "typicalTargets": ["Motor_Efficiency_All", "Battery_Voltage", "Baro_Bias"],
+      "defaultParameters": { "rate": -0.02, "start": 30, "rise_time": 60 },
+      "platformImplementation": {
+        "currentSupport": "partial",
+        "existingModule": "fault_drift exists but needs numeric config",
+        "recommendedModule": "fault_drift_ramp",
+        "pythonFunction": "parameter_drift"
+      },
+      "observableSignals": ["thrust", "battery_voltage", "altitude", "residual_trend"],
+      "displayPlan": "趋势面板展示 drift rate、当前故障参数值和随时间增长的残差。"
+    },
+    {
+      "id": "physical_parameter_step",
+      "name": "物理层参数突变",
+      "layer": "physical",
+      "modelClass": "突变故障",
+      "formula": "p_fault(t) = p_nominal + step_value * I(t >= t0)",
+      "typicalTargets": ["Motor_Max_Thrust", "Alloc_Matrix", "Cd"],
+      "defaultParameters": { "step_value": -0.35, "start": 20 },
+      "platformImplementation": {
+        "currentSupport": "partial",
+        "existingModule": "injectedFault on simulation_block",
+        "recommendedModule": "fault_step_jump",
+        "pythonFunction": "parameter_step"
+      },
+      "observableSignals": ["attitude", "control_output", "thrust_margin"],
+      "displayPlan": "时间轴标注突变时刻，示波器显示突变前后响应差异。"
+    },
+    {
+      "id": "actuator_lock_or_failure",
+      "name": "执行器卡死或失效",
+      "layer": "physical",
+      "modelClass": "卡位故障 / 信号阻塞故障",
+      "formula": "u_fault(t) = lock_value, t >= t0",
+      "typicalTargets": ["Motor_i_Lock_Value", "Servo_i_Lock_Value", "Throttle_i"],
+      "defaultParameters": { "lock_value": 0, "start": 10, "duration": null },
+      "platformImplementation": {
+        "currentSupport": "partial",
+        "existingModule": "fault_stuck exists in library but needs left-panel and runtime config",
+        "recommendedModule": "fault_freeze_or_lock",
+        "pythonFunction": "actuator_lock"
+      },
+      "observableSignals": ["motor_command", "motor_thrust", "roll_rate", "yaw_rate"],
+      "displayPlan": "故障节点贴附在执行器支路，仪器展示锁定前后指令与实际输出。"
+    },
+    {
+      "id": "saturation_limit",
+      "name": "饱和限制",
+      "layer": "physical",
+      "modelClass": "饱和限制",
+      "formula": "u_fault = clamp(u, lower, upper_fault)",
+      "typicalTargets": ["Throttle_UpperLimit", "Motor_Max_Thrust", "PWM_Max"],
+      "defaultParameters": { "lower": 0, "upper": 0.65, "start": 0 },
+      "platformImplementation": {
+        "currentSupport": "missing",
+        "existingModule": null,
+        "recommendedModule": "fault_saturation",
+        "pythonFunction": "saturation_limit"
+      },
+      "observableSignals": ["control_saturation", "altitude", "thrust_margin"],
+      "displayPlan": "控制量接近上限时用状态卡提示 saturation ratio。"
+    },
+    {
+      "id": "sensor_additive_bias",
+      "name": "传感器加性偏置",
+      "layer": "electrical",
+      "modelClass": "偏差故障",
+      "formula": "y_fault = y + b",
+      "typicalTargets": ["Gyro_Bias_Z", "Baro_Bias", "GPS_Pos_Bias", "Euler_Bias"],
+      "defaultParameters": { "offset": 0.15, "start": 5 },
+      "platformImplementation": {
+        "currentSupport": "partial",
+        "existingModule": "fault_bias and injectedFault",
+        "recommendedModule": "fault_sensor_bias",
+        "pythonFunction": "parameter_bias"
+      },
+      "observableSignals": ["gyro_z", "baro_altitude", "attitude_estimate", "residual"],
+      "displayPlan": "传感器模块属性面板显示 bias、单位、作用轴。"
+    },
+    {
+      "id": "fault_bias_overlay",
+      "name": "偏置叠加故障",
+      "layer": "electrical",
+      "modelClass": "偏置叠加",
+      "formula": "y_fault = y + offset",
+      "typicalTargets": ["Gyro_Bias_Z", "IMU_Pitch_Rate", "Feedback_Bias", "Command_Bias"],
+      "defaultParameters": { "offset": 0.15, "start": 0, "duration": null },
+      "platformImplementation": {
+        "currentSupport": "supported",
+        "existingModule": "fault_bias",
+        "recommendedModule": "fault_bias",
+        "pythonFunction": "parameter_bias"
+      },
+      "observableSignals": ["imu.pitch_rate", "attitude_error", "residual"],
+      "displayPlan": "故障库中作为偏置叠加块的直接故障类型，注入后在测点和D矩阵中按传感器反馈链路显示。"
+    },
+    {
+      "id": "fault_noise_injection",
+      "name": "噪声注入故障",
+      "layer": "electrical",
+      "modelClass": "噪声注入",
+      "formula": "y_fault = y + n(t)",
+      "typicalTargets": ["Gyro_Noise_STD", "IMU_Pitch_Rate", "Feedback_Noise", "Residual_Noise"],
+      "defaultParameters": { "noise_type": "gaussian", "std": 0.08, "amplitude": 0.2, "probability": 0.03, "start": 0, "duration": null },
+      "platformImplementation": {
+        "currentSupport": "supported",
+        "existingModule": "fault_noise",
+        "recommendedModule": "fault_noise",
+        "pythonFunction": "gaussian_noise / white_noise / pulse_noise"
+      },
+      "observableSignals": ["imu.pitch_rate", "rms_noise", "spectrum_peak", "residual"],
+      "displayPlan": "故障库中作为噪声注入块的直接故障类型，注入后频谱诊断和残差测点可作为主要观测位置。"
+    },
+    {
+      "id": "sensor_scale_distortion",
+      "name": "传感器比例失真",
+      "layer": "electrical",
+      "modelClass": "比例失真",
+      "formula": "y_fault = scale * y",
+      "typicalTargets": ["Accel_Scale_Z", "Attitude_Scale", "Velocity_Scale"],
+      "defaultParameters": { "scale": 1.25, "start": 5 },
+      "platformImplementation": {
+        "currentSupport": "missing",
+        "existingModule": null,
+        "recommendedModule": "fault_gain_scale",
+        "pythonFunction": "parameter_scale"
+      },
+      "observableSignals": ["accel_z", "velocity_estimate", "altitude_estimate"],
+      "displayPlan": "波形对比显示斜率和幅值改变，属性面板显示 scale factor。"
+    },
+    {
+      "id": "noise_increase",
+      "name": "噪声增强",
+      "layer": "electrical",
+      "modelClass": "高斯噪声 / 白噪声 / 脉冲噪声",
+      "formula": "y_fault = y + n(t), n ~ N(0, sigma^2) 或 U(-a,a)",
+      "typicalTargets": ["Gyro_Noise_STD", "Baro_Noise_STD", "Euler_Noise_STD"],
+      "defaultParameters": { "std": 0.08, "amplitude": 0.2, "probability": 0.03, "start": 0 },
+      "platformImplementation": {
+        "currentSupport": "partial",
+        "existingModule": "fault_noise",
+        "recommendedModule": "fault_noise_configurable",
+        "pythonFunction": "gaussian_noise / white_noise / pulse_noise"
+      },
+      "observableSignals": ["gyro", "barometer", "spectrum_peak", "rms_noise"],
+      "displayPlan": "频谱分析仪展示高频能量上升，数据记录仪输出 RMS 噪声。"
+    },
+    {
+      "id": "colored_noise",
+      "name": "有色噪声",
+      "layer": "electrical",
+      "modelClass": "有色噪声",
+      "formula": "n[k] = alpha * n[k-1] + e[k], y_fault = y + n[k]",
+      "typicalTargets": ["Gyro_Noise_STD", "Baro_Noise_STD"],
+      "defaultParameters": { "alpha": 0.92, "std": 0.03, "start": 0 },
+      "platformImplementation": {
+        "currentSupport": "missing",
+        "existingModule": null,
+        "recommendedModule": "fault_colored_noise",
+        "pythonFunction": "colored_noise"
+      },
+      "observableSignals": ["low_frequency_noise", "spectrum_bins"],
+      "displayPlan": "频谱仪展示低频噪声抬升，属性面板给出 alpha 和 std。"
+    },
+    {
+      "id": "signal_freeze",
+      "name": "信号阻塞 / 冻结",
+      "layer": "electrical",
+      "modelClass": "信号阻塞",
+      "formula": "y_fault[k] = y_fault[k-1]",
+      "typicalTargets": ["GPS_Pos_Freeze_Enable", "GPS_Vel_Freeze_Enable", "Command_Hold"],
+      "defaultParameters": { "enable": true, "start": 12 },
+      "platformImplementation": {
+        "currentSupport": "partial",
+        "existingModule": "protocol replay/hold behavior and fault_stuck",
+        "recommendedModule": "fault_freeze_hold",
+        "pythonFunction": "signal_freeze"
+      },
+      "observableSignals": ["gps_position", "gps_velocity", "trajectory_error"],
+      "displayPlan": "冻结区间在波形上标注，残差曲线持续增大。"
+    },
+    {
+      "id": "state_jump_or_sign_flip",
+      "name": "状态跳变或符号翻转",
+      "layer": "electrical",
+      "modelClass": "状态突变",
+      "formula": "y_fault = y + jump 或 y_fault = -y",
+      "typicalTargets": ["Phi_Sign_Fault", "Theta_Sign_Fault", "Yaw_Sign_Fault"],
+      "defaultParameters": { "jump": 0.5, "invert": true, "start": 8 },
+      "platformImplementation": {
+        "currentSupport": "missing",
+        "existingModule": null,
+        "recommendedModule": "fault_state_jump",
+        "pythonFunction": "state_jump / sign_flip"
+      },
+      "observableSignals": ["attitude_feedback", "controller_error", "divergence_flag"],
+      "displayPlan": "画布节点用红色状态突变标记，控制误差面板提示正反馈风险。"
+    },
+    {
+      "id": "intermittent_anomaly",
+      "name": "间歇异常",
+      "layer": "electrical",
+      "modelClass": "间歇故障",
+      "formula": "y_fault = f(y) when ((t - t0) mod T) / T <= duty else y",
+      "typicalTargets": ["Noise_Burst_Enable", "Sensor_Bias_Burst", "Command_Block_Burst"],
+      "defaultParameters": { "period": 4, "duty": 0.25, "start": 10 },
+      "platformImplementation": {
+        "currentSupport": "missing",
+        "existingModule": null,
+        "recommendedModule": "fault_intermittent_gate",
+        "pythonFunction": "intermittent_fault"
+      },
+      "observableSignals": ["burst_flag", "sensor_output", "alert_log"],
+      "displayPlan": "状态日志记录每次触发窗口，波形上显示周期性高亮。"
+    },
+    {
+      "id": "fixed_delay",
+      "name": "固定延迟传输",
+      "layer": "protocol",
+      "modelClass": "延迟传输故障",
+      "formula": "y_fault[k] = y[k - d]",
+      "typicalTargets": ["GPS_Delay", "Gyro_Delay", "Command_Delay"],
+      "defaultParameters": { "delay_steps": 3, "delay_seconds": 0.3, "start": 0 },
+      "platformImplementation": {
+        "currentSupport": "partial",
+        "existingModule": "CAN edge injectedFault faultCode=delay",
+        "recommendedModule": "fault_delay_buffer",
+        "pythonFunction": "fixed_delay"
+      },
+      "observableSignals": ["phase_lag", "oscillation", "settling_time"],
+      "displayPlan": "连接线属性显示 delay steps，示波器显示相位滞后。"
+    },
+    {
+      "id": "time_varying_delay",
+      "name": "时变延迟",
+      "layer": "protocol",
+      "modelClass": "时延抖动",
+      "formula": "y_fault[k] = y[k - d(k)], d(k)=base+jitter",
+      "typicalTargets": ["Target_Update_Delay", "Sensor_Update_Delay"],
+      "defaultParameters": { "base_steps": 2, "jitter_steps": 2, "start": 0 },
+      "platformImplementation": {
+        "currentSupport": "missing",
+        "existingModule": null,
+        "recommendedModule": "fault_jitter_delay",
+        "pythonFunction": "time_varying_delay"
+      },
+      "observableSignals": ["latency_estimate", "tracking_error", "control_jitter"],
+      "displayPlan": "协议线显示当前时延，状态层统计 latency min/max。"
+    },
+    {
+      "id": "random_packet_loss",
+      "name": "随机丢包",
+      "layer": "protocol",
+      "modelClass": "丢包故障",
+      "formula": "y_fault = hold(y_prev) with probability drop_rate",
+      "typicalTargets": ["GPS_Drop_Rate", "Sensor_Drop_Rate", "Command_Drop_Rate"],
+      "defaultParameters": { "drop_rate": 0.08, "strategy": "hold", "start": 0 },
+      "platformImplementation": {
+        "currentSupport": "partial",
+        "existingModule": "CAN edge injectedFault faultCode=loss",
+        "recommendedModule": "fault_packet_loss",
+        "pythonFunction": "random_packet_loss"
+      },
+      "observableSignals": ["packet_loss_rate", "estimator_residual", "trajectory_error"],
+      "displayPlan": "数据流视图显示丢包计数和有效帧率。"
+    },
+    {
+      "id": "burst_packet_loss",
+      "name": "突发丢包",
+      "layer": "protocol",
+      "modelClass": "连续丢包",
+      "formula": "连续 L 个采样周期输出 hold(y_prev)",
+      "typicalTargets": ["Burst_Loss_Length", "Data_Link_Burst_Loss"],
+      "defaultParameters": { "start_probability": 0.02, "burst_length": 5, "strategy": "hold" },
+      "platformImplementation": {
+        "currentSupport": "missing",
+        "existingModule": null,
+        "recommendedModule": "fault_burst_loss",
+        "pythonFunction": "burst_packet_loss"
+      },
+      "observableSignals": ["burst_loss_flag", "packet_gap", "control_drop"],
+      "displayPlan": "协议边在突发窗口变红，日志记录 burst start/end。"
+    },
+    {
+      "id": "data_tamper",
+      "name": "数据篡改",
+      "layer": "protocol",
+      "modelClass": "篡改故障",
+      "formula": "payload_fault = scale * payload + bias 或 payload_fault = -payload",
+      "typicalTargets": ["GPS_Pos_Bias", "Cmd_Sign_Tamper", "Sensor_Data_Tamper_Enable"],
+      "defaultParameters": { "bias": 1.0, "scale": 1.0, "invert": false, "start": 6 },
+      "platformImplementation": {
+        "currentSupport": "partial",
+        "existingModule": "CAN edge bitflip/replay but not full payload tamper",
+        "recommendedModule": "fault_payload_tamper",
+        "pythonFunction": "data_tamper"
+      },
+      "observableSignals": ["payload_value", "trajectory_error", "yaw_error"],
+      "displayPlan": "数据流视图展示原始 payload 与篡改 payload 的差值。"
+    },
+    {
+      "id": "blocking_interrupt",
+      "name": "阻塞或中断",
+      "layer": "protocol",
+      "modelClass": "阻塞 / 中断",
+      "formula": "y_fault = hold(y_prev) 或 0 while interrupt_enable",
+      "typicalTargets": ["Sensor_Data_Tamper_Enable", "Command_Link_Enable"],
+      "defaultParameters": { "enable": true, "strategy": "hold", "start": 15, "duration": 4 },
+      "platformImplementation": {
+        "currentSupport": "partial",
+        "existingModule": "fault_stuck and protocol hold",
+        "recommendedModule": "fault_link_interrupt",
+        "pythonFunction": "blocking_interrupt"
+      },
+      "observableSignals": ["link_status", "sensor_age", "control_latency"],
+      "displayPlan": "连接线显示断链状态，状态栏显示 sensor age 和控制延迟。"
+    }
+  ]
+}

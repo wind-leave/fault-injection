@@ -1,0 +1,409 @@
+{
+  "schemaVersion": 1,
+  "packageType": "flight-control-model",
+  "systemFamily": "uav-flight-control",
+  "supportedFaultLibraries": ["uav-flight-control-faults"],
+  "modelId": "evtol-fault-comparison-demo",
+  "modelName": "eVTOL Normal vs Fault Comparison Demo",
+  "description": "A compact but richer prewired comparison demo. It sends the same command through a normal branch and a fault-injected branch, then compares both responses in one oscilloscope.",
+  "source": {
+    "origin": "workbench-demo",
+    "notes": "Use this package to demonstrate normal response versus motor-efficiency-loss response in CH1/CH2."
+  },
+  "pythonModules": [],
+  "faultLibrary": [
+    {
+      "id": "motor_efficiency_loss",
+      "name": "Motor Efficiency Loss",
+      "layer": "electrical",
+      "desc": "Motor-side efficiency loss used to reduce the fault branch amplitude.",
+      "defaultValue": 0.45,
+      "moduleTargets": [
+        "motor_model"
+      ],
+      "parameter": "efficiency",
+      "tags": [
+        "demo",
+        "motor",
+        "electrical",
+        "comparison"
+      ],
+      "createdAt": "2026-04-28",
+      "origin": "demo"
+    }
+  ],
+  "workbenchSnapshot": {
+    "version": 1,
+    "modelNodes": [
+      {
+        "id": "compare-command",
+        "type": "signal_source",
+        "x": 100,
+        "y": 280,
+        "w": 164,
+        "h": 84,
+        "props": {
+          "name": "Pilot Command",
+          "waveType": "正弦",
+          "amplitude": "3.0",
+          "frequency": "0.55",
+          "outputFormat": "标量"
+        },
+        "pythonBinding": null
+      },
+      {
+        "id": "compare-controller",
+        "type": "simulation_block",
+        "x": 330,
+        "y": 260,
+        "w": 184,
+        "h": 104,
+        "props": {
+          "name": "Flight Controller",
+          "moduleType": "一阶函数",
+          "inputs": [
+            {
+              "name": "Command",
+              "type": "标量"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Motor Command",
+              "type": "标量"
+            }
+          ],
+          "middleVars": [
+            {
+              "name": "Controller State",
+              "type": "标量"
+            }
+          ],
+          "ffunctionNote": "Demo first-order controller for normal/fault branch comparison."
+        },
+        "pythonBinding": null
+      },
+      {
+        "id": "compare-normal-motor",
+        "type": "simulation_block",
+        "x": 600,
+        "y": 150,
+        "w": 184,
+        "h": 104,
+        "props": {
+          "name": "Normal Motor",
+          "moduleType": "一阶函数",
+          "inputs": [
+            {
+              "name": "Motor Command",
+              "type": "标量"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Normal Motor Response",
+              "type": "标量"
+            }
+          ],
+          "middleVars": [
+            {
+              "name": "Normal Motor State",
+              "type": "标量"
+            }
+          ],
+          "ffunctionNote": "Baseline motor response with no injected fault."
+        },
+        "pythonBinding": null
+      },
+      {
+        "id": "compare-fault-motor",
+        "type": "simulation_block",
+        "x": 600,
+        "y": 380,
+        "w": 184,
+        "h": 104,
+        "props": {
+          "name": "Faulted Motor",
+          "moduleType": "一阶函数",
+          "inputs": [
+            {
+              "name": "Motor Command",
+              "type": "标量"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Faulted Motor Response",
+              "type": "标量"
+            }
+          ],
+          "middleVars": [
+            {
+              "name": "Faulted Motor State",
+              "type": "标量"
+            }
+          ],
+          "ffunctionNote": "Same motor path, but pre-injected with motor efficiency loss."
+        },
+        "pythonBinding": null,
+        "injectedFault": {
+          "modelId": "motor_efficiency_loss",
+          "name": "Motor Efficiency Loss",
+          "layer": "electrical",
+          "parameter": "efficiency",
+          "value": 0.45,
+          "desc": "Fault branch motor response is scaled to 45% in the actual simulation channel.",
+          "tags": [
+            "demo",
+            "comparison",
+            "preloaded"
+          ]
+        }
+      },
+      {
+        "id": "compare-normal-sensor",
+        "type": "simulation_block",
+        "x": 870,
+        "y": 150,
+        "w": 184,
+        "h": 104,
+        "props": {
+          "name": "Normal Sensor Filter",
+          "moduleType": "一阶函数",
+          "inputs": [
+            {
+              "name": "Normal Motor Response",
+              "type": "标量"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Normal Response",
+              "type": "标量"
+            }
+          ],
+          "middleVars": [
+            {
+              "name": "Normal Sensor State",
+              "type": "标量"
+            }
+          ],
+          "ffunctionNote": "Normal branch measurement filter."
+        },
+        "pythonBinding": null
+      },
+      {
+        "id": "compare-fault-sensor",
+        "type": "simulation_block",
+        "x": 870,
+        "y": 380,
+        "w": 184,
+        "h": 104,
+        "props": {
+          "name": "Fault Sensor Filter",
+          "moduleType": "一阶函数",
+          "inputs": [
+            {
+              "name": "Faulted Motor Response",
+              "type": "标量"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Fault Response",
+              "type": "标量"
+            }
+          ],
+          "middleVars": [
+            {
+              "name": "Fault Sensor State",
+              "type": "标量"
+            }
+          ],
+          "ffunctionNote": "Fault branch measurement filter after the injected motor."
+        },
+        "pythonBinding": null
+      },
+      {
+        "id": "compare-residual",
+        "type": "sum_block",
+        "x": 1130,
+        "y": 500,
+        "w": 150,
+        "h": 84,
+        "props": {
+          "name": "Response Residual",
+          "inputCount": 2,
+          "signs": [
+            "+",
+            "-"
+          ],
+          "outputFormat": "标量"
+        },
+        "pythonBinding": null
+      },
+      {
+        "id": "compare-scope",
+        "type": "instrument_scope",
+        "x": 1170,
+        "y": 220,
+        "w": 170,
+        "h": 88,
+        "props": {
+          "name": "Normal vs Fault Scope",
+          "instrumentType": "示波器",
+          "sampleRate": "10Hz",
+          "signal": "CH1 正常响应 / CH2 故障响应"
+        },
+        "pythonBinding": null
+      },
+      {
+        "id": "compare-logger",
+        "type": "instrument_logger",
+        "x": 1380,
+        "y": 500,
+        "w": 160,
+        "h": 84,
+        "props": {
+          "name": "Residual Logger",
+          "instrumentType": "数据记录",
+          "sampleRate": "10Hz",
+          "signal": "正常 - 故障残差"
+        },
+        "pythonBinding": null
+      },
+      {
+        "id": "compare-spectrum",
+        "type": "instrument_spectrum",
+        "x": 1380,
+        "y": 340,
+        "w": 160,
+        "h": 84,
+        "props": {
+          "name": "Residual Spectrum",
+          "instrumentType": "频谱分析",
+          "sampleRate": "10Hz",
+          "signal": "正常 - 故障残差频谱"
+        },
+        "pythonBinding": null
+      }
+    ],
+    "modelEdges": [
+      {
+        "id": "compare-edge-command-controller",
+        "sourceNodeId": "compare-command",
+        "targetNodeId": "compare-controller",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "compare-edge-controller-normal",
+        "sourceNodeId": "compare-controller",
+        "targetNodeId": "compare-normal-motor",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "compare-edge-controller-fault",
+        "sourceNodeId": "compare-controller",
+        "targetNodeId": "compare-fault-motor",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "compare-edge-normal-sensor",
+        "sourceNodeId": "compare-normal-motor",
+        "targetNodeId": "compare-normal-sensor",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "compare-edge-fault-sensor",
+        "sourceNodeId": "compare-fault-motor",
+        "targetNodeId": "compare-fault-sensor",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "compare-edge-normal-scope",
+        "sourceNodeId": "compare-normal-sensor",
+        "targetNodeId": "compare-scope",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "compare-edge-fault-scope",
+        "sourceNodeId": "compare-fault-sensor",
+        "targetNodeId": "compare-scope",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 1,
+        "lineType": "normal"
+      },
+      {
+        "id": "compare-edge-normal-residual",
+        "sourceNodeId": "compare-normal-sensor",
+        "targetNodeId": "compare-residual",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "compare-edge-fault-residual",
+        "sourceNodeId": "compare-fault-sensor",
+        "targetNodeId": "compare-residual",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 1,
+        "lineType": "normal"
+      },
+      {
+        "id": "compare-edge-residual-logger",
+        "sourceNodeId": "compare-residual",
+        "targetNodeId": "compare-logger",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "compare-edge-residual-spectrum",
+        "sourceNodeId": "compare-residual",
+        "targetNodeId": "compare-spectrum",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      }
+    ],
+    "nodeSeq": 10,
+    "edgeSeq": 11,
+    "activeLineType": "normal",
+    "faultedBlks": [
+      "compare-fault-motor"
+    ],
+    "importedFaultModels": [
+      {
+        "id": "motor_efficiency_loss",
+        "name": "Motor Efficiency Loss",
+        "layer": "electrical",
+        "desc": "Motor-side efficiency loss used to reduce the fault branch amplitude.",
+        "defaultValue": 0.45,
+        "moduleTargets": [
+          "motor_model"
+        ],
+        "parameter": "efficiency",
+        "tags": [
+          "demo",
+          "motor",
+          "electrical",
+          "comparison"
+        ],
+        "createdAt": "2026-04-28",
+        "origin": "demo"
+      }
+    ]
+  }
+}

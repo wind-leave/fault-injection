@@ -1,0 +1,37 @@
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --font-ui:"Microsoft YaHei UI","Noto Sans SC","PingFang SC","Segoe UI",sans-serif;
+  --font-data:"Fira Code","Cascadia Mono","JetBrains Mono","Consolas",monospace;
+  --sidebar-w:192px;
+  --sidebar-w-md:184px;
+  --bg-base:#f0f5fb;
+  --bg-panel:#ffffff;
+  --bg-card:#f7fafd;
+  --bg-hover:#eaf2fb;
+  --border:#d6e4f0;
+  --border-mid:#c2d6ea;
+  --border-dark:#a8c4de;
+  --blue:#1d6fbf;
+  --blue-lt:#4a9eff;
+  --blue-bg:#e8f1fb;
+  --teal:#0e8fa8;
+  --teal-bg:#e3f6fa;
+  --red:#dc2626;
+  --red-lt:#ef4444;
+  --red-bg:#fef2f2;
+  --red-border:#fca5a5;
+  --green:#16a34a;
+  --green-bg:#f0fdf4;
+  --orange:#c2540a;
+  --orange-bg:#fff7ed;
+  --purple:#6d28d9;
+  --purple-bg:#f5f3ff;
+  --text:#1e3a5f;
+  --text2:#4a6a8a;
+  --textm:#7a9ab8;
+  --textd:#b3c8da;
+  --shadow-sm:0 1px 2px rgba(15,23,42,0.05);
+  --shadow-md:0 10px 28px rgba(30,58,95,0.10);
+  --shadow-lg:0 18px 46px rgba(30,58,95,0.14);
+  --ring-blue:0 0 0 3px rgba(37,99,235,0.13);
+}

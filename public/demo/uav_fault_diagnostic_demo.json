@@ -1,0 +1,51 @@
+{
+  "name": "eVTOL 闭环飞控故障诊断 Demo",
+  "description": "完整演示：故障库可注入，固定测点可安装，点击测点后给出候选故障并支持人工确认。",
+  "nodes": [
+    {"id": "node-command", "type": "source", "name": "姿态指令", "x": 80, "y": 110, "w": 150, "h": 74, "category": "command"},
+    {"id": "node-shaper", "type": "block", "name": "指令整形", "x": 290, "y": 110, "w": 150, "h": 74, "category": "control"},
+    {"id": "node-error", "type": "block", "name": "俯仰误差求和", "x": 500, "y": 110, "w": 170, "h": 74, "category": "control"},
+    {"id": "node-controller", "type": "block", "name": "俯仰控制器", "x": 740, "y": 110, "w": 160, "h": 74, "category": "control"},
+    {"id": "node-allocator", "type": "block", "name": "控制分配", "x": 960, "y": 110, "w": 160, "h": 74, "category": "actuator"},
+    {"id": "node-motor", "type": "block", "name": "电机混控器", "x": 1180, "y": 110, "w": 160, "h": 74, "category": "actuator"},
+    {"id": "node-dynamics", "type": "plant", "name": "飞行器俯仰动力学", "x": 740, "y": 330, "w": 200, "h": 86, "category": "plant"},
+    {"id": "node-imu", "type": "sensor", "name": "IMU 陀螺仪", "x": 500, "y": 330, "w": 160, "h": 74, "category": "sensor"},
+    {"id": "node-logger", "type": "scope", "name": "残差记录仪", "x": 960, "y": 330, "w": 160, "h": 74, "category": "diagnostic"},
+    {"id": "node-spectrum", "type": "scope", "name": "频谱分析仪", "x": 1180, "y": 330, "w": 160, "h": 74, "category": "diagnostic"}
+  ],
+  "edges": [
+    {"id": "edge-command-shaper", "source": "node-command", "target": "node-shaper", "label": "俯仰指令", "signalId": "cmd.pitch", "channelId": "CMD-PITCH", "bus": "internal"},
+    {"id": "edge-shaper-error", "source": "node-shaper", "target": "node-error", "label": "整形指令", "signalId": "cmd.pitch.shaped", "channelId": "CMD-SHAPED", "bus": "internal"},
+    {"id": "edge-imu-error", "source": "node-imu", "target": "node-error", "label": "IMU 反馈", "signalId": "imu.pitch_rate", "channelId": "CAN-FC-IMU", "bus": "CAN"},
+    {"id": "edge-error-controller", "source": "node-error", "target": "node-controller", "label": "俯仰误差", "signalId": "err.pitch", "channelId": "ERR-PITCH", "bus": "internal"},
+    {"id": "edge-controller-allocator", "source": "node-controller", "target": "node-allocator", "label": "控制量", "signalId": "ctrl.pitch", "channelId": "CTRL-PITCH", "bus": "internal"},
+    {"id": "edge-allocator-motor", "source": "node-allocator", "target": "node-motor", "label": "电机指令", "signalId": "motor.command", "channelId": "CAN-FC-MOTOR", "bus": "CAN"},
+    {"id": "edge-motor-dynamics", "source": "node-motor", "target": "node-dynamics", "label": "执行推力", "signalId": "plant.thrust", "channelId": "ACT-THRUST", "bus": "physical"},
+    {"id": "edge-dynamics-imu", "source": "node-dynamics", "target": "node-imu", "label": "机体角速度", "signalId": "body.pitch_rate", "channelId": "BODY-RATE", "bus": "physical"},
+    {"id": "edge-error-logger", "source": "node-error", "target": "node-logger", "label": "残差诊断", "signalId": "diag.residual", "channelId": "DIAG-RES", "bus": "diagnostic"},
+    {"id": "edge-error-spectrum", "source": "node-error", "target": "node-spectrum", "label": "频谱诊断", "signalId": "diag.spectrum", "channelId": "DIAG-SPEC", "bus": "diagnostic"}
+  ],
+  "faultLibrary": [
+    {"id": "sensor_bias_imu_pitch", "name": "IMU 俯仰角速度偏置", "category": "传感器故障", "targetNodeId": "node-imu", "targetEdgeId": "edge-imu-error"},
+    {"id": "sensor_noise_imu_pitch", "name": "IMU 俯仰角速度噪声", "category": "传感器故障", "targetNodeId": "node-imu", "targetEdgeId": "edge-imu-error"},
+    {"id": "actuator_loss_motor", "name": "电机推力效率下降", "category": "执行器故障", "targetNodeId": "node-motor", "targetEdgeId": "edge-motor-dynamics"},
+    {"id": "link_dropout_motor_can", "name": "电机 CAN 指令丢包", "category": "链路故障", "targetEdgeId": "edge-allocator-motor"},
+    {"id": "link_stuck_command", "name": "姿态指令保持", "category": "链路故障", "targetEdgeId": "edge-command-shaper"},
+    {"id": "param_gain_controller", "name": "俯仰控制增益异常", "category": "参数/本地故障", "targetNodeId": "node-controller", "targetEdgeId": "edge-controller-allocator"},
+    {"id": "param_allocator_limit", "name": "控制分配限幅异常", "category": "参数/本地故障", "targetNodeId": "node-allocator", "targetEdgeId": "edge-allocator-motor"},
+    {"id": "diagnostic_residual_logger", "name": "残差记录异常", "category": "诊断/残差型", "targetNodeId": "node-logger", "targetEdgeId": "edge-error-logger"},
+    {"id": "diagnostic_spectrum_drift", "name": "频谱诊断漂移", "category": "诊断/残差型", "targetNodeId": "node-spectrum", "targetEdgeId": "edge-error-spectrum"}
+  ],
+  "testPoints": [
+    {"pointId": "tp-command", "shortName": "M1", "name": "姿态指令测点", "edgeId": "edge-command-shaper", "detects": ["link_stuck_command"]},
+    {"pointId": "tp-shaper", "shortName": "M2", "name": "整形指令测点", "edgeId": "edge-shaper-error", "detects": ["link_stuck_command"]},
+    {"pointId": "tp-imu", "shortName": "M3", "name": "IMU 反馈测点", "edgeId": "edge-imu-error", "detects": ["sensor_bias_imu_pitch", "sensor_noise_imu_pitch"]},
+    {"pointId": "tp-error", "shortName": "M4", "name": "误差残差测点", "edgeId": "edge-error-controller", "detects": ["sensor_bias_imu_pitch", "sensor_noise_imu_pitch", "param_gain_controller"]},
+    {"pointId": "tp-controller", "shortName": "M5", "name": "控制器输出测点", "edgeId": "edge-controller-allocator", "detects": ["param_gain_controller"]},
+    {"pointId": "tp-allocator", "shortName": "M6", "name": "控制分配测点", "edgeId": "edge-allocator-motor", "detects": ["param_allocator_limit", "link_dropout_motor_can"]},
+    {"pointId": "tp-motor", "shortName": "M7", "name": "电机执行测点", "edgeId": "edge-motor-dynamics", "detects": ["actuator_loss_motor", "link_dropout_motor_can"]},
+    {"pointId": "tp-dynamics", "shortName": "M8", "name": "动力学响应测点", "edgeId": "edge-dynamics-imu", "detects": ["actuator_loss_motor", "param_gain_controller", "param_allocator_limit"]},
+    {"pointId": "tp-logger", "shortName": "M9", "name": "残差诊断测点", "edgeId": "edge-error-logger", "detects": ["diagnostic_residual_logger", "sensor_bias_imu_pitch", "sensor_noise_imu_pitch"]},
+    {"pointId": "tp-spectrum", "shortName": "M10", "name": "频谱诊断测点", "edgeId": "edge-error-spectrum", "detects": ["diagnostic_spectrum_drift", "sensor_noise_imu_pitch"]}
+  ]
+}

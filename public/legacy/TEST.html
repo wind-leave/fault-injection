@@ -1,0 +1,4077 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>故障注入平台</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --sidebar-w:192px;
+  --sidebar-w-md:184px;
+  --bg-base:#f0f5fb;
+  --bg-panel:#ffffff;
+  --bg-card:#f7fafd;
+  --bg-hover:#eaf2fb;
+  --border:#d6e4f0;
+  --border-mid:#c2d6ea;
+  --border-dark:#a8c4de;
+  --blue:#1d6fbf;
+  --blue-lt:#4a9eff;
+  --blue-bg:#e8f1fb;
+  --teal:#0e8fa8;
+  --teal-bg:#e3f6fa;
+  --red:#dc2626;
+  --red-lt:#ef4444;
+  --red-bg:#fef2f2;
+  --red-border:#fca5a5;
+  --green:#16a34a;
+  --green-bg:#f0fdf4;
+  --orange:#c2540a;
+  --orange-bg:#fff7ed;
+  --purple:#6d28d9;
+  --purple-bg:#f5f3ff;
+  --text:#1e3a5f;
+  --text2:#4a6a8a;
+  --textm:#7a9ab8;
+  --textd:#b3c8da;
+}
+body{font-family:'Noto Sans SC',sans-serif;background:var(--bg-base);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+/* ── HEADER ── */
+header{height:52px;background:var(--bg-panel);border-bottom:1.5px solid var(--border);display:flex;align-items:center;flex-shrink:0;z-index:100;box-shadow:0 1px 4px rgba(30,58,95,0.06);}
+.logo{width:var(--sidebar-w);padding:0 16px;display:flex;align-items:center;gap:9px;border-right:1.5px solid var(--border);height:100%;flex-shrink:0;}
+.logo-badge{width:28px;height:28px;background:linear-gradient(135deg,var(--blue),var(--blue-lt));border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:11px;color:#fff;flex-shrink:0;box-shadow:0 2px 6px rgba(29,111,191,0.28);}
+.logo-name{font-family:'Rajdhani',sans-serif;font-weight:700;font-size:15px;color:var(--text);line-height:1.2;white-space:nowrap;}
+
+/* ── 三步流程条 ── */
+.stepbar{flex:1;display:flex;align-items:center;justify-content:center;padding:0 20px;gap:0;}
+.step-item{display:flex;align-items:center;}
+.step-pill{display:flex;align-items:center;gap:7px;padding:6px 16px;border-radius:20px;border:1.5px solid var(--border);background:transparent;transition:all 0.25s;cursor:default;}
+.step-num{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;background:var(--border);color:var(--textm);transition:all 0.25s;flex-shrink:0;}
+.step-lbl{font-size:13px;font-weight:500;color:var(--textm);white-space:nowrap;transition:all 0.25s;}
+.step-arrow{width:40px;height:1.5px;background:var(--border);margin:0 4px;position:relative;flex-shrink:0;}
+.step-arrow::after{content:'▸';position:absolute;right:-6px;top:-7px;font-size:8px;color:var(--border);}
+.step-item[data-s="1"]{--sc:var(--blue);--scbg:var(--blue-bg);}
+.step-item[data-s="2"]{--sc:var(--red);--scbg:var(--red-bg);}
+.step-item[data-s="3"]{--sc:var(--green);--scbg:var(--green-bg);}
+.step-item.active .step-pill{border-color:var(--sc);background:var(--scbg);}
+.step-item.active .step-num{background:var(--sc);color:#fff;box-shadow:0 1px 5px color-mix(in srgb,var(--sc) 40%,transparent);}
+.step-item.active .step-lbl{color:var(--sc);font-weight:600;}
+.step-item.done .step-pill{border-color:var(--border-mid);background:var(--bg-hover);}
+.step-item.done .step-num{background:var(--blue);color:#fff;font-size:8px;}
+.step-item.done .step-lbl{color:var(--text2);}
+
+/* ── 右上角工具栏（4个按钮） ── */
+.toolbar{display:flex;align-items:center;gap:5px;padding:0 14px;border-left:1.5px solid var(--border);height:100%;flex-shrink:0;}
+.tbtn{display:flex;align-items:center;gap:4px;padding:5px 11px;border-radius:5px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--text2);font-family:'Noto Sans SC',sans-serif;font-size:11px;cursor:pointer;transition:all 0.18s;white-space:nowrap;font-weight:500;}
+.tbtn:hover:not(.tbtn-disabled){background:var(--bg-hover);border-color:var(--border-mid);color:var(--text);}
+.tbtn-disabled{opacity:0.38;cursor:not-allowed;}
+.tbtn-imp-sys{border-color:var(--blue);color:var(--blue);background:var(--blue-bg);}
+.tbtn-imp-sys:hover{background:#dceef9!important;}
+.tbtn-imp-flt{border-color:var(--red);color:var(--red);}
+.tbtn-imp-flt.ready{background:var(--red-bg);}
+.tbtn-save-sys{border-color:var(--teal);color:var(--teal);}
+.tbtn-save-sys.ready{background:var(--teal-bg);}
+.tbtn-save-res{border-color:var(--green);color:var(--green);}
+.tbtn-save-res.ready{background:var(--green-bg);}
+.tbtn-divider{width:1px;height:22px;background:var(--border);margin:0 2px;flex-shrink:0;}
+
+/* ── LAYOUT ── */
+main{flex:1;display:flex;overflow:hidden;}
+
+/* ── 左侧面板（4组） ── */
+.lpanel{width:var(--sidebar-w);flex-shrink:0;background:var(--bg-panel);border-right:1.5px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
+.lscroll{flex:1;overflow-y:auto;}
+.lscroll::-webkit-scrollbar{width:3px;}
+.lscroll::-webkit-scrollbar-thumb{background:var(--border);}
+
+/* 分组标题 */
+.lgroup-head{display:flex;align-items:center;gap:6px;padding:8px 12px 5px;font-size:10px;font-weight:600;color:var(--text2);letter-spacing:0.3px;border-bottom:1px solid var(--border);background:var(--bg-card);margin-top:1px;cursor:pointer;user-select:none;position:sticky;top:0;z-index:2;}
+.lgroup-head:first-child{margin-top:0;}
+.lgroup-icon{font-size:11px;}
+.lgroup-arrow{margin-left:auto;font-size:9px;color:var(--textd);transition:transform 0.2s;}
+.lgroup-arrow.open{transform:rotate(90deg);}
+.lgroup-body{padding:4px 8px 6px;}
+
+/* 元件条目 */
+.citem{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:5px;border:1px solid transparent;cursor:grab;transition:all 0.14s;margin-bottom:2px;font-size:11px;color:var(--text2);}
+.citem:hover{background:var(--blue-bg);border-color:var(--border-mid);color:var(--blue);}
+.citem-draggable{cursor:grab;}
+.citem-draggable:active{cursor:grabbing;}
+.citem-dragging{opacity:0.58;transform:translateX(2px);}
+.citem-copy{display:flex;flex-direction:column;gap:1px;min-width:0;}
+.citem-sub{font-size:9px;color:var(--textm);line-height:1.35;white-space:normal;}
+.citem-label{font-size:11px;font-weight:600;color:inherit;line-height:1.45;}
+.cdot{width:6px;height:6px;border-radius:2px;flex-shrink:0;}
+.citem-line-tool{cursor:pointer;}
+.citem-line-tool.active{background:var(--blue-bg);border-color:var(--blue-lt);color:var(--blue);box-shadow:0 0 0 1px rgba(74,158,255,0.12) inset;}
+.citem-line-tool.active.citem-can{background:#ede9fe!important;border-color:var(--purple)!important;color:var(--purple)!important;}
+
+/* 故障注入组件特殊样式 */
+.citem-fault{color:var(--red)!important;border:1px solid var(--red-border)!important;background:var(--red-bg);}
+.citem-fault:hover{background:#fee2e2!important;border-color:var(--red)!important;}
+
+/* 测量仪器 */
+.citem-scope{border:1.5px solid #bbf7d0!important;background:#f0fdf4;color:var(--green)!important;}
+.citem-scope:hover{background:#dcfce7!important;border-color:var(--green)!important;}
+
+/* 连接线 */
+.citem-can{border:1px solid #c4b5fd!important;background:var(--purple-bg);color:var(--purple)!important;}
+.citem-can:hover{background:#ede9fe!important;border-color:var(--purple)!important;}
+
+/* ── 画布 ── */
+.canvas-wrap{flex:1;background:var(--bg-base);position:relative;overflow:hidden;}
+.canvas-grid{position:absolute;inset:0;background:radial-gradient(circle at top right, rgba(122,183,255,0.12), transparent 26%),linear-gradient(180deg, rgba(255,255,255,0.72), rgba(240,245,251,0.94));}
+.empty-state{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none;}
+.empty-icon{width:56px;height:56px;border:2px dashed var(--border-mid);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;}
+.empty-txt{font-size:14px;color:var(--text2);font-weight:500;}
+.empty-sub{font-size:11px;color:var(--textm);}
+.diagram{position:absolute;inset:0;display:none;}
+.diagram.on{display:block;}
+.diagram.dragover .diagram-placeholder-card{border-color:var(--blue);background:#f5f9ff;box-shadow:0 10px 24px rgba(29,111,191,0.12);}
+.diagram-guide{position:absolute;top:106px;left:22px;z-index:8;display:flex;flex-direction:column;gap:3px;padding:11px 14px;border-radius:10px;border:1px solid rgba(194,214,234,0.95);background:rgba(255,255,255,0.9);backdrop-filter:blur(10px);box-shadow:0 8px 18px rgba(30,58,95,0.08);}
+.diagram-guide-title{font-size:13px;font-weight:700;color:var(--text);}
+.diagram-guide-sub{font-size:10px;color:var(--textm);line-height:1.5;max-width:300px;}
+.diagram-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;padding:24px;z-index:7;}
+.diagram-placeholder-card{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;width:min(420px,100%);padding:26px 28px;border-radius:18px;border:2px dashed var(--border-mid);background:rgba(255,255,255,0.72);text-align:center;transition:all 0.18s;}
+.diagram-placeholder-icon{font-size:26px;line-height:1;color:var(--blue);}
+.diagram-placeholder-title{font-size:16px;font-weight:700;color:var(--text);}
+.diagram-placeholder-sub{font-size:11px;color:var(--textm);line-height:1.6;max-width:320px;}
+.canvas-viewport{position:absolute;inset:0;overflow:hidden;z-index:3;cursor:grab;}
+.canvas-viewport.panning{cursor:grabbing;}
+.canvas-stage{position:absolute;left:0;top:0;width:1600px;height:980px;transform-origin:0 0;will-change:transform;touch-action:none;}
+.canvas-stage-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(194,214,234,0.55) 1px, transparent 1px),linear-gradient(90deg, rgba(194,214,234,0.55) 1px, transparent 1px);background-size:32px 32px,32px 32px;opacity:0.54;pointer-events:none;}
+.edge-layer{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:auto;}
+.edge-path{fill:none;stroke-linecap:round;stroke-linejoin:round;pointer-events:none;}
+.edge-path--normal{stroke:#84aee0;stroke-width:2.2;}
+.edge-path--can{stroke:#8c7cf6;stroke-width:3.2;}
+.edge-hit{fill:none;stroke:rgba(79,134,231,0.001);stroke-width:18;stroke-linecap:round;stroke-linejoin:round;pointer-events:visibleStroke;cursor:pointer;}
+.edge-path.is-selected{filter:drop-shadow(0 0 6px rgba(79,134,231,0.24));}
+.edge-path--normal.is-selected{stroke:#4f86e7;stroke-width:2.9;}
+.edge-path--can.is-selected{stroke:#6d5df6;stroke-width:4;}
+.edge-label{font-family:'JetBrains Mono',monospace;font-size:9px;fill:#6d28d9;pointer-events:auto;cursor:pointer;transition:fill 0.16s ease;}
+.edge-label.is-selected{fill:#1d4ed8;font-weight:700;}
+.edge-path.is-faulted{stroke-dasharray:10 6;filter:drop-shadow(0 0 5px rgba(220,38,38,0.18));}
+.edge-path--can.is-faulted{stroke:var(--red);stroke-width:3.6;}
+.edge-label.is-faulted{fill:var(--red);font-weight:700;}
+.edge-label.is-faulted.is-selected{fill:#b91c1c;}
+.edge-preview{fill:none;stroke:#7ab7ff;stroke-width:2;stroke-dasharray:7 5;opacity:0.92;}
+.node-layer{position:absolute;inset:0;z-index:4;}
+.canvas-floating{position:absolute;right:18px;bottom:18px;z-index:9;display:flex;flex-direction:column;align-items:flex-end;gap:10px;}
+.canvas-mode{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid rgba(183,197,219,0.48);border-radius:16px;background:rgba(255,255,255,0.9);backdrop-filter:blur(12px);box-shadow:0 12px 24px rgba(30,58,95,0.08);}
+.canvas-mode__label{font-size:10px;color:var(--textm);font-weight:700;letter-spacing:0.2px;}
+.canvas-mode__chip{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border-radius:999px;border:1px solid rgba(194,214,234,0.72);background:var(--bg-card);font-size:11px;color:var(--text2);font-weight:700;}
+.canvas-mode__chip.can{border-color:#c4b5fd;background:#f5f3ff;color:#6d28d9;}
+.canvas-zoom{display:flex;align-items:center;gap:9px;padding:9px 12px;border:1px solid rgba(183,197,219,0.48);border-radius:16px;background:rgba(255,255,255,0.9);backdrop-filter:blur(12px);box-shadow:0 12px 24px rgba(30,58,95,0.08);}
+.canvas-zoom__button,.canvas-zoom__reset{border:1px solid rgba(183,197,220,0.58);background:rgba(255,255,255,0.92);color:#415f8f;cursor:pointer;transition:background 0.2s ease,border-color 0.2s ease;}
+.canvas-zoom__button:hover,.canvas-zoom__reset:hover{border-color:rgba(76,116,204,0.42);background:rgba(236,243,255,0.94);}
+.canvas-zoom__button{width:30px;height:30px;border-radius:9px;font-size:17px;line-height:1;}
+.canvas-zoom__track{width:110px;height:6px;border-radius:999px;background:rgba(175,191,220,0.28);overflow:hidden;}
+.canvas-zoom__fill{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#5b8cff,#7ab7ff);}
+.canvas-zoom__reset{min-width:64px;height:30px;padding:0 10px;border-radius:9px;font-size:13px;font-weight:700;}
+
+/* ── 模块块 ── */
+.blk{position:absolute;border-radius:12px;border:1.5px solid;background:var(--bg-panel);cursor:grab;transition:box-shadow 0.18s,border-color 0.18s,transform 0.18s;user-select:none;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:4px;box-shadow:0 6px 16px rgba(30,58,95,0.08);}
+.blk.is-dragging{cursor:grabbing;box-shadow:0 16px 28px rgba(30,58,95,0.18);transform:translateY(-1px);}
+.blk:hover{box-shadow:0 3px 12px rgba(30,58,95,0.14);z-index:10;}
+.blk.sel{box-shadow:0 0 0 3px color-mix(in srgb,currentColor 25%,transparent),0 2px 10px rgba(30,58,95,0.1);z-index:20;}
+.blk-lbl{font-size:12px;font-weight:700;padding:0 10px;line-height:1.4;color:var(--text);letter-spacing:0.1px;}
+.blk-sub{font-size:10px;color:var(--textm);padding:0 10px;font-family:"Segoe UI","Microsoft YaHei UI",sans-serif;line-height:1.55;}
+.blk-kicker{font-size:9px;font-weight:700;letter-spacing:0.55px;text-transform:uppercase;color:currentColor;opacity:0.82;margin-bottom:2px;}
+.node-port{position:absolute;display:flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:2px solid currentColor;background:#fff;box-shadow:0 0 0 3px rgba(255,255,255,0.78);pointer-events:auto;cursor:crosshair;z-index:2;transform:translate(-50%,-50%);padding:0;appearance:none;outline:none;}
+.node-port--output{background:currentColor;border-color:#fff;box-shadow:0 0 0 2px color-mix(in srgb,currentColor 24%,transparent);}
+.node-port--top{background:#fff;border-color:currentColor;box-shadow:0 0 0 3px rgba(255,255,255,0.9),0 6px 14px rgba(56,189,248,0.14);}
+.node-port--active{box-shadow:0 0 0 5px color-mix(in srgb,currentColor 18%,transparent);}
+.node-port__inner{width:4px;height:4px;border-radius:50%;background:currentColor;}
+.fbadge{position:absolute;top:-7px;right:-7px;width:15px;height:15px;background:var(--red);border-radius:50%;display:none;align-items:center;justify-content:center;font-size:7px;font-weight:700;color:#fff;box-shadow:0 1px 4px rgba(220,38,38,0.45);}
+.blk.faulted .fbadge{display:flex;}
+.blk.faulted{border-color:var(--red-lt)!important;background:var(--red-bg)!important;animation:fpulse 2.2s ease-in-out infinite;}
+.blk.faulted .blk-lbl{color:var(--red);}
+@keyframes fpulse{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,0);}50%{box-shadow:0 0 0 4px rgba(220,38,38,0.12);}}
+.b-source{border-color:#4f86e7;color:#2a6dc9;}
+.b-flow{border-color:#60a5fa;color:var(--blue);}
+.b-sim{border-color:#38bdf8;color:var(--teal);}
+.b-fault{border-color:#f87171;color:var(--red);}
+.b-inst{border-color:#4ade80;color:var(--green);}
+.b-link{border-color:#a78bfa;color:var(--purple);}
+.b-sensor{border-color:#93c5fd;color:var(--blue);}
+.b-ctrl{border-color:#67e8f9;color:var(--teal);}
+.b-motor{border-color:#fdba74;color:var(--orange);}
+.b-scope{border-color:#86efac;color:var(--green);}
+.scope-view-btn{position:absolute;bottom:-13px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;font-size:9px;font-weight:600;padding:2px 8px;border-radius:10px;cursor:pointer;white-space:nowrap;display:none;box-shadow:0 1px 4px rgba(22,163,74,0.3);}
+
+/* 层分隔 */
+.lay-lbl{position:absolute;top:14px;font-size:9px;color:var(--textm);font-family:'JetBrains Mono',monospace;pointer-events:none;background:var(--bg-base);padding:0 4px;}
+.lay-div{position:absolute;top:10px;bottom:10px;width:1px;background:var(--border-mid);pointer-events:none;opacity:0.6;}
+
+/* ── 仿真控制栏 ── */
+.simbar{
+  position:absolute;top:12px;left:50%;transform:translateX(-50%);
+  display:flex;align-items:center;gap:0;
+  max-width:calc(100% - 24px);
+  background:var(--bg-panel);border:1.5px solid var(--border);
+  border-radius:9px;box-shadow:0 2px 10px rgba(30,58,95,0.1);
+  z-index:50;overflow:hidden;white-space:nowrap;
+}
+/* 左段：参数输入 */
+.simbar-params{display:flex;align-items:center;gap:0;padding:0 12px;border-right:1.5px solid var(--border);}
+.sim-field{display:flex;align-items:center;gap:5px;padding:7px 8px 7px 0;border-right:1px solid var(--border);margin-right:8px;}
+.sim-field:last-child{border-right:none;margin-right:0;}
+.sim-field-lbl{font-size:10px;color:var(--textm);white-space:nowrap;}
+.sim-field-inp{width:58px;border:1.5px solid var(--border);border-radius:4px;padding:3px 6px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);background:var(--bg-card);outline:none;transition:border-color 0.15s;text-align:right;}
+.sim-field-inp:focus{border-color:var(--blue);}
+/* 中段：实时模式开关 */
+.simbar-rt{display:flex;align-items:center;gap:7px;padding:7px 14px;border-right:1.5px solid var(--border);}
+.simbar-rt-lbl{font-size:11px;color:var(--text2);}
+/* Toggle */
+.toggle-wrap{position:relative;width:36px;height:20px;flex-shrink:0;}
+.toggle-wrap input{opacity:0;width:0;height:0;position:absolute;}
+.toggle-track{position:absolute;inset:0;border-radius:10px;background:var(--border-dark);cursor:pointer;transition:background 0.2s;}
+.toggle-wrap input:checked+.toggle-track{background:var(--green);}
+.toggle-thumb{position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.18);transition:transform 0.2s;pointer-events:none;}
+.toggle-wrap input:checked~.toggle-thumb{transform:translateX(16px);}
+/* 右段：操作按钮 */
+.simbar-btns{display:flex;align-items:center;}
+.sim-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:7px 14px;border:none;border-right:1px solid var(--border);background:transparent;cursor:pointer;transition:background 0.15s;min-width:56px;}
+.sim-btn:last-child{border-right:none;}
+.sim-btn:hover:not(.sim-btn-disabled){background:var(--bg-hover);}
+.sim-btn-disabled{opacity:0.35;cursor:not-allowed;}
+.sim-btn-icon{font-size:15px;line-height:1;}
+.sim-btn-lbl{font-size:10px;color:var(--text2);font-weight:500;}
+/* 运行按钮激活态 */
+.sim-btn-run.active .sim-btn-icon{color:var(--green);}
+.sim-btn-run.active .sim-btn-lbl{color:var(--green);}
+.sim-btn-run.active{background:var(--green-bg);}
+/* 终止按钮 */
+.sim-btn-stop .sim-btn-icon{color:var(--red);}
+.sim-btn-stop .sim-btn-lbl{color:var(--red);}
+.sim-btn-stop:hover{background:var(--red-bg)!important;}
+/* 运行中状态指示 */
+.sim-running-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:blink 1s ease-in-out infinite;display:none;}
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:0.3;}}
+
+/* ── 右侧属性面板 ── */
+.rpanel{width:232px;flex-shrink:0;background:var(--bg-panel);border-left:1.5px solid var(--border);display:flex;flex-direction:column;}
+.ph{padding:10px 14px 8px;font-size:10px;font-weight:600;letter-spacing:0.6px;color:var(--textm);text-transform:uppercase;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg-card);}
+.props-body{flex:1;overflow-y:auto;padding:16px 14px;}
+.props-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;color:var(--textm);font-size:12px;text-align:center;}
+.pgroup{margin-bottom:18px;}
+.pglbl{font-size:9px;color:var(--textd);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px;font-weight:600;}
+.prow{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:11px;}
+.pk{color:var(--text2);}
+.pv{color:var(--text);font-family:'JetBrains Mono',monospace;font-size:10px;}
+.pv-ok{color:var(--green);font-weight:600;}
+.pv-fault{color:var(--red);font-weight:600;}
+.props-title{font-size:14px;font-weight:700;color:var(--text);line-height:1.3;}
+.props-sub{font-size:10px;color:var(--textm);line-height:1.5;margin-top:3px;}
+.props-form{display:flex;flex-direction:column;gap:16px;}
+.props-field{display:flex;flex-direction:column;gap:8px;}
+.props-field label{font-size:10px;color:var(--text2);font-weight:600;letter-spacing:0.2px;}
+.props-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.props-field input,
+.props-field select,
+.props-field textarea{width:100%;border:1.5px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--bg-card);font-size:12px;color:var(--text);outline:none;transition:border-color 0.15s,box-shadow 0.15s;line-height:1.5;}
+.props-field textarea{min-height:78px;resize:vertical;line-height:1.5;}
+.props-field input:focus,
+.props-field select:focus,
+.props-field textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(74,158,255,0.12);}
+.props-help{font-size:10px;color:var(--textm);line-height:1.7;}
+.sim-intf-toolbar{display:flex;flex-direction:column;gap:10px;}
+.sim-intf-counts{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.sim-intf-counts .props-field:last-child{grid-column:1 / -1;}
+.sim-intf-group{border:1px solid rgba(174,194,221,0.72);border-radius:12px;background:linear-gradient(180deg,rgba(252,254,255,0.98),rgba(246,250,255,0.92));padding:12px 12px 13px;display:flex;flex-direction:column;gap:10px;box-shadow:0 6px 14px rgba(30,58,95,0.04);}
+.sim-intf-head{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.sim-intf-title{font-size:11px;font-weight:700;color:var(--text);}
+.sim-intf-meta{font-size:10px;color:var(--textm);padding:3px 8px;border-radius:999px;background:rgba(221,234,252,0.78);}
+.sim-intf-list{display:flex;flex-direction:column;gap:9px;}
+.sim-intf-row{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,0.88fr);gap:10px;align-items:end;}
+.sim-intf-note{font-size:10px;color:var(--textm);line-height:1.6;}
+.props-actions{display:flex;flex-direction:column;gap:10px;margin-top:20px;}
+.props-save{width:100%;padding:9px 12px;border:none;border-radius:7px;background:var(--red);color:#fff;font-size:12px;font-weight:700;cursor:pointer;transition:background 0.18s,transform 0.18s;}
+.props-save:hover{background:#b91c1c;}
+.props-save:active{transform:translateY(1px);}
+.props-secondary{width:100%;padding:8px 12px;border-radius:7px;border:1.5px solid #86efac;background:var(--green-bg);color:var(--green);font-size:11px;font-weight:600;cursor:pointer;}
+.props-danger{width:100%;padding:9px 12px;border-radius:7px;border:1.5px solid #f7b1b1;background:#fff5f5;color:#c62828;font-size:12px;font-weight:700;cursor:pointer;transition:background 0.18s,border-color 0.18s,transform 0.18s;}
+.props-danger:hover{background:#feeaea;border-color:#ee8d8d;}
+.props-danger:active{transform:translateY(1px);}
+
+/* ── 状态栏 ── */
+.sbar{height:24px;background:var(--bg-panel);border-top:1.5px solid var(--border);display:flex;align-items:center;padding:0 14px;gap:16px;flex-shrink:0;}
+.si{display:flex;align-items:center;gap:5px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--textm);}
+.sdot{width:5px;height:5px;border-radius:50%;background:var(--textd);}
+.sdot-b{background:var(--blue);}
+.sdot-g{background:var(--green);}
+.sdot-r{background:var(--red);}
+
+/* ── 通用模态框 ── */
+.overlay{position:fixed;inset:0;background:rgba(30,58,95,0.2);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center;}
+.overlay.open{display:flex;}
+.modal{background:var(--bg-panel);border:1.5px solid var(--border);border-radius:10px;box-shadow:0 20px 48px rgba(30,58,95,0.16);display:flex;flex-direction:column;overflow:hidden;animation:mup 0.2s ease;}
+@keyframes mup{from{transform:translateY(12px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+.mhead{padding:13px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg-card);flex-shrink:0;}
+.mtitle{font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:700;letter-spacing:0.2px;}
+.mclose{width:24px;height:24px;border-radius:4px;background:transparent;border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;transition:all 0.14s;}
+.mclose:hover{background:var(--bg-hover);color:var(--text);}
+.mbody{flex:1;overflow:hidden;display:flex;}
+.mfoot{padding:10px 18px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:flex-end;gap:8px;background:var(--bg-card);flex-shrink:0;}
+.btn-cancel{padding:5px 14px;border-radius:4px;border:1.5px solid var(--border);background:transparent;color:var(--text2);font-size:12px;cursor:pointer;transition:all 0.14s;}
+.btn-cancel:hover{background:var(--bg-hover);color:var(--text);}
+.btn-ok{padding:5px 16px;border-radius:4px;border:none;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.18s;}
+.btn-ok-b{background:var(--blue);color:#fff;}
+.btn-ok-b:hover{background:#155fa0;}
+.btn-ok-p{background:var(--purple);color:#fff;}
+.btn-ok-p:hover{background:#5b21b6;}
+.btn-ok-r{background:var(--red);color:#fff;}
+.btn-ok-r:hover{background:#b91c1c;}
+.btn-ok-g{background:var(--green);color:#fff;}
+.btn-ok-g:hover{background:#15803d;}
+
+/* ── 导入故障模型弹窗 ── */
+.ifm-body{flex:1;display:flex;flex-direction:column;gap:0;overflow:hidden;}
+.ifm-top{padding:14px 18px 10px;border-bottom:1px solid var(--border);}
+.ifm-drop{border:2px dashed var(--border-mid);border-radius:7px;padding:24px;text-align:center;cursor:pointer;transition:all 0.18s;background:var(--bg-card);}
+.ifm-drop:hover{border-color:var(--red);background:var(--red-bg);}
+.ifm-drop-icon{font-size:24px;margin-bottom:6px;}
+.ifm-drop-txt{font-size:12px;color:var(--text2);}
+.ifm-drop-sub{font-size:10px;color:var(--textm);margin-top:3px;}
+.ifm-list{flex:1;overflow-y:auto;padding:10px 18px;}
+.ifm-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:5px;border:1.5px solid var(--border);background:var(--bg-card);margin-bottom:6px;cursor:pointer;transition:all 0.14s;}
+.ifm-item:hover{border-color:var(--border-mid);background:var(--bg-hover);}
+.ifm-item.on{border-color:var(--red);background:var(--red-bg);}
+.ifm-item.is-imported{border-color:#f7c7c7;background:#fff6f6;}
+.ifm-icon{font-size:16px;}
+.ifm-name{font-size:12px;font-weight:500;color:var(--text);flex:1;}
+.ifm-meta{font-size:10px;color:var(--textm);font-family:'JetBrains Mono',monospace;}
+.ifm-state{margin-left:auto;padding:2px 7px;border-radius:999px;border:1px solid #f5c2c2;background:#fff;font-size:9px;color:#c24141;font-weight:700;}
+.ifm-empty{display:flex;align-items:center;justify-content:center;padding:22px 14px;border:1.5px dashed var(--border-mid);border-radius:8px;color:var(--textm);font-size:11px;background:var(--bg-card);}
+.ifm-divider{height:1px;background:var(--border);margin:8px 0;}
+.ifm-build-row{padding:10px 18px;border-top:1px solid var(--border);background:var(--bg-card);display:flex;align-items:center;gap:10px;flex-shrink:0;}
+.ifm-build-hint{font-size:11px;color:var(--textm);flex:1;}
+.btn-build-fault{display:flex;align-items:center;gap:5px;padding:6px 14px;border-radius:5px;border:1.5px solid var(--purple);background:var(--purple-bg);color:var(--purple);font-size:12px;font-weight:600;cursor:pointer;transition:all 0.18s;white-space:nowrap;}
+.btn-build-fault:hover{background:#ede9fe;}
+
+/* ── 模板库 ── */
+.tpl-cats{width:148px;border-right:1px solid var(--border);padding:8px 6px;overflow-y:auto;background:var(--bg-card);}
+.tcat-head{font-size:9px;color:var(--textd);letter-spacing:0.6px;padding:3px 6px 6px;text-transform:uppercase;font-weight:600;}
+.tpl-cat{display:flex;align-items:center;gap:6px;padding:6px 9px;border-radius:5px;cursor:pointer;font-size:12px;color:var(--text2);transition:all 0.14s;margin-bottom:2px;border:1px solid transparent;}
+.tpl-cat:hover{background:var(--blue-bg);color:var(--blue);}
+.tpl-cat.on{background:var(--purple-bg);border-color:#c4b5fd;color:var(--purple);font-weight:500;}
+.tpl-cnt{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:9px;opacity:0.65;}
+.tpl-grid{flex:1;padding:10px;overflow-y:auto;display:grid;grid-template-columns:repeat(2,1fr);gap:8px;align-content:start;}
+.tcard{background:var(--bg-panel);border:1.5px solid var(--border);border-radius:7px;padding:10px;cursor:pointer;transition:all 0.18s;}
+.tcard:hover{border-color:var(--border-mid);box-shadow:0 2px 8px rgba(30,58,95,0.08);}
+.tcard.on{border-color:#c4b5fd;background:var(--purple-bg);}
+.tcard-name{font-size:11px;font-weight:600;color:var(--text);margin-bottom:3px;}
+.tcard-desc{font-size:10px;color:var(--text2);line-height:1.4;margin-bottom:6px;}
+.tcard-tags{display:flex;gap:3px;flex-wrap:wrap;}
+.ttag{padding:2px 5px;border-radius:6px;font-size:8px;font-weight:500;font-family:'JetBrains Mono',monospace;}
+.tpl-detail{width:196px;border-left:1px solid var(--border);padding:12px;overflow-y:auto;background:var(--bg-card);}
+.tdph{color:var(--textd);font-size:11px;text-align:center;margin-top:50px;}
+.tdtitle{font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;}
+.tdlbl{font-size:9px;color:var(--textd);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;margin-top:9px;font-weight:600;}
+.tdval{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--purple);background:var(--purple-bg);padding:3px 7px;border-radius:3px;border:1px solid #ddd6fe;}
+
+/* ── 电气层注入弹窗 ── */
+.einj-body{display:grid;grid-template-columns:220px 1fr 220px;gap:0;flex:1;min-height:0;}
+.einj-side,.einj-detail{background:var(--bg-card);display:flex;flex-direction:column;min-height:0;}
+.einj-side{border-right:1px solid var(--border);}
+.einj-detail{border-left:1px solid var(--border);}
+.einj-side-head,.einj-detail-head{padding:12px 14px 10px;border-bottom:1px solid var(--border);}
+.einj-side-title,.einj-detail-title{font-size:12px;font-weight:700;color:var(--text);}
+.einj-side-sub,.einj-detail-sub{font-size:10px;color:var(--textm);margin-top:3px;line-height:1.5;}
+.einj-import-list{flex:1;overflow-y:auto;padding:10px 12px;}
+.einj-main{display:flex;flex-direction:column;min-height:0;background:var(--bg-panel);}
+.einj-target{padding:14px 16px 12px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,#ffffff,#f9fbff);}
+.einj-target-kicker{font-size:10px;color:var(--textd);text-transform:uppercase;letter-spacing:0.5px;font-weight:700;}
+.einj-target-name{font-size:16px;font-weight:700;color:var(--text);margin-top:4px;}
+.einj-target-sub{font-size:11px;color:var(--text2);margin-top:4px;line-height:1.6;}
+.einj-current{display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:4px 8px;border-radius:999px;border:1px solid #f3b2b2;background:#fff5f5;color:#c24141;font-size:10px;font-weight:700;}
+.einj-grid{flex:1;overflow-y:auto;padding:12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-content:start;}
+.einj-card{background:var(--bg-card);border:1.5px solid var(--border);border-radius:8px;padding:11px 12px;cursor:pointer;transition:all 0.16s;}
+.einj-card:hover{border-color:#f0b2b2;box-shadow:0 4px 14px rgba(180,83,9,0.08);}
+.einj-card.on{border-color:#dc2626;background:#fff4f4;box-shadow:0 4px 16px rgba(220,38,38,0.08);}
+.einj-card-name{font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px;}
+.einj-card-desc{font-size:10px;color:var(--text2);line-height:1.55;margin-bottom:8px;}
+.einj-tags{display:flex;flex-wrap:wrap;gap:4px;}
+.einj-tag{padding:2px 6px;border-radius:999px;font-size:9px;font-weight:700;border:1px solid rgba(180,83,9,0.18);background:#fff8f1;color:#b45309;}
+.einj-detail-body{flex:1;overflow-y:auto;padding:12px 14px;}
+.einj-empty{display:flex;align-items:center;justify-content:center;height:100%;padding:16px;text-align:center;font-size:11px;color:var(--textm);line-height:1.7;}
+.einj-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);font-size:11px;}
+.einj-row span:first-child{color:var(--textm);}
+.einj-row span:last-child{color:var(--text);font-weight:600;text-align:right;}
+.props-fault-action{border-color:#f5b5b5;background:#fff5f5;color:#c62828;}
+.props-fault-action:hover{background:#feeaea;}
+.props-protocol-action{border-color:#b6d6fa;background:#eef6ff;color:var(--blue);}
+.props-protocol-action:hover{background:#e3f0ff;}
+.einj-protocol .einj-card:hover{border-color:#b6d6fa;box-shadow:0 4px 14px rgba(29,111,191,0.08);}
+.einj-protocol .einj-card.on{border-color:var(--blue);background:#eff6ff;box-shadow:0 4px 16px rgba(29,111,191,0.1);}
+.einj-protocol .einj-tag{border-color:rgba(29,111,191,0.2);background:#f3f8ff;color:var(--blue);}
+.einj-protocol .einj-current{border-color:#bfd7f5;background:#f3f8ff;color:var(--blue);}
+
+/* ── 故障配置弹窗 ── */
+.cfg-form{flex:1;padding:14px 18px;overflow-y:auto;}
+.cfg-sec{margin-bottom:16px;}
+.cfg-sec-title{font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;padding-bottom:4px;border-bottom:1.5px solid var(--red-border);}
+.cfg-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.cfg-f{display:flex;flex-direction:column;gap:3px;}
+.cfg-f label{font-size:10px;color:var(--text2);}
+.cfg-f select,.cfg-f input{background:var(--bg-card);border:1.5px solid var(--border);border-radius:4px;padding:5px 8px;color:var(--text);font-size:11px;font-family:'JetBrains Mono',monospace;outline:none;transition:border-color 0.18s;width:100%;}
+.cfg-f select:focus,.cfg-f input:focus{border-color:var(--red);}
+.layer-sel{display:flex;gap:5px;margin-bottom:8px;}
+.lbtn{flex:1;padding:6px 4px;border-radius:4px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--text2);font-size:11px;cursor:pointer;transition:all 0.18s;text-align:center;}
+.lbtn:hover{background:var(--bg-hover);}
+.lbtn.on{border-color:var(--red);background:var(--red-bg);color:var(--red);font-weight:600;}
+.cfg-prev{width:196px;border-left:1px solid var(--border);padding:12px;background:var(--bg-card);display:flex;flex-direction:column;gap:4px;flex-shrink:0;}
+.cprev-title{font-size:10px;color:var(--red);font-weight:700;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;}
+.cfg-tl{height:72px;border:1.5px solid var(--border);border-radius:4px;background:#f9fbfe;position:relative;overflow:hidden;margin-bottom:6px;}
+.srow{display:flex;justify-content:space-between;font-size:10px;padding:2px 0;border-bottom:1px solid var(--border);}
+.sk{color:var(--textm);}
+.sv{color:var(--text);font-family:'JetBrains Mono',monospace;font-size:9px;}
+
+/* ── 示波器 ── */
+.scope-ctrl{padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:9px;flex-shrink:0;background:var(--bg-card);}
+.scbtn{padding:4px 10px;border-radius:4px;border:1.5px solid var(--border);background:var(--bg-panel);color:var(--text2);font-size:10px;cursor:pointer;transition:all 0.14s;display:flex;align-items:center;gap:4px;}
+.scbtn:hover{background:var(--bg-hover);color:var(--text);}
+.scbtn.on{border-color:var(--red);color:var(--red);background:var(--red-bg);}
+.scope-legend{display:flex;gap:10px;margin-left:auto;font-size:10px;}
+.sleg{display:flex;align-items:center;gap:4px;color:var(--text2);}
+.slegdot{width:14px;height:2px;border-radius:1px;}
+.scope-channels{flex:1;padding:10px 14px;display:flex;flex-direction:column;gap:7px;overflow:hidden;}
+.scope-ch{flex:1;background:#f9fbfe;border:1.5px solid var(--border);border-radius:5px;position:relative;overflow:hidden;}
+.sch-lbl{position:absolute;top:5px;left:7px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--textm);z-index:1;}
+
+/* ── Toast ── */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--bg-panel);border:1.5px solid var(--border);border-radius:7px;padding:8px 16px;font-size:12px;color:var(--text);z-index:9999;box-shadow:0 6px 20px rgba(30,58,95,0.13);display:none;align-items:center;gap:7px;animation:mup 0.18s ease;white-space:nowrap;}
+.toast.on{display:flex;}
+.toast-w{border-color:var(--red-border);}
+.toast-s{border-color:#86efac;}
+.ti-w{color:var(--red);}
+.ti-s{color:var(--green);}
+/* 鈹€鈹€ Local Font & Size Override 鈹€鈹€ */
+body{font-family:"Microsoft YaHei UI","Segoe UI","PingFang SC",sans-serif;}
+.logo-badge,.logo-name,.mtitle{font-family:"Segoe UI Semibold","Microsoft YaHei UI",sans-serif;}
+.step-num,.blk-sub,.pv,.ifm-meta,.tdval,.sv,.si,.sch-lbl{font-family:"Cascadia Mono","Consolas",monospace;}
+.logo-name{font-size:16px;}
+.step-lbl{font-size:14px;}
+.tbtn{padding:6px 12px;font-size:12px;}
+.lgroup-head{padding:9px 12px 6px;font-size:11px;}
+.citem{padding:6px 8px;font-size:12px;}
+.blk-lbl{font-size:13px;}
+.blk-sub{font-size:10.5px;}
+.pglbl{font-size:10px;}
+.prow{padding:5px 0;font-size:12px;}
+.btn-build-fault{padding:7px 15px;font-size:13px;}
+.cfg-f label{font-size:11px;}
+.cfg-f select,.cfg-f input{padding:6px 8px;font-size:12px;}
+.sch-lbl{font-size:10px;}
+
+@media (max-width:1180px){
+  .toolbar{padding:0 10px;gap:4px;}
+  .tbtn{padding:6px 10px;font-size:11px;}
+  .logo{width:var(--sidebar-w-md);}
+  .lpanel{width:var(--sidebar-w-md);}
+  .rpanel{width:236px;}
+}
+
+@media (max-width:980px){
+  body{
+    height:auto;
+    min-height:100vh;
+    overflow:auto;
+  }
+  header{height:auto;min-height:52px;flex-wrap:wrap;}
+  .logo{height:52px;border-right:none;}
+  .toolbar{height:auto;margin-left:auto;border-left:none;width:100%;padding:8px 12px;flex-wrap:wrap;justify-content:flex-start;}
+  .tbtn{flex:1 1 calc(50% - 4px);justify-content:center;min-width:0;}
+  .tbtn-divider{display:none;}
+  .stepbar{width:100%;justify-content:flex-start;padding:8px 12px 10px;border-top:1px solid var(--border);overflow-x:auto;}
+  main{
+    flex-direction:column;
+    overflow:auto;
+  }
+  .lpanel,
+  .rpanel{
+    width:100%;
+    flex:none;
+  }
+  .lpanel{
+    max-height:232px;
+    border-right:none;
+    border-bottom:1.5px solid var(--border);
+  }
+  .rpanel{
+    min-height:240px;
+    border-left:none;
+    border-top:1.5px solid var(--border);
+  }
+  .canvas-wrap{
+    flex:none;
+    width:100%;
+    min-height:640px;
+    overflow:auto;
+  }
+  .canvas-grid,
+  .empty-state,
+  .diagram{
+    min-width:980px;
+    min-height:640px;
+  }
+  .simbar{
+    left:10px;right:10px;transform:none;top:10px;
+    max-width:none;overflow-x:auto;
+  }
+}
+
+@media (max-width:760px){
+  .canvas-floating{right:12px;left:12px;align-items:stretch;}
+  .canvas-mode,.canvas-zoom{justify-content:center;}
+  .canvas-mode{flex-wrap:wrap;}
+  .diagram-guide{left:16px;right:16px;}
+  .props-row{grid-template-columns:1fr;}
+  .einj-body{grid-template-columns:1fr;}
+  .einj-side,.einj-detail{border:none;border-bottom:1px solid var(--border);}
+  .einj-grid{grid-template-columns:1fr;}
+  .simbar{
+    flex-wrap:wrap;
+    white-space:normal;
+  }
+  .simbar-params,
+  .simbar-rt,
+  .simbar-btns{
+    width:100%;
+    border-right:none;
+  }
+  .simbar-params,
+  .simbar-rt{
+    border-bottom:1px solid var(--border);
+  }
+  .simbar-params{
+    flex-wrap:wrap;
+    row-gap:6px;
+    padding:10px 12px;
+  }
+  .sim-field{
+    flex:1 1 calc(50% - 8px);
+    margin-right:0;
+    padding-right:8px;
+  }
+  .sim-field:last-child{
+    flex-basis:100%;
+    padding-right:0;
+  }
+  .sim-field-inp{
+    width:100%;
+    min-width:0;
+  }
+  .simbar-rt{
+    justify-content:space-between;
+  }
+  .simbar-btns{
+    display:grid;
+    grid-template-columns:repeat(5,minmax(0,1fr));
+  }
+  .sim-btn{
+    min-width:0;
+    padding:8px 6px;
+  }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ HEADER ═══ -->
+<header>
+  <div class="logo">
+    <div class="logo-badge">GZ</div>
+    <div class="logo-name">故障注入平台</div>
+  </div>
+
+  <!-- 三步流程条 -->
+  <div class="stepbar">
+    <div class="step-item active" data-s="1" id="s1">
+      <div class="step-pill"><div class="step-num" id="sn1">1</div><div class="step-lbl">系统建模</div></div>
+    </div>
+    <div class="step-arrow"></div>
+    <div class="step-item" data-s="2" id="s2">
+      <div class="step-pill"><div class="step-num" id="sn2">2</div><div class="step-lbl">故障注入</div></div>
+    </div>
+    <div class="step-arrow"></div>
+    <div class="step-item" data-s="3" id="s3">
+      <div class="step-pill"><div class="step-num" id="sn3">3</div><div class="step-lbl">仿真分析</div></div>
+    </div>
+  </div>
+
+  <!-- 右上角4个操作按钮 -->
+  <div class="toolbar">
+    <button class="tbtn tbtn-imp-sys" onclick="doImportSys()" id="btn-imp-sys">导入系统模型</button>
+    <button class="tbtn tbtn-imp-flt tbtn-disabled" onclick="doImportFault()" id="btn-imp-flt">导入故障模型</button>
+    <div class="tbtn-divider"></div>
+    <button class="tbtn tbtn-save-sys tbtn-disabled" onclick="doSaveSys()" id="btn-save-sys">保存系统模型</button>
+    <button class="tbtn tbtn-save-res tbtn-disabled" onclick="doSaveRes()" id="btn-save-res">保存仿真结果</button>
+  </div>
+</header>
+
+<!-- ═══ MAIN ═══ -->
+<main>
+  <!-- ── 左侧面板（4组） ── -->
+  <aside class="lpanel">
+    <div class="lscroll">
+
+      <!-- 1. 系统建模组件 -->
+      <div class="lgroup-head" onclick="toggleGroup('g1')">
+        <span class="lgroup-icon">🏗</span>
+        <span>系统建模组件</span>
+        <span class="lgroup-arrow open" id="arr-g1">▸</span>
+      </div>
+      <div class="lgroup-body" id="g1">
+        <div class="citem citem-draggable" draggable="true" data-component="signal_source">
+          <div class="cdot" style="background:#4f86e7"></div>
+          <span class="citem-label">信号源</span>
+        </div>
+        <div class="citem citem-draggable" draggable="true" data-component="flow_block">
+          <div class="cdot" style="background:#60a5fa"></div>
+          <span class="citem-label">流程块</span>
+        </div>
+        <div class="citem citem-draggable" draggable="true" data-component="simulation_block">
+          <div class="cdot" style="background:#38bdf8"></div>
+          <span class="citem-label">仿真块</span>
+        </div>
+      </div>
+
+      <!-- 2. 故障注入组件 -->
+      <div class="lgroup-head" onclick="toggleGroup('g2')">
+        <span class="lgroup-icon">⚠</span>
+        <span>故障注入组件</span>
+        <span class="lgroup-arrow open" id="arr-g2">▸</span>
+      </div>
+      <div class="lgroup-body" id="g2">
+        <div class="citem citem-fault citem-draggable" draggable="true" data-component="fault_bias"><span>⚡</span> 偏置叠加块</div>
+        <div class="citem citem-fault citem-draggable" draggable="true" data-component="fault_noise"><span>⚡</span> 噪声注入块</div>
+      </div>
+
+      <!-- 3. 测量仪器组件 -->
+      <div class="lgroup-head" onclick="toggleGroup('g3')">
+        <span class="lgroup-icon">🔬</span>
+        <span>测量仪器组件</span>
+        <span class="lgroup-arrow open" id="arr-g3">▸</span>
+      </div>
+      <div class="lgroup-body" id="g3">
+        <div class="citem citem-scope citem-draggable" draggable="true" data-component="instrument_scope" title="接入信号线，仿真后查看波形">🔭 示波器</div>
+        <div class="citem citem-draggable" draggable="true" data-component="instrument_spectrum" style="color:var(--teal);border:1px solid #a5f3fc;background:#ecfeff;">📊 频谱分析仪</div>
+        <div class="citem citem-draggable" draggable="true" data-component="instrument_logger" style="color:var(--blue);border:1px solid #93c5fd;background:#eff6ff;">📈 数据记录仪</div>
+      </div>
+
+      <!-- 4. 连接线组件 -->
+      <div class="lgroup-head" onclick="toggleGroup('g4')">
+        <span class="lgroup-icon">🔗</span>
+        <span>连接线组件</span>
+        <span class="lgroup-arrow open" id="arr-g4">▸</span>
+      </div>
+      <div class="lgroup-body" id="g4">
+        <div class="citem citem-line-tool active" data-line-type="normal" onclick="setConnectionTool('normal')" style="color:var(--text2);">
+          <div style="width:18px;height:2px;background:var(--border-dark);border-radius:1px;flex-shrink:0;"></div>
+          普通连接线
+        </div>
+        <div class="citem citem-can citem-line-tool" data-line-type="can" onclick="setConnectionTool('can')">
+          <div style="width:18px;height:3px;background:var(--purple);border-radius:1px;flex-shrink:0;border:1px solid var(--purple);"></div>
+          CAN 总线
+        </div>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- ── 画布 ── -->
+  <div class="canvas-wrap" id="cw">
+    <div class="canvas-grid"></div>
+
+    <!-- ★ 仿真控制栏 ★ -->
+    <div class="simbar" id="simbar">
+      <div class="simbar-params">
+        <div class="sim-field">
+          <span class="sim-field-lbl">数据集名称</span>
+          <input class="sim-field-inp" id="sim-name" value="test" style="width:68px;text-align:left;">
+        </div>
+        <div class="sim-field">
+          <span class="sim-field-lbl">仿真时长</span>
+          <input class="sim-field-inp" id="sim-dur" value="1000" type="number" min="1">
+        </div>
+        <div class="sim-field" style="border-right:none;margin-right:0;">
+          <span class="sim-field-lbl">仿真步长</span>
+          <input class="sim-field-inp" id="sim-step" value="0.1" type="number" min="0.001" step="0.01">
+        </div>
+      </div>
+      <div class="simbar-rt">
+        <span class="simbar-rt-lbl">实时模式</span>
+        <label class="toggle-wrap">
+          <input type="checkbox" id="sim-rt" onchange="onRtToggle(this)">
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+      <div class="simbar-btns">
+        <button class="sim-btn sim-btn-disabled" id="sbtn-init" onclick="simInit()" title="初始化">
+          <span class="sim-btn-icon">⬇</span>
+          <span class="sim-btn-lbl">初始化</span>
+        </button>
+        <button class="sim-btn sim-btn-run sim-btn-disabled" id="sbtn-run" onclick="simRun()" title="运行">
+          <span class="sim-btn-icon" id="run-icon">▶</span>
+          <span class="sim-btn-lbl" id="run-lbl">运行</span>
+        </button>
+        <button class="sim-btn sim-btn-disabled" id="sbtn-step" onclick="simStep()" title="步进">
+          <span class="sim-btn-icon">⏭</span>
+          <span class="sim-btn-lbl">步进</span>
+        </button>
+        <button class="sim-btn sim-btn-disabled" id="sbtn-pause" onclick="simPause()" title="暂停">
+          <span class="sim-btn-icon">⏸</span>
+          <span class="sim-btn-lbl" id="pause-lbl">暂停</span>
+        </button>
+        <button class="sim-btn sim-btn-stop sim-btn-disabled" id="sbtn-stop" onclick="simStop()" title="终止">
+          <span class="sim-btn-icon">⏹</span>
+          <span class="sim-btn-lbl">终止</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="empty-state" id="empty">
+      <div class="empty-icon">📐</div>
+      <div class="empty-txt">请导入系统模型完成建模</div>
+      <div class="empty-sub">点击右上角「导入系统模型」开始</div>
+    </div>
+
+    <div class="diagram" id="diagram">
+      <div class="diagram-guide">
+        <div class="diagram-guide-title">系统故障传播建模画布</div>
+        <div class="diagram-guide-sub">拖拽信号源、流程块或仿真块进入画布；节点可移动，输出端口可连到输入端口，鼠标滚轮可缩放，节点和连线都支持选中后删除。</div>
+      </div>
+      <div class="diagram-placeholder" id="diagram-placeholder">
+        <div class="diagram-placeholder-card">
+          <div class="diagram-placeholder-icon">⧉</div>
+          <div class="diagram-placeholder-title">将组件拖拽到此处</div>
+          <div class="diagram-placeholder-sub">建议先放置信号源、流程块和仿真块，再通过输出端口与输入端口完成连线。</div>
+        </div>
+      </div>
+      <div class="canvas-floating">
+        <div class="canvas-mode">
+          <span class="canvas-mode__label">当前连线</span>
+          <span class="canvas-mode__chip" id="line-mode-chip">普通连接线</span>
+        </div>
+        <div class="canvas-zoom">
+          <button type="button" class="canvas-zoom__button" onclick="handleCanvasZoomOut()">−</button>
+          <div class="canvas-zoom__track">
+            <span class="canvas-zoom__fill" id="canvas-zoom-fill" style="width:100%"></span>
+          </div>
+          <button type="button" class="canvas-zoom__button" onclick="handleCanvasZoomIn()">+</button>
+          <button type="button" class="canvas-zoom__reset" id="canvas-zoom-reset" onclick="handleCanvasZoomReset()">100%</button>
+        </div>
+      </div>
+      <div class="canvas-viewport" id="canvas-viewport">
+        <div class="canvas-stage" id="canvas-stage">
+          <div class="canvas-stage-grid"></div>
+          <svg class="edge-layer" id="edge-layer" viewBox="0 0 1600 980" preserveAspectRatio="none">
+            <defs>
+              <marker id="edge-arrow-normal" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+                <path d="M1 1L8 5L1 9" fill="none" stroke="#84aee0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </marker>
+              <marker id="edge-arrow-can" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+                <path d="M1 1L8 5L1 9" fill="none" stroke="#8c7cf6" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+              </marker>
+              <marker id="edge-arrow-fault" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+                <path d="M1 1L8 5L1 9" fill="none" stroke="#dc2626" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+              </marker>
+            </defs>
+            <g id="edge-group"></g>
+            <path id="edge-preview" class="edge-preview" d="" style="display:none"></path>
+          </svg>
+          <div class="node-layer" id="node-layer"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 右侧属性面板 ── -->
+  <aside class="rpanel">
+    <div class="ph">属性面板</div>
+    <div class="props-body">
+      <div class="props-empty" id="pe">
+        <div style="font-size:24px;opacity:0.2">◻</div>
+        <div>点击元件查看属性</div>
+        <div style="font-size:11px;color:var(--textd)">先从左侧拖拽信号源、流程块或仿真块到画布</div>
+      </div>
+      <div id="pd" style="display:none"></div>
+    </div>
+  </aside>
+</main>
+
+<!-- 状态栏 -->
+<div class="sbar">
+  <div class="si"><div class="sdot" id="sdot"></div><span id="stxt">就绪 · 等待导入系统模型</span></div>
+  <div class="si" style="margin-left:auto"><span id="sblk">元件: 0</span></div>
+  <div class="si"><span id="sflt">故障模型: 0</span></div>
+  <div class="si"><span style="color:var(--border-mid)">│</span><span>故障注入平台</span></div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"><span id="ti"></span><span id="tm"></span></div>
+
+
+<!-- ═══ 弹窗1：导入故障模型 ═══ -->
+<div class="overlay" id="ov-ifm">
+  <div class="modal" style="width:520px;height:480px;">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--red)">导入故障模型</div>
+      <button class="mclose" onclick="closeOv('ov-ifm')">✕</button>
+    </div>
+    <div class="mbody" style="flex-direction:column;">
+      <div class="ifm-body">
+        <!-- 文件拖放区 -->
+        <div class="ifm-top">
+          <div class="ifm-drop" onclick="simulateFileImport()">
+            <div class="ifm-drop-icon">📂</div>
+            <div class="ifm-drop-txt">点击选择 或 拖拽故障模型文件</div>
+            <div class="ifm-drop-sub">支持 .flt · .json · .xml 格式</div>
+          </div>
+        </div>
+        <!-- 已有文件列表 -->
+        <div class="ifm-list">
+          <div style="font-size:9px;color:var(--textd);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">可导入故障模型</div>
+          <div id="ifm-list-container"></div>
+        </div>
+      </div>
+      <!-- ★ 故障建模入口行 ★ -->
+      <div class="ifm-build-row">
+        <div class="ifm-build-hint">没有合适的模型？从模板库新建</div>
+        <button class="btn-build-fault" onclick="openFaultBuild()">⚡ 故障建模</button>
+      </div>
+    </div>
+    <div class="mfoot">
+      <div style="flex:1;font-size:11px;color:var(--textm)" id="ifm-sel-hint">已选：未选择故障模型</div>
+      <button class="btn-cancel" onclick="closeOv('ov-ifm')">取消</button>
+      <button class="btn-ok btn-ok-r" onclick="confirmImportFault()">确认导入</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══ 弹窗2：故障建模（模板库） ═══ -->
+<div class="overlay" id="ov-tpl">
+  <div class="modal" style="width:820px;height:530px">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--purple)">⚡ 故障建模 · 模板库</div>
+      <button class="mclose" onclick="closeOv('ov-tpl')">✕</button>
+    </div>
+    <div class="mbody">
+      <div class="tpl-cats">
+        <div class="tcat-head">故障层级</div>
+        <div class="tpl-cat on" onclick="setCat(this,'physical')"><span>🔧</span><span>物理层</span><span class="tpl-cnt">5</span></div>
+        <div class="tpl-cat" onclick="setCat(this,'electrical')"><span>⚡</span><span>电气层</span><span class="tpl-cnt">4</span></div>
+        <div class="tpl-cat" onclick="setCat(this,'protocol')"><span>📡</span><span>协议层</span><span class="tpl-cnt">4</span></div>
+        <div style="height:1px;background:var(--border);margin:8px 4px"></div>
+        <div class="tcat-head">已选模板</div>
+        <div id="sel-list"><div style="font-size:10px;color:var(--textd);text-align:center;margin-top:6px">暂无</div></div>
+      </div>
+      <div class="tpl-grid" id="tgrid"></div>
+      <div class="tpl-detail" id="tdetail"><div class="tdph">← 选择模板查看详情</div></div>
+    </div>
+    <div class="mfoot">
+      <div style="flex:1;font-size:11px;color:var(--textm)" id="sel-cnt">已选 0 个故障模板</div>
+      <button class="btn-cancel" onclick="backToImport()">← 返回导入</button>
+      <button class="btn-ok btn-ok-p" onclick="confirmFM()">✓ 确认建模</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 弹窗3：电气层故障注入 ═══ -->
+<div class="overlay" id="ov-elec">
+  <div class="modal" style="width:860px;height:540px">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--red)">电气层故障注入</div>
+      <button class="mclose" onclick="closeOv('ov-elec')">✕</button>
+    </div>
+    <div class="mbody einj-body">
+      <div class="einj-side">
+        <div class="einj-side-head">
+          <div class="einj-side-title">已导入模型</div>
+          <div class="einj-side-sub">这里显示通过“导入故障模型”进入工作区的电气层故障。</div>
+        </div>
+        <div class="einj-import-list" id="einj-import-list"></div>
+      </div>
+      <div class="einj-main">
+        <div class="einj-target" id="einj-target"></div>
+        <div class="einj-grid" id="einj-template-grid"></div>
+      </div>
+      <div class="einj-detail">
+        <div class="einj-detail-head">
+          <div class="einj-detail-title">模型详情</div>
+          <div class="einj-detail-sub">可从已导入模型中选择，也可直接从电气层模板库导入并注入。</div>
+        </div>
+        <div class="einj-detail-body" id="einj-detail-body"></div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <div style="flex:1;font-size:11px;color:var(--textm)" id="einj-foot-hint">请选择一个电气层故障模型。</div>
+      <button class="btn-cancel" onclick="closeOv('ov-elec')">取消</button>
+      <button class="btn-ok btn-ok-r" onclick="confirmElectricalFaultInjection()">导入并注入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 弹窗4：协议层故障注入（CAN 总线） ═══ -->
+<div class="overlay" id="ov-proto">
+  <div class="modal" style="width:860px;height:540px">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--blue)">CAN 协议层故障注入</div>
+      <button class="mclose" onclick="closeOv('ov-proto')">✕</button>
+    </div>
+    <div class="mbody einj-body einj-protocol">
+      <div class="einj-side">
+        <div class="einj-side-head">
+          <div class="einj-side-title">已导入模型</div>
+          <div class="einj-side-sub">这里显示通过“导入故障模型”进入工作区的 CAN 协议层故障。</div>
+        </div>
+        <div class="einj-import-list" id="pinj-import-list"></div>
+      </div>
+      <div class="einj-main">
+        <div class="einj-target" id="pinj-target"></div>
+        <div class="einj-grid" id="pinj-template-grid"></div>
+      </div>
+      <div class="einj-detail">
+        <div class="einj-detail-head">
+          <div class="einj-detail-title">模型详情</div>
+          <div class="einj-detail-sub">当前仅支持对 CAN 总线注入协议层故障。</div>
+        </div>
+        <div class="einj-detail-body" id="pinj-detail-body"></div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <div style="flex:1;font-size:11px;color:var(--textm)" id="pinj-foot-hint">请选择一个 CAN 协议层故障模型。</div>
+      <button class="btn-cancel" onclick="closeOv('ov-proto')">取消</button>
+      <button class="btn-ok btn-ok-b" onclick="confirmProtocolFaultInjection()">导入并注入</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══ 弹窗5：故障配置 ═══ -->
+<div class="overlay" id="ov-cfg">
+  <div class="modal" style="width:680px;height:490px">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--red)">⚙ 故障配置 · 注入参数</div>
+      <button class="mclose" onclick="closeOv('ov-cfg')">✕</button>
+    </div>
+    <div class="mbody">
+      <div class="cfg-form">
+        <div class="cfg-sec">
+          <div class="cfg-sec-title">目标组件</div>
+            <div class="cfg-grid">
+            <div class="cfg-f"><label>注入位置</label>
+              <select id="cftgt" onchange="upPrev()"></select>
+            </div>
+            <div class="cfg-f"><label>故障模型</label><select id="cfmdl" onchange="upPrev()"></select></div>
+          </div>
+        </div>
+        <div class="cfg-sec">
+          <div class="cfg-sec-title">注入层级</div>
+          <div class="layer-sel">
+            <div class="lbtn on" onclick="setLayer(this,'物理层')">🔧 物理层</div>
+            <div class="lbtn" onclick="setLayer(this,'电气层')">⚡ 电气层</div>
+            <div class="lbtn" onclick="setLayer(this,'协议层')">📡 协议层</div>
+          </div>
+        </div>
+        <div class="cfg-sec">
+          <div class="cfg-sec-title">故障模式</div>
+          <div class="cfg-grid">
+            <div class="cfg-f"><label>故障类型</label>
+              <select id="cftype" onchange="upPrev()">
+                <option>固定偏差 (Bias)</option><option>随机噪声 (Noise)</option>
+                <option>卡死 (Stuck-at)</option><option>缓变漂移 (Drift)</option><option>增益错误 (Gain)</option>
+              </select>
+            </div>
+            <div class="cfg-f"><label>持续方式</label>
+              <select id="cfpers" onchange="upPrev()">
+                <option>永久性 (Permanent)</option><option>间歇性 (Intermittent)</option><option>瞬态 (Transient)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="cfg-sec">
+          <div class="cfg-sec-title">时序参数</div>
+          <div class="cfg-grid">
+            <div class="cfg-f"><label>注入起始时间 (s)</label><input type="number" id="cfs" value="5.0" step="0.5" min="0" oninput="upPrev()"></div>
+            <div class="cfg-f"><label>持续时长 (s)</label><input type="number" id="cfd" value="3.0" step="0.5" min="0.1" oninput="upPrev()"></div>
+            <div class="cfg-f"><label>故障幅度</label><input type="number" id="cfmag" value="0.5" step="0.1" oninput="upPrev()"></div>
+            <div class="cfg-f"><label>仿真总时长 (s)</label><input type="number" id="cftot" value="20.0" step="1" min="1" oninput="upPrev()"></div>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-prev">
+        <div class="cprev-title">📊 配置预览</div>
+        <div style="font-size:9px;color:var(--textm);margin-bottom:4px">时序示意</div>
+        <div class="cfg-tl"><svg id="ctlsvg" width="100%" height="100%">
+          <polyline id="tln" points="" stroke="#c2d6ea" stroke-width="1" fill="none"/>
+          <rect id="tlr" x="0" y="0" width="0" height="100%" fill="rgba(220,38,38,0.07)"/>
+          <polyline id="tlf" points="" stroke="#dc2626" stroke-width="1.5" fill="none"/>
+          <line id="tll" x1="0" y1="0" x2="0" y2="72" stroke="#dc2626" stroke-width="1" stroke-dasharray="3,2" opacity="0.6"/>
+        </svg></div>
+        <div id="csumm" style="display:flex;flex-direction:column;gap:2px"></div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <button class="btn-cancel" onclick="closeOv('ov-cfg')">取消</button>
+      <button class="btn-ok btn-ok-r" onclick="confirmFC()">💾 保存配置</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══ 弹窗5：示波器 ═══ -->
+<div class="overlay" id="ov-scope">
+  <div class="modal" style="width:720px;height:450px">
+    <div class="mhead">
+      <div class="mtitle" id="scope-title" style="color:var(--green)">🔭 示波器 · 波形查看</div>
+      <button class="mclose" onclick="closeOv('ov-scope')">✕</button>
+    </div>
+    <div class="mbody" style="flex-direction:column">
+      <div class="scope-ctrl">
+        <button class="scbtn" onclick="drawScope()">⟳ 刷新</button>
+        <button class="scbtn" onclick="focusScopeLatest()">⌖ 最新</button>
+        <button class="scbtn" id="scmp" onclick="togCmp()">⚖ 对比模式</button>
+        <div id="scope-meta" style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--textm)">等待仿真数据</div>
+        <div class="scope-legend">
+          <div class="sleg"><div class="slegdot" style="background:var(--blue)"></div><span>正常</span></div>
+          <div class="sleg" id="sleg-f" style="display:none"><div class="slegdot" style="background:var(--red)"></div><span>故障</span></div>
+        </div>
+      </div>
+      <div class="scope-channels">
+        <div class="scope-ch" style="flex:2">
+          <div class="sch-lbl" id="sc1-lbl">CH1 · 时域波形</div>
+          <canvas id="sc1" style="width:100%;height:100%"></canvas>
+        </div>
+        <div class="scope-ch" style="flex:1">
+          <div class="sch-lbl" id="sc2-lbl">CH2 · 频谱</div>
+          <canvas id="sc2" style="width:100%;height:100%"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <button class="btn-ok btn-ok-g" onclick="closeOv('ov-scope')">关闭</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+// ─── 状态 ───
+const S={
+  step:1,
+  sysLoaded:false,
+  systemSaved:false,
+  faultLoaded:false,
+  faultModels:0,
+  availableFaultModels:[],
+  importedFaultModels:[],
+  selectedFaultCatalogId:'',
+  simDone:false,
+  selBlk:null,
+  selEdge:null,
+  selTpls:[],
+  faultedBlks:[],
+  cmpMode:false,
+  activeLayer:'物理层',
+  modelNodes:[],
+  modelEdges:[],
+  nodeSeq:0,
+  edgeSeq:0,
+  dragType:null,
+  activeLineType:'normal',
+  canvasScale:1,
+  canvasOffsetX:0,
+  canvasOffsetY:0,
+  pendingConnection:null,
+  injectTargetId:'',
+  injectSelectionMode:'',
+  injectSelectionId:'',
+  protocolInjectTargetId:'',
+  protocolInjectSelectionMode:'',
+  protocolInjectSelectionId:''
+};
+
+const CANVAS_STAGE={width:1600,height:980,minScale:0.6,maxScale:1.8,nodePadding:24,nodeMinY:118};
+const NODE_DRAG={active:false,pointerId:null,nodeId:'',startX:0,startY:0,originX:0,originY:0};
+const CANVAS_PAN={active:false,pointerId:null,startX:0,startY:0,originX:0,originY:0};
+const NODE_DOUBLE_CLICK={nodeId:'',timestamp:0};
+
+const PORT_FORMATS=['标量','向量','矩阵','布尔','事件'];
+const SIM_MODULE_TYPES=['一阶函数','微分','积分'];
+const SIM_INTERFACE_LIMITS={inputs:[1,6],outputs:[1,6],middleVars:[0,6]};
+
+const COMPONENT_LIBRARY={
+  signal_source:{
+    label:'信号源',
+    badge:'信号',
+    className:'b-source',
+    width:164,
+    height:84,
+    defaults:{name:'信号源',waveType:'正弦',amplitude:'1.0',frequency:'1.0',outputFormat:'标量'}
+  },
+  flow_block:{
+    label:'流程块',
+    badge:'流程',
+    className:'b-flow',
+    width:168,
+    height:88,
+    defaults:{name:'流程块',inputName:'输入信号',inputFormat:'标量',outputName:'输出信号',outputFormat:'标量'}
+  },
+  simulation_block:{
+    label:'仿真块',
+    badge:'仿真',
+    className:'b-sim',
+    width:174,
+    height:92,
+    defaults:{
+      name:'仿真块',
+      moduleType:'一阶函数',
+      inputs:[{name:'输入 1',type:'标量'}],
+      outputs:[{name:'输出 1',type:'标量'}],
+      middleVars:[{name:'中间量 1',type:'标量'}],
+      functionNote:'当前预留 Python 函数接口，可在后续导入函数定义。'
+    }
+  },
+  fault_bias:{
+    label:'偏置叠加块',
+    badge:'故障',
+    className:'b-fault',
+    width:156,
+    height:74,
+    defaults:{name:'偏置叠加块',faultType:'偏置叠加',layer:'物理层',trigger:'持续'}
+  },
+  fault_noise:{
+    label:'噪声注入块',
+    badge:'故障',
+    className:'b-fault',
+    width:156,
+    height:74,
+    defaults:{name:'噪声注入块',faultType:'随机噪声',layer:'物理层',trigger:'持续'}
+  },
+  fault_stuck:{
+    label:'卡死注入块',
+    badge:'故障',
+    className:'b-fault',
+    width:156,
+    height:74,
+    defaults:{name:'卡死注入块',faultType:'卡死',layer:'电气层',trigger:'持续'}
+  },
+  fault_drift:{
+    label:'漂移注入块',
+    badge:'故障',
+    className:'b-fault',
+    width:156,
+    height:74,
+    defaults:{name:'漂移注入块',faultType:'漂移',layer:'协议层',trigger:'渐变'}
+  },
+  instrument_scope:{
+    label:'示波器',
+    badge:'仪器',
+    className:'b-inst',
+    width:150,
+    height:74,
+    defaults:{name:'示波器',instrumentType:'波形监测',sampleRate:'64kHz',signal:'流程块输出'}
+  },
+  instrument_spectrum:{
+    label:'频谱分析仪',
+    badge:'仪器',
+    className:'b-inst',
+    width:158,
+    height:74,
+    defaults:{name:'频谱分析仪',instrumentType:'频谱分析',sampleRate:'32kHz',signal:'仿真块输出'}
+  },
+  instrument_logger:{
+    label:'数据记录仪',
+    badge:'仪器',
+    className:'b-inst',
+    width:158,
+    height:74,
+    defaults:{name:'数据记录仪',instrumentType:'数据记录',sampleRate:'10Hz',signal:'系统总线'}
+  },
+  link_normal:{
+    label:'普通连接线',
+    badge:'连接',
+    className:'b-link',
+    width:154,
+    height:64,
+    defaults:{name:'普通连接线',linkType:'普通连接线',sourcePort:'源端口',targetPort:'目标端口'}
+  },
+  link_can:{
+    label:'CAN 总线',
+    badge:'连接',
+    className:'b-link',
+    width:154,
+    height:64,
+    defaults:{name:'CAN 总线',linkType:'CAN 总线',sourcePort:'节点 A',targetPort:'节点 B'}
+  }
+};
+
+const TPLS={
+  physical:[
+    {id:'ph1',name:'传感器偏差注入',desc:'叠加固定偏置，模拟安装误差或校准失效',tags:['Bias','永久性'],c:'#6d28d9'},
+    {id:'ph2',name:'随机噪声扰动',desc:'注入白噪声，模拟电磁干扰效应',tags:['Noise','连续'],c:'#6d28d9'},
+    {id:'ph3',name:'卡死故障',desc:'输出锁定固定值，模拟传感器完全失效',tags:['Stuck','永久性'],c:'#6d28d9'},
+    {id:'ph4',name:'缓变漂移',desc:'输出随时间偏移，模拟热漂移或老化',tags:['Drift','渐变'],c:'#6d28d9'},
+    {id:'ph5',name:'增益倍率错误',desc:'幅值异常缩放，模拟放大器故障',tags:['Gain','乘性'],c:'#6d28d9'}
+  ],
+  electrical:[
+    {id:'el1',name:'电源电压扰动',desc:'注入纹波或瞬时压降，模拟电源管理失效',tags:['电压','瞬态'],c:'#b45309'},
+    {id:'el2',name:'信号线短路',desc:'模拟两路信号线短接导致数据混叠',tags:['短路','永久性'],c:'#b45309'},
+    {id:'el3',name:'断路 / 开路',desc:'导线断裂或接头松动引发信号中断',tags:['断路','间歇'],c:'#b45309'},
+    {id:'el4',name:'过流保护触发',desc:'模拟电机过载导致ESC过流保护切断',tags:['过流','响应'],c:'#b45309'}
+  ],
+  protocol:[
+    {id:'pr1',name:'CAN 帧丢包',desc:'按设定概率丢弃 CAN 帧，模拟总线竞争或链路退化。',tags:['丢包','CAN'],faultKind:'丢包',faultCode:'loss',c:'#1d6fbf'},
+    {id:'pr2',name:'CAN 帧延迟',desc:'为目标 CAN 帧引入额外传输延迟，模拟总线拥塞。',tags:['延迟','CAN'],faultKind:'延迟',faultCode:'delay',c:'#1d6fbf'},
+    {id:'pr3',name:'CAN 位翻转',desc:'翻转 CAN 帧中的关键位，模拟电磁干扰造成的比特错误。',tags:['位翻转','CAN'],faultKind:'位翻转',faultCode:'bitflip',c:'#1d6fbf'},
+    {id:'pr4',name:'CAN 帧重放',desc:'重放历史 CAN 帧，模拟异常重发或回放攻击。',tags:['重放','CAN'],faultKind:'重放',faultCode:'replay',c:'#1d6fbf'}
+  ]
+};
+
+const LAYER_LABELS={
+  physical:'物理层',
+  electrical:'电气层',
+  protocol:'协议层'
+};
+
+const FAULT_CATALOG_SEED=[
+  {id:'fm-imu-bias',name:'IMU偏差故障模型',layer:'physical',desc:'通过恒定偏置模拟传感器安装误差与校准漂移。',tags:['Bias','物理层'],createdAt:'2024-03-12',origin:'file'},
+  {id:'fm-esc-overcurrent',name:'ESC过流保护模型',layer:'electrical',desc:'在控制模块内触发过流保护逻辑，模拟电气保护动作。',tags:['Overcurrent','电气层'],createdAt:'2024-03-10',origin:'file'},
+  {id:'fm-can-loss',name:'CAN总线丢包模型',layer:'protocol',desc:'对 CAN 总线施加帧丢失，模拟协议层链路退化。',tags:['丢包','协议层'],faultKind:'丢包',faultCode:'loss',createdAt:'2024-03-08',origin:'file'},
+  {id:'fm-can-delay',name:'CAN总线延迟模型',layer:'protocol',desc:'为 CAN 帧增加额外时延，模拟总线拥塞和优先级等待。',tags:['延迟','协议层'],faultKind:'延迟',faultCode:'delay',createdAt:'2024-03-09',origin:'file'},
+  {id:'fm-can-bitflip',name:'CAN总线位翻转模型',layer:'protocol',desc:'对 CAN 帧注入位翻转，模拟 EMI 引发的位错误。',tags:['位翻转','协议层'],faultKind:'位翻转',faultCode:'bitflip',createdAt:'2024-03-11',origin:'file'},
+  {id:'fm-can-replay',name:'CAN总线重放模型',layer:'protocol',desc:'对历史 CAN 帧进行重放，模拟协议层异常重发或回放攻击。',tags:['重放','协议层'],faultKind:'重放',faultCode:'replay',createdAt:'2024-03-13',origin:'file'}
+];
+
+let curCat='physical';
+initializeFaultCatalog();
+renderTpls('physical');
+renderFaultCatalogList();
+initPaletteDrag();
+initCanvasDrop();
+bindCanvasInteractions();
+syncConfigTargets();
+renderModelNodes();
+setConnectionTool('normal');
+handleCanvasZoomReset();
+
+// ─── UI 更新 ───
+function updateUI(){
+  [1,2,3].forEach(i=>{
+    const el=document.getElementById('s'+i);
+    const nm=document.getElementById('sn'+i);
+    el.classList.remove('active','done');
+    if(i<S.step){el.classList.add('done');nm.textContent='✓';}
+    else if(i===S.step){el.classList.add('active');nm.textContent=i;}
+    else nm.textContent=i;
+  });
+
+  const impFlt=document.getElementById('btn-imp-flt');
+  const savSys=document.getElementById('btn-save-sys');
+  const savRes=document.getElementById('btn-save-res');
+
+  if(S.sysLoaded){
+    savSys.classList.remove('tbtn-disabled');
+    savSys.classList.add('ready');
+  }else{
+    savSys.classList.add('tbtn-disabled');
+    savSys.classList.remove('ready');
+  }
+
+  if(S.systemSaved){
+    impFlt.classList.remove('tbtn-disabled');
+    impFlt.classList.add('ready');
+  }else{
+    impFlt.classList.add('tbtn-disabled');
+    impFlt.classList.remove('ready');
+  }
+
+  if(S.simDone){
+    savRes.classList.remove('tbtn-disabled');
+    savRes.classList.add('ready');
+  }else{
+    savRes.classList.add('tbtn-disabled');
+    savRes.classList.remove('ready');
+  }
+
+  let statusText='就绪 · 等待导入系统模型';
+  if(S.sysLoaded && S.step===1){
+    if(!S.modelNodes.length){
+      statusText='系统建模中 · 请拖拽组件到画布';
+    }else if(canInitializeSimulation()){
+      statusText='系统建模中 · 当前链路已可运行，可直接初始化仿真';
+    }else{
+      statusText='系统建模中 · 单击模块后可在右侧保存设置';
+    }
+  }else if(S.step===2){
+    statusText=hasSimulationFaults()
+      ?'系统模型已保存 · 当前包含故障注入，可继续仿真分析'
+      :'系统模型已保存 · 故障注入为可选，可直接初始化仿真';
+  }else if(S.step===3){
+    statusText=hasSimulationFaults()
+      ?'故障配置完成 · 仿真分析'
+      :'仿真分析阶段 · 当前为无故障基线仿真';
+  }
+  if(typeof SIM!=='undefined'){
+    if(SIM.running&&!SIM.paused){
+      statusText=`仿真运行中 · t = ${SIM.time.toFixed(2)}s / ${SIM.duration.toFixed(2)}s`;
+    }else if(SIM.paused){
+      statusText=`仿真已暂停 · t = ${SIM.time.toFixed(2)}s / ${SIM.duration.toFixed(2)}s`;
+    }else if(SIM.hasSamples&&S.step===3){
+      statusText=`仿真结果就绪 · ${SIM.datasetName} · 已采样 ${SIM.stepIndex} 步`;
+    }
+  }
+  document.getElementById('stxt').textContent=statusText;
+  const sd=document.getElementById('sdot');
+  sd.className='sdot'+['','sdot-b','sdot-r','sdot-g'][S.step];
+  document.getElementById('sblk').textContent=`元件: ${S.modelNodes.length} · 连线: ${S.modelEdges.length}`;
+  document.getElementById('sflt').textContent=`故障模型: ${S.faultModels}`;
+  updateSimbarEnabled();
+}
+
+// ─── 基础工具 ───
+function clamp(value,min,max){return Math.min(Math.max(value,min),max);}
+
+function cloneDefaults(value){
+  return JSON.parse(JSON.stringify(value));
+}
+
+function escapeHtml(value){
+  return String(value ?? '')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
+
+function clampInterfaceCount(value,[min,max]){
+  const parsed=Number.parseInt(value,10);
+  if(!Number.isFinite(parsed)){return min;}
+  return clamp(parsed,min,max);
+}
+
+function normalizeSimulationInterfaceList(items,prefix,fallbackType,minCount=0){
+  const base=Array.isArray(items)?items:[];
+  const normalized=base
+    .map((item,index)=>({
+      name:String(item?.name||`${prefix} ${index+1}`).trim()||`${prefix} ${index+1}`,
+      type:PORT_FORMATS.includes(item?.type)?item.type:(fallbackType||'标量')
+    }))
+    .filter(Boolean);
+  while(normalized.length<minCount){
+    normalized.push({
+      name:`${prefix} ${normalized.length+1}`,
+      type:fallbackType||'标量'
+    });
+  }
+  return normalized;
+}
+
+function normalizeSimulationInterfaces(props){
+  const inputFallback=PORT_FORMATS.includes(props?.inputFormat)?props.inputFormat:'标量';
+  const outputFallback=PORT_FORMATS.includes(props?.outputFormat)?props.outputFormat:'标量';
+  props.inputs=normalizeSimulationInterfaceList(props?.inputs,'输入',inputFallback,1);
+  props.outputs=normalizeSimulationInterfaceList(props?.outputs,'输出',outputFallback,1);
+  props.middleVars=normalizeSimulationInterfaceList(props?.middleVars,'中间量',outputFallback,0);
+  if(!props.middleVars.length&&props?.inputFormat){
+    props.middleVars=[{name:'中间量 1',type:outputFallback}];
+  }
+  if(!props.functionNote){
+    props.functionNote='当前预留 Python 函数接口，可在后续导入函数定义。';
+  }
+  delete props.inputFormat;
+  delete props.outputFormat;
+  return props;
+}
+
+function getSimulationPortSets(props){
+  normalizeSimulationInterfaces(props);
+  return {
+    inputs:props.inputs,
+    outputs:props.outputs,
+    middleVars:props.middleVars
+  };
+}
+
+function getSimulationNodeSize(props){
+  const groups=getSimulationPortSets(props);
+  const leftCount=Math.max(groups.inputs.length,1);
+  const rightCount=Math.max(groups.outputs.length,1);
+  const topCount=groups.middleVars.length;
+  const verticalDominant=Math.max(leftCount,rightCount);
+  return {
+    width:clamp(196+Math.max(0,topCount-2)*28,196,336),
+    height:clamp(116+Math.max(0,verticalDominant-2)*22+(topCount?18:0),116,312)
+  };
+}
+
+function applyNodeGeometry(node){
+  if(!node){return;}
+  if(node.type==='simulation_block'){
+    normalizeSimulationInterfaces(node.props);
+    const size=getSimulationNodeSize(node.props);
+    node.w=size.width;
+    node.h=size.height;
+  }else{
+    const meta=COMPONENT_LIBRARY[node.type];
+    if(meta){
+      node.w=meta.width;
+      node.h=meta.height;
+    }
+  }
+  node.x=clamp(node.x,CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-node.w-CANVAS_STAGE.nodePadding);
+  node.y=clamp(node.y,CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-node.h-CANVAS_STAGE.nodePadding);
+}
+
+function pruneInvalidEdgesForNode(node){
+  const ports=getNodePorts(node);
+  const outputCount=ports.outputs.length;
+  const inputCount=ports.inputs.length;
+  const removed=S.modelEdges.filter(edge=>{
+    if(edge.sourceNodeId===node.id&&(edge.sourcePortIndex||0)>=outputCount){return true;}
+    if(edge.targetNodeId===node.id&&(edge.targetPortIndex||0)>=inputCount){return true;}
+    return false;
+  });
+  if(!removed.length){return 0;}
+  const removedIds=new Set(removed.map(edge=>edge.id));
+  S.modelEdges=S.modelEdges.filter(edge=>!removedIds.has(edge.id));
+  if(S.selEdge&&removedIds.has(S.selEdge)){S.selEdge=null;}
+  if(S.protocolInjectTargetId&&removedIds.has(S.protocolInjectTargetId)){
+    S.protocolInjectTargetId='';
+    S.protocolInjectSelectionMode='';
+    S.protocolInjectSelectionId='';
+  }
+  return removed.length;
+}
+
+function getSimulationFlatOutputs(props){
+  const groups=getSimulationPortSets(props);
+  return [
+    ...groups.outputs.map((item,index)=>({kind:'output',name:item.name,type:item.type,index,side:'right'})),
+    ...groups.middleVars.map((item,index)=>({kind:'middle',name:item.name,type:item.type,index,side:'top'}))
+  ];
+}
+
+function buildSimulationInterfaceRows(items,prefix){
+  return items.map((item,index)=>`
+    <div class="sim-intf-row" data-role="${prefix}" data-index="${index}">
+      <div class="props-field">
+        <label>${prefix}名称 ${index+1}</label>
+        <input data-sim-field="name" value="${escapeHtml(item.name)}">
+      </div>
+      <div class="props-field">
+        <label>${prefix}类型</label>
+        <select data-sim-field="type">${buildSelectOptions(PORT_FORMATS,item.type)}</select>
+      </div>
+    </div>`).join('');
+}
+
+function buildSimulationBlockFields(node){
+  normalizeSimulationInterfaces(node.props);
+  return `
+    <div class="pgroup">
+      <div class="pglbl">仿真接口</div>
+      <div class="props-field"><label>模块名称</label><input id="prop-name" value="${escapeHtml(node.props.name)}"></div>
+      <div class="props-field"><label>模块类型</label><select id="prop-moduleType">${buildSelectOptions(SIM_MODULE_TYPES,node.props.moduleType)}</select></div>
+      <div class="sim-intf-toolbar">
+        <div class="sim-intf-counts">
+          <div class="props-field"><label>输入数量</label><input id="sim-input-count" type="number" min="${SIM_INTERFACE_LIMITS.inputs[0]}" max="${SIM_INTERFACE_LIMITS.inputs[1]}" value="${node.props.inputs.length}"></div>
+          <div class="props-field"><label>输出数量</label><input id="sim-output-count" type="number" min="${SIM_INTERFACE_LIMITS.outputs[0]}" max="${SIM_INTERFACE_LIMITS.outputs[1]}" value="${node.props.outputs.length}"></div>
+          <div class="props-field"><label>中间变量数量</label><input id="sim-middle-count" type="number" min="${SIM_INTERFACE_LIMITS.middleVars[0]}" max="${SIM_INTERFACE_LIMITS.middleVars[1]}" value="${node.props.middleVars.length}"></div>
+        </div>
+        <button class="props-secondary" type="button" onclick="syncSimulationInterfaceCounts()">同步接口数量</button>
+        <div class="sim-intf-note">中间变量当前会挂在模块上方，作为辅助观察端口使用；输入仍在左侧，主输出仍在右侧。</div>
+      </div>
+    </div>
+    <div class="sim-intf-group">
+      <div class="sim-intf-head">
+        <div class="sim-intf-title">输入接口</div>
+        <div class="sim-intf-meta">${node.props.inputs.length} 个左侧端口</div>
+      </div>
+      <div class="sim-intf-list">${buildSimulationInterfaceRows(node.props.inputs,'输入')}</div>
+    </div>
+    <div class="sim-intf-group">
+      <div class="sim-intf-head">
+        <div class="sim-intf-title">输出接口</div>
+        <div class="sim-intf-meta">${node.props.outputs.length} 个右侧主输出</div>
+      </div>
+      <div class="sim-intf-list">${buildSimulationInterfaceRows(node.props.outputs,'输出')}</div>
+    </div>
+    <div class="sim-intf-group">
+      <div class="sim-intf-head">
+        <div class="sim-intf-title">中间变量</div>
+        <div class="sim-intf-meta">${node.props.middleVars.length} 个顶部辅助端口</div>
+      </div>
+      <div class="sim-intf-list">${node.props.middleVars.length?buildSimulationInterfaceRows(node.props.middleVars,'中间量'):'<div class="sim-intf-note">当前未暴露中间变量端口，可先调整数量后再同步。</div>'}</div>
+    </div>
+    <div class="props-field"><label>函数说明</label><textarea id="prop-functionNote">${escapeHtml(node.props.functionNote)}</textarea></div>
+    <div class="props-help">后续这里会接入 Python 函数导入能力。当前版本先支持接口编排、端口连线和基础模块运行时。</div>`;
+}
+
+function readSimulationInterfaceRows(role){
+  return [...document.querySelectorAll(`.sim-intf-row[data-role="${role}"]`)].map((row,index)=>({
+    name:(row.querySelector('[data-sim-field="name"]')?.value||`${role} ${index+1}`).trim()||`${role} ${index+1}`,
+    type:row.querySelector('[data-sim-field="type"]')?.value||'标量'
+  }));
+}
+
+function syncSimulationInterfaceCounts(){
+  const node=getNode(S.selBlk);
+  if(!node||node.type!=='simulation_block'){return;}
+  const nextProps=cloneDefaults(node.props);
+  nextProps.inputs=readSimulationInterfaceRows('输入');
+  nextProps.outputs=readSimulationInterfaceRows('输出');
+  nextProps.middleVars=readSimulationInterfaceRows('中间量');
+  normalizeSimulationInterfaces(nextProps);
+  const inputCount=clampInterfaceCount(document.getElementById('sim-input-count')?.value,SIM_INTERFACE_LIMITS.inputs);
+  const outputCount=clampInterfaceCount(document.getElementById('sim-output-count')?.value,SIM_INTERFACE_LIMITS.outputs);
+  const middleCount=clampInterfaceCount(document.getElementById('sim-middle-count')?.value,SIM_INTERFACE_LIMITS.middleVars);
+  nextProps.inputs=normalizeSimulationInterfaceList(nextProps.inputs.slice(0,inputCount),'输入',nextProps.inputs[0]?.type||'标量',inputCount);
+  nextProps.outputs=normalizeSimulationInterfaceList(nextProps.outputs.slice(0,outputCount),'输出',nextProps.outputs[0]?.type||'标量',outputCount);
+  nextProps.middleVars=normalizeSimulationInterfaceList(nextProps.middleVars.slice(0,middleCount),'中间量',nextProps.middleVars[0]?.type||'标量',middleCount);
+  const preview={...node,props:nextProps};
+  renderPropertyPanel(preview);
+}
+
+function getNode(id){
+  return S.modelNodes.find(node=>node.id===id);
+}
+
+function getEdge(id){
+  return S.modelEdges.find(edge=>edge.id===id);
+}
+
+function getLayerLabel(layer){
+  return LAYER_LABELS[layer]||layer||'未分类';
+}
+
+function isPhysicalFaultNodeType(type){
+  return type==='fault_bias'||type==='fault_noise';
+}
+
+function isElectricalInjectableType(type){
+  return type==='flow_block'||type==='simulation_block';
+}
+
+function isProtocolInjectableEdge(edge){
+  return !!edge&&edge.lineType==='can';
+}
+
+function isFaultNodeType(type){
+  return isPhysicalFaultNodeType(type);
+}
+
+function isFaultNode(node){
+  return !!node&&(isFaultNodeType(node.type)||Boolean(node.injectedFault));
+}
+
+function getMutationScopeForType(type){
+  return isFaultNodeType(type)?'fault':'system';
+}
+
+function getMutationScopeForEdge(edge){
+  const sourceNode=getNode(edge?.sourceNodeId);
+  const targetNode=getNode(edge?.targetNodeId);
+  return (sourceNode&&isFaultNodeType(sourceNode.type))||(targetNode&&isFaultNodeType(targetNode.type))?'fault':'system';
+}
+
+function syncFaultModelCount(){
+  S.faultModels=S.importedFaultModels.length;
+  S.faultLoaded=S.faultModels>0;
+}
+
+function initializeFaultCatalog(){
+  S.availableFaultModels=cloneDefaults(FAULT_CATALOG_SEED);
+  S.importedFaultModels=[];
+  syncFaultModelCount();
+  S.selectedFaultCatalogId=S.availableFaultModels[0]?.id||'';
+}
+
+function buildFaultCatalogMeta(model){
+  return `${model.tags?.[0]||'Fault'} · ${getLayerLabel(model.layer)} · ${model.createdAt||'未记录'}`;
+}
+
+function getFaultCatalogModel(id){
+  return S.availableFaultModels.find(model=>model.id===id);
+}
+
+function getImportedFaultModel(id){
+  return S.importedFaultModels.find(model=>model.id===id);
+}
+
+function ensureImportedFaultModel(model){
+  if(!model){return null;}
+  const existed=S.importedFaultModels.find(item=>item.id===model.id);
+  if(existed){
+    syncFaultModelCount();
+    return existed;
+  }
+  const copy=cloneDefaults(model);
+  S.importedFaultModels.unshift(copy);
+  syncFaultModelCount();
+  return copy;
+}
+
+function upsertAvailableFaultModel(model){
+  if(!model){return null;}
+  const existed=S.availableFaultModels.find(item=>item.id===model.id||(item.name===model.name&&item.layer===model.layer));
+  if(existed){
+    Object.assign(existed,model);
+    return existed;
+  }
+  S.availableFaultModels.unshift(cloneDefaults(model));
+  return S.availableFaultModels[0];
+}
+
+function renderFaultCatalogList(){
+  const container=document.getElementById('ifm-list-container');
+  if(!container){return;}
+  if(!S.selectedFaultCatalogId&&S.availableFaultModels.length){
+    S.selectedFaultCatalogId=S.availableFaultModels[0].id;
+  }
+  container.innerHTML='';
+  if(S.availableFaultModels.length===0){
+    container.innerHTML='<div class="ifm-empty">当前没有可导入的故障模型，请先从模板库新建。</div>';
+  }else{
+    S.availableFaultModels.forEach(model=>{
+      const item=document.createElement('div');
+      const imported=S.importedFaultModels.some(entry=>entry.id===model.id);
+      item.className=`ifm-item${S.selectedFaultCatalogId===model.id?' on':''}${imported?' is-imported':''}`;
+      item.dataset.faultId=model.id;
+      item.innerHTML=`
+        <div class="ifm-icon">${model.layer==='electrical'?'⚡':model.layer==='physical'?'🔧':'📡'}</div>
+        <div style="min-width:0;flex:1">
+          <div class="ifm-name">${escapeHtml(model.name)}</div>
+          <div class="ifm-meta">${escapeHtml(buildFaultCatalogMeta(model))}</div>
+        </div>
+        ${imported?'<span class="ifm-state">已导入</span>':''}`;
+      item.addEventListener('click',()=>selectFaultCatalogModel(model.id));
+      container.appendChild(item);
+    });
+  }
+  const selected=getFaultCatalogModel(S.selectedFaultCatalogId);
+  document.getElementById('ifm-sel-hint').textContent=selected
+    ?`已选：${selected.name} · ${getLayerLabel(selected.layer)}`
+    :'已选：未选择故障模型';
+}
+
+function selectFaultCatalogModel(id){
+  S.selectedFaultCatalogId=id;
+  renderFaultCatalogList();
+}
+
+function getElectricalInjectableNodes(){
+  return S.modelNodes.filter(node=>isElectricalInjectableType(node.type));
+}
+
+function clearCanvasSelection(){
+  S.selBlk=null;
+  S.selEdge=null;
+  renderModelNodes();
+  renderPropertyPanel(null);
+}
+
+function findNearestEdgeIdByClientPoint(clientX,clientY,threshold=14){
+  const paths=[...document.querySelectorAll('.edge-path[data-edge-id]')];
+  if(paths.length===0){return '';}
+  const point=clientToStagePoint(clientX,clientY);
+  const stageThreshold=threshold/Math.max(S.canvasScale,0.001);
+  let nearestId='';
+  let nearestDistance=Infinity;
+
+  paths.forEach(path=>{
+    const total=path.getTotalLength();
+    const sampleStep=Math.max(8,total/18);
+    for(let cursor=0;cursor<=total;cursor+=sampleStep){
+      const pos=path.getPointAtLength(Math.min(cursor,total));
+      const distance=Math.hypot(pos.x-point.x,pos.y-point.y);
+      if(distance<nearestDistance){
+        nearestDistance=distance;
+        nearestId=path.dataset.edgeId||'';
+      }
+    }
+    const last=path.getPointAtLength(total);
+    const lastDistance=Math.hypot(last.x-point.x,last.y-point.y);
+    if(lastDistance<nearestDistance){
+      nearestDistance=lastDistance;
+      nearestId=path.dataset.edgeId||'';
+    }
+  });
+
+  return nearestDistance<=stageThreshold?nearestId:'';
+}
+
+function getConfigurableNodes(){
+  return S.modelNodes.filter(node=>node.type==='flow_block'||node.type==='simulation_block');
+}
+
+function getNodeTypeCount(type){
+  return S.modelNodes.filter(node=>node.type===type).length+1;
+}
+
+function getCanvasViewport(){
+  return document.getElementById('canvas-viewport');
+}
+
+function getCanvasStage(){
+  return document.getElementById('canvas-stage');
+}
+
+function getEdgeLabel(edge){
+  if(edge.lineType==='can'&&edge.injectedFault?.faultKind){
+    return `CAN · ${edge.injectedFault.faultKind}`;
+  }
+  return edge.lineType==='can'?'CAN':'LINK';
+}
+
+function getNodePorts(node){
+  if(!node){return {inputs:[],outputs:[]};}
+  if(node.type==='signal_source'){
+    return {
+      inputs:[],
+      outputs:[{key:'signal',label:node.props.outputFormat||'输出'}]
+    };
+  }
+  if(node.type==='flow_block'){
+    return {
+      inputs:[{key:'input',label:node.props.inputName||'输入'}],
+      outputs:[{key:'output',label:node.props.outputName||'输出'}]
+    };
+  }
+  if(node.type==='simulation_block'){
+    const groups=getSimulationPortSets(node.props);
+    return {
+      inputs:groups.inputs.map((item,index)=>({
+        key:`input-${index}`,
+        label:`输入 ${index+1} · ${item.name} / ${item.type}`,
+        kind:'input',
+        side:'left'
+      })),
+      outputs:getSimulationFlatOutputs(node.props).map((item,index)=>({
+        key:`${item.kind}-${item.index}`,
+        label:`${item.kind==='middle'?'中间量':'输出'} ${item.index+1} · ${item.name} / ${item.type}`,
+        kind:item.kind,
+        side:item.side,
+        portIndex:index
+      }))
+    };
+  }
+  if(node.type.startsWith('fault_')){
+    return {
+      inputs:[{key:'input',label:'故障输入'}],
+      outputs:[{key:'output',label:'故障输出'}]
+    };
+  }
+  if(node.type.startsWith('instrument_')){
+    return {
+      inputs:[{key:'input',label:'观测输入'}],
+      outputs:[]
+    };
+  }
+  return {inputs:[],outputs:[]};
+}
+
+function getPortInfo(node,direction,index=0){
+  const ports=getNodePorts(node)[direction==='input'?'inputs':'outputs'];
+  const port=ports[index];
+  if(!port){return null;}
+  const side=port.side||(direction==='input'?'left':'right');
+  let localX=direction==='input'?0:node.w;
+  let localY=Math.round(node.h/2);
+  if(side==='top'){
+    const topPorts=ports.filter(item=>(item.side||'right')==='top');
+    const topIndex=topPorts.findIndex(item=>item.key===port.key);
+    const topGap=node.w/(Math.max(topPorts.length,1)+1);
+    localX=Math.round(topGap*(topIndex+1));
+    localY=0;
+  }else{
+    const sidePorts=ports.filter(item=>(item.side||(direction==='input'?'left':'right'))===side);
+    const sideIndex=sidePorts.findIndex(item=>item.key===port.key);
+    const gap=node.h/(Math.max(sidePorts.length,1)+1);
+    localY=Math.round(gap*(sideIndex+1));
+    localX=side==='left'?0:node.w;
+  }
+  return {
+    ...port,
+    direction,
+    side,
+    index,
+    localX,
+    localY,
+    x:node.x+localX,
+    y:node.y+localY
+  };
+}
+
+function buildEdgePath(start,end){
+  const deltaX=Math.max(64,Math.abs(end.x-start.x)*0.42);
+  const deltaY=Math.max(48,Math.abs(end.y-start.y)*0.38);
+  const cp1={
+    x:start.side==='right'?start.x+deltaX:(start.side==='left'?start.x-deltaX:start.x),
+    y:start.side==='top'?start.y-deltaY:start.y
+  };
+  const cp2={
+    x:end.side==='right'?end.x+deltaX:(end.side==='left'?end.x-deltaX:end.x),
+    y:end.side==='top'?end.y-deltaY:end.y
+  };
+  return `M ${start.x} ${start.y} C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${end.x} ${end.y}`;
+}
+
+function clientToStagePoint(clientX,clientY){
+  const viewport=getCanvasViewport();
+  const rect=viewport.getBoundingClientRect();
+  return {
+    x:(clientX-rect.left-S.canvasOffsetX)/S.canvasScale,
+    y:(clientY-rect.top-S.canvasOffsetY)/S.canvasScale
+  };
+}
+
+function clampCanvasOffset(){
+  const viewport=getCanvasViewport();
+  if(!viewport){return;}
+  const scaledWidth=CANVAS_STAGE.width*S.canvasScale;
+  const scaledHeight=CANVAS_STAGE.height*S.canvasScale;
+  const width=viewport.clientWidth;
+  const height=viewport.clientHeight;
+  const edgeGap=72;
+
+  if(scaledWidth<=width-edgeGap*2){
+    S.canvasOffsetX=Math.round((width-scaledWidth)/2);
+  }else{
+    S.canvasOffsetX=clamp(S.canvasOffsetX,width-scaledWidth-edgeGap,edgeGap);
+  }
+
+  if(scaledHeight<=height-edgeGap*2){
+    S.canvasOffsetY=Math.round((height-scaledHeight)/2);
+  }else{
+    S.canvasOffsetY=clamp(S.canvasOffsetY,height-scaledHeight-edgeGap,edgeGap);
+  }
+}
+
+function applyCanvasTransform(){
+  const stage=getCanvasStage();
+  if(stage){
+    stage.style.transform=`translate(${S.canvasOffsetX}px,${S.canvasOffsetY}px) scale(${S.canvasScale})`;
+  }
+  const fill=document.getElementById('canvas-zoom-fill');
+  const reset=document.getElementById('canvas-zoom-reset');
+  const percent=Math.round(S.canvasScale*100);
+  if(fill){
+    const ratio=clamp((S.canvasScale-CANVAS_STAGE.minScale)/(CANVAS_STAGE.maxScale-CANVAS_STAGE.minScale),0,1);
+    fill.style.width=`${Math.round(28+ratio*72)}%`;
+  }
+  if(reset){
+    reset.textContent=`${percent}%`;
+  }
+}
+
+function setCanvasZoom(nextScale,pivotClientX,pivotClientY){
+  const viewport=getCanvasViewport();
+  if(!viewport){return;}
+  const rect=viewport.getBoundingClientRect();
+  const oldScale=S.canvasScale;
+  const clampedScale=clamp(nextScale,CANVAS_STAGE.minScale,CANVAS_STAGE.maxScale);
+  const pivotX=(pivotClientX ?? (rect.left+rect.width/2))-rect.left;
+  const pivotY=(pivotClientY ?? (rect.top+rect.height/2))-rect.top;
+  const stageX=(pivotX-S.canvasOffsetX)/oldScale;
+  const stageY=(pivotY-S.canvasOffsetY)/oldScale;
+  S.canvasScale=clampedScale;
+  S.canvasOffsetX=pivotX-stageX*S.canvasScale;
+  S.canvasOffsetY=pivotY-stageY*S.canvasScale;
+  clampCanvasOffset();
+  applyCanvasTransform();
+}
+
+function handleCanvasZoomIn(){
+  setCanvasZoom(S.canvasScale+0.1);
+}
+
+function handleCanvasZoomOut(){
+  setCanvasZoom(S.canvasScale-0.1);
+}
+
+function handleCanvasZoomReset(){
+  S.canvasScale=1;
+  S.canvasOffsetX=0;
+  S.canvasOffsetY=0;
+  clampCanvasOffset();
+  applyCanvasTransform();
+}
+
+function setConnectionTool(type){
+  S.activeLineType=type==='can'?'can':'normal';
+  document.querySelectorAll('.citem-line-tool').forEach(item=>{
+    item.classList.toggle('active',item.dataset.lineType===S.activeLineType);
+  });
+  const chip=document.getElementById('line-mode-chip');
+  if(chip){
+    chip.textContent=S.activeLineType==='can'?'CAN 总线':'普通连接线';
+    chip.classList.toggle('can',S.activeLineType==='can');
+  }
+  if(S.pendingConnection){
+    S.pendingConnection.lineType=S.activeLineType;
+    renderEdges();
+  }
+}
+
+function clearPendingConnection(){
+  S.pendingConnection=null;
+  renderEdges();
+}
+
+function markTopologyDirty(scope='system'){
+  if(scope==='system'){
+    S.systemSaved=false;
+  }
+  S.simDone=false;
+  if(typeof SIM!=='undefined'){
+    if(typeof clearSimLoop==='function'){clearSimLoop();}
+    SIM.inited=false;
+    SIM.running=false;
+    SIM.paused=false;
+    SIM.hasSamples=false;
+    SIM.time=0;
+    SIM.stepIndex=0;
+  }
+  if(scope==='system'){
+    if(S.step!==1){S.step=1;}
+    return;
+  }
+  if(S.systemSaved){
+    S.step=2;
+  }
+}
+
+function buildSelectOptions(options,selected){
+  return options.map(option=>`<option value="${escapeHtml(option)}"${option===selected?' selected':''}>${escapeHtml(option)}</option>`).join('');
+}
+
+function buildNodeSubtitle(node){
+  const props=node.props;
+  const faultNote=node.injectedFault?' · 电气故障':''; 
+  switch(node.type){
+    case 'signal_source':
+      return `${props.waveType} · 幅值 ${props.amplitude} · ${props.outputFormat}`;
+    case 'flow_block':
+      return `${props.inputName} / ${props.inputFormat} → ${props.outputName} / ${props.outputFormat}${faultNote}`;
+    case 'simulation_block':
+      normalizeSimulationInterfaces(props);
+      return `${props.inputs.length}入 · ${props.outputs.length}出 · ${props.middleVars.length}中间 · ${props.moduleType}${faultNote}`;
+    case 'fault_bias':
+    case 'fault_noise':
+    case 'fault_stuck':
+    case 'fault_drift':
+      return `${props.faultType} · ${props.layer}`;
+    case 'instrument_scope':
+      return `${props.instrumentType} · 双击查看波形`;
+    case 'instrument_spectrum':
+    case 'instrument_logger':
+      return `${props.instrumentType} · ${props.sampleRate}`;
+    case 'link_normal':
+    case 'link_can':
+      return `${props.sourcePort} → ${props.targetPort}`;
+    default:
+      return '';
+  }
+}
+
+function renderEdges(){
+  const edgeGroup=document.getElementById('edge-group');
+  const preview=document.getElementById('edge-preview');
+  if(!edgeGroup||!preview){return;}
+  edgeGroup.innerHTML='';
+
+  S.modelEdges.forEach(edge=>{
+    const sourceNode=getNode(edge.sourceNodeId);
+    const targetNode=getNode(edge.targetNodeId);
+    if(!sourceNode||!targetNode){return;}
+    const sourcePort=getPortInfo(sourceNode,'output',edge.sourcePortIndex||0);
+    const targetPort=getPortInfo(targetNode,'input',edge.targetPortIndex||0);
+    if(!sourcePort||!targetPort){return;}
+    const selected=S.selEdge===edge.id;
+    const faulted=Boolean(edge.injectedFault);
+    const edgePath=buildEdgePath(sourcePort,targetPort);
+
+    const hit=document.createElementNS('http://www.w3.org/2000/svg','path');
+    hit.setAttribute('d',edgePath);
+    hit.setAttribute('class','edge-hit');
+    hit.dataset.edgeId=edge.id;
+    hit.addEventListener('click',event=>{
+      event.stopPropagation();
+      selectEdge(edge.id);
+    });
+    edgeGroup.appendChild(hit);
+
+    const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d',edgePath);
+    path.setAttribute('class',`edge-path edge-path--${edge.lineType}${selected?' is-selected':''}${faulted?' is-faulted':''}`);
+    path.setAttribute('marker-end',faulted?'url(#edge-arrow-fault)':`url(#edge-arrow-${edge.lineType})`);
+    path.dataset.edgeId=edge.id;
+    path.addEventListener('click',event=>{
+      event.stopPropagation();
+      selectEdge(edge.id);
+    });
+    edgeGroup.appendChild(path);
+
+    const label=document.createElementNS('http://www.w3.org/2000/svg','text');
+    label.setAttribute('class',`edge-label${selected?' is-selected':''}${faulted?' is-faulted':''}`);
+    label.setAttribute('x',String(Math.round((sourcePort.x+targetPort.x)/2)));
+    label.setAttribute('y',String(Math.round((sourcePort.y+targetPort.y)/2)-10));
+    label.setAttribute('text-anchor','middle');
+    label.dataset.edgeId=edge.id;
+    label.textContent=getEdgeLabel(edge);
+    label.addEventListener('click',event=>{
+      event.stopPropagation();
+      selectEdge(edge.id);
+    });
+    edgeGroup.appendChild(label);
+  });
+
+  if(S.pendingConnection){
+    const sourceNode=getNode(S.pendingConnection.sourceNodeId);
+    const sourcePort=sourceNode?getPortInfo(sourceNode,'output',S.pendingConnection.sourcePortIndex||0):null;
+    if(sourcePort){
+      preview.style.display='block';
+      preview.setAttribute('d',buildEdgePath(sourcePort,{
+        x:S.pendingConnection.x,
+        y:S.pendingConnection.y
+      }));
+      preview.setAttribute('stroke',S.pendingConnection.lineType==='can'?'#8c7cf6':'#7ab7ff');
+      preview.setAttribute('stroke-width',S.pendingConnection.lineType==='can'?'2.8':'2');
+    }else{
+      preview.style.display='none';
+      preview.setAttribute('d','');
+    }
+  }else{
+    preview.style.display='none';
+    preview.setAttribute('d','');
+  }
+}
+
+function updateNodePositionDOM(node){
+  const element=document.getElementById(`b-${node.id}`);
+  if(!element){return;}
+  element.style.left=`${node.x}px`;
+  element.style.top=`${node.y}px`;
+}
+
+function beginNodeDrag(event,nodeId){
+  if(event.button!==0||event.target.closest('.node-port')){return;}
+  const node=getNode(nodeId);
+  if(!node){return;}
+  if(node.type==='instrument_scope'){
+    const now=Date.now();
+    if(NODE_DOUBLE_CLICK.nodeId===nodeId&&(now-NODE_DOUBLE_CLICK.timestamp)<320){
+      NODE_DOUBLE_CLICK.nodeId='';
+      NODE_DOUBLE_CLICK.timestamp=0;
+      openScope(nodeId);
+      event.preventDefault();
+      return;
+    }
+    NODE_DOUBLE_CLICK.nodeId=nodeId;
+    NODE_DOUBLE_CLICK.timestamp=now;
+  }
+  selectNode(nodeId);
+  NODE_DRAG.active=true;
+  NODE_DRAG.pointerId=event.pointerId;
+  NODE_DRAG.nodeId=nodeId;
+  NODE_DRAG.startX=event.clientX;
+  NODE_DRAG.startY=event.clientY;
+  NODE_DRAG.originX=node.x;
+  NODE_DRAG.originY=node.y;
+  const el=document.getElementById(`b-${nodeId}`);
+  if(el){
+    el.classList.add('is-dragging');
+    if(el.setPointerCapture){
+      el.setPointerCapture(event.pointerId);
+    }
+  }
+  event.preventDefault();
+}
+
+function handlePortClick(event,nodeId,direction,index){
+  event.stopPropagation();
+  const node=getNode(nodeId);
+  if(!node){return;}
+  const port=getPortInfo(node,direction,index);
+  if(!port){return;}
+
+  if(direction==='output'){
+    S.pendingConnection={
+      sourceNodeId:nodeId,
+      sourcePortIndex:index,
+      lineType:S.activeLineType,
+      x:port.x,
+      y:port.y
+    };
+    renderEdges();
+    return;
+  }
+
+  if(!S.pendingConnection){
+    toast('请先从输出端口开始连线','w');
+    return;
+  }
+
+  if(S.pendingConnection.sourceNodeId===nodeId){
+    toast('请连接到其他模块的输入端口','w');
+    clearPendingConnection();
+    return;
+  }
+
+  const duplicate=S.modelEdges.some(edge=>
+    edge.sourceNodeId===S.pendingConnection.sourceNodeId &&
+    edge.targetNodeId===nodeId &&
+    (edge.sourcePortIndex||0)===(S.pendingConnection.sourcePortIndex||0) &&
+    (edge.targetPortIndex||0)===index
+  );
+  if(duplicate){
+    toast('该连线已存在','w');
+    clearPendingConnection();
+    return;
+  }
+
+  const occupiedTarget=S.modelEdges.some(edge=>
+    edge.targetNodeId===nodeId &&
+    (edge.targetPortIndex||0)===index
+  );
+  if(occupiedTarget){
+    toast('该输入端口已有连线，请先删除原连线，避免信号耦合','w');
+    clearPendingConnection();
+    return;
+  }
+
+  const newEdge={
+    id:`edge-${++S.edgeSeq}`,
+    lineType:S.pendingConnection.lineType,
+    sourceNodeId:S.pendingConnection.sourceNodeId,
+    targetNodeId:nodeId,
+    sourcePortIndex:S.pendingConnection.sourcePortIndex||0,
+    targetPortIndex:index
+  };
+  S.modelEdges.push(newEdge);
+  markTopologyDirty(getMutationScopeForEdge(newEdge));
+  S.selEdge=newEdge.id;
+  S.selBlk=null;
+  clearPendingConnection();
+  renderPropertyPanel(newEdge);
+  updateUI();
+  toast('连线已创建','s');
+}
+
+function renderModelNodes(){
+  const layer=document.getElementById('node-layer');
+  if(!layer){return;}
+  layer.innerHTML='';
+  S.modelNodes.forEach(node=>{
+    applyNodeGeometry(node);
+    const meta=COMPONENT_LIBRARY[node.type];
+    const faulted=S.faultedBlks.includes(node.id)||Boolean(node.injectedFault);
+    const el=document.createElement('div');
+    el.id=`b-${node.id}`;
+    el.className=`blk ${meta.className}${S.selBlk===node.id?' sel':''}${faulted?' faulted':''}`;
+    el.style.left=`${node.x}px`;
+    el.style.top=`${node.y}px`;
+    el.style.width=`${node.w}px`;
+    el.style.height=`${node.h}px`;
+    if(node.type==='simulation_block'){
+      const topPortCount=node.props.middleVars?.length||0;
+      el.style.paddingTop=`${topPortCount?18:10}px`;
+      el.style.paddingBottom='10px';
+    }else{
+      el.style.paddingTop='';
+      el.style.paddingBottom='';
+    }
+    el.innerHTML=`
+      <div class="fbadge">F</div>
+      <div class="blk-kicker">${faulted&&!isFaultNodeType(node.type)?`${meta.badge} · 故障` : meta.badge}</div>
+      <div class="blk-lbl">${escapeHtml(node.props.name)}</div>
+      <div class="blk-sub">${escapeHtml(buildNodeSubtitle(node))}</div>`;
+    el.addEventListener('pointerdown',event=>beginNodeDrag(event,node.id));
+    el.addEventListener('click',event=>{
+      if(event.target.closest('.node-port')){return;}
+      selectNode(node.id);
+      if(node.type==='instrument_scope'){
+        const now=Date.now();
+        if(NODE_DOUBLE_CLICK.nodeId===node.id&&(now-NODE_DOUBLE_CLICK.timestamp)<320){
+          NODE_DOUBLE_CLICK.nodeId='';
+          NODE_DOUBLE_CLICK.timestamp=0;
+          openScope(node.id);
+          return;
+        }
+        NODE_DOUBLE_CLICK.nodeId=node.id;
+        NODE_DOUBLE_CLICK.timestamp=now;
+      }
+    });
+    if(node.type==='instrument_scope'){
+      el.title='双击打开示波器';
+      el.addEventListener('dblclick',event=>{
+        event.stopPropagation();
+        openScope(node.id);
+      });
+    }
+
+    const ports=getNodePorts(node);
+    ports.inputs.forEach((port,index)=>{
+      const info=getPortInfo(node,'input',index);
+      const portEl=document.createElement('button');
+      portEl.type='button';
+      portEl.className=`node-port node-port--input${S.pendingConnection?'':' '}`.trim();
+      portEl.style.left=`${info.localX}px`;
+      portEl.style.top=`${info.localY}px`;
+      portEl.style.color='#6f8fb8';
+      portEl.title=port.label;
+      if(S.pendingConnection){
+        portEl.classList.add('node-port--active');
+      }
+      portEl.innerHTML='<span class="node-port__inner"></span>';
+      portEl.addEventListener('click',event=>handlePortClick(event,node.id,'input',index));
+      el.appendChild(portEl);
+    });
+    ports.outputs.forEach((port,index)=>{
+      const info=getPortInfo(node,'output',index);
+      const portEl=document.createElement('button');
+      portEl.type='button';
+      portEl.className=`node-port node-port--output${info.side==='top'?' node-port--top':''}`;
+      portEl.style.left=`${info.localX}px`;
+      portEl.style.top=`${info.localY}px`;
+      portEl.style.color=port.kind==='middle'?'#4b9cb8':(node.type==='signal_source'?'#4f86e7':'#6da0ff');
+      portEl.title=port.label;
+      if(S.pendingConnection&&S.pendingConnection.sourceNodeId===node.id&&(S.pendingConnection.sourcePortIndex||0)===index){
+        portEl.classList.add('node-port--active');
+      }
+      portEl.innerHTML='<span class="node-port__inner"></span>';
+      portEl.addEventListener('click',event=>handlePortClick(event,node.id,'output',index));
+      el.appendChild(portEl);
+    });
+
+    layer.appendChild(el);
+  });
+  document.getElementById('diagram-placeholder').style.display=S.modelNodes.length?'none':'flex';
+  renderEdges();
+}
+
+function selectNode(id){
+  const node=getNode(id);
+  if(!node){return;}
+  S.selBlk=id;
+  S.selEdge=null;
+  renderModelNodes();
+  renderPropertyPanel(node);
+}
+
+function selBlk(id){selectNode(id);}
+
+function selectEdge(id){
+  const edge=getEdge(id);
+  if(!edge){return;}
+  if(S.pendingConnection){
+    S.pendingConnection=null;
+  }
+  S.selEdge=id;
+  S.selBlk=null;
+  renderModelNodes();
+  renderPropertyPanel(edge);
+}
+
+function deleteSelectedNode(){
+  const node=getNode(S.selBlk);
+  if(!node){return;}
+  const removedName=node.props.name;
+  const removedEdges=S.modelEdges.filter(edge=>edge.sourceNodeId===node.id||edge.targetNodeId===node.id).length;
+  const protocolEdgeAffected=S.protocolInjectTargetId&&S.modelEdges.some(edge=>edge.id===S.protocolInjectTargetId&&(edge.sourceNodeId===node.id||edge.targetNodeId===node.id));
+
+  S.modelNodes=S.modelNodes.filter(item=>item.id!==node.id);
+  S.modelEdges=S.modelEdges.filter(edge=>edge.sourceNodeId!==node.id&&edge.targetNodeId!==node.id);
+  S.faultedBlks=S.faultedBlks.filter(id=>id!==node.id);
+  if(S.injectTargetId===node.id){
+    S.injectTargetId='';
+  }
+  if(protocolEdgeAffected){
+    S.protocolInjectTargetId='';
+  }
+  if(S.pendingConnection&&S.pendingConnection.sourceNodeId===node.id){
+    S.pendingConnection=null;
+  }
+  S.selBlk=null;
+  markTopologyDirty(getMutationScopeForType(node.type));
+  renderModelNodes();
+  renderPropertyPanel(null);
+  syncConfigTargets();
+  updateUI();
+  toast(`模块「${removedName}」已删除${removedEdges?`，并移除 ${removedEdges} 条连线`:''}`,'s');
+}
+
+function deleteSelectedEdge(){
+  const edge=getEdge(S.selEdge);
+  if(!edge){return;}
+  const edgeName=edge.lineType==='can'?'CAN 总线':'普通连接线';
+  S.modelEdges=S.modelEdges.filter(item=>item.id!==edge.id);
+  if(S.protocolInjectTargetId===edge.id){
+    S.protocolInjectTargetId='';
+    S.protocolInjectSelectionMode='';
+    S.protocolInjectSelectionId='';
+  }
+  S.selEdge=null;
+  markTopologyDirty(getMutationScopeForEdge(edge));
+  renderModelNodes();
+  renderPropertyPanel(null);
+  updateUI();
+  toast(`连线「${edgeName}」已删除`,'s');
+}
+
+function deleteCurrentSelection(){
+  if(S.selEdge){
+    deleteSelectedEdge();
+    return;
+  }
+  if(S.selBlk){
+    deleteSelectedNode();
+  }
+}
+
+function syncConfigTargets(preferredId=''){
+  const sel=document.getElementById('cftgt');
+  if(!sel){return;}
+  const currentValue=preferredId||sel.value;
+  const nodes=getConfigurableNodes();
+  if(nodes.length===0){
+    sel.innerHTML='<option value="">请先创建系统建模组件</option>';
+    return;
+  }
+  sel.innerHTML=nodes.map(node=>`<option value="${node.id}">${escapeHtml(node.props.name)} · ${COMPONENT_LIBRARY[node.type].label}</option>`).join('');
+  sel.value=nodes.some(node=>node.id===currentValue)?currentValue:nodes[0].id;
+}
+
+function markFaultTarget(targetId){
+  S.faultedBlks=targetId?[targetId]:[];
+  renderModelNodes();
+  if(S.selBlk&&getNode(S.selBlk)){renderPropertyPanel(getNode(S.selBlk));}
+  else if(S.selEdge&&getEdge(S.selEdge)){renderPropertyPanel(getEdge(S.selEdge));}
+}
+
+function createNode(type,rawX,rawY){
+  const meta=COMPONENT_LIBRARY[type];
+  if(!meta){return;}
+  const props=cloneDefaults(meta.defaults);
+  const count=getNodeTypeCount(type);
+  if(type==='signal_source'){props.name=`信号源 ${count}`;}
+  if(type==='flow_block'){props.name=`流程块 ${count}`;}
+  if(type==='simulation_block'){props.name=`仿真块 ${count}`;}
+  if(type.startsWith('fault_')){props.name=`${meta.label} ${count}`;}
+  if(type.startsWith('instrument_')){props.name=`${meta.label} ${count}`;}
+  if(type.startsWith('link_')){props.name=`${meta.label} ${count}`;}
+
+  if(type==='simulation_block'){
+    normalizeSimulationInterfaces(props);
+  }
+  const size=type==='simulation_block'?getSimulationNodeSize(props):{width:meta.width,height:meta.height};
+  const point={
+    x:clamp(Math.round(rawX-size.width/2),CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-size.width-CANVAS_STAGE.nodePadding),
+    y:clamp(Math.round(rawY-size.height/2),CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-size.height-CANVAS_STAGE.nodePadding)
+  };
+  S.modelNodes.push({
+    id:`node-${++S.nodeSeq}`,
+    type,
+    x:point.x,
+    y:point.y,
+    w:size.width,
+    h:size.height,
+    props
+  });
+  markTopologyDirty(getMutationScopeForType(type));
+  const node=S.modelNodes[S.modelNodes.length-1];
+  renderModelNodes();
+  syncConfigTargets(node.id);
+  selectNode(node.id);
+  updateUI();
+  toast(`${meta.label} 已加入画布`,'s');
+}
+
+function initPaletteDrag(){
+  document.querySelectorAll('.citem-draggable').forEach(item=>{
+    item.addEventListener('dragstart',event=>{
+      const type=item.dataset.component||'';
+      S.dragType=type;
+      item.classList.add('citem-dragging');
+      event.dataTransfer.effectAllowed='copy';
+      event.dataTransfer.setData('text/plain',type);
+    });
+    item.addEventListener('dragend',()=>{
+      S.dragType=null;
+      item.classList.remove('citem-dragging');
+      document.getElementById('diagram').classList.remove('dragover');
+    });
+  });
+}
+
+function initCanvasDrop(){
+  const diagram=document.getElementById('diagram');
+  const viewport=getCanvasViewport();
+  if(!viewport){return;}
+  viewport.addEventListener('dragover',event=>{
+    if(!S.sysLoaded){return;}
+    event.preventDefault();
+    diagram.classList.add('dragover');
+    event.dataTransfer.dropEffect='copy';
+  });
+  viewport.addEventListener('dragleave',event=>{
+    if(event.target===viewport){diagram.classList.remove('dragover');}
+  });
+  viewport.addEventListener('drop',event=>{
+    event.preventDefault();
+    diagram.classList.remove('dragover');
+    if(!S.sysLoaded){toast('请先导入系统模型','w');return;}
+    const type=event.dataTransfer.getData('text/plain')||S.dragType;
+    if(!COMPONENT_LIBRARY[type]){return;}
+    const point=clientToStagePoint(event.clientX,event.clientY);
+    createNode(type,point.x,point.y);
+  });
+}
+
+function bindCanvasInteractions(){
+  const viewport=getCanvasViewport();
+  if(!viewport){return;}
+
+  viewport.addEventListener('wheel',event=>{
+    if(!S.sysLoaded){return;}
+    event.preventDefault();
+    setCanvasZoom(S.canvasScale+(event.deltaY<0?0.08:-0.08),event.clientX,event.clientY);
+  },{passive:false});
+
+  viewport.addEventListener('pointerdown',event=>{
+    if(event.button!==0){return;}
+    const target=event.target;
+    const edgeInteractive=target?.closest?.('.edge-hit, .edge-path, .edge-label');
+    const edgeId=edgeInteractive?.dataset?.edgeId||findNearestEdgeIdByClientPoint(event.clientX,event.clientY);
+    if(target.closest('.blk')||target.closest('.node-port')||edgeInteractive){return;}
+    if(edgeId){
+      selectEdge(edgeId);
+      return;
+    }
+    if(S.pendingConnection){
+      clearPendingConnection();
+      return;
+    }
+    if(S.selBlk||S.selEdge){
+      clearCanvasSelection();
+    }
+    CANVAS_PAN.active=true;
+    CANVAS_PAN.pointerId=event.pointerId;
+    CANVAS_PAN.startX=event.clientX;
+    CANVAS_PAN.startY=event.clientY;
+    CANVAS_PAN.originX=S.canvasOffsetX;
+    CANVAS_PAN.originY=S.canvasOffsetY;
+    viewport.classList.add('panning');
+    if(viewport.setPointerCapture){
+      viewport.setPointerCapture(event.pointerId);
+    }
+  });
+
+  viewport.addEventListener('pointermove',event=>{
+    if(S.pendingConnection){
+      const point=clientToStagePoint(event.clientX,event.clientY);
+      S.pendingConnection.x=point.x;
+      S.pendingConnection.y=point.y;
+      renderEdges();
+    }
+
+    if(NODE_DRAG.active&&NODE_DRAG.pointerId===event.pointerId){
+      const node=getNode(NODE_DRAG.nodeId);
+      if(!node){return;}
+      const deltaX=(event.clientX-NODE_DRAG.startX)/S.canvasScale;
+      const deltaY=(event.clientY-NODE_DRAG.startY)/S.canvasScale;
+      node.x=clamp(Math.round(NODE_DRAG.originX+deltaX),CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-node.w-CANVAS_STAGE.nodePadding);
+      node.y=clamp(Math.round(NODE_DRAG.originY+deltaY),CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-node.h-CANVAS_STAGE.nodePadding);
+      updateNodePositionDOM(node);
+      renderEdges();
+      return;
+    }
+
+    if(CANVAS_PAN.active&&CANVAS_PAN.pointerId===event.pointerId){
+      S.canvasOffsetX=CANVAS_PAN.originX+(event.clientX-CANVAS_PAN.startX);
+      S.canvasOffsetY=CANVAS_PAN.originY+(event.clientY-CANVAS_PAN.startY);
+      clampCanvasOffset();
+      applyCanvasTransform();
+    }
+  });
+
+  const endPointerInteraction=event=>{
+    if(NODE_DRAG.active&&NODE_DRAG.pointerId===event.pointerId){
+      const draggedNode=getNode(NODE_DRAG.nodeId);
+      const draggedEl=document.getElementById(`b-${NODE_DRAG.nodeId}`);
+      if(draggedEl){
+        draggedEl.classList.remove('is-dragging');
+      }
+      NODE_DRAG.active=false;
+      NODE_DRAG.pointerId=null;
+      NODE_DRAG.nodeId='';
+      if(draggedNode){renderEdges();}
+    }
+
+    if(CANVAS_PAN.active&&CANVAS_PAN.pointerId===event.pointerId){
+      CANVAS_PAN.active=false;
+      CANVAS_PAN.pointerId=null;
+      viewport.classList.remove('panning');
+    }
+  };
+
+  viewport.addEventListener('pointerup',endPointerInteraction);
+  viewport.addEventListener('pointercancel',endPointerInteraction);
+
+  window.addEventListener('keydown',event=>{
+    if(event.key==='Escape'&&S.pendingConnection){
+      clearPendingConnection();
+      return;
+    }
+    const active=document.activeElement;
+    const editing=active&&(
+      active.tagName==='INPUT'||
+      active.tagName==='TEXTAREA'||
+      active.tagName==='SELECT'||
+      active.isContentEditable
+    );
+    if((event.key==='Delete'||event.key==='Backspace')&&!editing&&!document.querySelector('.overlay.open')&&(S.selBlk||S.selEdge)){
+      event.preventDefault();
+      deleteCurrentSelection();
+    }
+  });
+
+  window.addEventListener('resize',()=>{
+    clampCanvasOffset();
+    applyCanvasTransform();
+  });
+}
+
+function renderPropertyPanel(node){
+  const pe=document.getElementById('pe');
+  const pd=document.getElementById('pd');
+  if(!node){
+    pe.style.display='flex';
+    pd.style.display='none';
+    pd.innerHTML='';
+    return;
+  }
+
+  if(node.sourceNodeId&&node.targetNodeId&&!node.type){
+    const sourceNode=getNode(node.sourceNodeId);
+    const targetNode=getNode(node.targetNodeId);
+    const edgeLabel=node.lineType==='can'?'CAN 总线':'普通连接线';
+    const sourceName=sourceNode?.props?.name||node.sourceNodeId;
+    const targetName=targetNode?.props?.name||node.targetNodeId;
+    const protocolFault=node.injectedFault?.layer==='protocol'?node.injectedFault:null;
+    pe.style.display='none';
+    pd.style.display='block';
+    pd.innerHTML=`
+      <div class="pgroup">
+        <div class="props-title">${edgeLabel}</div>
+        <div class="props-sub">画布连线 ${node.id.replace('edge-','#')}</div>
+      </div>
+      <div class="pgroup">
+        <div class="pglbl">连接信息</div>
+        <div class="prow"><span class="pk">连线类型</span><span class="pv">${edgeLabel}</span></div>
+        <div class="prow"><span class="pk">起点模块</span><span class="pv">${escapeHtml(sourceName)}</span></div>
+        <div class="prow"><span class="pk">终点模块</span><span class="pv">${escapeHtml(targetName)}</span></div>
+        <div class="prow"><span class="pk">协议状态</span><span class="pv ${protocolFault?'pv-fault':'pv-ok'}">${protocolFault?'⚠ 已注入协议故障':'✓ 正常'}</span></div>
+        ${protocolFault?`<div class="prow"><span class="pk">协议故障</span><span class="pv pv-fault">${escapeHtml(protocolFault.name)}</span></div>`:''}
+      </div>
+      <div class="props-form">
+        <div class="pgroup">
+          <div class="props-help">${isProtocolInjectableEdge(node)?'当前连线为 CAN 总线，可在此导入协议层故障；普通连接线暂不支持协议注入。':'当前已选中一条独立连线，可直接删除，不影响其他模块。'}</div>
+        </div>
+        <div class="props-actions">
+          ${isProtocolInjectableEdge(node)?`<button class="props-secondary props-protocol-action" onclick="openProtocolFaultImport()">${protocolFault?'更换协议故障':'导入协议故障'}</button>`:''}
+          <button class="props-danger" onclick="deleteSelectedEdge()">删除连线</button>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const meta=COMPONENT_LIBRARY[node.type];
+  const fault=S.faultedBlks.includes(node.id)||Boolean(node.injectedFault);
+  let fields='';
+
+  if(node.type==='signal_source'){
+    fields=`
+      <div class="pgroup">
+        <div class="pglbl">信号定义</div>
+        <div class="props-field"><label>模块名称</label><input id="prop-name" value="${escapeHtml(node.props.name)}"></div>
+        <div class="props-row">
+          <div class="props-field"><label>信号类型</label><select id="prop-waveType">${buildSelectOptions(['正弦','阶跃','常值'],node.props.waveType)}</select></div>
+          <div class="props-field"><label>输出格式</label><select id="prop-outputFormat">${buildSelectOptions(PORT_FORMATS,node.props.outputFormat)}</select></div>
+        </div>
+        <div class="props-row">
+          <div class="props-field"><label>幅值</label><input id="prop-amplitude" value="${escapeHtml(node.props.amplitude)}"></div>
+          <div class="props-field"><label>频率 / 周期</label><input id="prop-frequency" value="${escapeHtml(node.props.frequency)}"></div>
+        </div>
+        <div class="props-help">信号源用于提供系统建模阶段的输入激励，可在后续继续扩展波形编辑。</div>
+      </div>`;
+  }else if(node.type==='flow_block'){
+    fields=`
+      <div class="pgroup">
+        <div class="pglbl">接口定义</div>
+        <div class="props-field"><label>模块名称</label><input id="prop-name" value="${escapeHtml(node.props.name)}"></div>
+        <div class="props-field"><label>输入名称</label><input id="prop-inputName" value="${escapeHtml(node.props.inputName)}"></div>
+        <div class="props-row">
+          <div class="props-field"><label>输入格式</label><select id="prop-inputFormat">${buildSelectOptions(PORT_FORMATS,node.props.inputFormat)}</select></div>
+          <div class="props-field"><label>输出格式</label><select id="prop-outputFormat">${buildSelectOptions(PORT_FORMATS,node.props.outputFormat)}</select></div>
+        </div>
+        <div class="props-field"><label>输出名称</label><input id="prop-outputName" value="${escapeHtml(node.props.outputName)}"></div>
+        <div class="props-help">流程块用于定义系统中的输入、输出以及接口格式。</div>
+      </div>`;
+  }else if(node.type==='simulation_block'){
+    fields=buildSimulationBlockFields(node);
+  }else if(node.type.startsWith('fault_')){
+    fields=`
+      <div class="pgroup">
+        <div class="pglbl">故障参数</div>
+        <div class="props-field"><label>模块名称</label><input id="prop-name" value="${escapeHtml(node.props.name)}"></div>
+        <div class="props-field"><label>故障类型</label><input id="prop-faultType" value="${escapeHtml(node.props.faultType)}"></div>
+        <div class="props-row">
+          <div class="props-field"><label>作用层级</label><select id="prop-layer">${buildSelectOptions(['物理层','电气层','协议层'],node.props.layer)}</select></div>
+          <div class="props-field"><label>触发方式</label><select id="prop-trigger">${buildSelectOptions(['持续','渐变','瞬态','间歇'],node.props.trigger)}</select></div>
+        </div>
+      </div>`;
+  }else if(node.type.startsWith('instrument_')){
+    fields=`
+      <div class="pgroup">
+        <div class="pglbl">观测配置</div>
+        <div class="props-field"><label>模块名称</label><input id="prop-name" value="${escapeHtml(node.props.name)}"></div>
+        <div class="props-field"><label>观测类型</label><input id="prop-instrumentType" value="${escapeHtml(node.props.instrumentType)}"></div>
+        <div class="props-row">
+          <div class="props-field"><label>采样率</label><input id="prop-sampleRate" value="${escapeHtml(node.props.sampleRate)}"></div>
+          <div class="props-field"><label>观测信号</label><input id="prop-signal" value="${escapeHtml(node.props.signal)}"></div>
+        </div>
+      </div>`;
+  }else{
+    fields=`
+      <div class="pgroup">
+        <div class="pglbl">连接定义</div>
+        <div class="props-field"><label>组件名称</label><input id="prop-name" value="${escapeHtml(node.props.name)}"></div>
+        <div class="props-field"><label>连接类型</label><input id="prop-linkType" value="${escapeHtml(node.props.linkType)}"></div>
+        <div class="props-row">
+          <div class="props-field"><label>起点端口</label><input id="prop-sourcePort" value="${escapeHtml(node.props.sourcePort)}"></div>
+          <div class="props-field"><label>终点端口</label><input id="prop-targetPort" value="${escapeHtml(node.props.targetPort)}"></div>
+        </div>
+      </div>`;
+  }
+
+  pe.style.display='none';
+  pd.style.display='block';
+  const faultSummary=node.injectedFault
+    ?`<div class="prow"><span class="pk">电气故障</span><span class="pv pv-fault">${escapeHtml(node.injectedFault.name)}</span></div>`
+    :'';
+
+  pd.innerHTML=`
+    <div class="pgroup">
+      <div class="props-title">${escapeHtml(node.props.name)}</div>
+      <div class="props-sub">${meta.label} · 画布节点 ${node.id.replace('node-','#')}</div>
+    </div>
+    <div class="pgroup">
+      <div class="pglbl">当前状态</div>
+      <div class="prow"><span class="pk">节点类别</span><span class="pv">${meta.label}</span></div>
+      <div class="prow"><span class="pk">状态</span><span class="pv ${fault?'pv-fault':'pv-ok'}">${fault?'⚠ 已绑定故障':'✓ 正常'}</span></div>
+      ${faultSummary}
+    </div>
+    <div class="props-form">
+      ${fields}
+      <div class="props-actions">
+        ${node.type==='instrument_scope'?`<button class="props-secondary" onclick="openScope('${node.id}')">查看波形</button>`:''}
+        ${isElectricalInjectableType(node.type)?`<button class="props-secondary props-fault-action" onclick="openElectricalFaultImport()">${node.injectedFault?'更换故障':'导入故障'}</button>`:''}
+        <button class="props-save" onclick="saveSelectedNode()">保存设置</button>
+        <button class="props-danger" onclick="deleteSelectedNode()">删除模块</button>
+      </div>
+    </div>`;
+}
+
+function saveSelectedNode(){
+  const node=getNode(S.selBlk);
+  if(!node){return;}
+  if(node.type==='signal_source'){
+    node.props.name=document.getElementById('prop-name').value.trim()||node.props.name;
+    node.props.waveType=document.getElementById('prop-waveType').value;
+    node.props.outputFormat=document.getElementById('prop-outputFormat').value;
+    node.props.amplitude=document.getElementById('prop-amplitude').value.trim()||node.props.amplitude;
+    node.props.frequency=document.getElementById('prop-frequency').value.trim()||node.props.frequency;
+  }else if(node.type==='flow_block'){
+    node.props.name=document.getElementById('prop-name').value.trim()||node.props.name;
+    node.props.inputName=document.getElementById('prop-inputName').value.trim()||'输入信号';
+    node.props.inputFormat=document.getElementById('prop-inputFormat').value;
+    node.props.outputName=document.getElementById('prop-outputName').value.trim()||'输出信号';
+    node.props.outputFormat=document.getElementById('prop-outputFormat').value;
+  }else if(node.type==='simulation_block'){
+    node.props.name=document.getElementById('prop-name').value.trim()||node.props.name;
+    node.props.moduleType=document.getElementById('prop-moduleType').value;
+    node.props.inputs=readSimulationInterfaceRows('输入');
+    node.props.outputs=readSimulationInterfaceRows('输出');
+    node.props.middleVars=readSimulationInterfaceRows('中间量');
+    normalizeSimulationInterfaces(node.props);
+    node.props.inputs=normalizeSimulationInterfaceList(
+      node.props.inputs.slice(0,clampInterfaceCount(document.getElementById('sim-input-count')?.value,SIM_INTERFACE_LIMITS.inputs)),
+      '输入',
+      node.props.inputs[0]?.type||'标量',
+      clampInterfaceCount(document.getElementById('sim-input-count')?.value,SIM_INTERFACE_LIMITS.inputs)
+    );
+    node.props.outputs=normalizeSimulationInterfaceList(
+      node.props.outputs.slice(0,clampInterfaceCount(document.getElementById('sim-output-count')?.value,SIM_INTERFACE_LIMITS.outputs)),
+      '输出',
+      node.props.outputs[0]?.type||'标量',
+      clampInterfaceCount(document.getElementById('sim-output-count')?.value,SIM_INTERFACE_LIMITS.outputs)
+    );
+    node.props.middleVars=normalizeSimulationInterfaceList(
+      node.props.middleVars.slice(0,clampInterfaceCount(document.getElementById('sim-middle-count')?.value,SIM_INTERFACE_LIMITS.middleVars)),
+      '中间量',
+      node.props.middleVars[0]?.type||'标量',
+      clampInterfaceCount(document.getElementById('sim-middle-count')?.value,SIM_INTERFACE_LIMITS.middleVars)
+    );
+    node.props.functionNote=document.getElementById('prop-functionNote').value.trim()||'当前预留 Python 函数接口，可在后续导入函数定义。';
+    applyNodeGeometry(node);
+    pruneInvalidEdgesForNode(node);
+  }else if(node.type.startsWith('fault_')){
+    node.props.name=document.getElementById('prop-name').value.trim()||node.props.name;
+    node.props.faultType=document.getElementById('prop-faultType').value.trim()||node.props.faultType;
+    node.props.layer=document.getElementById('prop-layer').value;
+    node.props.trigger=document.getElementById('prop-trigger').value;
+  }else if(node.type.startsWith('instrument_')){
+    node.props.name=document.getElementById('prop-name').value.trim()||node.props.name;
+    node.props.instrumentType=document.getElementById('prop-instrumentType').value.trim()||node.props.instrumentType;
+    node.props.sampleRate=document.getElementById('prop-sampleRate').value.trim()||node.props.sampleRate;
+    node.props.signal=document.getElementById('prop-signal').value.trim()||node.props.signal;
+  }else{
+    node.props.name=document.getElementById('prop-name').value.trim()||node.props.name;
+    node.props.linkType=document.getElementById('prop-linkType').value.trim()||node.props.linkType;
+    node.props.sourcePort=document.getElementById('prop-sourcePort').value.trim()||node.props.sourcePort;
+    node.props.targetPort=document.getElementById('prop-targetPort').value.trim()||node.props.targetPort;
+  }
+  markTopologyDirty(getMutationScopeForType(node.type));
+  renderModelNodes();
+  renderPropertyPanel(node);
+  syncConfigTargets(node.id);
+  updateUI();
+  toast(`模块「${node.props.name}」设置已保存`,'s');
+}
+
+// ─── 分组折叠 ───
+function toggleGroup(id){
+  const body=document.getElementById(id);
+  const arr=document.getElementById('arr-'+id);
+  const open=body.style.display!=='none';
+  body.style.display=open?'none':'block';
+  arr.classList.toggle('open',!open);
+}
+
+// ─── 右上角按钮 ───
+function doImportSys(){
+  const btn=document.getElementById('btn-imp-sys');
+  btn.textContent='⏳ 导入中...';
+  btn.disabled=true;
+  setTimeout(()=>{
+    btn.textContent='导入系统模型';
+    btn.disabled=false;
+    S.sysLoaded=true;
+    S.step=1;
+    clearPendingConnection();
+    document.getElementById('empty').style.display='none';
+    document.getElementById('diagram').classList.add('on');
+    handleCanvasZoomReset();
+    toast('系统建模画布已就绪，请拖拽信号源、流程块或仿真块开始建模','s');
+    updateUI();
+  },1000);
+}
+
+function doImportFault(){
+  if(!S.sysLoaded){toast('请先导入系统模型','w');return;}
+  if(S.modelNodes.length===0){toast('请先在系统建模页拖入组件','w');return;}
+  if(!S.systemSaved){toast('请先保存系统模型，再导入故障模型','w');return;}
+  renderFaultCatalogList();
+  openOv('ov-ifm');
+}
+
+function doSaveSys(){
+  if(!S.sysLoaded){toast('请先导入系统模型','w');return;}
+  if(S.modelNodes.length===0){toast('请先拖拽组件完成系统建模','w');return;}
+  S.systemSaved=true;
+  S.step=2;
+  toast('系统模型已保存','s');
+  updateUI();
+}
+
+function doSaveRes(){
+  if(!S.simDone){toast('请先完成故障配置并运行仿真','w');return;}
+  toast('仿真结果已保存','s');
+}
+
+// ─── 导入故障模型弹窗 ───
+function simulateFileImport(){
+  toast('本地故障模型文件导入入口已预留，当前先使用模板库和示例模型完成流程。','w');
+}
+
+function selectFaultFile(el){
+  const id=el?.dataset?.faultId;
+  if(id){selectFaultCatalogModel(id);}
+}
+
+function updateSelectedTplSummary(){
+  document.getElementById('sel-cnt').textContent=`已选 ${S.selTpls.length} 个故障模板`;
+  document.getElementById('sel-list').innerHTML=S.selTpls.length===0
+    ?'<div style="font-size:10px;color:var(--textd);text-align:center;margin-top:6px">暂无</div>'
+    :S.selTpls.map(item=>`<div style="font-size:10px;color:var(--purple);padding:3px 6px;border-radius:3px;background:var(--purple-bg);margin-bottom:2px;border:1px solid #ddd6fe">⚡ ${item.name}</div>`).join('');
+}
+
+function openFaultBuild(defaultLayer='physical'){
+  curCat=defaultLayer;
+  document.querySelectorAll('.tpl-cat').forEach((el,index)=>{
+    const cat=index===0?'physical':index===1?'electrical':'protocol';
+    el.classList.toggle('on',cat===curCat);
+  });
+  renderTpls(curCat);
+  closeOv('ov-ifm');
+  openOv('ov-tpl');
+}
+
+function backToImport(){
+  closeOv('ov-tpl');
+  renderFaultCatalogList();
+  openOv('ov-ifm');
+}
+
+function confirmImportFault(){
+  const selected=getFaultCatalogModel(S.selectedFaultCatalogId);
+  if(!selected){toast('请先选择一个故障模型','w');return;}
+  ensureImportedFaultModel(selected);
+  closeOv('ov-ifm');
+  renderFaultCatalogList();
+  toast(`故障模型「${selected.name}」已导入工作区`,'s');
+  updateUI();
+}
+
+// ─── 模板库 ───
+function setCat(el,cat){
+  document.querySelectorAll('.tpl-cat').forEach(e=>e.classList.remove('on'));
+  el.classList.add('on');curCat=cat;renderTpls(cat);
+}
+
+function renderTpls(cat){
+  const g=document.getElementById('tgrid');g.innerHTML='';
+  (TPLS[cat]||[]).forEach(t=>{
+    const sel=S.selTpls.some(s=>s.id===t.id);
+    const d=document.createElement('div');
+    d.className='tcard'+(sel?' on':'');
+    d.innerHTML=`<div class="tcard-name">${t.name}</div>
+      <div class="tcard-desc">${t.desc}</div>
+      <div class="tcard-tags">${t.tags.map(tag=>`<span class="ttag" style="background:color-mix(in srgb,${t.c} 10%,#fff);color:${t.c};border:1px solid color-mix(in srgb,${t.c} 20%,#e5e7eb)">${tag}</span>`).join('')}</div>`;
+    d.onclick=()=>toggleTpl({...t,layer:cat},d);
+    g.appendChild(d);
+  });
+  showTplDetail({...((TPLS[cat]||[])[0]||{}),layer:cat});
+}
+
+function toggleTpl(t,card){
+  const i=S.selTpls.findIndex(s=>s.id===t.id);
+  if(i>=0){S.selTpls.splice(i,1);card.classList.remove('on');}
+  else{S.selTpls.push(t);card.classList.add('on');}
+  updateSelectedTplSummary();
+  showTplDetail(t);
+}
+
+function showTplDetail(t){
+  if(!t?.id){
+    document.getElementById('tdetail').innerHTML='<div class="tdph">← 选择模板查看详情</div>';
+    return;
+  }
+  document.getElementById('tdetail').innerHTML=`
+    <div class="tdtitle">${t.name}</div>
+    <div style="font-size:10px;color:var(--text2);line-height:1.5;margin-bottom:10px">${t.desc}</div>
+    <div class="tdlbl">故障层级</div><div class="tdval">${getLayerLabel(t.layer)}</div>
+    <div class="tdlbl">故障类别</div><div class="tdval">${t.tags[0]}</div>
+    <div class="tdlbl">持续特性</div><div class="tdval">${t.tags[1]||'—'}</div>
+    <div class="tdlbl">适用场景</div>
+    <div style="font-size:10px;color:var(--text2);margin-top:3px;line-height:1.5">系统建模模块 / 信号链路<br>故障传播与退化仿真</div>
+    <div class="tdlbl">幅度范围</div><div class="tdval">±0.01 ~ ±10.0</div>`;
+}
+
+function confirmFM(){
+  if(S.selTpls.length===0){toast('请至少选择一个故障模板','w');return;}
+  const createdModels=S.selTpls.map(item=>{
+    const model={
+      id:`fm-${item.layer}-${item.id}`,
+      name:item.name,
+      layer:item.layer,
+      desc:item.desc,
+      tags:item.tags,
+      createdAt:new Date().toLocaleDateString('zh-CN'),
+      origin:'template',
+      templateId:item.id
+    };
+    return upsertAvailableFaultModel(model);
+  });
+  if(createdModels[0]){
+    S.selectedFaultCatalogId=createdModels[0].id;
+  }
+  renderFaultCatalogList();
+  closeOv('ov-tpl');
+  openOv('ov-ifm');
+  toast(`已新建 ${S.selTpls.length} 个故障模型，返回导入页面继续入库`,'s');
+  S.selTpls=[];
+  updateSelectedTplSummary();
+  updateUI();
+}
+
+function getCurrentElectricalSelection(){
+  if(S.injectSelectionMode==='imported'){
+    return getImportedFaultModel(S.injectSelectionId);
+  }
+  if(S.injectSelectionMode==='template'){
+    return (TPLS.electrical||[]).find(item=>item.id===S.injectSelectionId)||null;
+  }
+  return null;
+}
+
+function selectElectricalInject(mode,id){
+  S.injectSelectionMode=mode;
+  S.injectSelectionId=id;
+  renderElectricalInjectModal();
+}
+
+function renderElectricalInjectModal(){
+  const target=getNode(S.injectTargetId);
+  const importedList=document.getElementById('einj-import-list');
+  const targetCard=document.getElementById('einj-target');
+  const grid=document.getElementById('einj-template-grid');
+  const detail=document.getElementById('einj-detail-body');
+  const hint=document.getElementById('einj-foot-hint');
+  if(!importedList||!targetCard||!grid||!detail||!hint){return;}
+
+  if(!target){
+    importedList.innerHTML='';
+    targetCard.innerHTML='';
+    grid.innerHTML='';
+    detail.innerHTML='<div class="einj-empty">未选择目标模块。</div>';
+    hint.textContent='请选择一个流程块或仿真块。';
+    return;
+  }
+
+  const importedElectrical=S.importedFaultModels.filter(model=>model.layer==='electrical');
+  if(importedElectrical.length===0){
+    importedList.innerHTML='<div class="ifm-empty">当前还没有已导入的电气层故障模型。可先从右上角导入，或直接在右侧模板库中选择并注入。</div>';
+  }else{
+    importedList.innerHTML=importedElectrical.map(model=>`
+      <div class="ifm-item${S.injectSelectionMode==='imported'&&S.injectSelectionId===model.id?' on':''}" onclick="selectElectricalInject('imported','${model.id}')">
+        <div class="ifm-icon">⚡</div>
+        <div style="min-width:0;flex:1">
+          <div class="ifm-name">${escapeHtml(model.name)}</div>
+          <div class="ifm-meta">${escapeHtml(buildFaultCatalogMeta(model))}</div>
+        </div>
+        <span class="ifm-state">已导入</span>
+      </div>`).join('');
+  }
+
+  targetCard.innerHTML=`
+    <div class="einj-target-kicker">目标模块</div>
+    <div class="einj-target-name">${escapeHtml(target.props.name)}</div>
+    <div class="einj-target-sub">电气层故障将以模块内部编辑的形式作用在当前${COMPONENT_LIBRARY[target.type].label}上，不需要额外拖拽故障块。</div>
+    ${target.injectedFault?`<div class="einj-current">已注入：${escapeHtml(target.injectedFault.name)}</div>`:''}`;
+
+  grid.innerHTML=(TPLS.electrical||[]).map(template=>`
+    <div class="einj-card${S.injectSelectionMode==='template'&&S.injectSelectionId===template.id?' on':''}" onclick="selectElectricalInject('template','${template.id}')">
+      <div class="einj-card-name">${escapeHtml(template.name)}</div>
+      <div class="einj-card-desc">${escapeHtml(template.desc)}</div>
+      <div class="einj-tags">${template.tags.map(tag=>`<span class="einj-tag">${escapeHtml(tag)}</span>`).join('')}</div>
+    </div>`).join('');
+
+  const selected=getCurrentElectricalSelection();
+  if(!selected){
+    detail.innerHTML='<div class="einj-empty">先从左侧已导入模型或中间模板库中选择一个电气层故障，再执行导入并注入。</div>';
+    hint.textContent='请选择一个电气层故障模型。';
+    return;
+  }
+
+  const selectedName=selected.name;
+  const selectedDesc=selected.desc||'未提供说明';
+  const selectedTags=selected.tags||[];
+  const selectedLayer=S.injectSelectionMode==='imported'?getLayerLabel(selected.layer):'电气层模板';
+  const sourceLabel=S.injectSelectionMode==='imported'?'已导入模型':'模板直注';
+  detail.innerHTML=`
+    <div class="tdtitle">${escapeHtml(selectedName)}</div>
+    <div style="font-size:10px;color:var(--text2);line-height:1.6;margin-bottom:10px">${escapeHtml(selectedDesc)}</div>
+    <div class="einj-row"><span>来源</span><span>${sourceLabel}</span></div>
+    <div class="einj-row"><span>层级</span><span>${selectedLayer}</span></div>
+    <div class="einj-row"><span>作用对象</span><span>${escapeHtml(target.props.name)}</span></div>
+    <div class="tdlbl">标签</div>
+    <div class="einj-tags" style="margin-top:6px">${selectedTags.map(tag=>`<span class="einj-tag">${escapeHtml(tag)}</span>`).join('')}</div>
+    <div class="tdlbl">注入说明</div>
+    <div style="font-size:10px;color:var(--text2);line-height:1.7;margin-top:4px">确认后将把该电气层故障绑定到当前模块，模块卡片会标红，并纳入后续仿真分析。</div>`;
+  hint.textContent=`已选：${selectedName}，确认后将注入到 ${target.props.name}`;
+}
+
+function openElectricalFaultImport(){
+  const node=getNode(S.selBlk);
+  if(!node||!isElectricalInjectableType(node.type)){return;}
+  if(!S.systemSaved){
+    toast('请先保存系统模型，再导入电气层故障','w');
+    return;
+  }
+  S.injectTargetId=node.id;
+  if(node.injectedFault&&getImportedFaultModel(node.injectedFault.modelId)){
+    S.injectSelectionMode='imported';
+    S.injectSelectionId=node.injectedFault.modelId;
+  }else{
+    S.injectSelectionMode='';
+    S.injectSelectionId='';
+  }
+  renderElectricalInjectModal();
+  openOv('ov-elec');
+}
+
+function confirmElectricalFaultInjection(){
+  const target=getNode(S.injectTargetId);
+  if(!target){toast('当前没有可注入的目标模块','w');return;}
+  const selected=getCurrentElectricalSelection();
+  if(!selected){toast('请先选择一个电气层故障模型','w');return;}
+
+  let faultModel=selected;
+  if(S.injectSelectionMode==='template'){
+    const existing=S.availableFaultModels.find(model=>model.layer==='electrical'&&(model.templateId===selected.id||model.name===selected.name));
+    faultModel=existing||upsertAvailableFaultModel({
+      id:`fm-electrical-${selected.id}`,
+      name:selected.name,
+      layer:'electrical',
+      desc:selected.desc,
+      tags:selected.tags,
+      createdAt:new Date().toLocaleDateString('zh-CN'),
+      origin:'template',
+      templateId:selected.id
+    });
+  }
+
+  const importedModel=ensureImportedFaultModel(faultModel);
+  target.injectedFault={
+    modelId:importedModel.id,
+    name:importedModel.name,
+    layer:'electrical',
+    tags:cloneDefaults(importedModel.tags||[]),
+    desc:importedModel.desc||''
+  };
+  if(!S.faultedBlks.includes(target.id)){
+    S.faultedBlks.push(target.id);
+  }
+  renderFaultCatalogList();
+  markTopologyDirty('fault');
+  closeOv('ov-elec');
+  renderModelNodes();
+  renderPropertyPanel(target);
+  updateUI();
+  toast(`已将电气层故障「${importedModel.name}」注入到 ${target.props.name}`,'s');
+}
+
+function getCurrentProtocolSelection(){
+  if(S.protocolInjectSelectionMode==='imported'){
+    return getImportedFaultModel(S.protocolInjectSelectionId);
+  }
+  if(S.protocolInjectSelectionMode==='template'){
+    return (TPLS.protocol||[]).find(item=>item.id===S.protocolInjectSelectionId)||null;
+  }
+  return null;
+}
+
+function selectProtocolInject(mode,id){
+  S.protocolInjectSelectionMode=mode;
+  S.protocolInjectSelectionId=id;
+  renderProtocolInjectModal();
+}
+
+function renderProtocolInjectModal(){
+  const target=getEdge(S.protocolInjectTargetId);
+  const importedList=document.getElementById('pinj-import-list');
+  const targetCard=document.getElementById('pinj-target');
+  const grid=document.getElementById('pinj-template-grid');
+  const detail=document.getElementById('pinj-detail-body');
+  const hint=document.getElementById('pinj-foot-hint');
+  if(!importedList||!targetCard||!grid||!detail||!hint){return;}
+
+  if(!target||!isProtocolInjectableEdge(target)){
+    importedList.innerHTML='';
+    targetCard.innerHTML='';
+    grid.innerHTML='';
+    detail.innerHTML='<div class="einj-empty">未选择可注入的 CAN 总线。</div>';
+    hint.textContent='请选择一条 CAN 总线。';
+    return;
+  }
+
+  const sourceNode=getNode(target.sourceNodeId);
+  const targetNode=getNode(target.targetNodeId);
+  const sourceName=sourceNode?.props?.name||target.sourceNodeId;
+  const targetName=targetNode?.props?.name||target.targetNodeId;
+  const importedProtocol=S.importedFaultModels.filter(model=>model.layer==='protocol');
+
+  if(importedProtocol.length===0){
+    importedList.innerHTML='<div class="ifm-empty">当前还没有已导入的 CAN 协议层故障模型。可先从右上角导入，或直接在右侧模板库中选择并注入。</div>';
+  }else{
+    importedList.innerHTML=importedProtocol.map(model=>`
+      <div class="ifm-item${S.protocolInjectSelectionMode==='imported'&&S.protocolInjectSelectionId===model.id?' on':''}" onclick="selectProtocolInject('imported','${model.id}')">
+        <div class="ifm-icon">📡</div>
+        <div style="min-width:0;flex:1">
+          <div class="ifm-name">${escapeHtml(model.name)}</div>
+          <div class="ifm-meta">${escapeHtml(buildFaultCatalogMeta(model))}</div>
+        </div>
+        <span class="ifm-state">已导入</span>
+      </div>`).join('');
+  }
+
+  targetCard.innerHTML=`
+    <div class="einj-target-kicker">目标连线</div>
+    <div class="einj-target-name">CAN 总线</div>
+    <div class="einj-target-sub">连接 ${escapeHtml(sourceName)} → ${escapeHtml(targetName)}。协议层故障会直接作用在这条 CAN 通信链路上。</div>
+    ${target.injectedFault?`<div class="einj-current">已注入：${escapeHtml(target.injectedFault.name)}</div>`:''}`;
+
+  grid.innerHTML=(TPLS.protocol||[]).map(template=>`
+    <div class="einj-card${S.protocolInjectSelectionMode==='template'&&S.protocolInjectSelectionId===template.id?' on':''}" onclick="selectProtocolInject('template','${template.id}')">
+      <div class="einj-card-name">${escapeHtml(template.name)}</div>
+      <div class="einj-card-desc">${escapeHtml(template.desc)}</div>
+      <div class="einj-tags">${template.tags.map(tag=>`<span class="einj-tag">${escapeHtml(tag)}</span>`).join('')}</div>
+    </div>`).join('');
+
+  const selected=getCurrentProtocolSelection();
+  if(!selected){
+    detail.innerHTML='<div class="einj-empty">先从左侧已导入模型或中间模板库中选择一个 CAN 协议层故障，再执行导入并注入。</div>';
+    hint.textContent='请选择一个 CAN 协议层故障模型。';
+    return;
+  }
+
+  const selectedName=selected.name;
+  const selectedDesc=selected.desc||'未提供说明';
+  const selectedTags=selected.tags||[];
+  const selectedKind=selected.faultKind||selected.tags?.[0]||'协议故障';
+  const sourceLabel=S.protocolInjectSelectionMode==='imported'?'已导入模型':'模板直注';
+  detail.innerHTML=`
+    <div class="tdtitle">${escapeHtml(selectedName)}</div>
+    <div style="font-size:10px;color:var(--text2);line-height:1.6;margin-bottom:10px">${escapeHtml(selectedDesc)}</div>
+    <div class="einj-row"><span>来源</span><span>${sourceLabel}</span></div>
+    <div class="einj-row"><span>层级</span><span>协议层</span></div>
+    <div class="einj-row"><span>故障类型</span><span>${escapeHtml(selectedKind)}</span></div>
+    <div class="einj-row"><span>作用对象</span><span>CAN 总线</span></div>
+    <div class="tdlbl">标签</div>
+    <div class="einj-tags" style="margin-top:6px">${selectedTags.map(tag=>`<span class="einj-tag">${escapeHtml(tag)}</span>`).join('')}</div>
+    <div class="tdlbl">注入说明</div>
+    <div style="font-size:10px;color:var(--text2);line-height:1.7;margin-top:4px">确认后将把该协议层故障绑定到当前 CAN 总线上，连线会标红并切换为虚线，用于后续仿真分析。</div>`;
+  hint.textContent=`已选：${selectedName}，确认后将注入到当前 CAN 总线`;
+}
+
+function openProtocolFaultImport(){
+  const edge=getEdge(S.selEdge);
+  if(!isProtocolInjectableEdge(edge)){
+    toast('当前仅支持对 CAN 总线导入协议层故障','w');
+    return;
+  }
+  if(!S.systemSaved){
+    toast('请先保存系统模型，再导入协议层故障','w');
+    return;
+  }
+  S.protocolInjectTargetId=edge.id;
+  if(edge.injectedFault&&getImportedFaultModel(edge.injectedFault.modelId)){
+    S.protocolInjectSelectionMode='imported';
+    S.protocolInjectSelectionId=edge.injectedFault.modelId;
+  }else{
+    S.protocolInjectSelectionMode='';
+    S.protocolInjectSelectionId='';
+  }
+  renderProtocolInjectModal();
+  openOv('ov-proto');
+}
+
+function confirmProtocolFaultInjection(){
+  const target=getEdge(S.protocolInjectTargetId);
+  if(!isProtocolInjectableEdge(target)){
+    toast('当前没有可注入的 CAN 总线','w');
+    return;
+  }
+  const selected=getCurrentProtocolSelection();
+  if(!selected){
+    toast('请先选择一个 CAN 协议层故障模型','w');
+    return;
+  }
+
+  let faultModel=selected;
+  if(S.protocolInjectSelectionMode==='template'){
+    const existing=S.availableFaultModels.find(model=>model.layer==='protocol'&&(model.templateId===selected.id||model.name===selected.name));
+    faultModel=existing||upsertAvailableFaultModel({
+      id:`fm-protocol-${selected.id}`,
+      name:selected.name,
+      layer:'protocol',
+      desc:selected.desc,
+      tags:selected.tags,
+      faultKind:selected.faultKind||selected.tags?.[0]||'协议故障',
+      faultCode:selected.faultCode||'',
+      createdAt:new Date().toLocaleDateString('zh-CN'),
+      origin:'template',
+      templateId:selected.id
+    });
+  }
+
+  const importedModel=ensureImportedFaultModel(faultModel);
+  target.injectedFault={
+    modelId:importedModel.id,
+    name:importedModel.name,
+    layer:'protocol',
+    tags:cloneDefaults(importedModel.tags||[]),
+    desc:importedModel.desc||'',
+    faultKind:importedModel.faultKind||importedModel.tags?.[0]||'协议故障',
+    faultCode:importedModel.faultCode||''
+  };
+  renderFaultCatalogList();
+  markTopologyDirty('fault');
+  closeOv('ov-proto');
+  renderEdges();
+  renderPropertyPanel(target);
+  updateUI();
+  toast(`已将协议层故障「${importedModel.name}」注入到当前 CAN 总线`,'s');
+}
+
+// ─── 故障配置 ───
+function setLayer(el,l){
+  document.querySelectorAll('.lbtn').forEach(e=>e.classList.remove('on'));
+  el.classList.add('on');S.activeLayer=l;upPrev();
+}
+
+function upPrev(){
+  const s=parseFloat(document.getElementById('cfs')?.value)||5;
+  const d=parseFloat(document.getElementById('cfd')?.value)||3;
+  const tot=parseFloat(document.getElementById('cftot')?.value)||20;
+  const mag=parseFloat(document.getElementById('cfmag')?.value)||0.5;
+  const typ=document.getElementById('cftype')?.value||'';
+  const svg=document.getElementById('ctlsvg');if(!svg)return;
+  const W=svg.clientWidth||170,H=72,mid=H/2;
+  const tx=t=>(t/tot)*W;
+  const sx=tx(s),ex=tx(Math.min(s+d,tot));
+  document.getElementById('tlr').setAttribute('x',sx);
+  document.getElementById('tlr').setAttribute('width',ex-sx);
+  document.getElementById('tll').setAttribute('x1',sx);document.getElementById('tll').setAttribute('x2',sx);
+  let np=[],fp=[];
+  for(let i=0;i<=60;i++){
+    const t=(i/60)*tot,x=tx(t),y=mid+Math.sin(t*2)*10;
+    np.push(`${x},${y}`);
+    let fy=y;
+    if(t>=s&&t<=s+d){
+      if(typ.includes('卡死'))fy=mid+18;
+      else if(typ.includes('漂移'))fy=y+(t-s)*mag*4;
+      else fy=y+mag*18;
+    }
+    fp.push(`${x},${Math.max(4,Math.min(H-4,fy))}`);
+  }
+  document.getElementById('tln').setAttribute('points',np.join(' '));
+  document.getElementById('tlf').setAttribute('points',fp.join(' '));
+  const tgt=document.getElementById('cftgt')?.selectedOptions?.[0]?.textContent||'未选择目标';
+  document.getElementById('csumm').innerHTML=`
+    <div class="srow"><span class="sk">目标</span><span class="sv">${tgt.split('·')[0].trim()}</span></div>
+    <div class="srow"><span class="sk">层级</span><span class="sv">${S.activeLayer}</span></div>
+    <div class="srow"><span class="sk">类型</span><span class="sv">${typ.split('(')[0].trim()}</span></div>
+    <div class="srow"><span class="sk">起始</span><span class="sv">${s}s</span></div>
+    <div class="srow"><span class="sk">时长</span><span class="sv">${d}s</span></div>
+    <div class="srow"><span class="sk">幅度</span><span class="sv">${mag}</span></div>`;
+}
+
+function confirmFC(){
+  const targetId=document.getElementById('cftgt')?.value||'';
+  markFaultTarget(targetId);
+  S.simDone=false;
+  S.step=3;
+  closeOv('ov-cfg');
+  toast('故障配置已保存，可开始运行仿真','s');
+  updateUI();
+}
+
+// ─── 示波器与仿真运行时 ───
+function getScopeNodes(){
+  return S.modelNodes.filter(node=>node.type==='instrument_scope');
+}
+
+function getConnectedScopeNodes(){
+  return getScopeNodes().filter(node=>getIncomingEdgesForNode(node.id).length>0);
+}
+
+function getIncomingEdgesForNode(nodeId){
+  return S.modelEdges
+    .filter(edge=>edge.targetNodeId===nodeId)
+    .sort((a,b)=>(a.targetPortIndex||0)-(b.targetPortIndex||0)||a.id.localeCompare(b.id));
+}
+
+function getOutgoingEdgesForNode(nodeId){
+  return S.modelEdges.filter(edge=>edge.sourceNodeId===nodeId);
+}
+
+function createRuntimeBucket(){
+  return {nodeStates:{},edgeStates:{},scopeSamples:{}};
+}
+
+const SIM = {
+  inited:false,
+  running:false,
+  paused:false,
+  hasSamples:false,
+  timer:null,
+  time:0,
+  stepIndex:0,
+  duration:10,
+  stepSize:0.1,
+  datasetName:'test',
+  realtime:false,
+  activeScopeId:'',
+  actual:createRuntimeBucket(),
+  reference:createRuntimeBucket()
+};
+
+function clearSimLoop(){
+  if(SIM.timer){
+    clearInterval(SIM.timer);
+    SIM.timer=null;
+  }
+}
+
+function getNodeSeed(id){
+  return Number(String(id||'').replace(/\D/g,''))||1;
+}
+
+function noiseAt(seed,stepIndex,time){
+  const raw=Math.sin(seed*12.9898+stepIndex*78.233+time*5.173)*43758.5453;
+  const frac=raw-Math.floor(raw);
+  return frac*2-1;
+}
+
+function parseScalar(value,fallback=0){
+  const parsed=Number.parseFloat(String(value).replace(/[^\d+\-.eE]/g,''));
+  return Number.isFinite(parsed)?parsed:fallback;
+}
+
+function ensureScopeSelection(preferredId=''){
+  if(preferredId&&getNode(preferredId)?.type==='instrument_scope'){
+    SIM.activeScopeId=preferredId;
+    return;
+  }
+  if(getNode(SIM.activeScopeId)?.type==='instrument_scope'){return;}
+  SIM.activeScopeId=getScopeNodes()[0]?.id||'';
+}
+
+function ensureNodeRuntime(bucket,node){
+  if(!bucket.nodeStates[node.id]){
+    bucket.nodeStates[node.id]={
+      lastOutput:0,
+      lastInput:0,
+      lastOutputs:[0],
+      lastInputValues:[],
+      lastMiddleValues:[],
+      prevInput:0,
+      prevAggregateInput:0,
+      integrator:0,
+      firstOrder:0
+    };
+  }
+  return bucket.nodeStates[node.id];
+}
+
+function ensureEdgeRuntime(bucket,edge){
+  if(!bucket.edgeStates[edge.id]){
+    bucket.edgeStates[edge.id]={lastOutput:0,delayQueue:[],history:[]};
+  }
+  return bucket.edgeStates[edge.id];
+}
+
+function pushLimitedSample(list,sample,limit=720){
+  list.push(sample);
+  if(list.length>limit){
+    list.splice(0,list.length-limit);
+  }
+}
+
+function hasSimulationFaults(){
+  return S.modelNodes.some(node=>node.type.startsWith('fault_')||Boolean(node.injectedFault))
+    || S.modelEdges.some(edge=>Boolean(edge.injectedFault));
+}
+
+function canInitializeSimulation(){
+  if(!S.sysLoaded){return false;}
+  if(!S.modelNodes.some(node=>node.type==='signal_source')){return false;}
+  if(getConnectedScopeNodes().length===0){return false;}
+  if(findInputCouplingConflicts().length>0){return false;}
+  return true;
+}
+
+function resetSimulationRuntime(){
+  clearSimLoop();
+  SIM.time=0;
+  SIM.stepIndex=0;
+  SIM.hasSamples=false;
+  SIM.actual=createRuntimeBucket();
+  SIM.reference=createRuntimeBucket();
+  getScopeNodes().forEach(node=>{
+    SIM.actual.scopeSamples[node.id]=[];
+    SIM.reference.scopeSamples[node.id]=[];
+  });
+  ensureScopeSelection();
+  S.simDone=false;
+  if(S.systemSaved&&S.step===3){
+    S.step=2;
+  }
+}
+
+function getSimulationLoopInterval(){
+  if(SIM.realtime){
+    return clamp(Math.round(SIM.stepSize*1000),80,400);
+  }
+  return 40;
+}
+
+function updateSimbarVisualState(){
+  const runBtn=document.getElementById('sbtn-run');
+  if(runBtn){
+    runBtn.classList.toggle('active',SIM.running&&!SIM.paused);
+  }
+  document.getElementById('run-icon').textContent='▶';
+  document.getElementById('run-lbl').textContent=SIM.running&&!SIM.paused?'运行中':'运行';
+  document.getElementById('pause-lbl').textContent=SIM.paused?'继续':'暂停';
+}
+
+function simEnableButtons(init,run,step,pause,stop){
+  const ids=['sbtn-init','sbtn-run','sbtn-step','sbtn-pause','sbtn-stop'];
+  const vals=[init,run,step,pause,stop];
+  ids.forEach((id,i)=>{
+    const el=document.getElementById(id);
+    if(vals[i]) el.classList.remove('sim-btn-disabled');
+    else el.classList.add('sim-btn-disabled');
+  });
+  updateSimbarVisualState();
+}
+
+function updateSimbarEnabled(){
+  if(!S.sysLoaded){simEnableButtons(false,false,false,false,false);return;}
+  if(!SIM.inited){
+    simEnableButtons(canInitializeSimulation(),false,false,false,false);
+    return;
+  }
+  if(SIM.running&&!SIM.paused){simEnableButtons(false,false,false,true,true);return;}
+  if(SIM.paused){simEnableButtons(false,true,true,true,true);return;}
+  simEnableButtons(true,true,true,false,false);
+}
+
+function findInputCouplingConflicts(){
+  const seen=new Map();
+  const conflicts=[];
+  S.modelEdges.forEach(edge=>{
+    const key=`${edge.targetNodeId}:${edge.targetPortIndex||0}`;
+    if(seen.has(key)){
+      conflicts.push(seen.get(key),edge);
+    }else{
+      seen.set(key,edge);
+    }
+  });
+  return [...new Map(conflicts.map(edge=>[edge.id,edge])).values()];
+}
+
+function validateSimulationTopology(){
+  if(!S.sysLoaded){toast('请先导入系统模型','w');return false;}
+  if(!S.modelNodes.some(node=>node.type==='signal_source')){
+    toast('请至少放置一个信号源','w');
+    return false;
+  }
+  if(getScopeNodes().length===0){
+    toast('请至少放置一个示波器用于观察信号','w');
+    return false;
+  }
+  if(getConnectedScopeNodes().length===0){
+    toast('请至少让一个示波器接入信号链路，才能查看波形','w');
+    return false;
+  }
+  const conflicts=findInputCouplingConflicts();
+  if(conflicts.length){
+    selectEdge(conflicts[0].id);
+    toast('检测到同一输入端口存在多条连线，请先删除多余连线以避免信号耦合','w');
+    return false;
+  }
+  return true;
+}
+
+function computeSourceSignal(node,time){
+  const amplitude=parseScalar(node.props.amplitude,1);
+  const frequency=parseScalar(node.props.frequency,1);
+  if(node.props.waveType==='阶跃'){
+    const stepTime=Math.max(0.2,frequency);
+    return time>=stepTime?amplitude:0;
+  }
+  if(node.props.waveType==='常值'){
+    return amplitude;
+  }
+  return amplitude*Math.sin(2*Math.PI*frequency*time);
+}
+
+function applyElectricalFault(node,inputValue,outputValue,time){
+  if(!node.injectedFault){return outputValue;}
+  const name=node.injectedFault.name||'';
+  if(name.includes('过流')){
+    return Math.abs(inputValue)>1.2?0:outputValue*0.78;
+  }
+  if(name.includes('短路')||name.includes('断路')||name.includes('开路')){
+    return 0;
+  }
+  if(name.includes('电压')){
+    return outputValue*(0.94+0.08*Math.sin(time*7.4));
+  }
+  return outputValue*0.85;
+}
+
+function applyPhysicalFaultNode(node,inputValue,time,modeKey){
+  if(modeKey==='reference'){return inputValue;}
+  if(node.type==='fault_bias'){
+    return inputValue+0.5;
+  }
+  if(node.type==='fault_noise'){
+    return inputValue+noiseAt(getNodeSeed(node.id),SIM.stepIndex,time)*0.22;
+  }
+  return inputValue;
+}
+
+function flipBitValue(value){
+  const scaled=Math.round(value*256);
+  return (scaled^0b1000)/256;
+}
+
+function transmitEdgeSignal(edge,value,modeKey,time){
+  const bucket=modeKey==='reference'?SIM.reference:SIM.actual;
+  const edgeState=ensureEdgeRuntime(bucket,edge);
+  const base=Number.isFinite(value)?value:0;
+  let nextValue=base;
+
+  if(modeKey==='actual'&&edge.injectedFault?.layer==='protocol'){
+    const kind=edge.injectedFault.faultKind||'';
+    const faultCode=edge.injectedFault.faultCode||'';
+    const held=Number.isFinite(edgeState.lastOutput)?edgeState.lastOutput:0;
+    if(faultCode==='loss'||kind==='丢包'){
+      nextValue=noiseAt(getNodeSeed(edge.id),SIM.stepIndex,time)>0.55?held:base;
+    }else if(faultCode==='delay'||kind==='延迟'){
+      const delaySteps=clamp(Math.round(0.35/Math.max(SIM.stepSize,0.001)),1,8);
+      edgeState.delayQueue.push(base);
+      nextValue=edgeState.delayQueue.length>delaySteps?edgeState.delayQueue.shift():held;
+    }else if(faultCode==='bitflip'||kind==='位翻转'){
+      nextValue=flipBitValue(base);
+    }else if(faultCode==='replay'||kind==='重放'){
+      if(edgeState.history.length>6&&SIM.stepIndex>6&&SIM.stepIndex%10===0){
+        nextValue=edgeState.history[Math.max(0,edgeState.history.length-6)];
+      }else{
+        nextValue=base;
+      }
+    }
+  }
+
+  edgeState.lastOutput=nextValue;
+  pushLimitedSample(edgeState.history,base,40);
+  return nextValue;
+}
+
+function sanitizeSignalValue(value){
+  return Number.isFinite(value)?value:0;
+}
+
+function resolveNodeInputValues(node,modeKey,time,dt,cache,visiting){
+  const inputPorts=getNodePorts(node).inputs;
+  if(!inputPorts.length){return [];}
+  const incoming=getIncomingEdgesForNode(node.id);
+  return inputPorts.map((_,portIndex)=>{
+    const edge=incoming.find(item=>(item.targetPortIndex||0)===portIndex);
+    if(!edge){return 0;}
+    const upstream=resolveNodeOutput(edge.sourceNodeId,edge.sourcePortIndex||0,modeKey,time,dt,cache,visiting);
+    return transmitEdgeSignal(edge,upstream,modeKey,time);
+  });
+}
+
+function buildSimulationResult(node,nodeState,inputValues,modeKey,time,dt){
+  normalizeSimulationInterfaces(node.props);
+  const primaryInput=sanitizeSignalValue(inputValues[0]||0);
+  const aggregateInput=inputValues.length
+    ?inputValues.reduce((sum,value)=>sum+sanitizeSignalValue(value),0)
+    :0;
+  const activeInput=inputValues.length>1?aggregateInput:primaryInput;
+  let coreOutput=0;
+  let stateValue=0;
+
+  if(node.props.moduleType==='微分'){
+    coreOutput=(activeInput-(nodeState.prevAggregateInput||0))/Math.max(dt,0.001);
+    stateValue=activeInput;
+  }else if(node.props.moduleType==='积分'){
+    nodeState.integrator=(nodeState.integrator||0)+activeInput*dt;
+    coreOutput=nodeState.integrator;
+    stateValue=nodeState.integrator;
+  }else{
+    const tau=1;
+    const previous=nodeState.firstOrder||0;
+    const alpha=dt/(tau+dt);
+    coreOutput=previous+alpha*(activeInput-previous);
+    nodeState.firstOrder=coreOutput;
+    stateValue=nodeState.firstOrder;
+  }
+
+  nodeState.prevInput=primaryInput;
+  nodeState.prevAggregateInput=activeInput;
+  if(modeKey==='actual'){
+    coreOutput=applyElectricalFault(node,activeInput,coreOutput,time);
+  }
+
+  const outputValues=node.props.outputs.map((_,index)=>{
+    if(index===0){return sanitizeSignalValue(coreOutput);}
+    if(index===1){return sanitizeSignalValue(stateValue);}
+    if(index===2){return sanitizeSignalValue(aggregateInput);}
+    return sanitizeSignalValue(coreOutput+(index*0.12*aggregateInput));
+  });
+
+  const middleValues=node.props.middleVars.map((_,index)=>{
+    if(index===0){return sanitizeSignalValue(primaryInput);}
+    if(index===1){return sanitizeSignalValue(aggregateInput);}
+    if(index===2){return sanitizeSignalValue(stateValue);}
+    if(index===3){return sanitizeSignalValue(coreOutput);}
+    return sanitizeSignalValue((coreOutput+aggregateInput+primaryInput)/(index+1));
+  });
+
+  return {outputs:outputValues,middleValues};
+}
+
+function resolveNodeOutputs(nodeId,modeKey,time,dt,cache,visiting){
+  if(cache.has(nodeId)){return cache.get(nodeId);}
+  const node=getNode(nodeId);
+  if(!node){
+    return {outputs:[0],middleValues:[]};
+  }
+  const bucket=modeKey==='reference'?SIM.reference:SIM.actual;
+  const nodeState=ensureNodeRuntime(bucket,node);
+  if(visiting.has(nodeId)){
+    return {
+      outputs:nodeState.lastOutputs?.length?nodeState.lastOutputs:[nodeState.lastOutput||0],
+      middleValues:nodeState.lastMiddleValues||[]
+    };
+  }
+  visiting.add(nodeId);
+  const inputValues=resolveNodeInputValues(node,modeKey,time,dt,cache,visiting);
+  let resolved={outputs:[0],middleValues:[]};
+
+  if(node.type==='signal_source'){
+    resolved={outputs:[computeSourceSignal(node,time)],middleValues:[]};
+  }else if(node.type==='flow_block'){
+    const passthrough=sanitizeSignalValue(inputValues[0]||0);
+    resolved={outputs:[modeKey==='actual'?applyElectricalFault(node,passthrough,passthrough,time):passthrough],middleValues:[]};
+  }else if(node.type==='simulation_block'){
+    resolved=buildSimulationResult(node,nodeState,inputValues,modeKey,time,dt);
+  }else if(node.type.startsWith('fault_')){
+    resolved={outputs:[applyPhysicalFaultNode(node,sanitizeSignalValue(inputValues[0]||0),time,modeKey)],middleValues:[]};
+  }else if(node.type.startsWith('instrument_')){
+    resolved={outputs:[sanitizeSignalValue(inputValues[0]||0)],middleValues:[]};
+  }else{
+    resolved={outputs:[sanitizeSignalValue(inputValues[0]||0)],middleValues:[]};
+  }
+
+  resolved.outputs=(resolved.outputs||[0]).map(sanitizeSignalValue);
+  resolved.middleValues=(resolved.middleValues||[]).map(sanitizeSignalValue);
+  nodeState.lastInputValues=inputValues.slice();
+  nodeState.lastInput=inputValues[0]||0;
+  nodeState.lastOutputs=resolved.outputs.slice();
+  nodeState.lastMiddleValues=resolved.middleValues.slice();
+  nodeState.lastOutput=nodeState.lastOutputs[0]||0;
+  visiting.delete(nodeId);
+  cache.set(nodeId,resolved);
+  return resolved;
+}
+
+function resolveNodeOutput(nodeId,outputIndex,modeKey,time,dt,cache,visiting){
+  const node=getNode(nodeId);
+  const resolved=resolveNodeOutputs(nodeId,modeKey,time,dt,cache,visiting);
+  if(!node){return 0;}
+  if(node.type==='simulation_block'){
+    normalizeSimulationInterfaces(node.props);
+    const mainCount=node.props.outputs.length;
+    if(outputIndex<mainCount){
+      return sanitizeSignalValue(resolved.outputs[outputIndex]??resolved.outputs[0]??0);
+    }
+    return sanitizeSignalValue(resolved.middleValues[outputIndex-mainCount]??resolved.outputs[0]??0);
+  }
+  return sanitizeSignalValue(resolved.outputs[outputIndex]??resolved.outputs[0]??0);
+}
+
+function resolveNodeInput(node,modeKey,time,dt,cache,visiting){
+  return resolveNodeInputValues(node,modeKey,time,dt,cache,visiting)[0]||0;
+}
+
+function resolveNodeSignal(nodeId,modeKey,time,dt,cache,visiting){
+  return resolveNodeOutput(nodeId,0,modeKey,time,dt,cache,visiting);
+}
+
+function recordScopeSamples(time,dt){
+  const actualCache=new Map();
+  const referenceCache=new Map();
+  const actualVisiting=new Set();
+  const referenceVisiting=new Set();
+  getScopeNodes().forEach(scopeNode=>{
+    const actualValue=resolveNodeSignal(scopeNode.id,'actual',time,dt,actualCache,actualVisiting);
+    const referenceValue=resolveNodeSignal(scopeNode.id,'reference',time,dt,referenceCache,referenceVisiting);
+    pushLimitedSample(SIM.actual.scopeSamples[scopeNode.id],{t:time,v:actualValue});
+    pushLimitedSample(SIM.reference.scopeSamples[scopeNode.id],{t:time,v:referenceValue});
+  });
+}
+
+function runSimulationTick(){
+  if(!SIM.inited){return false;}
+  if(SIM.time>=SIM.duration){return true;}
+  const time=SIM.time;
+  const dt=SIM.stepSize;
+  recordScopeSamples(time,dt);
+  SIM.stepIndex+=1;
+  SIM.time=Number((SIM.time+dt).toFixed(6));
+  SIM.hasSamples=true;
+  S.step=3;
+  if(document.getElementById('ov-scope').classList.contains('open')){
+    drawScope();
+  }
+  updateUI();
+  return SIM.time>=SIM.duration;
+}
+
+function startSimulationLoop(){
+  clearSimLoop();
+  SIM.timer=setInterval(()=>{
+    if(!SIM.running||SIM.paused){return;}
+    const completed=runSimulationTick();
+    if(completed){
+      simStop('completed');
+    }
+  },getSimulationLoopInterval());
+}
+
+function getScopeSignalName(scopeNode){
+  const incoming=getIncomingEdgesForNode(scopeNode.id)[0];
+  if(!incoming){return '未接入信号';}
+  const sourceNode=getNode(incoming.sourceNodeId);
+  if(!sourceNode){return '上游信号';}
+  const outputPort=getNodePorts(sourceNode).outputs[incoming.sourcePortIndex||0];
+  if(outputPort){
+    return `${sourceNode.props?.name||'上游信号'} · ${outputPort.label}`;
+  }
+  return sourceNode.props?.name||'上游信号';
+}
+
+function updateScopeChrome(){
+  ensureScopeSelection();
+  const scopeNode=getNode(SIM.activeScopeId);
+  const scopeTitle=document.getElementById('scope-title');
+  const scopeMeta=document.getElementById('scope-meta');
+  const sc1Lbl=document.getElementById('sc1-lbl');
+  const sc2Lbl=document.getElementById('sc2-lbl');
+  if(!scopeNode){
+    scopeTitle.textContent='🔭 示波器 · 波形查看';
+    scopeMeta.textContent='当前没有示波器模块';
+    sc1Lbl.textContent='CH1 · 时域波形';
+    sc2Lbl.textContent='CH2 · 频谱';
+    return null;
+  }
+  const signalName=getScopeSignalName(scopeNode);
+  scopeTitle.textContent=`🔭 ${scopeNode.props.name} · 示波器`;
+  scopeMeta.textContent=SIM.hasSamples
+    ?`${SIM.datasetName} · t=${SIM.time.toFixed(2)}s / ${SIM.duration.toFixed(2)}s · Δt=${SIM.stepSize.toFixed(3)}s · ${signalName}`
+    :`${SIM.datasetName} · 等待仿真数据 · ${signalName}`;
+  sc1Lbl.textContent=`CH1 · ${signalName}`;
+  sc2Lbl.textContent=`CH2 · ${scopeNode.props.name} 频谱`;
+  return scopeNode;
+}
+
+function drawScopeGrid(ctx,width,height){
+  ctx.clearRect(0,0,width,height);
+  ctx.strokeStyle='#e2eef8';
+  ctx.lineWidth=0.5;
+  for(let x=0;x<width;x+=40){
+    ctx.beginPath();
+    ctx.moveTo(x,0);
+    ctx.lineTo(x,height);
+    ctx.stroke();
+  }
+  for(let y=0;y<height;y+=25){
+    ctx.beginPath();
+    ctx.moveTo(0,y);
+    ctx.lineTo(width,y);
+    ctx.stroke();
+  }
+}
+
+function drawScopeEmpty(ctx,width,height,message){
+  drawScopeGrid(ctx,width,height);
+  ctx.fillStyle='#8ca6be';
+  ctx.font='12px "Microsoft YaHei UI","Segoe UI",sans-serif';
+  ctx.textAlign='center';
+  ctx.fillText(message,width/2,height/2);
+  ctx.textAlign='left';
+}
+
+function drawWaveSeries(ctx,width,height,series,color,getX,getY){
+  if(series.length<1){return;}
+  ctx.strokeStyle=color;
+  ctx.lineWidth=1.7;
+  ctx.beginPath();
+  series.forEach((sample,index)=>{
+    const x=getX(sample.t,index,series.length);
+    const y=getY(sample.v);
+    if(index===0){ctx.moveTo(x,y);}else{ctx.lineTo(x,y);}
+  });
+  ctx.stroke();
+}
+
+function buildSpectrum(values,binCount=24){
+  if(values.length<4){return new Array(binCount).fill(0);}
+  const bins=[];
+  for(let k=1;k<=binCount;k++){
+    let real=0;
+    let imag=0;
+    values.forEach((value,index)=>{
+      const angle=2*Math.PI*k*index/values.length;
+      real+=value*Math.cos(angle);
+      imag-=value*Math.sin(angle);
+    });
+    bins.push(Math.sqrt(real*real+imag*imag)/values.length);
+  }
+  const maxValue=Math.max(...bins,1e-6);
+  return bins.map(value=>value/maxValue);
+}
+
+function openScope(scopeId=''){
+  ensureScopeSelection(scopeId||S.selBlk);
+  if(!SIM.activeScopeId){
+    toast('当前没有可打开的示波器模块','w');
+    return;
+  }
+  openOv('ov-scope');
+  setTimeout(drawScope,60);
+}
+
+function focusScopeLatest(){
+  drawScope();
+}
+
+function togCmp(){
+  S.cmpMode=!S.cmpMode;
+  document.getElementById('scmp').classList.toggle('on',S.cmpMode);
+  document.getElementById('sleg-f').style.display=S.cmpMode?'flex':'none';
+  drawScope();
+}
+
+function drawScope(){
+  const scopeNode=updateScopeChrome();
+  const ch1=document.getElementById('sc1');
+  const ch2=document.getElementById('sc2');
+  if(!ch1||!ch2){return;}
+  ch1.width=ch1.offsetWidth;
+  ch1.height=ch1.offsetHeight;
+  ch2.width=ch2.offsetWidth;
+  ch2.height=ch2.offsetHeight;
+  const ctx1=ch1.getContext('2d');
+  const ctx2=ch2.getContext('2d');
+  if(!scopeNode){
+    drawScopeEmpty(ctx1,ch1.width,ch1.height,'请先在画布中放置示波器');
+    drawScopeEmpty(ctx2,ch2.width,ch2.height,'等待频谱数据');
+    return;
+  }
+
+  const actualSeries=(SIM.actual.scopeSamples[scopeNode.id]||[]).slice(-240);
+  const referenceSeries=(SIM.reference.scopeSamples[scopeNode.id]||[]).slice(-240);
+  if(actualSeries.length===0){
+    drawScopeEmpty(ctx1,ch1.width,ch1.height,'双击示波器后，开始仿真即可看到波形');
+    drawScopeEmpty(ctx2,ch2.width,ch2.height,'暂无频谱数据');
+    return;
+  }
+
+  drawScopeGrid(ctx1,ch1.width,ch1.height);
+  const visibleSeries=S.cmpMode&&referenceSeries.length?referenceSeries.concat(actualSeries):actualSeries;
+  let minValue=Math.min(...visibleSeries.map(item=>item.v));
+  let maxValue=Math.max(...visibleSeries.map(item=>item.v));
+  if(Math.abs(maxValue-minValue)<1e-6){
+    maxValue+=1;
+    minValue-=1;
+  }else{
+    const padding=(maxValue-minValue)*0.18;
+    maxValue+=padding;
+    minValue-=padding;
+  }
+  const startTime=actualSeries[0].t;
+  const endTime=actualSeries[actualSeries.length-1].t||startTime+SIM.stepSize;
+  const span=Math.max(endTime-startTime,SIM.stepSize);
+  const getX=time=>18+((time-startTime)/span)*(ch1.width-36);
+  const getY=value=>12+(maxValue-value)/(maxValue-minValue)*(ch1.height-24);
+  const zeroY=getY(0);
+  if(zeroY>=8&&zeroY<=ch1.height-8){
+    ctx1.strokeStyle='#c2d6ea';
+    ctx1.lineWidth=0.8;
+    ctx1.beginPath();
+    ctx1.moveTo(0,zeroY);
+    ctx1.lineTo(ch1.width,zeroY);
+    ctx1.stroke();
+  }
+  if(S.cmpMode&&referenceSeries.length){
+    drawWaveSeries(ctx1,ch1.width,ch1.height,referenceSeries,'#1d6fbf',getX,getY);
+    drawWaveSeries(ctx1,ch1.width,ch1.height,actualSeries,'#dc2626',getX,getY);
+  }else{
+    drawWaveSeries(ctx1,ch1.width,ch1.height,actualSeries,'#1d6fbf',getX,getY);
+  }
+  ctx1.fillStyle='#94b4cc';
+  ctx1.font='8px JetBrains Mono,monospace';
+  ctx1.fillText(`${startTime.toFixed(1)}s`,4,ch1.height-4);
+  ctx1.fillText(`${endTime.toFixed(1)}s`,ch1.width-32,ch1.height-4);
+
+  drawScopeGrid(ctx2,ch2.width,ch2.height);
+  const actualSpectrum=buildSpectrum(actualSeries.map(item=>item.v));
+  const referenceSpectrum=buildSpectrum(referenceSeries.map(item=>item.v));
+  const binWidth=ch2.width/actualSpectrum.length;
+  actualSpectrum.forEach((value,index)=>{
+    const x=index*binWidth;
+    const height=value*(ch2.height-18);
+    const gradient=ctx2.createLinearGradient(x,ch2.height-height,x,ch2.height);
+    gradient.addColorStop(0,S.cmpMode?'rgba(220,38,38,0.85)':'rgba(29,111,191,0.88)');
+    gradient.addColorStop(1,'rgba(74,158,255,0.08)');
+    ctx2.fillStyle=gradient;
+    ctx2.fillRect(x+1,ch2.height-height,Math.max(binWidth-2,2),height);
+    if(S.cmpMode&&referenceSpectrum[index]!=null){
+      const refHeight=referenceSpectrum[index]*(ch2.height-18);
+      ctx2.fillStyle='rgba(29,111,191,0.24)';
+      ctx2.fillRect(x+1,ch2.height-refHeight,Math.max(binWidth-2,2),refHeight);
+    }
+  });
+  ctx2.fillStyle='#94b4cc';
+  ctx2.font='8px JetBrains Mono,monospace';
+  ctx2.fillText('0Hz',3,ch2.height-4);
+  ctx2.fillText(`${(0.5/Math.max(SIM.stepSize,0.001)).toFixed(1)}Hz`,Math.max(ch2.width-42,3),ch2.height-4);
+}
+
+// ─── 仿真控制栏 ───
+function simInit(silent=false){
+  if(!validateSimulationTopology()){return;}
+  const autoSaved=!S.systemSaved;
+  if(autoSaved){
+    S.systemSaved=true;
+    if(S.step<2){S.step=2;}
+  }
+  SIM.datasetName=document.getElementById('sim-name').value.trim()||'test';
+  SIM.duration=Math.max(parseScalar(document.getElementById('sim-dur').value,10),0.1);
+  SIM.stepSize=Math.max(parseScalar(document.getElementById('sim-step').value,0.1),0.001);
+  SIM.realtime=document.getElementById('sim-rt').checked;
+  SIM.inited=true;
+  SIM.running=false;
+  SIM.paused=false;
+  resetSimulationRuntime();
+  updateSimbarEnabled();
+  updateUI();
+  if(document.getElementById('ov-scope').classList.contains('open')){
+    drawScope();
+  }
+  if(!silent){
+    if(autoSaved){
+      toast(`系统模型已自动保存，并完成仿真初始化：${SIM.datasetName} · 时长 ${SIM.duration}s · 步长 ${SIM.stepSize}s`,'s');
+      return;
+    }
+    toast(`仿真初始化完成：${SIM.datasetName} · 时长 ${SIM.duration}s · 步长 ${SIM.stepSize}s`,'s');
+  }
+}
+
+function simRun(){
+  if(!SIM.inited){
+    simInit();
+    if(!SIM.inited){return;}
+  }
+  if(SIM.time>=SIM.duration){
+    simInit(true);
+  }
+  SIM.realtime=document.getElementById('sim-rt').checked;
+  SIM.running=true;
+  SIM.paused=false;
+  startSimulationLoop();
+  updateSimbarEnabled();
+  updateUI();
+  toast('仿真开始运行','s');
+}
+
+function simStep(){
+  if(!SIM.inited){
+    simInit();
+    if(!SIM.inited){return;}
+  }
+  if(SIM.time>=SIM.duration){
+    toast('当前仿真已结束，请重新初始化后再步进','w');
+    return;
+  }
+  const completed=runSimulationTick();
+  updateSimbarEnabled();
+  if(completed){
+    simStop('completed');
+  }else{
+    toast(`步进完成 · t = ${SIM.time.toFixed(2)}s`,'s');
+  }
+}
+
+function simPause(){
+  if(!SIM.running){return;}
+  SIM.paused=!SIM.paused;
+  if(SIM.paused){
+    clearSimLoop();
+    toast('仿真已暂停','w');
+  }else{
+    startSimulationLoop();
+    toast('仿真继续运行','s');
+  }
+  updateSimbarEnabled();
+  updateUI();
+}
+
+function simStop(mode='manual'){
+  clearSimLoop();
+  const hasData=SIM.hasSamples;
+  SIM.running=false;
+  SIM.paused=false;
+  S.simDone=hasData;
+  if(hasData){
+    S.step=3;
+  }
+  updateSimbarEnabled();
+  updateUI();
+  if(mode==='completed'){
+    toast('仿真已完成，结果可保存','s');
+  }else{
+    toast(hasData?'仿真已终止，结果可保存':'仿真已终止','s');
+  }
+}
+
+function onRtToggle(el){
+  SIM.realtime=el.checked;
+  if(SIM.running&&!SIM.paused){
+    startSimulationLoop();
+  }
+  toast(el.checked?'实时模式已开启':'实时模式已关闭', el.checked?'s':'w');
+}
+
+updateUI();
+
+// ─── 弹窗控制 ───
+function openOv(id){document.getElementById(id).classList.add('open');if(id==='ov-scope')setTimeout(drawScope,50);if(id==='ov-cfg')setTimeout(upPrev,50);}
+function closeOv(id){document.getElementById(id).classList.remove('open');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'));});
+
+// ─── Toast ───
+let toastT;
+function toast(msg,type='w'){
+  const el=document.getElementById('toast');
+  const ti=document.getElementById('ti');
+  const tm=document.getElementById('tm');
+  el.className='toast '+(type==='s'?'toast-s':'toast-w')+' on';
+  ti.className=type==='s'?'ti-s':'ti-w';
+  ti.textContent=type==='s'?'✓ ':'⚠ ';
+  tm.textContent=msg;
+  clearTimeout(toastT);
+  toastT=setTimeout(()=>el.classList.remove('on'),3500);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,418 @@
+{
+  "version": 1,
+  "modelNodes": [
+    {
+      "id": "node-1",
+      "type": "signal_source",
+      "x": 80,
+      "y": 120,
+      "props": {
+        "name": "Attitude Error",
+        "waveType": "常值",
+        "amplitude": "0.6",
+        "frequency": "1.0",
+        "outputFormat": "标量"
+      }
+    },
+    {
+      "id": "node-2",
+      "type": "signal_source",
+      "x": 80,
+      "y": 320,
+      "props": {
+        "name": "True Velocity",
+        "waveType": "正弦",
+        "amplitude": "1.2",
+        "frequency": "0.25",
+        "outputFormat": "标量"
+      }
+    },
+    {
+      "id": "node-3",
+      "type": "simulation_block",
+      "x": 280,
+      "y": 60,
+      "props": {
+        "name": "IMU Gyro",
+        "moduleType": "sensors",
+        "inputs": [
+          { "name": "Body Rate", "type": "scalar" }
+        ],
+        "outputs": [
+          { "name": "Measured Rate", "type": "scalar" }
+        ],
+        "middleVars": [
+          { "name": "measured_rate", "type": "scalar" }
+        ]
+      },
+      "pythonBinding": {
+        "bound": true,
+        "moduleId": "imu_gyro",
+        "moduleCategory": "sensors",
+        "fileName": "imu_gyro.py"
+      }
+    },
+    {
+      "id": "node-4",
+      "type": "simulation_block",
+      "x": 280,
+      "y": 180,
+      "props": {
+        "name": "IMU Accel",
+        "moduleType": "sensors",
+        "inputs": [
+          { "name": "Vertical Accel", "type": "scalar" }
+        ],
+        "outputs": [
+          { "name": "Measured Accel", "type": "scalar" }
+        ],
+        "middleVars": [
+          { "name": "measured_accel", "type": "scalar" }
+        ]
+      },
+      "pythonBinding": {
+        "bound": true,
+        "moduleId": "imu_accel",
+        "moduleCategory": "sensors",
+        "fileName": "imu_accel.py"
+      }
+    },
+    {
+      "id": "node-5",
+      "type": "simulation_block",
+      "x": 280,
+      "y": 300,
+      "props": {
+        "name": "Barometer",
+        "moduleType": "sensors",
+        "inputs": [
+          { "name": "Altitude", "type": "scalar" }
+        ],
+        "outputs": [
+          { "name": "Estimated Altitude", "type": "scalar" }
+        ],
+        "middleVars": [
+          { "name": "estimated_altitude", "type": "scalar" }
+        ]
+      },
+      "pythonBinding": {
+        "bound": true,
+        "moduleId": "barometer",
+        "moduleCategory": "sensors",
+        "fileName": "barometer.py"
+      }
+    },
+    {
+      "id": "node-6",
+      "type": "simulation_block",
+      "x": 280,
+      "y": 420,
+      "props": {
+        "name": "GPS Velocity",
+        "moduleType": "sensors",
+        "inputs": [
+          { "name": "True Velocity", "type": "scalar" },
+          { "name": "Held Velocity", "type": "scalar" }
+        ],
+        "outputs": [
+          { "name": "Reported Velocity", "type": "scalar" }
+        ],
+        "middleVars": [
+          { "name": "reported_velocity", "type": "scalar" }
+        ]
+      },
+      "pythonBinding": {
+        "bound": true,
+        "moduleId": "gps_velocity",
+        "moduleCategory": "sensors",
+        "fileName": "gps_velocity.py"
+      }
+    },
+    {
+      "id": "node-7",
+      "type": "simulation_block",
+      "x": 560,
+      "y": 120,
+      "props": {
+        "name": "Attitude PID",
+        "moduleType": "controllers",
+        "inputs": [
+          { "name": "Attitude Error", "type": "scalar" },
+          { "name": "Rate Feedback", "type": "scalar" }
+        ],
+        "outputs": [
+          { "name": "Command", "type": "scalar" }
+        ],
+        "middleVars": [
+          { "name": "integral_state", "type": "scalar" },
+          { "name": "derivative_state", "type": "scalar" }
+        ]
+      },
+      "pythonBinding": {
+        "bound": true,
+        "moduleId": "attitude_pid",
+        "moduleCategory": "controllers",
+        "fileName": "attitude_pid.py"
+      }
+    },
+    {
+      "id": "node-8",
+      "type": "simulation_block",
+      "x": 820,
+      "y": 120,
+      "props": {
+        "name": "Control Allocation",
+        "moduleType": "allocation",
+        "inputs": [
+          { "name": "Total Thrust", "type": "scalar" },
+          { "name": "Roll Command", "type": "scalar" }
+        ],
+        "outputs": [
+          { "name": "Left Command", "type": "scalar" },
+          { "name": "Right Command", "type": "scalar" }
+        ],
+        "middleVars": [
+          { "name": "left_cmd", "type": "scalar" },
+          { "name": "right_cmd", "type": "scalar" }
+        ]
+      },
+      "pythonBinding": {
+        "bound": true,
+        "moduleId": "control_allocation",
+        "moduleCategory": "allocation",
+        "fileName": "control_allocation.py"
+      }
+    },
+    {
+      "id": "node-9",
+      "type": "simulation_block",
+      "x": 1080,
+      "y": 120,
+      "props": {
+        "name": "Motor Model",
+        "moduleType": "actuators",
+        "inputs": [
+          { "name": "Left Command", "type": "scalar" },
+          { "name": "Right Command", "type": "scalar" },
+          { "name": "Efficiency", "type": "scalar" },
+          { "name": "Left Lock", "type": "scalar" }
+        ],
+        "outputs": [
+          { "name": "Left Thrust", "type": "scalar" },
+          { "name": "Right Thrust", "type": "scalar" }
+        ],
+        "middleVars": [
+          { "name": "left_thrust", "type": "scalar" },
+          { "name": "right_thrust", "type": "scalar" }
+        ]
+      },
+      "pythonBinding": {
+        "bound": true,
+        "moduleId": "motor_model",
+        "moduleCategory": "actuators",
+        "fileName": "motor_model.py"
+      }
+    },
+    {
+      "id": "node-10",
+      "type": "simulation_block",
+      "x": 1340,
+      "y": 120,
+      "props": {
+        "name": "Vehicle Dynamics",
+        "moduleType": "dynamics",
+        "inputs": [
+          { "name": "Left Thrust", "type": "scalar" },
+          { "name": "Right Thrust", "type": "scalar" }
+        ],
+        "outputs": [
+          { "name": "Vertical Accel", "type": "scalar" },
+          { "name": "Roll Moment", "type": "scalar" }
+        ],
+        "middleVars": [
+          { "name": "roll_moment", "type": "scalar" }
+        ]
+      },
+      "pythonBinding": {
+        "bound": true,
+        "moduleId": "vehicle_dynamics",
+        "moduleCategory": "dynamics",
+        "fileName": "vehicle_dynamics.py"
+      }
+    },
+    {
+      "id": "node-11",
+      "type": "instrument_scope",
+      "x": 1600,
+      "y": 100,
+      "props": {
+        "name": "Dynamics Scope"
+      }
+    },
+    {
+      "id": "node-12",
+      "type": "instrument_scope",
+      "x": 1600,
+      "y": 320,
+      "props": {
+        "name": "Sensor Scope"
+      }
+    },
+    {
+      "id": "node-13",
+      "type": "signal_source",
+      "x": 80,
+      "y": 460,
+      "props": {
+        "name": "Held Velocity Sample",
+        "waveType": "常值",
+        "amplitude": "1.2",
+        "frequency": "1.0",
+        "outputFormat": "标量"
+      }
+    }
+  ],
+  "modelEdges": [
+    {
+      "id": "edge-1",
+      "sourceNodeId": "node-1",
+      "targetNodeId": "node-7",
+      "sourcePortIndex": 0,
+      "targetPortIndex": 0,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-2",
+      "sourceNodeId": "node-3",
+      "targetNodeId": "node-7",
+      "sourcePortIndex": 0,
+      "targetPortIndex": 1,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-3",
+      "sourceNodeId": "node-5",
+      "targetNodeId": "node-8",
+      "sourcePortIndex": 0,
+      "targetPortIndex": 0,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-4",
+      "sourceNodeId": "node-7",
+      "targetNodeId": "node-8",
+      "sourcePortIndex": 0,
+      "targetPortIndex": 1,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-5",
+      "sourceNodeId": "node-8",
+      "targetNodeId": "node-9",
+      "sourcePortIndex": 0,
+      "targetPortIndex": 0,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-6",
+      "sourceNodeId": "node-8",
+      "targetNodeId": "node-9",
+      "sourcePortIndex": 1,
+      "targetPortIndex": 1,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-7",
+      "sourceNodeId": "node-9",
+      "targetNodeId": "node-10",
+      "sourcePortIndex": 0,
+      "targetPortIndex": 0,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-8",
+      "sourceNodeId": "node-9",
+      "targetNodeId": "node-10",
+      "sourcePortIndex": 1,
+      "targetPortIndex": 1,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-9",
+      "sourceNodeId": "node-10",
+      "targetNodeId": "node-4",
+      "sourcePortIndex": 0,
+      "targetPortIndex": 0,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-10",
+      "sourceNodeId": "node-10",
+      "targetNodeId": "node-3",
+      "sourcePortIndex": 1,
+      "targetPortIndex": 0,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-11",
+      "sourceNodeId": "node-10",
+      "targetNodeId": "node-5",
+      "sourcePortIndex": 0,
+      "targetPortIndex": 0,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-12",
+      "sourceNodeId": "node-2",
+      "targetNodeId": "node-6",
+      "sourcePortIndex": 0,
+      "targetPortIndex": 0,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-13",
+      "sourceNodeId": "node-4",
+      "targetNodeId": "node-12",
+      "sourcePortIndex": 0,
+      "targetPortIndex": 0,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-14",
+      "sourceNodeId": "node-13",
+      "targetNodeId": "node-6",
+      "sourcePortIndex": 0,
+      "targetPortIndex": 1,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-15",
+      "sourceNodeId": "node-6",
+      "targetNodeId": "node-12",
+      "sourcePortIndex": 0,
+      "targetPortIndex": 1,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-16",
+      "sourceNodeId": "node-10",
+      "targetNodeId": "node-11",
+      "sourcePortIndex": 0,
+      "targetPortIndex": 0,
+      "lineType": "normal"
+    },
+    {
+      "id": "edge-17",
+      "sourceNodeId": "node-10",
+      "targetNodeId": "node-11",
+      "sourcePortIndex": 1,
+      "targetPortIndex": 1,
+      "lineType": "normal"
+    }
+  ],
+  "nodeSeq": 13,
+  "edgeSeq": 17,
+  "activeLineType": "normal",
+  "faultedBlks": [],
+  "importedFaultModels": []
+}

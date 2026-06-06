@@ -1,0 +1,33 @@
+<div class="overlay" id="ov-elec">
+  <div class="modal" style="width:860px;height:540px">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--red)">电气层故障注入</div>
+      <button class="mclose" onclick="closeOv('ov-elec')">×</button>
+    </div>
+    <div class="mbody einj-body">
+      <div class="einj-side">
+        <div class="einj-side-head">
+          <div class="einj-side-title">已导入模型</div>
+          <div class="einj-side-sub">这里显示通过“导入故障模型”进入工作区的电气层故障。</div>
+        </div>
+        <div class="einj-import-list" id="einj-import-list"></div>
+      </div>
+      <div class="einj-main">
+        <div class="einj-target" id="einj-target"></div>
+        <div class="einj-grid" id="einj-template-grid"></div>
+      </div>
+      <div class="einj-detail">
+        <div class="einj-detail-head">
+          <div class="einj-detail-title">模型详情</div>
+          <div class="einj-detail-sub">可从已导入模型中选择，也可直接从电气层模板库导入并注入。</div>
+        </div>
+        <div class="einj-detail-body" id="einj-detail-body"></div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <div style="flex:1;font-size:11px;color:var(--textm)" id="einj-foot-hint">请选择一个电气层故障模型。</div>
+      <button class="btn-cancel" onclick="closeOv('ov-elec')">取消</button>
+      <button class="btn-ok btn-ok-r" onclick="confirmElectricalFaultInjection()">导入并注入</button>
+    </div>
+  </div>
+</div>

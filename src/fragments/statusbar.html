@@ -1,0 +1,66 @@
+<div class="sbar">
+  <section class="sbar-log">
+    <div class="sbar-log-head">
+      <div class="sbar-tabs">
+        <button type="button" class="sbar-tab is-active" data-status-tab="log" aria-pressed="true">日志</button>
+        <button type="button" class="sbar-tab" data-status-tab="alerts" aria-pressed="false">告警</button>
+        <button type="button" class="sbar-tab" data-status-tab="results" aria-pressed="false">仿真结果</button>
+        <button type="button" class="sbar-tab" data-status-tab="performance" aria-pressed="false">性能趋势</button>
+      </div>
+      <div class="sbar-actions">
+        <button type="button" class="sbar-action" data-status-action="clear">清空</button>
+        <button type="button" class="sbar-action" data-status-action="level" data-level="all">全部级别</button>
+        <button type="button" class="sbar-action" data-status-action="export">导出日志</button>
+      </div>
+    </div>
+    <div class="sbar-log-table">
+      <div class="sbar-row sbar-row--head">
+        <span>时间</span>
+        <span>级别</span>
+        <span>来源</span>
+        <span>消息</span>
+      </div>
+      <div class="sbar-row" data-log-entry data-level="info" data-view="log">
+        <span>10:24:31</span>
+        <span class="sbar-badge sbar-badge--info">信息</span>
+        <span>系统</span>
+        <span id="stxt">就绪 · 可导入系统模型或新建空白模型</span>
+      </div>
+      <div class="sbar-row" data-log-entry data-level="ok" data-view="log">
+        <span>10:24:18</span>
+        <span class="sbar-badge sbar-badge--ok">成功</span>
+        <span>建模</span>
+        <span>画布与组件库已加载</span>
+      </div>
+      <div class="sbar-empty is-hidden" data-status-empty>暂无匹配记录</div>
+    </div>
+  </section>
+  <section class="sbar-metrics">
+    <div class="sbar-card">
+      <span class="sbar-card__accent"></span>
+      <span class="sbar-card__label">组件</span>
+      <span class="sbar-card__value sbar-metric-line" id="sblk" data-metric="components">
+        <span class="sbar-metric-number">0</span><span class="sbar-metric-unit">组件</span>
+        <span class="sbar-metric-sep">·</span>
+        <span class="sbar-metric-number">0</span><span class="sbar-metric-unit">连线</span>
+      </span>
+    </div>
+    <div class="sbar-card">
+      <span class="sbar-card__accent"></span>
+      <span class="sbar-card__label">故障模型</span>
+      <span class="sbar-card__value sbar-metric-line" id="sflt" data-metric="faults">
+        <span class="sbar-metric-number">0</span><span class="sbar-metric-unit">故障</span>
+      </span>
+    </div>
+    <div class="sbar-card sbar-card--status">
+      <span class="sbar-card__accent"></span>
+      <span class="sbar-card__label">仿真状态</span>
+      <span class="sbar-state"><span class="sdot" id="sdot"></span>待机</span>
+    </div>
+    <div class="sbar-card">
+      <span class="sbar-card__accent"></span>
+      <span class="sbar-card__label">时间</span>
+      <span class="sbar-time">00:00:00</span>
+    </div>
+  </section>
+</div>

@@ -1,0 +1,73 @@
+[
+  {
+    "id": "gyro_bias",
+    "name": "Gyro Bias",
+    "moduleTargets": ["imu_gyro"],
+    "parameter": "bias",
+    "defaultValue": 0.15
+  },
+  {
+    "id": "accel_scale",
+    "name": "Accelerometer Scale Distortion",
+    "moduleTargets": ["imu_accel"],
+    "parameter": "scale",
+    "defaultValue": 1.25
+  },
+  {
+    "id": "baro_drift",
+    "name": "Barometer Drift",
+    "moduleTargets": ["barometer"],
+    "parameter": "drift",
+    "defaultValue": 2.0
+  },
+  {
+    "id": "gps_freeze",
+    "name": "GPS Freeze Approximation (Held Sample)",
+    "moduleTargets": ["gps_velocity"],
+    "parameter": "freeze",
+    "defaultValue": 1.0,
+    "description": "Simplified reference-package fault that switches GPS velocity output to a predefined held sample instead of latching the live previous sample."
+  },
+  {
+    "id": "attitude_kp_anomaly",
+    "name": "Controller Proportional Gain Anomaly",
+    "moduleTargets": ["attitude_pid"],
+    "parameter": "kp",
+    "defaultValue": 2.4
+  },
+  {
+    "id": "motor_efficiency_loss",
+    "name": "Motor Efficiency Loss",
+    "moduleTargets": ["motor_model"],
+    "parameter": "efficiency",
+    "defaultValue": 0.55
+  },
+  {
+    "id": "motor_lock",
+    "name": "Single Motor Lock",
+    "moduleTargets": ["motor_model"],
+    "parameter": "left_lock",
+    "defaultValue": 1.0
+  },
+  {
+    "id": "motor_thrust_saturation",
+    "name": "Thrust Saturation",
+    "moduleTargets": ["motor_model"],
+    "parameter": "saturation",
+    "defaultValue": 8.0
+  },
+  {
+    "id": "uav_mass_shift",
+    "name": "Mass Parameter Error",
+    "moduleTargets": ["vehicle_dynamics"],
+    "parameter": "mass",
+    "defaultValue": 11.0
+  },
+  {
+    "id": "drag_coefficient_jump",
+    "name": "Drag Coefficient Jump",
+    "moduleTargets": ["vehicle_dynamics"],
+    "parameter": "drag",
+    "defaultValue": 0.35
+  }
+]

@@ -1,0 +1,26 @@
+<div class="overlay" id="ov-tpl">
+  <div class="modal" style="width:820px;height:530px">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--purple)">故障建模 · 模板库</div>
+      <button class="mclose" onclick="closeOv('ov-tpl')">×</button>
+    </div>
+    <div class="mbody">
+      <div class="tpl-cats">
+        <div class="tcat-head">故障层级</div>
+        <div class="tpl-cat on" onclick="setCat(this,'physical')"><span>物理</span><span>物理层</span><span class="tpl-cnt">5</span></div>
+        <div class="tpl-cat" onclick="setCat(this,'electrical')"><span>电气</span><span>电气层</span><span class="tpl-cnt">4</span></div>
+        <div class="tpl-cat" onclick="setCat(this,'protocol')"><span>协议</span><span>协议层</span><span class="tpl-cnt">4</span></div>
+        <div style="height:1px;background:var(--border);margin:8px 4px"></div>
+        <div class="tcat-head">已选模板</div>
+        <div id="sel-list"><div style="font-size:10px;color:var(--textd);text-align:center;margin-top:6px">暂无</div></div>
+      </div>
+      <div class="tpl-grid" id="tgrid"></div>
+      <div class="tpl-detail" id="tdetail"><div class="tdph">选择模板查看详情</div></div>
+    </div>
+    <div class="mfoot">
+      <div style="flex:1;font-size:11px;color:var(--textm)" id="sel-cnt">已选 0 个故障模板</div>
+      <button class="btn-cancel" onclick="backToImport()">返回导入</button>
+      <button class="btn-ok btn-ok-p" onclick="confirmFM()">确认建模</button>
+    </div>
+  </div>
+</div>

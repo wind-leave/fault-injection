@@ -1,0 +1,48 @@
+<header>
+  <div class="logo">
+    <div class="logo-badge">GZ</div>
+    <div class="logo-name">故障注入平台</div>
+  </div>
+
+  <div class="header-project" aria-label="当前项目">
+    <div class="header-project__copy">
+      <span class="header-project__label">当前项目</span>
+      <strong class="header-project__name">飞控系统仿真项目</strong>
+    </div>
+    <span class="header-project__favorite">☆</span>
+    <span class="header-project__state">已保存</span>
+  </div>
+
+  <div class="stepbar">
+    <div class="step-item active" data-s="1" id="s1">
+      <div class="step-pill">
+        <div class="step-num" id="sn1">1</div>
+        <div class="step-lbl">系统建模</div>
+      </div>
+    </div>
+    <div class="step-arrow"></div>
+    <div class="step-item" data-s="2" id="s2">
+      <div class="step-pill">
+        <div class="step-num" id="sn2">2</div>
+        <div class="step-lbl">故障注入</div>
+      </div>
+    </div>
+    <div class="step-arrow"></div>
+    <div class="step-item" data-s="3" id="s3">
+      <div class="step-pill">
+        <div class="step-num" id="sn3">3</div>
+        <div class="step-lbl">仿真分析</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <button class="tbtn tbtn-imp-sys" onclick="doImportSys()" id="btn-imp-sys">导入系统模型</button>
+    <button class="tbtn tbtn-new-sys" onclick="doCreateBlankWorkspace()" id="btn-new-sys">新建空白模型</button>
+    <button class="tbtn tbtn-imp-flt tbtn-disabled" onclick="doImportFault()" id="btn-imp-flt">注入故障</button>
+    <div class="tbtn-divider"></div>
+    <button class="tbtn tbtn-reset-sys" onclick="doResetWorkspace()" id="btn-reset-sys">重置画布</button>
+    <button class="tbtn tbtn-save-sys tbtn-disabled" onclick="doSaveSys()" id="btn-save-sys">保存系统模型</button>
+    <button class="tbtn tbtn-save-res tbtn-disabled" onclick="doSaveRes()" id="btn-save-res">保存仿真结果</button>
+  </div>
+</header>

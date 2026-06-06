@@ -1,0 +1,1239 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>故障注入平台</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg-base:#f0f5fb;
+  --bg-panel:#ffffff;
+  --bg-card:#f7fafd;
+  --bg-hover:#eaf2fb;
+  --border:#d6e4f0;
+  --border-mid:#c2d6ea;
+  --border-dark:#a8c4de;
+  --blue:#1d6fbf;
+  --blue-lt:#4a9eff;
+  --blue-bg:#e8f1fb;
+  --teal:#0e8fa8;
+  --teal-bg:#e3f6fa;
+  --red:#dc2626;
+  --red-lt:#ef4444;
+  --red-bg:#fef2f2;
+  --red-border:#fca5a5;
+  --green:#16a34a;
+  --green-bg:#f0fdf4;
+  --orange:#c2540a;
+  --orange-bg:#fff7ed;
+  --purple:#6d28d9;
+  --purple-bg:#f5f3ff;
+  --text:#1e3a5f;
+  --text2:#4a6a8a;
+  --textm:#7a9ab8;
+  --textd:#b3c8da;
+}
+body{font-family:'Noto Sans SC',sans-serif;background:var(--bg-base);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+/* ── HEADER ── */
+header{height:52px;background:var(--bg-panel);border-bottom:1.5px solid var(--border);display:flex;align-items:center;flex-shrink:0;z-index:100;box-shadow:0 1px 4px rgba(30,58,95,0.06);}
+.logo{width:180px;padding:0 16px;display:flex;align-items:center;gap:9px;border-right:1.5px solid var(--border);height:100%;flex-shrink:0;}
+.logo-badge{width:28px;height:28px;background:linear-gradient(135deg,var(--blue),var(--blue-lt));border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:11px;color:#fff;flex-shrink:0;box-shadow:0 2px 6px rgba(29,111,191,0.28);}
+.logo-name{font-family:'Rajdhani',sans-serif;font-weight:700;font-size:15px;color:var(--text);line-height:1.2;white-space:nowrap;}
+
+/* ── 三步流程条 ── */
+.stepbar{flex:1;display:flex;align-items:center;justify-content:center;padding:0 20px;gap:0;}
+.step-item{display:flex;align-items:center;}
+.step-pill{display:flex;align-items:center;gap:7px;padding:6px 16px;border-radius:20px;border:1.5px solid var(--border);background:transparent;transition:all 0.25s;cursor:default;}
+.step-num{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;background:var(--border);color:var(--textm);transition:all 0.25s;flex-shrink:0;}
+.step-lbl{font-size:13px;font-weight:500;color:var(--textm);white-space:nowrap;transition:all 0.25s;}
+.step-arrow{width:40px;height:1.5px;background:var(--border);margin:0 4px;position:relative;flex-shrink:0;}
+.step-arrow::after{content:'▸';position:absolute;right:-6px;top:-7px;font-size:8px;color:var(--border);}
+.step-item[data-s="1"]{--sc:var(--blue);--scbg:var(--blue-bg);}
+.step-item[data-s="2"]{--sc:var(--red);--scbg:var(--red-bg);}
+.step-item[data-s="3"]{--sc:var(--green);--scbg:var(--green-bg);}
+.step-item.active .step-pill{border-color:var(--sc);background:var(--scbg);}
+.step-item.active .step-num{background:var(--sc);color:#fff;box-shadow:0 1px 5px color-mix(in srgb,var(--sc) 40%,transparent);}
+.step-item.active .step-lbl{color:var(--sc);font-weight:600;}
+.step-item.done .step-pill{border-color:var(--border-mid);background:var(--bg-hover);}
+.step-item.done .step-num{background:var(--blue);color:#fff;font-size:8px;}
+.step-item.done .step-lbl{color:var(--text2);}
+
+/* ── 右上角工具栏（4个按钮） ── */
+.toolbar{display:flex;align-items:center;gap:5px;padding:0 14px;border-left:1.5px solid var(--border);height:100%;flex-shrink:0;}
+.tbtn{display:flex;align-items:center;gap:4px;padding:5px 11px;border-radius:5px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--text2);font-family:'Noto Sans SC',sans-serif;font-size:11px;cursor:pointer;transition:all 0.18s;white-space:nowrap;font-weight:500;}
+.tbtn:hover:not(.tbtn-disabled){background:var(--bg-hover);border-color:var(--border-mid);color:var(--text);}
+.tbtn-disabled{opacity:0.38;cursor:not-allowed;}
+.tbtn-imp-sys{border-color:var(--blue);color:var(--blue);background:var(--blue-bg);}
+.tbtn-imp-sys:hover{background:#dceef9!important;}
+.tbtn-imp-flt{border-color:var(--red);color:var(--red);}
+.tbtn-imp-flt.ready{background:var(--red-bg);}
+.tbtn-save-sys{border-color:var(--teal);color:var(--teal);}
+.tbtn-save-sys.ready{background:var(--teal-bg);}
+.tbtn-save-res{border-color:var(--green);color:var(--green);}
+.tbtn-save-res.ready{background:var(--green-bg);}
+.tbtn-divider{width:1px;height:22px;background:var(--border);margin:0 2px;flex-shrink:0;}
+
+/* ── LAYOUT ── */
+main{flex:1;display:flex;overflow:hidden;}
+
+/* ── 左侧面板（4组） ── */
+.lpanel{width:192px;flex-shrink:0;background:var(--bg-panel);border-right:1.5px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
+.lscroll{flex:1;overflow-y:auto;}
+.lscroll::-webkit-scrollbar{width:3px;}
+.lscroll::-webkit-scrollbar-thumb{background:var(--border);}
+
+/* 分组标题 */
+.lgroup-head{display:flex;align-items:center;gap:6px;padding:8px 12px 5px;font-size:10px;font-weight:600;color:var(--text2);letter-spacing:0.3px;border-bottom:1px solid var(--border);background:var(--bg-card);margin-top:1px;cursor:pointer;user-select:none;position:sticky;top:0;z-index:2;}
+.lgroup-head:first-child{margin-top:0;}
+.lgroup-icon{font-size:11px;}
+.lgroup-arrow{margin-left:auto;font-size:9px;color:var(--textd);transition:transform 0.2s;}
+.lgroup-arrow.open{transform:rotate(90deg);}
+.lgroup-body{padding:4px 8px 6px;}
+
+/* 元件条目 */
+.citem{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:5px;border:1px solid transparent;cursor:grab;transition:all 0.14s;margin-bottom:2px;font-size:11px;color:var(--text2);}
+.citem:hover{background:var(--blue-bg);border-color:var(--border-mid);color:var(--blue);}
+.cdot{width:6px;height:6px;border-radius:2px;flex-shrink:0;}
+
+/* 故障注入组件特殊样式 */
+.citem-fault{color:var(--red)!important;border:1px solid var(--red-border)!important;background:var(--red-bg);}
+.citem-fault:hover{background:#fee2e2!important;border-color:var(--red)!important;}
+
+/* 测量仪器 */
+.citem-scope{border:1.5px solid #bbf7d0!important;background:#f0fdf4;color:var(--green)!important;}
+.citem-scope:hover{background:#dcfce7!important;border-color:var(--green)!important;}
+
+/* 连接线 */
+.citem-can{border:1px solid #c4b5fd!important;background:var(--purple-bg);color:var(--purple)!important;}
+.citem-can:hover{background:#ede9fe!important;border-color:var(--purple)!important;}
+
+/* ── 画布 ── */
+.canvas-wrap{flex:1;background:var(--bg-base);position:relative;overflow:hidden;}
+.canvas-grid{position:absolute;inset:0;
+  background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);
+  background-size:28px 28px;opacity:0.5;}
+.empty-state{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;pointer-events:none;}
+.empty-icon{width:56px;height:56px;border:2px dashed var(--border-mid);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;}
+.empty-txt{font-size:14px;color:var(--text2);font-weight:500;}
+.empty-sub{font-size:11px;color:var(--textm);}
+.diagram{position:absolute;inset:0;display:none;}
+.diagram.on{display:block;}
+
+/* ── 模块块 ── */
+.blk{position:absolute;border-radius:7px;border:1.5px solid;background:var(--bg-panel);cursor:pointer;transition:box-shadow 0.18s,border-color 0.18s;user-select:none;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;box-shadow:0 1px 5px rgba(30,58,95,0.08);}
+.blk:hover{box-shadow:0 3px 12px rgba(30,58,95,0.14);z-index:10;}
+.blk.sel{box-shadow:0 0 0 3px color-mix(in srgb,currentColor 25%,transparent),0 2px 10px rgba(30,58,95,0.1);z-index:20;}
+.blk-lbl{font-size:11px;font-weight:600;padding:0 6px;line-height:1.3;color:var(--text);}
+.blk-sub{font-size:9px;color:var(--textm);padding:0 4px;font-family:'JetBrains Mono',monospace;}
+.fbadge{position:absolute;top:-7px;right:-7px;width:15px;height:15px;background:var(--red);border-radius:50%;display:none;align-items:center;justify-content:center;font-size:7px;font-weight:700;color:#fff;box-shadow:0 1px 4px rgba(220,38,38,0.45);}
+.blk.faulted .fbadge{display:flex;}
+.blk.faulted{border-color:var(--red-lt)!important;background:var(--red-bg)!important;animation:fpulse 2.2s ease-in-out infinite;}
+.blk.faulted .blk-lbl{color:var(--red);}
+@keyframes fpulse{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,0);}50%{box-shadow:0 0 0 4px rgba(220,38,38,0.12);}}
+.b-sensor{border-color:#93c5fd;color:var(--blue);}
+.b-ctrl{border-color:#67e8f9;color:var(--teal);}
+.b-motor{border-color:#fdba74;color:var(--orange);}
+.b-scope{border-color:#86efac;color:var(--green);}
+.scope-view-btn{position:absolute;bottom:-13px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;font-size:9px;font-weight:600;padding:2px 8px;border-radius:10px;cursor:pointer;white-space:nowrap;display:none;box-shadow:0 1px 4px rgba(22,163,74,0.3);}
+
+/* 层分隔 */
+.lay-lbl{position:absolute;top:14px;font-size:9px;color:var(--textm);font-family:'JetBrains Mono',monospace;pointer-events:none;background:var(--bg-base);padding:0 4px;}
+.lay-div{position:absolute;top:10px;bottom:10px;width:1px;background:var(--border-mid);pointer-events:none;opacity:0.6;}
+
+/* ── 仿真控制栏 ── */
+.simbar{
+  position:absolute;top:12px;left:50%;transform:translateX(-50%);
+  display:flex;align-items:center;gap:0;
+  background:var(--bg-panel);border:1.5px solid var(--border);
+  border-radius:9px;box-shadow:0 2px 10px rgba(30,58,95,0.1);
+  z-index:50;overflow:hidden;white-space:nowrap;
+}
+/* 左段：参数输入 */
+.simbar-params{display:flex;align-items:center;gap:0;padding:0 12px;border-right:1.5px solid var(--border);}
+.sim-field{display:flex;align-items:center;gap:5px;padding:7px 8px 7px 0;border-right:1px solid var(--border);margin-right:8px;}
+.sim-field:last-child{border-right:none;margin-right:0;}
+.sim-field-lbl{font-size:10px;color:var(--textm);white-space:nowrap;}
+.sim-field-inp{width:58px;border:1.5px solid var(--border);border-radius:4px;padding:3px 6px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);background:var(--bg-card);outline:none;transition:border-color 0.15s;text-align:right;}
+.sim-field-inp:focus{border-color:var(--blue);}
+/* 中段：实时模式开关 */
+.simbar-rt{display:flex;align-items:center;gap:7px;padding:7px 14px;border-right:1.5px solid var(--border);}
+.simbar-rt-lbl{font-size:11px;color:var(--text2);}
+/* Toggle */
+.toggle-wrap{position:relative;width:36px;height:20px;flex-shrink:0;}
+.toggle-wrap input{opacity:0;width:0;height:0;position:absolute;}
+.toggle-track{position:absolute;inset:0;border-radius:10px;background:var(--border-dark);cursor:pointer;transition:background 0.2s;}
+.toggle-wrap input:checked+.toggle-track{background:var(--green);}
+.toggle-thumb{position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.18);transition:transform 0.2s;pointer-events:none;}
+.toggle-wrap input:checked~.toggle-thumb{transform:translateX(16px);}
+/* 右段：操作按钮 */
+.simbar-btns{display:flex;align-items:center;}
+.sim-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:7px 14px;border:none;border-right:1px solid var(--border);background:transparent;cursor:pointer;transition:background 0.15s;min-width:56px;}
+.sim-btn:last-child{border-right:none;}
+.sim-btn:hover:not(.sim-btn-disabled){background:var(--bg-hover);}
+.sim-btn-disabled{opacity:0.35;cursor:not-allowed;}
+.sim-btn-icon{font-size:15px;line-height:1;}
+.sim-btn-lbl{font-size:10px;color:var(--text2);font-weight:500;}
+/* 运行按钮激活态 */
+.sim-btn-run.active .sim-btn-icon{color:var(--green);}
+.sim-btn-run.active .sim-btn-lbl{color:var(--green);}
+.sim-btn-run.active{background:var(--green-bg);}
+/* 终止按钮 */
+.sim-btn-stop .sim-btn-icon{color:var(--red);}
+.sim-btn-stop .sim-btn-lbl{color:var(--red);}
+.sim-btn-stop:hover{background:var(--red-bg)!important;}
+/* 运行中状态指示 */
+.sim-running-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:blink 1s ease-in-out infinite;display:none;}
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:0.3;}}
+
+/* ── 右侧属性面板 ── */
+.rpanel{width:210px;flex-shrink:0;background:var(--bg-panel);border-left:1.5px solid var(--border);display:flex;flex-direction:column;}
+.ph{padding:10px 14px 8px;font-size:10px;font-weight:600;letter-spacing:0.6px;color:var(--textm);text-transform:uppercase;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg-card);}
+.props-body{flex:1;overflow-y:auto;padding:10px;}
+.props-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;color:var(--textm);font-size:12px;text-align:center;}
+.pgroup{margin-bottom:14px;}
+.pglbl{font-size:9px;color:var(--textd);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;font-weight:600;}
+.prow{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);font-size:11px;}
+.pk{color:var(--text2);}
+.pv{color:var(--text);font-family:'JetBrains Mono',monospace;font-size:10px;}
+.pv-ok{color:var(--green);font-weight:600;}
+.pv-fault{color:var(--red);font-weight:600;}
+
+/* ── 状态栏 ── */
+.sbar{height:24px;background:var(--bg-panel);border-top:1.5px solid var(--border);display:flex;align-items:center;padding:0 14px;gap:16px;flex-shrink:0;}
+.si{display:flex;align-items:center;gap:5px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--textm);}
+.sdot{width:5px;height:5px;border-radius:50%;background:var(--textd);}
+.sdot-b{background:var(--blue);}
+.sdot-g{background:var(--green);}
+.sdot-r{background:var(--red);}
+
+/* ── 通用模态框 ── */
+.overlay{position:fixed;inset:0;background:rgba(30,58,95,0.2);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center;}
+.overlay.open{display:flex;}
+.modal{background:var(--bg-panel);border:1.5px solid var(--border);border-radius:10px;box-shadow:0 20px 48px rgba(30,58,95,0.16);display:flex;flex-direction:column;overflow:hidden;animation:mup 0.2s ease;}
+@keyframes mup{from{transform:translateY(12px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+.mhead{padding:13px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg-card);flex-shrink:0;}
+.mtitle{font-family:'Rajdhani',sans-serif;font-size:15px;font-weight:700;letter-spacing:0.2px;}
+.mclose{width:24px;height:24px;border-radius:4px;background:transparent;border:1px solid var(--border);color:var(--text2);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;transition:all 0.14s;}
+.mclose:hover{background:var(--bg-hover);color:var(--text);}
+.mbody{flex:1;overflow:hidden;display:flex;}
+.mfoot{padding:10px 18px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:flex-end;gap:8px;background:var(--bg-card);flex-shrink:0;}
+.btn-cancel{padding:5px 14px;border-radius:4px;border:1.5px solid var(--border);background:transparent;color:var(--text2);font-size:12px;cursor:pointer;transition:all 0.14s;}
+.btn-cancel:hover{background:var(--bg-hover);color:var(--text);}
+.btn-ok{padding:5px 16px;border-radius:4px;border:none;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.18s;}
+.btn-ok-b{background:var(--blue);color:#fff;}
+.btn-ok-b:hover{background:#155fa0;}
+.btn-ok-p{background:var(--purple);color:#fff;}
+.btn-ok-p:hover{background:#5b21b6;}
+.btn-ok-r{background:var(--red);color:#fff;}
+.btn-ok-r:hover{background:#b91c1c;}
+.btn-ok-g{background:var(--green);color:#fff;}
+.btn-ok-g:hover{background:#15803d;}
+
+/* ── 导入故障模型弹窗 ── */
+.ifm-body{flex:1;display:flex;flex-direction:column;gap:0;overflow:hidden;}
+.ifm-top{padding:14px 18px 10px;border-bottom:1px solid var(--border);}
+.ifm-drop{border:2px dashed var(--border-mid);border-radius:7px;padding:24px;text-align:center;cursor:pointer;transition:all 0.18s;background:var(--bg-card);}
+.ifm-drop:hover{border-color:var(--red);background:var(--red-bg);}
+.ifm-drop-icon{font-size:24px;margin-bottom:6px;}
+.ifm-drop-txt{font-size:12px;color:var(--text2);}
+.ifm-drop-sub{font-size:10px;color:var(--textm);margin-top:3px;}
+.ifm-list{flex:1;overflow-y:auto;padding:10px 18px;}
+.ifm-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:5px;border:1.5px solid var(--border);background:var(--bg-card);margin-bottom:6px;cursor:pointer;transition:all 0.14s;}
+.ifm-item:hover{border-color:var(--border-mid);background:var(--bg-hover);}
+.ifm-item.on{border-color:var(--red);background:var(--red-bg);}
+.ifm-icon{font-size:16px;}
+.ifm-name{font-size:12px;font-weight:500;color:var(--text);flex:1;}
+.ifm-meta{font-size:10px;color:var(--textm);font-family:'JetBrains Mono',monospace;}
+.ifm-divider{height:1px;background:var(--border);margin:8px 0;}
+.ifm-build-row{padding:10px 18px;border-top:1px solid var(--border);background:var(--bg-card);display:flex;align-items:center;gap:10px;flex-shrink:0;}
+.ifm-build-hint{font-size:11px;color:var(--textm);flex:1;}
+.btn-build-fault{display:flex;align-items:center;gap:5px;padding:6px 14px;border-radius:5px;border:1.5px solid var(--purple);background:var(--purple-bg);color:var(--purple);font-size:12px;font-weight:600;cursor:pointer;transition:all 0.18s;white-space:nowrap;}
+.btn-build-fault:hover{background:#ede9fe;}
+
+/* ── 模板库 ── */
+.tpl-cats{width:148px;border-right:1px solid var(--border);padding:8px 6px;overflow-y:auto;background:var(--bg-card);}
+.tcat-head{font-size:9px;color:var(--textd);letter-spacing:0.6px;padding:3px 6px 6px;text-transform:uppercase;font-weight:600;}
+.tpl-cat{display:flex;align-items:center;gap:6px;padding:6px 9px;border-radius:5px;cursor:pointer;font-size:12px;color:var(--text2);transition:all 0.14s;margin-bottom:2px;border:1px solid transparent;}
+.tpl-cat:hover{background:var(--blue-bg);color:var(--blue);}
+.tpl-cat.on{background:var(--purple-bg);border-color:#c4b5fd;color:var(--purple);font-weight:500;}
+.tpl-cnt{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:9px;opacity:0.65;}
+.tpl-grid{flex:1;padding:10px;overflow-y:auto;display:grid;grid-template-columns:repeat(2,1fr);gap:8px;align-content:start;}
+.tcard{background:var(--bg-panel);border:1.5px solid var(--border);border-radius:7px;padding:10px;cursor:pointer;transition:all 0.18s;}
+.tcard:hover{border-color:var(--border-mid);box-shadow:0 2px 8px rgba(30,58,95,0.08);}
+.tcard.on{border-color:#c4b5fd;background:var(--purple-bg);}
+.tcard-name{font-size:11px;font-weight:600;color:var(--text);margin-bottom:3px;}
+.tcard-desc{font-size:10px;color:var(--text2);line-height:1.4;margin-bottom:6px;}
+.tcard-tags{display:flex;gap:3px;flex-wrap:wrap;}
+.ttag{padding:2px 5px;border-radius:6px;font-size:8px;font-weight:500;font-family:'JetBrains Mono',monospace;}
+.tpl-detail{width:196px;border-left:1px solid var(--border);padding:12px;overflow-y:auto;background:var(--bg-card);}
+.tdph{color:var(--textd);font-size:11px;text-align:center;margin-top:50px;}
+.tdtitle{font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;}
+.tdlbl{font-size:9px;color:var(--textd);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;margin-top:9px;font-weight:600;}
+.tdval{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--purple);background:var(--purple-bg);padding:3px 7px;border-radius:3px;border:1px solid #ddd6fe;}
+
+/* ── 故障配置弹窗 ── */
+.cfg-form{flex:1;padding:14px 18px;overflow-y:auto;}
+.cfg-sec{margin-bottom:16px;}
+.cfg-sec-title{font-size:10px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;padding-bottom:4px;border-bottom:1.5px solid var(--red-border);}
+.cfg-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.cfg-f{display:flex;flex-direction:column;gap:3px;}
+.cfg-f label{font-size:10px;color:var(--text2);}
+.cfg-f select,.cfg-f input{background:var(--bg-card);border:1.5px solid var(--border);border-radius:4px;padding:5px 8px;color:var(--text);font-size:11px;font-family:'JetBrains Mono',monospace;outline:none;transition:border-color 0.18s;width:100%;}
+.cfg-f select:focus,.cfg-f input:focus{border-color:var(--red);}
+.layer-sel{display:flex;gap:5px;margin-bottom:8px;}
+.lbtn{flex:1;padding:6px 4px;border-radius:4px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--text2);font-size:11px;cursor:pointer;transition:all 0.18s;text-align:center;}
+.lbtn:hover{background:var(--bg-hover);}
+.lbtn.on{border-color:var(--red);background:var(--red-bg);color:var(--red);font-weight:600;}
+.cfg-prev{width:196px;border-left:1px solid var(--border);padding:12px;background:var(--bg-card);display:flex;flex-direction:column;gap:4px;flex-shrink:0;}
+.cprev-title{font-size:10px;color:var(--red);font-weight:700;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;}
+.cfg-tl{height:72px;border:1.5px solid var(--border);border-radius:4px;background:#f9fbfe;position:relative;overflow:hidden;margin-bottom:6px;}
+.srow{display:flex;justify-content:space-between;font-size:10px;padding:2px 0;border-bottom:1px solid var(--border);}
+.sk{color:var(--textm);}
+.sv{color:var(--text);font-family:'JetBrains Mono',monospace;font-size:9px;}
+
+/* ── 示波器 ── */
+.scope-ctrl{padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:9px;flex-shrink:0;background:var(--bg-card);}
+.scbtn{padding:4px 10px;border-radius:4px;border:1.5px solid var(--border);background:var(--bg-panel);color:var(--text2);font-size:10px;cursor:pointer;transition:all 0.14s;display:flex;align-items:center;gap:4px;}
+.scbtn:hover{background:var(--bg-hover);color:var(--text);}
+.scbtn.on{border-color:var(--red);color:var(--red);background:var(--red-bg);}
+.scope-legend{display:flex;gap:10px;margin-left:auto;font-size:10px;}
+.sleg{display:flex;align-items:center;gap:4px;color:var(--text2);}
+.slegdot{width:14px;height:2px;border-radius:1px;}
+.scope-channels{flex:1;padding:10px 14px;display:flex;flex-direction:column;gap:7px;overflow:hidden;}
+.scope-ch{flex:1;background:#f9fbfe;border:1.5px solid var(--border);border-radius:5px;position:relative;overflow:hidden;}
+.sch-lbl{position:absolute;top:5px;left:7px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--textm);z-index:1;}
+
+/* ── Toast ── */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--bg-panel);border:1.5px solid var(--border);border-radius:7px;padding:8px 16px;font-size:12px;color:var(--text);z-index:9999;box-shadow:0 6px 20px rgba(30,58,95,0.13);display:none;align-items:center;gap:7px;animation:mup 0.18s ease;white-space:nowrap;}
+.toast.on{display:flex;}
+.toast-w{border-color:var(--red-border);}
+.toast-s{border-color:#86efac;}
+.ti-w{color:var(--red);}
+.ti-s{color:var(--green);}
+</style>
+</head>
+<body>
+
+<!-- ═══ HEADER ═══ -->
+<header>
+  <div class="logo">
+    <div class="logo-badge">GZ</div>
+    <div class="logo-name">故障注入平台</div>
+  </div>
+
+  <!-- 三步流程条 -->
+  <div class="stepbar">
+    <div class="step-item active" data-s="1" id="s1">
+      <div class="step-pill"><div class="step-num" id="sn1">1</div><div class="step-lbl">系统建模</div></div>
+    </div>
+    <div class="step-arrow"></div>
+    <div class="step-item" data-s="2" id="s2">
+      <div class="step-pill"><div class="step-num" id="sn2">2</div><div class="step-lbl">故障注入</div></div>
+    </div>
+    <div class="step-arrow"></div>
+    <div class="step-item" data-s="3" id="s3">
+      <div class="step-pill"><div class="step-num" id="sn3">3</div><div class="step-lbl">仿真分析</div></div>
+    </div>
+  </div>
+
+  <!-- 右上角4个操作按钮 -->
+  <div class="toolbar">
+    <button class="tbtn tbtn-imp-sys" onclick="doImportSys()" id="btn-imp-sys">↑ 导入系统模型</button>
+    <button class="tbtn tbtn-imp-flt tbtn-disabled" onclick="doImportFault()" id="btn-imp-flt">↑ 导入故障模型</button>
+    <div class="tbtn-divider"></div>
+    <button class="tbtn tbtn-save-sys tbtn-disabled" onclick="doSaveSys()" id="btn-save-sys">↓ 保存系统模型</button>
+    <button class="tbtn tbtn-save-res tbtn-disabled" onclick="doSaveRes()" id="btn-save-res">↓ 保存仿真结果</button>
+  </div>
+</header>
+
+<!-- ═══ MAIN ═══ -->
+<main>
+  <!-- ── 左侧面板（4组） ── -->
+  <aside class="lpanel">
+    <div class="lscroll">
+
+      <!-- 1. 系统建模组件 -->
+      <div class="lgroup-head" onclick="toggleGroup('g1')">
+        <span class="lgroup-icon">🏗</span>
+        <span>系统建模组件</span>
+        <span class="lgroup-arrow open" id="arr-g1">▸</span>
+      </div>
+      <div class="lgroup-body" id="g1">
+        <div style="font-size:9px;color:var(--textd);padding:2px 4px 3px;font-weight:600;">传感器</div>
+        <div class="citem"><div class="cdot" style="background:#93c5fd"></div>IMU 惯性测量</div>
+        <div class="citem"><div class="cdot" style="background:#93c5fd"></div>GPS 定位模块</div>
+        <div class="citem"><div class="cdot" style="background:#93c5fd"></div>气压计 Baro</div>
+        <div class="citem"><div class="cdot" style="background:#93c5fd"></div>磁力计</div>
+        <div style="font-size:9px;color:var(--textd);padding:5px 4px 3px;font-weight:600;">控制器</div>
+        <div class="citem"><div class="cdot" style="background:#67e8f9"></div>飞控 FCU</div>
+        <div class="citem"><div class="cdot" style="background:#67e8f9"></div>电调驱动 ESC</div>
+        <div style="font-size:9px;color:var(--textd);padding:5px 4px 3px;font-weight:600;">执行器</div>
+        <div class="citem"><div class="cdot" style="background:#fdba74"></div>无刷电机</div>
+        <div class="citem"><div class="cdot" style="background:#fdba74"></div>舵机</div>
+      </div>
+
+      <!-- 2. 故障注入组件 -->
+      <div class="lgroup-head" onclick="toggleGroup('g2')">
+        <span class="lgroup-icon">⚠</span>
+        <span>故障注入组件</span>
+        <span class="lgroup-arrow open" id="arr-g2">▸</span>
+      </div>
+      <div class="lgroup-body" id="g2">
+        <div class="citem citem-fault"><span>⚡</span> 偏差注入块</div>
+        <div class="citem citem-fault"><span>⚡</span> 噪声注入块</div>
+        <div class="citem citem-fault"><span>⚡</span> 卡死注入块</div>
+        <div class="citem citem-fault"><span>⚡</span> 漂移注入块</div>
+      </div>
+
+      <!-- 3. 测量仪器组件 -->
+      <div class="lgroup-head" onclick="toggleGroup('g3')">
+        <span class="lgroup-icon">🔬</span>
+        <span>测量仪器组件</span>
+        <span class="lgroup-arrow open" id="arr-g3">▸</span>
+      </div>
+      <div class="lgroup-body" id="g3">
+        <div class="citem citem-scope" title="接入信号线，仿真后查看波形">🔭 示波器</div>
+        <div class="citem" style="color:var(--teal);border:1px solid #a5f3fc;background:#ecfeff;">📊 频谱分析仪</div>
+        <div class="citem" style="color:var(--blue);border:1px solid #93c5fd;background:#eff6ff;">📈 数据记录仪</div>
+      </div>
+
+      <!-- 4. 连接线组件 -->
+      <div class="lgroup-head" onclick="toggleGroup('g4')">
+        <span class="lgroup-icon">🔗</span>
+        <span>连接线组件</span>
+        <span class="lgroup-arrow open" id="arr-g4">▸</span>
+      </div>
+      <div class="lgroup-body" id="g4">
+        <div class="citem" style="color:var(--text2);">
+          <div style="width:18px;height:2px;background:var(--border-dark);border-radius:1px;flex-shrink:0;"></div>
+          普通连接线
+        </div>
+        <div class="citem citem-can">
+          <div style="width:18px;height:3px;background:var(--purple);border-radius:1px;flex-shrink:0;border:1px solid var(--purple);"></div>
+          CAN 总线
+        </div>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- ── 画布 ── -->
+  <div class="canvas-wrap" id="cw">
+    <div class="canvas-grid"></div>
+
+    <!-- ★ 仿真控制栏 ★ -->
+    <div class="simbar" id="simbar">
+      <div class="simbar-params">
+        <div class="sim-field">
+          <span class="sim-field-lbl">数据集名称</span>
+          <input class="sim-field-inp" id="sim-name" value="test" style="width:68px;text-align:left;">
+        </div>
+        <div class="sim-field">
+          <span class="sim-field-lbl">仿真时长</span>
+          <input class="sim-field-inp" id="sim-dur" value="1000" type="number" min="1">
+        </div>
+        <div class="sim-field" style="border-right:none;margin-right:0;">
+          <span class="sim-field-lbl">仿真步长</span>
+          <input class="sim-field-inp" id="sim-step" value="0.1" type="number" min="0.001" step="0.01">
+        </div>
+      </div>
+      <div class="simbar-rt">
+        <span class="simbar-rt-lbl">实时模式</span>
+        <label class="toggle-wrap">
+          <input type="checkbox" id="sim-rt" onchange="onRtToggle(this)">
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+      <div class="simbar-btns">
+        <button class="sim-btn sim-btn-disabled" id="sbtn-init" onclick="simInit()" title="初始化">
+          <span class="sim-btn-icon">⬇</span>
+          <span class="sim-btn-lbl">初始化</span>
+        </button>
+        <button class="sim-btn sim-btn-run sim-btn-disabled" id="sbtn-run" onclick="simRun()" title="运行">
+          <span class="sim-btn-icon" id="run-icon">▶</span>
+          <span class="sim-btn-lbl" id="run-lbl">运行</span>
+        </button>
+        <button class="sim-btn sim-btn-disabled" id="sbtn-step" onclick="simStep()" title="步进">
+          <span class="sim-btn-icon">⏭</span>
+          <span class="sim-btn-lbl">步进</span>
+        </button>
+        <button class="sim-btn sim-btn-disabled" id="sbtn-pause" onclick="simPause()" title="暂停">
+          <span class="sim-btn-icon">⏸</span>
+          <span class="sim-btn-lbl" id="pause-lbl">暂停</span>
+        </button>
+        <button class="sim-btn sim-btn-stop sim-btn-disabled" id="sbtn-stop" onclick="simStop()" title="终止">
+          <span class="sim-btn-icon">⏹</span>
+          <span class="sim-btn-lbl">终止</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="empty-state" id="empty">
+      <div class="empty-icon">📐</div>
+      <div class="empty-txt">请导入系统模型完成建模</div>
+      <div class="empty-sub">点击右上角「导入系统模型」开始</div>
+    </div>
+
+    <div class="diagram" id="diagram">
+      <svg id="csvg" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;">
+        <defs>
+          <marker id="ab" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto"><path d="M0,0L6,2.5L0,5Z" fill="#93c5fd"/></marker>
+          <marker id="ac" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto"><path d="M0,0L6,2.5L0,5Z" fill="#67e8f9"/></marker>
+          <marker id="ao" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto"><path d="M0,0L6,2.5L0,5Z" fill="#fdba74"/></marker>
+          <marker id="ag" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto"><path d="M0,0L6,2.5L0,5Z" fill="#86efac"/></marker>
+          <!-- CAN 紫色箭头 -->
+          <marker id="acan" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto"><path d="M0,0L6,2.5L0,5Z" fill="#a78bfa"/></marker>
+        </defs>
+        <!-- 普通信号线 -->
+        <path d="M193,163 C248,163 248,272 310,272" stroke="#93c5fd" stroke-width="1.5" fill="none" opacity="0.85" marker-end="url(#ab)"/>
+        <path d="M193,283 L310,283" stroke="#93c5fd" stroke-width="1.5" fill="none" opacity="0.85" marker-end="url(#ab)"/>
+        <path d="M193,393 C248,393 248,294 310,294" stroke="#93c5fd" stroke-width="1.5" fill="none" opacity="0.85" marker-end="url(#ab)"/>
+        <!-- CAN 总线 (粗线 + 紫色) -->
+        <path d="M462,283 L564,283" stroke="#a78bfa" stroke-width="2.5" fill="none" opacity="0.8" marker-end="url(#acan)" stroke-linecap="round"/>
+        <!-- 普通连接到电机 -->
+        <path d="M700,268 C748,268 748,155 808,155" stroke="#fdba74" stroke-width="1.4" fill="none" opacity="0.8" marker-end="url(#ao)"/>
+        <path d="M700,276 C748,276 748,246 808,246" stroke="#fdba74" stroke-width="1.4" fill="none" opacity="0.8" marker-end="url(#ao)"/>
+        <path d="M700,283 C748,283 748,332 808,332" stroke="#fdba74" stroke-width="1.4" fill="none" opacity="0.8" marker-end="url(#ao)"/>
+        <path d="M700,291 C748,291 748,422 808,422" stroke="#fdba74" stroke-width="1.4" fill="none" opacity="0.8" marker-end="url(#ao)"/>
+        <!-- 示波器虚线 -->
+        <path d="M218,205 L218,455 L310,455" stroke="#86efac" stroke-width="1.2" fill="none" opacity="0.75" stroke-dasharray="5,3" marker-end="url(#ag)"/>
+        <!-- CAN 标注 -->
+        <rect x="478" y="268" width="36" height="13" rx="3" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1"/>
+        <text x="496" y="278" font-family="JetBrains Mono,monospace" font-size="8" fill="#6d28d9" text-anchor="middle">CAN</text>
+      </svg>
+
+      <div class="lay-lbl" style="left:74px">传感器层</div>
+      <div class="lay-div" style="left:228px"></div>
+      <div class="lay-lbl" style="left:332px">控制层</div>
+      <div class="lay-div" style="left:796px"></div>
+      <div class="lay-lbl" style="left:812px">执行层</div>
+
+      <div class="blk b-sensor" id="b-imu" style="left:80px;top:138px;width:113px;height:50px" onclick="selBlk('imu')">
+        <div class="fbadge">F</div><div class="blk-lbl">IMU</div><div class="blk-sub">惯性测量单元</div>
+      </div>
+      <div class="blk b-sensor" id="b-gps" style="left:80px;top:258px;width:113px;height:50px" onclick="selBlk('gps')">
+        <div class="fbadge">F</div><div class="blk-lbl">GPS</div><div class="blk-sub">定位模块</div>
+      </div>
+      <div class="blk b-sensor" id="b-baro" style="left:80px;top:368px;width:113px;height:50px" onclick="selBlk('baro')">
+        <div class="fbadge">F</div><div class="blk-lbl">气压计</div><div class="blk-sub">Barometer</div>
+      </div>
+      <div class="blk b-ctrl" id="b-fcu" style="left:310px;top:238px;width:152px;height:96px" onclick="selBlk('fcu')">
+        <div class="fbadge">F</div><div class="blk-lbl">飞控 FCU</div><div class="blk-sub">Flight Controller</div>
+      </div>
+      <div class="blk b-ctrl" id="b-esc" style="left:564px;top:253px;width:136px;height:60px" onclick="selBlk('esc')">
+        <div class="fbadge">F</div><div class="blk-lbl">ESC 驱动</div><div class="blk-sub">电调控制器</div>
+      </div>
+      <div class="blk b-motor" id="b-m1" style="left:808px;top:133px;width:112px;height:44px" onclick="selBlk('m1')">
+        <div class="fbadge">F</div><div class="blk-lbl">Motor 1</div><div class="blk-sub">前左旋翼</div>
+      </div>
+      <div class="blk b-motor" id="b-m2" style="left:808px;top:224px;width:112px;height:44px" onclick="selBlk('m2')">
+        <div class="fbadge">F</div><div class="blk-lbl">Motor 2</div><div class="blk-sub">前右旋翼</div>
+      </div>
+      <div class="blk b-motor" id="b-m3" style="left:808px;top:310px;width:112px;height:44px" onclick="selBlk('m3')">
+        <div class="fbadge">F</div><div class="blk-lbl">Motor 3</div><div class="blk-sub">后左旋翼</div>
+      </div>
+      <div class="blk b-motor" id="b-m4" style="left:808px;top:400px;width:112px;height:44px" onclick="selBlk('m4')">
+        <div class="fbadge">F</div><div class="blk-lbl">Motor 4</div><div class="blk-sub">后右旋翼</div>
+      </div>
+      <div class="blk b-scope" id="b-scope" style="left:310px;top:430px;width:120px;height:50px" onclick="selBlk('scope')">
+        <div class="blk-lbl">🔭 示波器</div><div class="blk-sub">CH1: IMU-Ax</div>
+        <div class="scope-view-btn" id="svb" onclick="event.stopPropagation();openScope()">查看波形 ▸</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 右侧属性面板 ── -->
+  <aside class="rpanel">
+    <div class="ph">属性面板</div>
+    <div class="props-body">
+      <div class="props-empty" id="pe">
+        <div style="font-size:24px;opacity:0.2">◻</div>
+        <div>点击元件查看属性</div>
+      </div>
+      <div id="pd" style="display:none"></div>
+    </div>
+  </aside>
+</main>
+
+<!-- 状态栏 -->
+<div class="sbar">
+  <div class="si"><div class="sdot" id="sdot"></div><span id="stxt">就绪 · 等待导入系统模型</span></div>
+  <div class="si" style="margin-left:auto"><span id="sblk">元件: 0</span></div>
+  <div class="si"><span id="sflt">故障模型: 0</span></div>
+  <div class="si"><span style="color:var(--border-mid)">│</span><span>故障注入平台</span></div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"><span id="ti"></span><span id="tm"></span></div>
+
+
+<!-- ═══ 弹窗1：导入故障模型 ═══ -->
+<div class="overlay" id="ov-ifm">
+  <div class="modal" style="width:520px;height:480px;">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--red)">↑ 导入故障模型</div>
+      <button class="mclose" onclick="closeOv('ov-ifm')">✕</button>
+    </div>
+    <div class="mbody" style="flex-direction:column;">
+      <div class="ifm-body">
+        <!-- 文件拖放区 -->
+        <div class="ifm-top">
+          <div class="ifm-drop" onclick="simulateFileImport()">
+            <div class="ifm-drop-icon">📂</div>
+            <div class="ifm-drop-txt">点击选择 或 拖拽故障模型文件</div>
+            <div class="ifm-drop-sub">支持 .flt · .json · .xml 格式</div>
+          </div>
+        </div>
+        <!-- 已有文件列表 -->
+        <div class="ifm-list">
+          <div style="font-size:9px;color:var(--textd);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">已有故障模型</div>
+          <div class="ifm-item on" id="ifm-i1">
+            <div class="ifm-icon">⚡</div>
+            <div>
+              <div class="ifm-name">IMU偏差故障模型</div>
+              <div class="ifm-meta">Bias · 物理层 · 2024-03-12</div>
+            </div>
+          </div>
+          <div class="ifm-item" id="ifm-i2" onclick="selectFaultFile(this)">
+            <div class="ifm-icon">⚡</div>
+            <div>
+              <div class="ifm-name">ESC过流保护模型</div>
+              <div class="ifm-meta">Overcurrent · 电气层 · 2024-03-10</div>
+            </div>
+          </div>
+          <div class="ifm-item" id="ifm-i3" onclick="selectFaultFile(this)">
+            <div class="ifm-icon">⚡</div>
+            <div>
+              <div class="ifm-name">CAN总线丢包模型</div>
+              <div class="ifm-meta">Packet Loss · 协议层 · 2024-03-08</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- ★ 故障建模入口行 ★ -->
+      <div class="ifm-build-row">
+        <div class="ifm-build-hint">没有合适的模型？从模板库新建</div>
+        <button class="btn-build-fault" onclick="openFaultBuild()">⚡ 故障建模</button>
+      </div>
+    </div>
+    <div class="mfoot">
+      <div style="flex:1;font-size:11px;color:var(--textm)" id="ifm-sel-hint">已选：IMU偏差故障模型</div>
+      <button class="btn-cancel" onclick="closeOv('ov-ifm')">取消</button>
+      <button class="btn-ok btn-ok-r" onclick="confirmImportFault()">确认导入</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══ 弹窗2：故障建模（模板库） ═══ -->
+<div class="overlay" id="ov-tpl">
+  <div class="modal" style="width:820px;height:530px">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--purple)">⚡ 故障建模 · 模板库</div>
+      <button class="mclose" onclick="closeOv('ov-tpl')">✕</button>
+    </div>
+    <div class="mbody">
+      <div class="tpl-cats">
+        <div class="tcat-head">故障层级</div>
+        <div class="tpl-cat on" onclick="setCat(this,'physical')"><span>🔧</span><span>物理层</span><span class="tpl-cnt">5</span></div>
+        <div class="tpl-cat" onclick="setCat(this,'electrical')"><span>⚡</span><span>电气层</span><span class="tpl-cnt">4</span></div>
+        <div class="tpl-cat" onclick="setCat(this,'protocol')"><span>📡</span><span>协议层</span><span class="tpl-cnt">4</span></div>
+        <div style="height:1px;background:var(--border);margin:8px 4px"></div>
+        <div class="tcat-head">已选模板</div>
+        <div id="sel-list"><div style="font-size:10px;color:var(--textd);text-align:center;margin-top:6px">暂无</div></div>
+      </div>
+      <div class="tpl-grid" id="tgrid"></div>
+      <div class="tpl-detail" id="tdetail"><div class="tdph">← 选择模板查看详情</div></div>
+    </div>
+    <div class="mfoot">
+      <div style="flex:1;font-size:11px;color:var(--textm)" id="sel-cnt">已选 0 个故障模板</div>
+      <button class="btn-cancel" onclick="backToImport()">← 返回导入</button>
+      <button class="btn-ok btn-ok-p" onclick="confirmFM()">✓ 确认建模</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══ 弹窗3：故障配置 ═══ -->
+<div class="overlay" id="ov-cfg">
+  <div class="modal" style="width:680px;height:490px">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--red)">⚙ 故障配置 · 注入参数</div>
+      <button class="mclose" onclick="closeOv('ov-cfg')">✕</button>
+    </div>
+    <div class="mbody">
+      <div class="cfg-form">
+        <div class="cfg-sec">
+          <div class="cfg-sec-title">目标组件</div>
+          <div class="cfg-grid">
+            <div class="cfg-f"><label>注入位置</label>
+              <select id="cftgt" onchange="upPrev()">
+                <option>IMU · 惯性测量单元</option><option>GPS · 定位模块</option>
+                <option>气压计 · Barometer</option><option>飞控 FCU</option><option>ESC 驱动</option>
+              </select>
+            </div>
+            <div class="cfg-f"><label>故障模型</label><select id="cfmdl" onchange="upPrev()"></select></div>
+          </div>
+        </div>
+        <div class="cfg-sec">
+          <div class="cfg-sec-title">注入层级</div>
+          <div class="layer-sel">
+            <div class="lbtn on" onclick="setLayer(this,'物理层')">🔧 物理层</div>
+            <div class="lbtn" onclick="setLayer(this,'电气层')">⚡ 电气层</div>
+            <div class="lbtn" onclick="setLayer(this,'协议层')">📡 协议层</div>
+          </div>
+        </div>
+        <div class="cfg-sec">
+          <div class="cfg-sec-title">故障模式</div>
+          <div class="cfg-grid">
+            <div class="cfg-f"><label>故障类型</label>
+              <select id="cftype" onchange="upPrev()">
+                <option>固定偏差 (Bias)</option><option>随机噪声 (Noise)</option>
+                <option>卡死 (Stuck-at)</option><option>缓变漂移 (Drift)</option><option>增益错误 (Gain)</option>
+              </select>
+            </div>
+            <div class="cfg-f"><label>持续方式</label>
+              <select id="cfpers" onchange="upPrev()">
+                <option>永久性 (Permanent)</option><option>间歇性 (Intermittent)</option><option>瞬态 (Transient)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="cfg-sec">
+          <div class="cfg-sec-title">时序参数</div>
+          <div class="cfg-grid">
+            <div class="cfg-f"><label>注入起始时间 (s)</label><input type="number" id="cfs" value="5.0" step="0.5" min="0" oninput="upPrev()"></div>
+            <div class="cfg-f"><label>持续时长 (s)</label><input type="number" id="cfd" value="3.0" step="0.5" min="0.1" oninput="upPrev()"></div>
+            <div class="cfg-f"><label>故障幅度</label><input type="number" id="cfmag" value="0.5" step="0.1" oninput="upPrev()"></div>
+            <div class="cfg-f"><label>仿真总时长 (s)</label><input type="number" id="cftot" value="20.0" step="1" min="1" oninput="upPrev()"></div>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-prev">
+        <div class="cprev-title">📊 配置预览</div>
+        <div style="font-size:9px;color:var(--textm);margin-bottom:4px">时序示意</div>
+        <div class="cfg-tl"><svg id="ctlsvg" width="100%" height="100%">
+          <polyline id="tln" points="" stroke="#c2d6ea" stroke-width="1" fill="none"/>
+          <rect id="tlr" x="0" y="0" width="0" height="100%" fill="rgba(220,38,38,0.07)"/>
+          <polyline id="tlf" points="" stroke="#dc2626" stroke-width="1.5" fill="none"/>
+          <line id="tll" x1="0" y1="0" x2="0" y2="72" stroke="#dc2626" stroke-width="1" stroke-dasharray="3,2" opacity="0.6"/>
+        </svg></div>
+        <div id="csumm" style="display:flex;flex-direction:column;gap:2px"></div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <button class="btn-cancel" onclick="closeOv('ov-cfg')">取消</button>
+      <button class="btn-ok btn-ok-r" onclick="confirmFC()">💾 保存配置</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══ 弹窗4：示波器 ═══ -->
+<div class="overlay" id="ov-scope">
+  <div class="modal" style="width:720px;height:450px">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--green)">🔭 示波器 · 波形查看</div>
+      <button class="mclose" onclick="closeOv('ov-scope')">✕</button>
+    </div>
+    <div class="mbody" style="flex-direction:column">
+      <div class="scope-ctrl">
+        <button class="scbtn">▶ 播放</button>
+        <button class="scbtn">⏸ 暂停</button>
+        <button class="scbtn" id="scmp" onclick="togCmp()">⚖ 对比模式</button>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--textm)">采样率: 64kHz &nbsp;│&nbsp; 0 ~ 20s</div>
+        <div class="scope-legend">
+          <div class="sleg"><div class="slegdot" style="background:var(--blue)"></div><span>正常</span></div>
+          <div class="sleg" id="sleg-f" style="display:none"><div class="slegdot" style="background:var(--red)"></div><span>故障</span></div>
+        </div>
+      </div>
+      <div class="scope-channels">
+        <div class="scope-ch" style="flex:2">
+          <div class="sch-lbl">CH1 · IMU Ax [m/s²]</div>
+          <canvas id="sc1" style="width:100%;height:100%"></canvas>
+        </div>
+        <div class="scope-ch" style="flex:1">
+          <div class="sch-lbl">CH2 · 频谱 [dB]</div>
+          <canvas id="sc2" style="width:100%;height:100%"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <button class="btn-ok btn-ok-g" onclick="closeOv('ov-scope')">关闭</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+// ─── 状态 ───
+const S={step:1,sysLoaded:false,faultLoaded:false,faultModels:0,simDone:false,selBlk:null,selTpls:[],faultedBlks:[],cmpMode:false,activeLayer:'物理层'};
+
+const BPROPS={
+  imu:{n:'IMU 惯性测量单元',t:'传感器',m:'MPU-6050',out:'加速度/角速度',f:'400Hz',bus:'SPI'},
+  gps:{n:'GPS 定位模块',t:'传感器',m:'u-blox M8N',out:'位置/速度',f:'10Hz',bus:'UART'},
+  baro:{n:'气压计',t:'传感器',m:'MS5611',out:'高度/气压',f:'100Hz',bus:'I2C'},
+  fcu:{n:'飞控 FCU',t:'控制器',m:'PX4 v1.13',out:'PWM×4/MAVLink',f:'1kHz',bus:'CAN/UART'},
+  esc:{n:'ESC 电调驱动',t:'驱动器',m:'BLHeli32',out:'三相PWM',f:'48kHz',bus:'DSHOT600'},
+  m1:{n:'Motor 1 前左',t:'执行器',m:'T-Motor F40',out:'推力/扭矩',f:'—',bus:'直驱'},
+  m2:{n:'Motor 2 前右',t:'执行器',m:'T-Motor F40',out:'推力/扭矩',f:'—',bus:'直驱'},
+  m3:{n:'Motor 3 后左',t:'执行器',m:'T-Motor F40',out:'推力/扭矩',f:'—',bus:'直驱'},
+  m4:{n:'Motor 4 后右',t:'执行器',m:'T-Motor F40',out:'推力/扭矩',f:'—',bus:'直驱'},
+  scope:{n:'示波器',t:'测量仪器',m:'Virtual Scope',out:'波形/频谱',f:'64kHz',bus:'数字接口'}
+};
+
+const TPLS={
+  physical:[
+    {id:'ph1',name:'传感器偏差注入',desc:'叠加固定偏置，模拟安装误差或校准失效',tags:['Bias','永久性'],c:'#6d28d9'},
+    {id:'ph2',name:'随机噪声扰动',desc:'注入白噪声，模拟电磁干扰效应',tags:['Noise','连续'],c:'#6d28d9'},
+    {id:'ph3',name:'卡死故障',desc:'输出锁定固定值，模拟传感器完全失效',tags:['Stuck','永久性'],c:'#6d28d9'},
+    {id:'ph4',name:'缓变漂移',desc:'输出随时间偏移，模拟热漂移或老化',tags:['Drift','渐变'],c:'#6d28d9'},
+    {id:'ph5',name:'增益倍率错误',desc:'幅值异常缩放，模拟放大器故障',tags:['Gain','乘性'],c:'#6d28d9'}
+  ],
+  electrical:[
+    {id:'el1',name:'电源电压扰动',desc:'注入纹波或瞬时压降，模拟电源管理失效',tags:['电压','瞬态'],c:'#b45309'},
+    {id:'el2',name:'信号线短路',desc:'模拟两路信号线短接导致数据混叠',tags:['短路','永久性'],c:'#b45309'},
+    {id:'el3',name:'断路 / 开路',desc:'导线断裂或接头松动引发信号中断',tags:['断路','间歇'],c:'#b45309'},
+    {id:'el4',name:'过流保护触发',desc:'模拟电机过载导致ESC过流保护切断',tags:['过流','响应'],c:'#b45309'}
+  ],
+  protocol:[
+    {id:'pr1',name:'数据包丢失',desc:'随机丢弃通信帧，模拟无线链路质量下降',tags:['丢包','随机'],c:'#0e6e85'},
+    {id:'pr2',name:'通信延迟注入',desc:'为消息引入可配置延迟，模拟总线拥塞',tags:['延迟','时序'],c:'#0e6e85'},
+    {id:'pr3',name:'位翻转 (Bit Flip)',desc:'随机翻转数据帧中某位，模拟EMI位错误',tags:['BitFlip','EMI'],c:'#0e6e85'},
+    {id:'pr4',name:'数据重放攻击',desc:'重复发送历史帧，模拟恶意回放',tags:['重放','安全'],c:'#0e6e85'}
+  ]
+};
+
+let curCat='physical';
+renderTpls('physical');
+updateUI();
+
+// ─── UI 更新 ───
+function updateUI(){
+  // 步骤条（3步）
+  [1,2,3].forEach(i=>{
+    const el=document.getElementById('s'+i);
+    const nm=document.getElementById('sn'+i);
+    el.classList.remove('active','done');
+    if(i<S.step){el.classList.add('done');nm.textContent='✓';}
+    else if(i===S.step){el.classList.add('active');nm.textContent=i;}
+    else nm.textContent=i;
+  });
+
+  // 工具栏按钮状态
+  const impFlt=document.getElementById('btn-imp-flt');
+  const savSys=document.getElementById('btn-save-sys');
+  const savRes=document.getElementById('btn-save-res');
+  if(S.sysLoaded){
+    impFlt.classList.remove('tbtn-disabled');impFlt.classList.add('ready');
+    savSys.classList.remove('tbtn-disabled');savSys.classList.add('ready');
+  }else{
+    impFlt.classList.add('tbtn-disabled');savSys.classList.add('tbtn-disabled');
+  }
+  if(S.simDone){savRes.classList.remove('tbtn-disabled');savRes.classList.add('ready');}
+  else savRes.classList.add('tbtn-disabled');
+
+  // 状态栏
+  const labels=['就绪 · 等待导入系统模型','系统建模完成 · 进行故障注入','故障配置完成 · 仿真分析'];
+  document.getElementById('stxt').textContent=labels[S.step-1];
+  const sd=document.getElementById('sdot');
+  sd.className='sdot'+['','sdot-b','sdot-r','sdot-g'][S.step];
+  document.getElementById('sblk').textContent=`元件: ${S.sysLoaded?10:0}`;
+  document.getElementById('sflt').textContent=`故障模型: ${S.faultModels}`;
+  const svb=document.getElementById('svb');
+  if(svb)svb.style.display=S.simDone?'block':'none';
+  updateSimbarEnabled();
+}
+
+// ─── 分组折叠 ───
+function toggleGroup(id){
+  const body=document.getElementById(id);
+  const arr=document.getElementById('arr-'+id);
+  const open=body.style.display!=='none';
+  body.style.display=open?'none':'block';
+  arr.classList.toggle('open',!open);
+}
+
+// ─── 右上角按钮 ───
+function doImportSys(){
+  const btn=document.getElementById('btn-imp-sys');
+  btn.textContent='⏳ 导入中...';btn.disabled=true;
+  setTimeout(()=>{
+    btn.innerHTML='↑ 导入系统模型';btn.disabled=false;
+    S.sysLoaded=true;S.step=2;
+    document.getElementById('empty').style.display='none';
+    document.getElementById('diagram').classList.add('on');
+    toast('系统故障传播模型导入成功，飞控系统已载入','s');
+    updateUI();
+  },1000);
+}
+
+function doImportFault(){
+  if(!S.sysLoaded){toast('请先导入系统模型','w');return;}
+  openOv('ov-ifm');
+}
+
+function doSaveSys(){
+  if(!S.sysLoaded){toast('请先完成系统建模','w');return;}
+  toast('系统模型已保存','s');
+}
+
+function doSaveRes(){
+  if(!S.simDone){toast('请先完成仿真配置','w');return;}
+  toast('仿真结果已保存','s');
+}
+
+// ─── 导入故障模型弹窗 ───
+function simulateFileImport(){
+  toast('请选择 .flt / .json / .xml 格式的故障模型文件','w');
+}
+
+function selectFaultFile(el){
+  document.querySelectorAll('.ifm-item').forEach(e=>e.classList.remove('on'));
+  el.classList.add('on');
+  document.getElementById('ifm-sel-hint').textContent='已选：'+el.querySelector('.ifm-name').textContent;
+}
+
+function openFaultBuild(){
+  // 从"导入故障模型"跳到"故障建模"
+  closeOv('ov-ifm');
+  openOv('ov-tpl');
+}
+
+function backToImport(){
+  closeOv('ov-tpl');
+  openOv('ov-ifm');
+}
+
+function confirmImportFault(){
+  S.faultLoaded=true;
+  const selName=document.getElementById('ifm-sel-hint').textContent.replace('已选：','');
+  closeOv('ov-ifm');
+  // 如果还未建模，触发故障配置
+  if(S.faultModels===0){
+    S.faultModels=1;
+    S.faultedBlks=['imu'];
+    document.getElementById('b-imu').classList.add('faulted');
+  }
+  S.step=3;S.simDone=true;
+  toast(`故障模型「${selName}」已导入并应用`,'s');
+  updateUI();
+  // 打开配置
+  setTimeout(()=>{
+    const sel=document.getElementById('cfmdl');
+    sel.innerHTML=`<option>${selName}</option>`;
+    upPrev();openOv('ov-cfg');
+  },300);
+}
+
+// ─── 模板库 ───
+function setCat(el,cat){
+  document.querySelectorAll('.tpl-cat').forEach(e=>e.classList.remove('on'));
+  el.classList.add('on');curCat=cat;renderTpls(cat);
+}
+
+function renderTpls(cat){
+  const g=document.getElementById('tgrid');g.innerHTML='';
+  (TPLS[cat]||[]).forEach(t=>{
+    const sel=S.selTpls.some(s=>s.id===t.id);
+    const d=document.createElement('div');
+    d.className='tcard'+(sel?' on':'');
+    d.innerHTML=`<div class="tcard-name">${t.name}</div>
+      <div class="tcard-desc">${t.desc}</div>
+      <div class="tcard-tags">${t.tags.map(tag=>`<span class="ttag" style="background:color-mix(in srgb,${t.c} 10%,#fff);color:${t.c};border:1px solid color-mix(in srgb,${t.c} 20%,#e5e7eb)">${tag}</span>`).join('')}</div>`;
+    d.onclick=()=>toggleTpl(t,d);
+    g.appendChild(d);
+  });
+}
+
+function toggleTpl(t,card){
+  const i=S.selTpls.findIndex(s=>s.id===t.id);
+  if(i>=0){S.selTpls.splice(i,1);card.classList.remove('on');}
+  else{S.selTpls.push(t);card.classList.add('on');}
+  document.getElementById('sel-cnt').textContent=`已选 ${S.selTpls.length} 个故障模板`;
+  document.getElementById('sel-list').innerHTML=S.selTpls.length===0
+    ?'<div style="font-size:10px;color:var(--textd);text-align:center;margin-top:6px">暂无</div>'
+    :S.selTpls.map(x=>`<div style="font-size:10px;color:var(--purple);padding:3px 6px;border-radius:3px;background:var(--purple-bg);margin-bottom:2px;border:1px solid #ddd6fe">⚡ ${x.name}</div>`).join('');
+  showTplDetail(t);
+}
+
+function showTplDetail(t){
+  document.getElementById('tdetail').innerHTML=`
+    <div class="tdtitle">${t.name}</div>
+    <div style="font-size:10px;color:var(--text2);line-height:1.5;margin-bottom:10px">${t.desc}</div>
+    <div class="tdlbl">故障类别</div><div class="tdval">${t.tags[0]}</div>
+    <div class="tdlbl">持续特性</div><div class="tdval">${t.tags[1]||'—'}</div>
+    <div class="tdlbl">适用场景</div>
+    <div style="font-size:10px;color:var(--text2);margin-top:3px;line-height:1.5">传感器失效 / 环境干扰<br>系统退化仿真</div>
+    <div class="tdlbl">幅度范围</div><div class="tdval">±0.01 ~ ±10.0</div>`;
+}
+
+function confirmFM(){
+  if(S.selTpls.length===0){toast('请至少选择一个故障模板','w');return;}
+  S.faultModels+=S.selTpls.length;
+  S.faultedBlks=['imu'];
+  document.getElementById('b-imu').classList.add('faulted');
+  closeOv('ov-tpl');
+  // 返回导入页
+  openOv('ov-ifm');
+  // 更新导入页的已有模型列表（追加新模型）
+  const list=document.querySelector('.ifm-list');
+  S.selTpls.forEach(t=>{
+    const d=document.createElement('div');
+    d.className='ifm-item';d.onclick=()=>selectFaultFile(d);
+    d.innerHTML=`<div class="ifm-icon">⚡</div><div><div class="ifm-name">${t.name}</div><div class="ifm-meta">${t.tags[0]} · 新建 · ${new Date().toLocaleDateString('zh-CN')}</div></div>`;
+    list.appendChild(d);
+  });
+  toast(`已新建 ${S.selTpls.length} 个故障模型，返回导入页面`,'s');
+  S.selTpls=[];
+  document.getElementById('sel-cnt').textContent='已选 0 个故障模板';
+  document.getElementById('sel-list').innerHTML='<div style="font-size:10px;color:var(--textd);text-align:center;margin-top:6px">暂无</div>';
+  updateUI();
+}
+
+// ─── 故障配置 ───
+function setLayer(el,l){
+  document.querySelectorAll('.lbtn').forEach(e=>e.classList.remove('on'));
+  el.classList.add('on');S.activeLayer=l;upPrev();
+}
+
+function upPrev(){
+  const s=parseFloat(document.getElementById('cfs')?.value)||5;
+  const d=parseFloat(document.getElementById('cfd')?.value)||3;
+  const tot=parseFloat(document.getElementById('cftot')?.value)||20;
+  const mag=parseFloat(document.getElementById('cfmag')?.value)||0.5;
+  const typ=document.getElementById('cftype')?.value||'';
+  const svg=document.getElementById('ctlsvg');if(!svg)return;
+  const W=svg.clientWidth||170,H=72,mid=H/2;
+  const tx=t=>(t/tot)*W;
+  const sx=tx(s),ex=tx(Math.min(s+d,tot));
+  document.getElementById('tlr').setAttribute('x',sx);
+  document.getElementById('tlr').setAttribute('width',ex-sx);
+  document.getElementById('tll').setAttribute('x1',sx);document.getElementById('tll').setAttribute('x2',sx);
+  let np=[],fp=[];
+  for(let i=0;i<=60;i++){
+    const t=(i/60)*tot,x=tx(t),y=mid+Math.sin(t*2)*10;
+    np.push(`${x},${y}`);
+    let fy=y;
+    if(t>=s&&t<=s+d){
+      if(typ.includes('卡死'))fy=mid+18;
+      else if(typ.includes('漂移'))fy=y+(t-s)*mag*4;
+      else fy=y+mag*18;
+    }
+    fp.push(`${x},${Math.max(4,Math.min(H-4,fy))}`);
+  }
+  document.getElementById('tln').setAttribute('points',np.join(' '));
+  document.getElementById('tlf').setAttribute('points',fp.join(' '));
+  const tgt=document.getElementById('cftgt')?.value||'IMU';
+  document.getElementById('csumm').innerHTML=`
+    <div class="srow"><span class="sk">目标</span><span class="sv">${tgt.split('·')[0].trim()}</span></div>
+    <div class="srow"><span class="sk">层级</span><span class="sv">${S.activeLayer}</span></div>
+    <div class="srow"><span class="sk">类型</span><span class="sv">${typ.split('(')[0].trim()}</span></div>
+    <div class="srow"><span class="sk">起始</span><span class="sv">${s}s</span></div>
+    <div class="srow"><span class="sk">时长</span><span class="sv">${d}s</span></div>
+    <div class="srow"><span class="sk">幅度</span><span class="sv">${mag}</span></div>`;
+}
+
+function confirmFC(){
+  S.simDone=true;S.step=3;
+  closeOv('ov-cfg');
+  toast('故障配置已保存，可运行仿真并保存结果','s');
+  updateUI();
+}
+
+// ─── 元件属性 ───
+function selBlk(id){
+  if(S.selBlk){document.getElementById('b-'+S.selBlk)?.classList.remove('sel');}
+  S.selBlk=id;
+  document.getElementById('b-'+id)?.classList.add('sel');
+  const p=BPROPS[id];if(!p)return;
+  document.getElementById('pe').style.display='none';
+  const pd=document.getElementById('pd');pd.style.display='block';
+  const fault=S.faultedBlks.includes(id);
+  pd.innerHTML=`
+    <div class="pgroup"><div class="pglbl">基本信息</div>
+      <div class="prow"><span class="pk">名称</span><span class="pv">${p.n}</span></div>
+      <div class="prow"><span class="pk">类型</span><span class="pv">${p.t}</span></div>
+      <div class="prow"><span class="pk">型号</span><span class="pv">${p.m}</span></div>
+    </div>
+    <div class="pgroup"><div class="pglbl">接口参数</div>
+      <div class="prow"><span class="pk">输出</span><span class="pv">${p.out}</span></div>
+      <div class="prow"><span class="pk">频率</span><span class="pv">${p.f}</span></div>
+      <div class="prow"><span class="pk">总线</span><span class="pv">${p.bus}</span></div>
+    </div>
+    <div class="pgroup"><div class="pglbl">故障状态</div>
+      <div class="prow"><span class="pk">状态</span><span class="pv ${fault?'pv-fault':'pv-ok'}">${fault?'⚠ 故障注入':'✓ 正常'}</span></div>
+      ${fault?'<div class="prow"><span class="pk">类型</span><span class="pv pv-fault">偏差注入</span></div>':''}
+    </div>
+    ${id==='scope'&&S.simDone?`<div class="pgroup"><button onclick="openScope()" style="width:100%;padding:6px;border-radius:4px;border:1.5px solid #86efac;background:var(--green-bg);color:var(--green);font-size:11px;cursor:pointer;font-weight:500">🔭 查看波形</button></div>`:''}`;
+}
+
+// ─── 示波器 ───
+function openScope(){openOv('ov-scope');}
+function togCmp(){
+  S.cmpMode=!S.cmpMode;
+  document.getElementById('scmp').classList.toggle('on',S.cmpMode);
+  document.getElementById('sleg-f').style.display=S.cmpMode?'flex':'none';
+  drawScope();
+}
+function drawScope(){drawCh1();drawCh2();}
+function drawCh1(){
+  const c=document.getElementById('sc1');if(!c)return;
+  c.width=c.offsetWidth;c.height=c.offsetHeight;
+  const ctx=c.getContext('2d'),W=c.width,H=c.height,mid=H/2;
+  ctx.strokeStyle='#e2eef8';ctx.lineWidth=0.5;
+  for(let x=0;x<W;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+  for(let y=0;y<H;y+=25){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+  ctx.strokeStyle='#c2d6ea';ctx.lineWidth=0.8;ctx.beginPath();ctx.moveTo(0,mid);ctx.lineTo(W,mid);ctx.stroke();
+  ctx.strokeStyle='#1d6fbf';ctx.lineWidth=1.5;ctx.beginPath();
+  for(let i=0;i<W;i++){
+    const t=(i/W)*20,y=mid-Math.sin(t*3)*18-Math.sin(t*7)*4+(Math.random()*1.2);
+    i===0?ctx.moveTo(i,y):ctx.lineTo(i,y);
+  }ctx.stroke();
+  if(S.cmpMode){
+    const s=5,d=3;
+    ctx.strokeStyle='#dc2626';ctx.lineWidth=1.5;ctx.beginPath();
+    for(let i=0;i<W;i++){
+      const t=(i/W)*20;let y=mid-Math.sin(t*3)*18-Math.sin(t*7)*4;
+      if(t>=s&&t<=s+d)y+=32+Math.random()*6;else y+=Math.random()*1.2;
+      i===0?ctx.moveTo(i,y):ctx.lineTo(i,y);
+    }ctx.stroke();
+    const x1=(s/20)*W,x2=((s+d)/20)*W;
+    ctx.fillStyle='rgba(220,38,38,0.05)';ctx.fillRect(x1,0,x2-x1,H);
+    ctx.strokeStyle='rgba(220,38,38,0.2)';ctx.lineWidth=1;ctx.setLineDash([4,3]);
+    ctx.beginPath();ctx.moveTo(x1,0);ctx.lineTo(x1,H);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle='#dc2626';ctx.font='9px JetBrains Mono,monospace';ctx.fillText('FAULT',x1+3,14);
+  }
+}
+function drawCh2(){
+  const c=document.getElementById('sc2');if(!c)return;
+  c.width=c.offsetWidth;c.height=c.offsetHeight;
+  const ctx=c.getContext('2d'),W=c.width,H=c.height,N=30,bw=W/N-1;
+  ctx.strokeStyle='#e2eef8';ctx.lineWidth=0.5;
+  for(let x=0;x<W;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+  for(let i=0;i<N;i++){
+    const f=i/N,h=(Math.exp(-f*3)*0.85+Math.random()*0.08)*H*0.88,x=i*(W/N);
+    const g=ctx.createLinearGradient(x,H-h,x,H);
+    g.addColorStop(0,'#4a9eff');g.addColorStop(1,'rgba(74,158,255,0.1)');
+    ctx.fillStyle=g;ctx.fillRect(x,H-h,bw,h);
+    if(S.cmpMode){
+      const hf=h*(1+(i<7?0.55:0.05));
+      ctx.fillStyle='rgba(220,38,38,0.28)';ctx.fillRect(x,H-hf,bw,hf-h);
+    }
+  }
+  ctx.fillStyle='#94b4cc';ctx.font='8px JetBrains Mono,monospace';
+  ctx.fillText('0Hz',2,H-3);ctx.fillText('32kHz',W-34,H-3);
+}
+
+
+// ─── 仿真控制栏 ───
+const SIM = {inited:false, running:false, paused:false};
+
+function simEnableButtons(init,run,step,pause,stop){
+  const ids=['sbtn-init','sbtn-run','sbtn-step','sbtn-pause','sbtn-stop'];
+  const vals=[init,run,step,pause,stop];
+  ids.forEach((id,i)=>{
+    const el=document.getElementById(id);
+    if(vals[i]) el.classList.remove('sim-btn-disabled');
+    else el.classList.add('sim-btn-disabled');
+  });
+}
+
+function updateSimbarEnabled(){
+  if(!S.sysLoaded){simEnableButtons(false,false,false,false,false);return;}
+  if(!SIM.inited){simEnableButtons(true,false,false,false,false);return;}
+  if(SIM.running && !SIM.paused){simEnableButtons(false,false,true,true,true);return;}
+  if(SIM.paused){simEnableButtons(false,true,true,true,true);return;}
+  simEnableButtons(true,true,true,false,false);
+}
+
+function simInit(){
+  if(!S.sysLoaded){toast('请先导入系统模型','w');return;}
+  const name=document.getElementById('sim-name').value||'test';
+  const dur=document.getElementById('sim-dur').value;
+  const step=document.getElementById('sim-step').value;
+  SIM.inited=true; SIM.running=false; SIM.paused=false;
+  updateSimbarEnabled();
+  toast('仿真初始化完成：'+name+' · 时长 '+dur+'s · 步长 '+step+'s','s');
+}
+
+function simRun(){
+  if(!SIM.inited){toast('请先初始化','w');return;}
+  SIM.running=true; SIM.paused=false;
+  document.getElementById('sbtn-run').classList.add('active');
+  document.getElementById('run-icon').textContent='▶';
+  document.getElementById('run-lbl').textContent='运行中';
+  document.getElementById('stxt').textContent='仿真运行中...';
+  document.getElementById('sdot').className='sdot sdot-g';
+  updateSimbarEnabled();
+  toast('仿真开始运行','s');
+}
+
+function simStep(){
+  if(!SIM.inited){toast('请先初始化','w');return;}
+  toast('步进一帧','s');
+}
+
+function simPause(){
+  if(!SIM.running){return;}
+  SIM.paused=!SIM.paused;
+  const lbl=document.getElementById('pause-lbl');
+  const runBtn=document.getElementById('sbtn-run');
+  if(SIM.paused){
+    lbl.textContent='继续';
+    runBtn.classList.remove('active');
+    document.getElementById('run-lbl').textContent='运行';
+    document.getElementById('run-icon').textContent='▶';
+    document.getElementById('stxt').textContent='仿真已暂停';
+    toast('仿真已暂停','w');
+  } else {
+    lbl.textContent='暂停';
+    runBtn.classList.add('active');
+    document.getElementById('run-lbl').textContent='运行中';
+    document.getElementById('stxt').textContent='仿真运行中...';
+    toast('仿真继续运行','s');
+  }
+  updateSimbarEnabled();
+}
+
+function simStop(){
+  SIM.running=false; SIM.paused=false;
+  document.getElementById('sbtn-run').classList.remove('active');
+  document.getElementById('run-lbl').textContent='运行';
+  document.getElementById('run-icon').textContent='▶';
+  document.getElementById('pause-lbl').textContent='暂停';
+  S.simDone=true;
+  updateSimbarEnabled();
+  toast('仿真已终止，结果可保存','s');
+  updateUI();
+}
+
+function onRtToggle(el){
+  toast(el.checked?'实时模式已开启':'实时模式已关闭', el.checked?'s':'w');
+}
+
+// ─── 弹窗控制 ───
+function openOv(id){document.getElementById(id).classList.add('open');if(id==='ov-scope')setTimeout(drawScope,50);if(id==='ov-cfg')setTimeout(upPrev,50);}
+function closeOv(id){document.getElementById(id).classList.remove('open');}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'));});
+
+// ─── Toast ───
+let toastT;
+function toast(msg,type='w'){
+  const el=document.getElementById('toast');
+  const ti=document.getElementById('ti');
+  const tm=document.getElementById('tm');
+  el.className='toast '+(type==='s'?'toast-s':'toast-w')+' on';
+  ti.className=type==='s'?'ti-s':'ti-w';
+  ti.textContent=type==='s'?'✓ ':'⚠ ';
+  tm.textContent=msg;
+  clearTimeout(toastT);
+  toastT=setTimeout(()=>el.classList.remove('on'),3500);
+}
+</script>
+</body>
+</html>

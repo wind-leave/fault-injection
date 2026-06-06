@@ -1,0 +1,2054 @@
+{
+  "schemaVersion": 1,
+  "packageType": "flight-control-model",
+  "systemFamily": "uav-flight-control",
+  "supportedFaultLibraries": ["uav-flight-control-faults"],
+  "modelId": "evtol-small-nonlinear",
+  "modelName": "eVTOL Small Nonlinear Flight Control",
+  "description": "Manually decomposed eVTOL flight-control reference package derived from the Simulink validation model",
+  "source": {
+    "origin": "manual-from-slx",
+    "slxFile": "eVTOL_Small_nonandlin_algorithm_validation.slx",
+    "notesDoc": "常见飞控模型故障梳理(1).docx"
+  },
+  "pythonModules": [
+    {
+      "moduleId": "imu_gyro",
+      "fileName": "imu_gyro.py",
+      "entryFunction": "process",
+      "category": "sensors",
+      "sourcePackageId": "evtol-small-nonlinear",
+      "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+      "source": "\"\"\"\nModule: imu_gyro\nDescription: Gyro sensing with optional bias injection\n\"\"\"\n\n\ndef process(body_rate: float, bias: float = 0.0, scale: float = 1.0):\n    # @observable\n    measured_rate = (body_rate + bias) * scale  # gyro measurement\n    return measured_rate\n",
+      "parsedInterface": {
+        "fileName": "imu_gyro.py",
+        "moduleName": "imu_gyro",
+        "description": "Gyro sensing with optional bias injection",
+        "entryFunction": "process",
+        "inputs": [
+          {
+            "name": "body_rate",
+            "type": "float",
+            "default": null,
+            "comment": ""
+          },
+          {
+            "name": "bias",
+            "type": "float",
+            "default": "0.0",
+            "comment": ""
+          },
+          {
+            "name": "scale",
+            "type": "float",
+            "default": "1.0",
+            "comment": ""
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output_0",
+            "type": "float",
+            "comment": ""
+          }
+        ],
+        "middleVars": [
+          {
+            "name": "measured_rate",
+            "type": "float",
+            "comment": "gyro measurement"
+          }
+        ],
+        "rawSource": "\"\"\"\nModule: imu_gyro\nDescription: Gyro sensing with optional bias injection\n\"\"\"\n\n\ndef process(body_rate: float, bias: float = 0.0, scale: float = 1.0):\n    # @observable\n    measured_rate = (body_rate + bias) * scale  # gyro measurement\n    return measured_rate\n"
+      }
+    },
+    {
+      "moduleId": "imu_accel",
+      "fileName": "imu_accel.py",
+      "entryFunction": "process",
+      "category": "sensors",
+      "sourcePackageId": "evtol-small-nonlinear",
+      "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+      "source": "\"\"\"\nModule: imu_accel\nDescription: Accelerometer sensing with scale distortion\n\"\"\"\n\n\ndef process(vertical_accel: float, scale: float = 1.0, offset: float = 0.0):\n    # @observable\n    measured_accel = vertical_accel * scale + offset  # accel measurement\n    return measured_accel\n",
+      "parsedInterface": {
+        "fileName": "imu_accel.py",
+        "moduleName": "imu_accel",
+        "description": "Accelerometer sensing with scale distortion",
+        "entryFunction": "process",
+        "inputs": [
+          {
+            "name": "vertical_accel",
+            "type": "float",
+            "default": null,
+            "comment": ""
+          },
+          {
+            "name": "scale",
+            "type": "float",
+            "default": "1.0",
+            "comment": ""
+          },
+          {
+            "name": "offset",
+            "type": "float",
+            "default": "0.0",
+            "comment": ""
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output_0",
+            "type": "float",
+            "comment": ""
+          }
+        ],
+        "middleVars": [
+          {
+            "name": "measured_accel",
+            "type": "float",
+            "comment": "accel measurement"
+          }
+        ],
+        "rawSource": "\"\"\"\nModule: imu_accel\nDescription: Accelerometer sensing with scale distortion\n\"\"\"\n\n\ndef process(vertical_accel: float, scale: float = 1.0, offset: float = 0.0):\n    # @observable\n    measured_accel = vertical_accel * scale + offset  # accel measurement\n    return measured_accel\n"
+      }
+    },
+    {
+      "moduleId": "barometer",
+      "fileName": "barometer.py",
+      "entryFunction": "process",
+      "category": "sensors",
+      "sourcePackageId": "evtol-small-nonlinear",
+      "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+      "source": "\"\"\"\nModule: barometer\nDescription: Barometric altitude channel with drift\n\"\"\"\n\n\ndef process(altitude: float, drift: float = 0.0):\n    # @observable\n    estimated_altitude = altitude + drift  # barometer estimate\n    return estimated_altitude\n",
+      "parsedInterface": {
+        "fileName": "barometer.py",
+        "moduleName": "barometer",
+        "description": "Barometric altitude channel with drift",
+        "entryFunction": "process",
+        "inputs": [
+          {
+            "name": "altitude",
+            "type": "float",
+            "default": null,
+            "comment": ""
+          },
+          {
+            "name": "drift",
+            "type": "float",
+            "default": "0.0",
+            "comment": ""
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output_0",
+            "type": "float",
+            "comment": ""
+          }
+        ],
+        "middleVars": [
+          {
+            "name": "estimated_altitude",
+            "type": "float",
+            "comment": "barometer estimate"
+          }
+        ],
+        "rawSource": "\"\"\"\nModule: barometer\nDescription: Barometric altitude channel with drift\n\"\"\"\n\n\ndef process(altitude: float, drift: float = 0.0):\n    # @observable\n    estimated_altitude = altitude + drift  # barometer estimate\n    return estimated_altitude\n"
+      }
+    },
+    {
+      "moduleId": "gps_velocity",
+      "fileName": "gps_velocity.py",
+      "entryFunction": "process",
+      "category": "sensors",
+      "sourcePackageId": "evtol-small-nonlinear",
+      "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+      "source": "\"\"\"\nModule: gps_velocity\nDescription: GPS velocity channel with held-sample freeze approximation\n\"\"\"\n\n\ndef process(true_velocity: float, held_velocity: float = 0.0, freeze: float = 0.0):\n    # @observable\n    reported_velocity = held_velocity if freeze >= 1.0 else true_velocity  # gps report\n    return reported_velocity\n",
+      "parsedInterface": {
+        "fileName": "gps_velocity.py",
+        "moduleName": "gps_velocity",
+        "description": "GPS velocity channel with held-sample freeze approximation",
+        "entryFunction": "process",
+        "inputs": [
+          {
+            "name": "true_velocity",
+            "type": "float",
+            "default": null,
+            "comment": ""
+          },
+          {
+            "name": "held_velocity",
+            "type": "float",
+            "default": "0.0",
+            "comment": ""
+          },
+          {
+            "name": "freeze",
+            "type": "float",
+            "default": "0.0",
+            "comment": ""
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output_0",
+            "type": "float",
+            "comment": ""
+          }
+        ],
+        "middleVars": [
+          {
+            "name": "reported_velocity",
+            "type": "float",
+            "comment": "gps report"
+          }
+        ],
+        "rawSource": "\"\"\"\nModule: gps_velocity\nDescription: GPS velocity channel with held-sample freeze approximation\n\"\"\"\n\n\ndef process(true_velocity: float, held_velocity: float = 0.0, freeze: float = 0.0):\n    # @observable\n    reported_velocity = held_velocity if freeze >= 1.0 else true_velocity  # gps report\n    return reported_velocity\n"
+      }
+    },
+    {
+      "moduleId": "attitude_pid",
+      "fileName": "attitude_pid.py",
+      "entryFunction": "process",
+      "category": "controllers",
+      "sourcePackageId": "evtol-small-nonlinear",
+      "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+      "source": "\"\"\"\nModule: attitude_pid\nDescription: Simplified attitude PID control block\n\"\"\"\n\n\ndef process(\n    attitude_error: float,\n    rate_feedback: float,\n    dt: float = 0.01,\n    kp: float = 1.2,\n    ki: float = 0.25,\n    kd: float = 0.08\n):\n    # @observable\n    integral_state = attitude_error * dt  # integral state\n    # @observable\n    derivative_state = -rate_feedback * kd  # derivative term\n    command = kp * attitude_error + ki * integral_state + derivative_state\n    return command\n",
+      "parsedInterface": {
+        "fileName": "attitude_pid.py",
+        "moduleName": "attitude_pid",
+        "description": "Simplified attitude PID control block",
+        "entryFunction": "process",
+        "inputs": [
+          {
+            "name": "attitude_error",
+            "type": "float",
+            "default": null,
+            "comment": ""
+          },
+          {
+            "name": "rate_feedback",
+            "type": "float",
+            "default": null,
+            "comment": ""
+          },
+          {
+            "name": "dt",
+            "type": "float",
+            "default": "0.01",
+            "comment": ""
+          },
+          {
+            "name": "kp",
+            "type": "float",
+            "default": "1.2",
+            "comment": ""
+          },
+          {
+            "name": "ki",
+            "type": "float",
+            "default": "0.25",
+            "comment": ""
+          },
+          {
+            "name": "kd",
+            "type": "float",
+            "default": "0.08",
+            "comment": ""
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output_0",
+            "type": "float",
+            "comment": ""
+          }
+        ],
+        "middleVars": [
+          {
+            "name": "integral_state",
+            "type": "float",
+            "comment": "integral state"
+          },
+          {
+            "name": "derivative_state",
+            "type": "float",
+            "comment": "derivative term"
+          }
+        ],
+        "rawSource": "\"\"\"\nModule: attitude_pid\nDescription: Simplified attitude PID control block\n\"\"\"\n\n\ndef process(\n    attitude_error: float,\n    rate_feedback: float,\n    dt: float = 0.01,\n    kp: float = 1.2,\n    ki: float = 0.25,\n    kd: float = 0.08\n):\n    # @observable\n    integral_state = attitude_error * dt  # integral state\n    # @observable\n    derivative_state = -rate_feedback * kd  # derivative term\n    command = kp * attitude_error + ki * integral_state + derivative_state\n    return command\n"
+      }
+    },
+    {
+      "moduleId": "control_allocation",
+      "fileName": "control_allocation.py",
+      "entryFunction": "process",
+      "category": "allocation",
+      "sourcePackageId": "evtol-small-nonlinear",
+      "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+      "source": "\"\"\"\nModule: control_allocation\nDescription: Convert total thrust and roll command into left and right motor references\n\"\"\"\n\n\ndef process(total_thrust: float, roll_command: float):\n    # @observable\n    left_cmd = total_thrust * 0.5 - roll_command * 0.5  # left motor command\n    # @observable\n    right_cmd = total_thrust * 0.5 + roll_command * 0.5  # right motor command\n    return left_cmd, right_cmd\n",
+      "parsedInterface": {
+        "fileName": "control_allocation.py",
+        "moduleName": "control_allocation",
+        "description": "Convert total thrust and roll command into left and right motor references",
+        "entryFunction": "process",
+        "inputs": [
+          {
+            "name": "total_thrust",
+            "type": "float",
+            "default": null,
+            "comment": ""
+          },
+          {
+            "name": "roll_command",
+            "type": "float",
+            "default": null,
+            "comment": ""
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output_0",
+            "type": "float",
+            "comment": ""
+          },
+          {
+            "name": "output_1",
+            "type": "float",
+            "comment": ""
+          }
+        ],
+        "middleVars": [
+          {
+            "name": "left_cmd",
+            "type": "float",
+            "comment": "left motor command"
+          },
+          {
+            "name": "right_cmd",
+            "type": "float",
+            "comment": "right motor command"
+          }
+        ],
+        "rawSource": "\"\"\"\nModule: control_allocation\nDescription: Convert total thrust and roll command into left and right motor references\n\"\"\"\n\n\ndef process(total_thrust: float, roll_command: float):\n    # @observable\n    left_cmd = total_thrust * 0.5 - roll_command * 0.5  # left motor command\n    # @observable\n    right_cmd = total_thrust * 0.5 + roll_command * 0.5  # right motor command\n    return left_cmd, right_cmd\n"
+      }
+    },
+    {
+      "moduleId": "motor_model",
+      "fileName": "motor_model.py",
+      "entryFunction": "process",
+      "category": "actuators",
+      "sourcePackageId": "evtol-small-nonlinear",
+      "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+      "source": "\"\"\"\nModule: motor_model\nDescription: Motor efficiency and saturation model\n\"\"\"\n\n\ndef process(\n    left_cmd: float,\n    right_cmd: float,\n    efficiency: float = 1.0,\n    left_lock: float = 0.0,\n    saturation: float = 20.0\n):\n    # @observable\n    left_efficiency = 0.0 if left_lock >= 1.0 else efficiency  # left motor availability\n    # @observable\n    left_thrust = min(max(left_cmd * left_efficiency, 0.0), saturation)  # left thrust\n    # @observable\n    right_thrust = min(max(right_cmd * efficiency, 0.0), saturation)  # right thrust\n    return left_thrust, right_thrust\n",
+      "parsedInterface": {
+        "fileName": "motor_model.py",
+        "moduleName": "motor_model",
+        "description": "Motor efficiency and saturation model",
+        "entryFunction": "process",
+        "inputs": [
+          {
+            "name": "left_cmd",
+            "type": "float",
+            "default": null,
+            "comment": ""
+          },
+          {
+            "name": "right_cmd",
+            "type": "float",
+            "default": null,
+            "comment": ""
+          },
+          {
+            "name": "efficiency",
+            "type": "float",
+            "default": "1.0",
+            "comment": ""
+          },
+          {
+            "name": "left_lock",
+            "type": "float",
+            "default": "0.0",
+            "comment": ""
+          },
+          {
+            "name": "saturation",
+            "type": "float",
+            "default": "20.0",
+            "comment": ""
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output_0",
+            "type": "float",
+            "comment": ""
+          },
+          {
+            "name": "output_1",
+            "type": "float",
+            "comment": ""
+          }
+        ],
+        "middleVars": [
+          {
+            "name": "left_efficiency",
+            "type": "float",
+            "comment": "left motor availability"
+          },
+          {
+            "name": "left_thrust",
+            "type": "float",
+            "comment": "left thrust"
+          },
+          {
+            "name": "right_thrust",
+            "type": "float",
+            "comment": "right thrust"
+          }
+        ],
+        "rawSource": "\"\"\"\nModule: motor_model\nDescription: Motor efficiency and saturation model\n\"\"\"\n\n\ndef process(\n    left_cmd: float,\n    right_cmd: float,\n    efficiency: float = 1.0,\n    left_lock: float = 0.0,\n    saturation: float = 20.0\n):\n    # @observable\n    left_efficiency = 0.0 if left_lock >= 1.0 else efficiency  # left motor availability\n    # @observable\n    left_thrust = min(max(left_cmd * left_efficiency, 0.0), saturation)  # left thrust\n    # @observable\n    right_thrust = min(max(right_cmd * efficiency, 0.0), saturation)  # right thrust\n    return left_thrust, right_thrust\n"
+      }
+    },
+    {
+      "moduleId": "vehicle_dynamics",
+      "fileName": "vehicle_dynamics.py",
+      "entryFunction": "process",
+      "category": "dynamics",
+      "sourcePackageId": "evtol-small-nonlinear",
+      "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+      "source": "\"\"\"\nModule: vehicle_dynamics\nDescription: Reduced-order vertical and roll dynamics\n\"\"\"\n\n\ndef process(\n    left_thrust: float,\n    right_thrust: float,\n    mass: float = 8.0,\n    drag: float = 0.12\n):\n    total_thrust = left_thrust + right_thrust\n    # @observable\n    roll_moment = right_thrust - left_thrust  # roll moment\n    vertical_accel = total_thrust / max(mass, 0.1) - drag\n    return vertical_accel, roll_moment\n",
+      "parsedInterface": {
+        "fileName": "vehicle_dynamics.py",
+        "moduleName": "vehicle_dynamics",
+        "description": "Reduced-order vertical and roll dynamics",
+        "entryFunction": "process",
+        "inputs": [
+          {
+            "name": "left_thrust",
+            "type": "float",
+            "default": null,
+            "comment": ""
+          },
+          {
+            "name": "right_thrust",
+            "type": "float",
+            "default": null,
+            "comment": ""
+          },
+          {
+            "name": "mass",
+            "type": "float",
+            "default": "8.0",
+            "comment": ""
+          },
+          {
+            "name": "drag",
+            "type": "float",
+            "default": "0.12",
+            "comment": ""
+          }
+        ],
+        "outputs": [
+          {
+            "name": "output_0",
+            "type": "float",
+            "comment": ""
+          },
+          {
+            "name": "output_1",
+            "type": "float",
+            "comment": ""
+          }
+        ],
+        "middleVars": [
+          {
+            "name": "roll_moment",
+            "type": "float",
+            "comment": "roll moment"
+          }
+        ],
+        "rawSource": "\"\"\"\nModule: vehicle_dynamics\nDescription: Reduced-order vertical and roll dynamics\n\"\"\"\n\n\ndef process(\n    left_thrust: float,\n    right_thrust: float,\n    mass: float = 8.0,\n    drag: float = 0.12\n):\n    total_thrust = left_thrust + right_thrust\n    # @observable\n    roll_moment = right_thrust - left_thrust  # roll moment\n    vertical_accel = total_thrust / max(mass, 0.1) - drag\n    return vertical_accel, roll_moment\n"
+      }
+    }
+  ],
+  "faultLibrary": [
+    {
+      "id": "gyro_bias",
+      "name": "Gyro Bias",
+      "moduleTargets": [
+        "imu_gyro"
+      ],
+      "parameter": "bias",
+      "defaultValue": 0.15
+    },
+    {
+      "id": "accel_scale",
+      "name": "Accelerometer Scale Distortion",
+      "moduleTargets": [
+        "imu_accel"
+      ],
+      "parameter": "scale",
+      "defaultValue": 1.25
+    },
+    {
+      "id": "baro_drift",
+      "name": "Barometer Drift",
+      "moduleTargets": [
+        "barometer"
+      ],
+      "parameter": "drift",
+      "defaultValue": 2
+    },
+    {
+      "id": "gps_freeze",
+      "name": "GPS Freeze Approximation (Held Sample)",
+      "moduleTargets": [
+        "gps_velocity"
+      ],
+      "parameter": "freeze",
+      "defaultValue": 1,
+      "description": "Simplified reference-package fault that switches GPS velocity output to a predefined held sample instead of latching the live previous sample."
+    },
+    {
+      "id": "attitude_kp_anomaly",
+      "name": "Controller Proportional Gain Anomaly",
+      "moduleTargets": [
+        "attitude_pid"
+      ],
+      "parameter": "kp",
+      "defaultValue": 2.4
+    },
+    {
+      "id": "motor_efficiency_loss",
+      "name": "Motor Efficiency Loss",
+      "moduleTargets": [
+        "motor_model"
+      ],
+      "parameter": "efficiency",
+      "defaultValue": 0.55
+    },
+    {
+      "id": "motor_lock",
+      "name": "Single Motor Lock",
+      "moduleTargets": [
+        "motor_model"
+      ],
+      "parameter": "left_lock",
+      "defaultValue": 1
+    },
+    {
+      "id": "motor_thrust_saturation",
+      "name": "Thrust Saturation",
+      "moduleTargets": [
+        "motor_model"
+      ],
+      "parameter": "saturation",
+      "defaultValue": 8
+    },
+    {
+      "id": "uav_mass_shift",
+      "name": "Mass Parameter Error",
+      "moduleTargets": [
+        "vehicle_dynamics"
+      ],
+      "parameter": "mass",
+      "defaultValue": 11
+    },
+    {
+      "id": "drag_coefficient_jump",
+      "name": "Drag Coefficient Jump",
+      "moduleTargets": [
+        "vehicle_dynamics"
+      ],
+      "parameter": "drag",
+      "defaultValue": 0.35
+    }
+  ],
+  "workbenchSnapshot": {
+    "version": 1,
+    "modelNodes": [
+      {
+        "id": "node-1",
+        "type": "signal_source",
+        "x": 80,
+        "y": 120,
+        "props": {
+          "name": "Attitude Error",
+          "waveType": "常值",
+          "amplitude": "0.6",
+          "frequency": "1.0",
+          "outputFormat": "标量"
+        },
+        "pythonBinding": null
+      },
+      {
+        "id": "node-2",
+        "type": "signal_source",
+        "x": 80,
+        "y": 320,
+        "props": {
+          "name": "True Velocity",
+          "waveType": "正弦",
+          "amplitude": "1.2",
+          "frequency": "0.25",
+          "outputFormat": "标量"
+        },
+        "pythonBinding": null
+      },
+      {
+        "id": "node-3",
+        "type": "simulation_block",
+        "x": 280,
+        "y": 60,
+        "props": {
+          "name": "IMU Gyro",
+          "moduleType": "sensors",
+          "inputs": [
+            {
+              "name": "Body Rate",
+              "type": "scalar"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Measured Rate",
+              "type": "scalar"
+            }
+          ],
+          "middleVars": [
+            {
+              "name": "measured_rate",
+              "type": "scalar"
+            }
+          ]
+        },
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "imu_gyro",
+          "fileName": "imu_gyro.py",
+          "moduleName": "imu_gyro",
+          "moduleCategory": "sensors",
+          "sourcePackageId": "evtol-small-nonlinear",
+          "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+          "description": "Gyro sensing with optional bias injection",
+          "entryFunction": "process",
+          "parsedInterface": {
+            "fileName": "imu_gyro.py",
+            "moduleName": "imu_gyro",
+            "description": "Gyro sensing with optional bias injection",
+            "entryFunction": "process",
+            "inputs": [
+              {
+                "name": "body_rate",
+                "type": "float",
+                "default": null,
+                "comment": ""
+              },
+              {
+                "name": "bias",
+                "type": "float",
+                "default": "0.0",
+                "comment": ""
+              },
+              {
+                "name": "scale",
+                "type": "float",
+                "default": "1.0",
+                "comment": ""
+              }
+            ],
+            "outputs": [
+              {
+                "name": "output_0",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "measured_rate",
+                "type": "float",
+                "comment": "gyro measurement"
+              }
+            ],
+            "rawSource": "\"\"\"\nModule: imu_gyro\nDescription: Gyro sensing with optional bias injection\n\"\"\"\n\n\ndef process(body_rate: float, bias: float = 0.0, scale: float = 1.0):\n    # @observable\n    measured_rate = (body_rate + bias) * scale  # gyro measurement\n    return measured_rate\n"
+          },
+          "rawSource": "\"\"\"\nModule: imu_gyro\nDescription: Gyro sensing with optional bias injection\n\"\"\"\n\n\ndef process(body_rate: float, bias: float = 0.0, scale: float = 1.0):\n    # @observable\n    measured_rate = (body_rate + bias) * scale  # gyro measurement\n    return measured_rate\n",
+          "executionMode": "backend",
+          "executionConfig": {
+            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
+            "timeoutMs": 3000
+          },
+          "portMapping": {
+            "inputs": [
+              {
+                "portId": "input-0",
+                "varName": "body_rate",
+                "displayName": "body_rate",
+                "type": "float",
+                "default": null,
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-1",
+                "varName": "bias",
+                "displayName": "bias",
+                "type": "float",
+                "default": "0.0",
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-2",
+                "varName": "scale",
+                "displayName": "scale",
+                "type": "float",
+                "default": "1.0",
+                "comment": "",
+                "connected": false
+              }
+            ],
+            "outputs": [
+              {
+                "portId": "output-0",
+                "varName": "output_0",
+                "displayName": "output_0",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "portId": "middle-0",
+                "varName": "measured_rate",
+                "displayName": "measured_rate",
+                "type": "float",
+                "comment": "gyro measurement"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "node-4",
+        "type": "simulation_block",
+        "x": 280,
+        "y": 180,
+        "props": {
+          "name": "IMU Accel",
+          "moduleType": "sensors",
+          "inputs": [
+            {
+              "name": "Vertical Accel",
+              "type": "scalar"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Measured Accel",
+              "type": "scalar"
+            }
+          ],
+          "middleVars": [
+            {
+              "name": "measured_accel",
+              "type": "scalar"
+            }
+          ]
+        },
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "imu_accel",
+          "fileName": "imu_accel.py",
+          "moduleName": "imu_accel",
+          "moduleCategory": "sensors",
+          "sourcePackageId": "evtol-small-nonlinear",
+          "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+          "description": "Accelerometer sensing with scale distortion",
+          "entryFunction": "process",
+          "parsedInterface": {
+            "fileName": "imu_accel.py",
+            "moduleName": "imu_accel",
+            "description": "Accelerometer sensing with scale distortion",
+            "entryFunction": "process",
+            "inputs": [
+              {
+                "name": "vertical_accel",
+                "type": "float",
+                "default": null,
+                "comment": ""
+              },
+              {
+                "name": "scale",
+                "type": "float",
+                "default": "1.0",
+                "comment": ""
+              },
+              {
+                "name": "offset",
+                "type": "float",
+                "default": "0.0",
+                "comment": ""
+              }
+            ],
+            "outputs": [
+              {
+                "name": "output_0",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "measured_accel",
+                "type": "float",
+                "comment": "accel measurement"
+              }
+            ],
+            "rawSource": "\"\"\"\nModule: imu_accel\nDescription: Accelerometer sensing with scale distortion\n\"\"\"\n\n\ndef process(vertical_accel: float, scale: float = 1.0, offset: float = 0.0):\n    # @observable\n    measured_accel = vertical_accel * scale + offset  # accel measurement\n    return measured_accel\n"
+          },
+          "rawSource": "\"\"\"\nModule: imu_accel\nDescription: Accelerometer sensing with scale distortion\n\"\"\"\n\n\ndef process(vertical_accel: float, scale: float = 1.0, offset: float = 0.0):\n    # @observable\n    measured_accel = vertical_accel * scale + offset  # accel measurement\n    return measured_accel\n",
+          "executionMode": "backend",
+          "executionConfig": {
+            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
+            "timeoutMs": 3000
+          },
+          "portMapping": {
+            "inputs": [
+              {
+                "portId": "input-0",
+                "varName": "vertical_accel",
+                "displayName": "vertical_accel",
+                "type": "float",
+                "default": null,
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-1",
+                "varName": "scale",
+                "displayName": "scale",
+                "type": "float",
+                "default": "1.0",
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-2",
+                "varName": "offset",
+                "displayName": "offset",
+                "type": "float",
+                "default": "0.0",
+                "comment": "",
+                "connected": false
+              }
+            ],
+            "outputs": [
+              {
+                "portId": "output-0",
+                "varName": "output_0",
+                "displayName": "output_0",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "portId": "middle-0",
+                "varName": "measured_accel",
+                "displayName": "measured_accel",
+                "type": "float",
+                "comment": "accel measurement"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "node-5",
+        "type": "simulation_block",
+        "x": 280,
+        "y": 300,
+        "props": {
+          "name": "Barometer",
+          "moduleType": "sensors",
+          "inputs": [
+            {
+              "name": "Altitude",
+              "type": "scalar"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Estimated Altitude",
+              "type": "scalar"
+            }
+          ],
+          "middleVars": [
+            {
+              "name": "estimated_altitude",
+              "type": "scalar"
+            }
+          ]
+        },
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "barometer",
+          "fileName": "barometer.py",
+          "moduleName": "barometer",
+          "moduleCategory": "sensors",
+          "sourcePackageId": "evtol-small-nonlinear",
+          "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+          "description": "Barometric altitude channel with drift",
+          "entryFunction": "process",
+          "parsedInterface": {
+            "fileName": "barometer.py",
+            "moduleName": "barometer",
+            "description": "Barometric altitude channel with drift",
+            "entryFunction": "process",
+            "inputs": [
+              {
+                "name": "altitude",
+                "type": "float",
+                "default": null,
+                "comment": ""
+              },
+              {
+                "name": "drift",
+                "type": "float",
+                "default": "0.0",
+                "comment": ""
+              }
+            ],
+            "outputs": [
+              {
+                "name": "output_0",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "estimated_altitude",
+                "type": "float",
+                "comment": "barometer estimate"
+              }
+            ],
+            "rawSource": "\"\"\"\nModule: barometer\nDescription: Barometric altitude channel with drift\n\"\"\"\n\n\ndef process(altitude: float, drift: float = 0.0):\n    # @observable\n    estimated_altitude = altitude + drift  # barometer estimate\n    return estimated_altitude\n"
+          },
+          "rawSource": "\"\"\"\nModule: barometer\nDescription: Barometric altitude channel with drift\n\"\"\"\n\n\ndef process(altitude: float, drift: float = 0.0):\n    # @observable\n    estimated_altitude = altitude + drift  # barometer estimate\n    return estimated_altitude\n",
+          "executionMode": "backend",
+          "executionConfig": {
+            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
+            "timeoutMs": 3000
+          },
+          "portMapping": {
+            "inputs": [
+              {
+                "portId": "input-0",
+                "varName": "altitude",
+                "displayName": "altitude",
+                "type": "float",
+                "default": null,
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-1",
+                "varName": "drift",
+                "displayName": "drift",
+                "type": "float",
+                "default": "0.0",
+                "comment": "",
+                "connected": false
+              }
+            ],
+            "outputs": [
+              {
+                "portId": "output-0",
+                "varName": "output_0",
+                "displayName": "output_0",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "portId": "middle-0",
+                "varName": "estimated_altitude",
+                "displayName": "estimated_altitude",
+                "type": "float",
+                "comment": "barometer estimate"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "node-6",
+        "type": "simulation_block",
+        "x": 280,
+        "y": 420,
+        "props": {
+          "name": "GPS Velocity",
+          "moduleType": "sensors",
+          "inputs": [
+            {
+              "name": "True Velocity",
+              "type": "scalar"
+            },
+            {
+              "name": "Held Velocity",
+              "type": "scalar"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Reported Velocity",
+              "type": "scalar"
+            }
+          ],
+          "middleVars": [
+            {
+              "name": "reported_velocity",
+              "type": "scalar"
+            }
+          ]
+        },
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "gps_velocity",
+          "fileName": "gps_velocity.py",
+          "moduleName": "gps_velocity",
+          "moduleCategory": "sensors",
+          "sourcePackageId": "evtol-small-nonlinear",
+          "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+          "description": "GPS velocity channel with held-sample freeze approximation",
+          "entryFunction": "process",
+          "parsedInterface": {
+            "fileName": "gps_velocity.py",
+            "moduleName": "gps_velocity",
+            "description": "GPS velocity channel with held-sample freeze approximation",
+            "entryFunction": "process",
+            "inputs": [
+              {
+                "name": "true_velocity",
+                "type": "float",
+                "default": null,
+                "comment": ""
+              },
+              {
+                "name": "held_velocity",
+                "type": "float",
+                "default": "0.0",
+                "comment": ""
+              },
+              {
+                "name": "freeze",
+                "type": "float",
+                "default": "0.0",
+                "comment": ""
+              }
+            ],
+            "outputs": [
+              {
+                "name": "output_0",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "reported_velocity",
+                "type": "float",
+                "comment": "gps report"
+              }
+            ],
+            "rawSource": "\"\"\"\nModule: gps_velocity\nDescription: GPS velocity channel with held-sample freeze approximation\n\"\"\"\n\n\ndef process(true_velocity: float, held_velocity: float = 0.0, freeze: float = 0.0):\n    # @observable\n    reported_velocity = held_velocity if freeze >= 1.0 else true_velocity  # gps report\n    return reported_velocity\n"
+          },
+          "rawSource": "\"\"\"\nModule: gps_velocity\nDescription: GPS velocity channel with held-sample freeze approximation\n\"\"\"\n\n\ndef process(true_velocity: float, held_velocity: float = 0.0, freeze: float = 0.0):\n    # @observable\n    reported_velocity = held_velocity if freeze >= 1.0 else true_velocity  # gps report\n    return reported_velocity\n",
+          "executionMode": "backend",
+          "executionConfig": {
+            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
+            "timeoutMs": 3000
+          },
+          "portMapping": {
+            "inputs": [
+              {
+                "portId": "input-0",
+                "varName": "true_velocity",
+                "displayName": "true_velocity",
+                "type": "float",
+                "default": null,
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-1",
+                "varName": "held_velocity",
+                "displayName": "held_velocity",
+                "type": "float",
+                "default": "0.0",
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-2",
+                "varName": "freeze",
+                "displayName": "freeze",
+                "type": "float",
+                "default": "0.0",
+                "comment": "",
+                "connected": false
+              }
+            ],
+            "outputs": [
+              {
+                "portId": "output-0",
+                "varName": "output_0",
+                "displayName": "output_0",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "portId": "middle-0",
+                "varName": "reported_velocity",
+                "displayName": "reported_velocity",
+                "type": "float",
+                "comment": "gps report"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "node-7",
+        "type": "simulation_block",
+        "x": 560,
+        "y": 120,
+        "props": {
+          "name": "Attitude PID",
+          "moduleType": "controllers",
+          "inputs": [
+            {
+              "name": "Attitude Error",
+              "type": "scalar"
+            },
+            {
+              "name": "Rate Feedback",
+              "type": "scalar"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Command",
+              "type": "scalar"
+            }
+          ],
+          "middleVars": [
+            {
+              "name": "integral_state",
+              "type": "scalar"
+            },
+            {
+              "name": "derivative_state",
+              "type": "scalar"
+            }
+          ]
+        },
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "attitude_pid",
+          "fileName": "attitude_pid.py",
+          "moduleName": "attitude_pid",
+          "moduleCategory": "controllers",
+          "sourcePackageId": "evtol-small-nonlinear",
+          "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+          "description": "Simplified attitude PID control block",
+          "entryFunction": "process",
+          "parsedInterface": {
+            "fileName": "attitude_pid.py",
+            "moduleName": "attitude_pid",
+            "description": "Simplified attitude PID control block",
+            "entryFunction": "process",
+            "inputs": [
+              {
+                "name": "attitude_error",
+                "type": "float",
+                "default": null,
+                "comment": ""
+              },
+              {
+                "name": "rate_feedback",
+                "type": "float",
+                "default": null,
+                "comment": ""
+              },
+              {
+                "name": "dt",
+                "type": "float",
+                "default": "0.01",
+                "comment": ""
+              },
+              {
+                "name": "kp",
+                "type": "float",
+                "default": "1.2",
+                "comment": ""
+              },
+              {
+                "name": "ki",
+                "type": "float",
+                "default": "0.25",
+                "comment": ""
+              },
+              {
+                "name": "kd",
+                "type": "float",
+                "default": "0.08",
+                "comment": ""
+              }
+            ],
+            "outputs": [
+              {
+                "name": "output_0",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "integral_state",
+                "type": "float",
+                "comment": "integral state"
+              },
+              {
+                "name": "derivative_state",
+                "type": "float",
+                "comment": "derivative term"
+              }
+            ],
+            "rawSource": "\"\"\"\nModule: attitude_pid\nDescription: Simplified attitude PID control block\n\"\"\"\n\n\ndef process(\n    attitude_error: float,\n    rate_feedback: float,\n    dt: float = 0.01,\n    kp: float = 1.2,\n    ki: float = 0.25,\n    kd: float = 0.08\n):\n    # @observable\n    integral_state = attitude_error * dt  # integral state\n    # @observable\n    derivative_state = -rate_feedback * kd  # derivative term\n    command = kp * attitude_error + ki * integral_state + derivative_state\n    return command\n"
+          },
+          "rawSource": "\"\"\"\nModule: attitude_pid\nDescription: Simplified attitude PID control block\n\"\"\"\n\n\ndef process(\n    attitude_error: float,\n    rate_feedback: float,\n    dt: float = 0.01,\n    kp: float = 1.2,\n    ki: float = 0.25,\n    kd: float = 0.08\n):\n    # @observable\n    integral_state = attitude_error * dt  # integral state\n    # @observable\n    derivative_state = -rate_feedback * kd  # derivative term\n    command = kp * attitude_error + ki * integral_state + derivative_state\n    return command\n",
+          "executionMode": "backend",
+          "executionConfig": {
+            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
+            "timeoutMs": 3000
+          },
+          "portMapping": {
+            "inputs": [
+              {
+                "portId": "input-0",
+                "varName": "attitude_error",
+                "displayName": "attitude_error",
+                "type": "float",
+                "default": null,
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-1",
+                "varName": "rate_feedback",
+                "displayName": "rate_feedback",
+                "type": "float",
+                "default": null,
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-2",
+                "varName": "dt",
+                "displayName": "dt",
+                "type": "float",
+                "default": "0.01",
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-3",
+                "varName": "kp",
+                "displayName": "kp",
+                "type": "float",
+                "default": "1.2",
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-4",
+                "varName": "ki",
+                "displayName": "ki",
+                "type": "float",
+                "default": "0.25",
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-5",
+                "varName": "kd",
+                "displayName": "kd",
+                "type": "float",
+                "default": "0.08",
+                "comment": "",
+                "connected": false
+              }
+            ],
+            "outputs": [
+              {
+                "portId": "output-0",
+                "varName": "output_0",
+                "displayName": "output_0",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "portId": "middle-0",
+                "varName": "integral_state",
+                "displayName": "integral_state",
+                "type": "float",
+                "comment": "integral state"
+              },
+              {
+                "portId": "middle-1",
+                "varName": "derivative_state",
+                "displayName": "derivative_state",
+                "type": "float",
+                "comment": "derivative term"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "node-8",
+        "type": "simulation_block",
+        "x": 820,
+        "y": 120,
+        "props": {
+          "name": "Control Allocation",
+          "moduleType": "allocation",
+          "inputs": [
+            {
+              "name": "Total Thrust",
+              "type": "scalar"
+            },
+            {
+              "name": "Roll Command",
+              "type": "scalar"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Left Command",
+              "type": "scalar"
+            },
+            {
+              "name": "Right Command",
+              "type": "scalar"
+            }
+          ],
+          "middleVars": [
+            {
+              "name": "left_cmd",
+              "type": "scalar"
+            },
+            {
+              "name": "right_cmd",
+              "type": "scalar"
+            }
+          ]
+        },
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "control_allocation",
+          "fileName": "control_allocation.py",
+          "moduleName": "control_allocation",
+          "moduleCategory": "allocation",
+          "sourcePackageId": "evtol-small-nonlinear",
+          "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+          "description": "Convert total thrust and roll command into left and right motor references",
+          "entryFunction": "process",
+          "parsedInterface": {
+            "fileName": "control_allocation.py",
+            "moduleName": "control_allocation",
+            "description": "Convert total thrust and roll command into left and right motor references",
+            "entryFunction": "process",
+            "inputs": [
+              {
+                "name": "total_thrust",
+                "type": "float",
+                "default": null,
+                "comment": ""
+              },
+              {
+                "name": "roll_command",
+                "type": "float",
+                "default": null,
+                "comment": ""
+              }
+            ],
+            "outputs": [
+              {
+                "name": "output_0",
+                "type": "float",
+                "comment": ""
+              },
+              {
+                "name": "output_1",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "left_cmd",
+                "type": "float",
+                "comment": "left motor command"
+              },
+              {
+                "name": "right_cmd",
+                "type": "float",
+                "comment": "right motor command"
+              }
+            ],
+            "rawSource": "\"\"\"\nModule: control_allocation\nDescription: Convert total thrust and roll command into left and right motor references\n\"\"\"\n\n\ndef process(total_thrust: float, roll_command: float):\n    # @observable\n    left_cmd = total_thrust * 0.5 - roll_command * 0.5  # left motor command\n    # @observable\n    right_cmd = total_thrust * 0.5 + roll_command * 0.5  # right motor command\n    return left_cmd, right_cmd\n"
+          },
+          "rawSource": "\"\"\"\nModule: control_allocation\nDescription: Convert total thrust and roll command into left and right motor references\n\"\"\"\n\n\ndef process(total_thrust: float, roll_command: float):\n    # @observable\n    left_cmd = total_thrust * 0.5 - roll_command * 0.5  # left motor command\n    # @observable\n    right_cmd = total_thrust * 0.5 + roll_command * 0.5  # right motor command\n    return left_cmd, right_cmd\n",
+          "executionMode": "backend",
+          "executionConfig": {
+            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
+            "timeoutMs": 3000
+          },
+          "portMapping": {
+            "inputs": [
+              {
+                "portId": "input-0",
+                "varName": "total_thrust",
+                "displayName": "total_thrust",
+                "type": "float",
+                "default": null,
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-1",
+                "varName": "roll_command",
+                "displayName": "roll_command",
+                "type": "float",
+                "default": null,
+                "comment": "",
+                "connected": false
+              }
+            ],
+            "outputs": [
+              {
+                "portId": "output-0",
+                "varName": "output_0",
+                "displayName": "output_0",
+                "type": "float",
+                "comment": ""
+              },
+              {
+                "portId": "output-1",
+                "varName": "output_1",
+                "displayName": "output_1",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "portId": "middle-0",
+                "varName": "left_cmd",
+                "displayName": "left_cmd",
+                "type": "float",
+                "comment": "left motor command"
+              },
+              {
+                "portId": "middle-1",
+                "varName": "right_cmd",
+                "displayName": "right_cmd",
+                "type": "float",
+                "comment": "right motor command"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "node-9",
+        "type": "simulation_block",
+        "x": 1080,
+        "y": 120,
+        "props": {
+          "name": "Motor Model",
+          "moduleType": "actuators",
+          "inputs": [
+            {
+              "name": "Left Command",
+              "type": "scalar"
+            },
+            {
+              "name": "Right Command",
+              "type": "scalar"
+            },
+            {
+              "name": "Efficiency",
+              "type": "scalar"
+            },
+            {
+              "name": "Left Lock",
+              "type": "scalar"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Left Thrust",
+              "type": "scalar"
+            },
+            {
+              "name": "Right Thrust",
+              "type": "scalar"
+            }
+          ],
+          "middleVars": [
+            {
+              "name": "left_thrust",
+              "type": "scalar"
+            },
+            {
+              "name": "right_thrust",
+              "type": "scalar"
+            }
+          ]
+        },
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "motor_model",
+          "fileName": "motor_model.py",
+          "moduleName": "motor_model",
+          "moduleCategory": "actuators",
+          "sourcePackageId": "evtol-small-nonlinear",
+          "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+          "description": "Motor efficiency and saturation model",
+          "entryFunction": "process",
+          "parsedInterface": {
+            "fileName": "motor_model.py",
+            "moduleName": "motor_model",
+            "description": "Motor efficiency and saturation model",
+            "entryFunction": "process",
+            "inputs": [
+              {
+                "name": "left_cmd",
+                "type": "float",
+                "default": null,
+                "comment": ""
+              },
+              {
+                "name": "right_cmd",
+                "type": "float",
+                "default": null,
+                "comment": ""
+              },
+              {
+                "name": "efficiency",
+                "type": "float",
+                "default": "1.0",
+                "comment": ""
+              },
+              {
+                "name": "left_lock",
+                "type": "float",
+                "default": "0.0",
+                "comment": ""
+              },
+              {
+                "name": "saturation",
+                "type": "float",
+                "default": "20.0",
+                "comment": ""
+              }
+            ],
+            "outputs": [
+              {
+                "name": "output_0",
+                "type": "float",
+                "comment": ""
+              },
+              {
+                "name": "output_1",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "left_efficiency",
+                "type": "float",
+                "comment": "left motor availability"
+              },
+              {
+                "name": "left_thrust",
+                "type": "float",
+                "comment": "left thrust"
+              },
+              {
+                "name": "right_thrust",
+                "type": "float",
+                "comment": "right thrust"
+              }
+            ],
+            "rawSource": "\"\"\"\nModule: motor_model\nDescription: Motor efficiency and saturation model\n\"\"\"\n\n\ndef process(\n    left_cmd: float,\n    right_cmd: float,\n    efficiency: float = 1.0,\n    left_lock: float = 0.0,\n    saturation: float = 20.0\n):\n    # @observable\n    left_efficiency = 0.0 if left_lock >= 1.0 else efficiency  # left motor availability\n    # @observable\n    left_thrust = min(max(left_cmd * left_efficiency, 0.0), saturation)  # left thrust\n    # @observable\n    right_thrust = min(max(right_cmd * efficiency, 0.0), saturation)  # right thrust\n    return left_thrust, right_thrust\n"
+          },
+          "rawSource": "\"\"\"\nModule: motor_model\nDescription: Motor efficiency and saturation model\n\"\"\"\n\n\ndef process(\n    left_cmd: float,\n    right_cmd: float,\n    efficiency: float = 1.0,\n    left_lock: float = 0.0,\n    saturation: float = 20.0\n):\n    # @observable\n    left_efficiency = 0.0 if left_lock >= 1.0 else efficiency  # left motor availability\n    # @observable\n    left_thrust = min(max(left_cmd * left_efficiency, 0.0), saturation)  # left thrust\n    # @observable\n    right_thrust = min(max(right_cmd * efficiency, 0.0), saturation)  # right thrust\n    return left_thrust, right_thrust\n",
+          "executionMode": "backend",
+          "executionConfig": {
+            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
+            "timeoutMs": 3000
+          },
+          "portMapping": {
+            "inputs": [
+              {
+                "portId": "input-0",
+                "varName": "left_cmd",
+                "displayName": "left_cmd",
+                "type": "float",
+                "default": null,
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-1",
+                "varName": "right_cmd",
+                "displayName": "right_cmd",
+                "type": "float",
+                "default": null,
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-2",
+                "varName": "efficiency",
+                "displayName": "efficiency",
+                "type": "float",
+                "default": "1.0",
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-3",
+                "varName": "left_lock",
+                "displayName": "left_lock",
+                "type": "float",
+                "default": "0.0",
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-4",
+                "varName": "saturation",
+                "displayName": "saturation",
+                "type": "float",
+                "default": "20.0",
+                "comment": "",
+                "connected": false
+              }
+            ],
+            "outputs": [
+              {
+                "portId": "output-0",
+                "varName": "output_0",
+                "displayName": "output_0",
+                "type": "float",
+                "comment": ""
+              },
+              {
+                "portId": "output-1",
+                "varName": "output_1",
+                "displayName": "output_1",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "portId": "middle-0",
+                "varName": "left_efficiency",
+                "displayName": "left_efficiency",
+                "type": "float",
+                "comment": "left motor availability"
+              },
+              {
+                "portId": "middle-1",
+                "varName": "left_thrust",
+                "displayName": "left_thrust",
+                "type": "float",
+                "comment": "left thrust"
+              },
+              {
+                "portId": "middle-2",
+                "varName": "right_thrust",
+                "displayName": "right_thrust",
+                "type": "float",
+                "comment": "right thrust"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "node-10",
+        "type": "simulation_block",
+        "x": 1340,
+        "y": 120,
+        "props": {
+          "name": "Vehicle Dynamics",
+          "moduleType": "dynamics",
+          "inputs": [
+            {
+              "name": "Left Thrust",
+              "type": "scalar"
+            },
+            {
+              "name": "Right Thrust",
+              "type": "scalar"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "Vertical Accel",
+              "type": "scalar"
+            },
+            {
+              "name": "Roll Moment",
+              "type": "scalar"
+            }
+          ],
+          "middleVars": [
+            {
+              "name": "roll_moment",
+              "type": "scalar"
+            }
+          ]
+        },
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "vehicle_dynamics",
+          "fileName": "vehicle_dynamics.py",
+          "moduleName": "vehicle_dynamics",
+          "moduleCategory": "dynamics",
+          "sourcePackageId": "evtol-small-nonlinear",
+          "sourcePackageName": "eVTOL Small Nonlinear Flight Control",
+          "description": "Reduced-order vertical and roll dynamics",
+          "entryFunction": "process",
+          "parsedInterface": {
+            "fileName": "vehicle_dynamics.py",
+            "moduleName": "vehicle_dynamics",
+            "description": "Reduced-order vertical and roll dynamics",
+            "entryFunction": "process",
+            "inputs": [
+              {
+                "name": "left_thrust",
+                "type": "float",
+                "default": null,
+                "comment": ""
+              },
+              {
+                "name": "right_thrust",
+                "type": "float",
+                "default": null,
+                "comment": ""
+              },
+              {
+                "name": "mass",
+                "type": "float",
+                "default": "8.0",
+                "comment": ""
+              },
+              {
+                "name": "drag",
+                "type": "float",
+                "default": "0.12",
+                "comment": ""
+              }
+            ],
+            "outputs": [
+              {
+                "name": "output_0",
+                "type": "float",
+                "comment": ""
+              },
+              {
+                "name": "output_1",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "roll_moment",
+                "type": "float",
+                "comment": "roll moment"
+              }
+            ],
+            "rawSource": "\"\"\"\nModule: vehicle_dynamics\nDescription: Reduced-order vertical and roll dynamics\n\"\"\"\n\n\ndef process(\n    left_thrust: float,\n    right_thrust: float,\n    mass: float = 8.0,\n    drag: float = 0.12\n):\n    total_thrust = left_thrust + right_thrust\n    # @observable\n    roll_moment = right_thrust - left_thrust  # roll moment\n    vertical_accel = total_thrust / max(mass, 0.1) - drag\n    return vertical_accel, roll_moment\n"
+          },
+          "rawSource": "\"\"\"\nModule: vehicle_dynamics\nDescription: Reduced-order vertical and roll dynamics\n\"\"\"\n\n\ndef process(\n    left_thrust: float,\n    right_thrust: float,\n    mass: float = 8.0,\n    drag: float = 0.12\n):\n    total_thrust = left_thrust + right_thrust\n    # @observable\n    roll_moment = right_thrust - left_thrust  # roll moment\n    vertical_accel = total_thrust / max(mass, 0.1) - drag\n    return vertical_accel, roll_moment\n",
+          "executionMode": "backend",
+          "executionConfig": {
+            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
+            "timeoutMs": 3000
+          },
+          "portMapping": {
+            "inputs": [
+              {
+                "portId": "input-0",
+                "varName": "left_thrust",
+                "displayName": "left_thrust",
+                "type": "float",
+                "default": null,
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-1",
+                "varName": "right_thrust",
+                "displayName": "right_thrust",
+                "type": "float",
+                "default": null,
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-2",
+                "varName": "mass",
+                "displayName": "mass",
+                "type": "float",
+                "default": "8.0",
+                "comment": "",
+                "connected": false
+              },
+              {
+                "portId": "input-3",
+                "varName": "drag",
+                "displayName": "drag",
+                "type": "float",
+                "default": "0.12",
+                "comment": "",
+                "connected": false
+              }
+            ],
+            "outputs": [
+              {
+                "portId": "output-0",
+                "varName": "output_0",
+                "displayName": "output_0",
+                "type": "float",
+                "comment": ""
+              },
+              {
+                "portId": "output-1",
+                "varName": "output_1",
+                "displayName": "output_1",
+                "type": "float",
+                "comment": ""
+              }
+            ],
+            "middleVars": [
+              {
+                "portId": "middle-0",
+                "varName": "roll_moment",
+                "displayName": "roll_moment",
+                "type": "float",
+                "comment": "roll moment"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": "node-11",
+        "type": "instrument_scope",
+        "x": 1600,
+        "y": 100,
+        "props": {
+          "name": "Dynamics Scope"
+        },
+        "pythonBinding": null
+      },
+      {
+        "id": "node-12",
+        "type": "instrument_scope",
+        "x": 1600,
+        "y": 320,
+        "props": {
+          "name": "Sensor Scope"
+        },
+        "pythonBinding": null
+      },
+      {
+        "id": "node-13",
+        "type": "signal_source",
+        "x": 80,
+        "y": 460,
+        "props": {
+          "name": "Held Velocity Sample",
+          "waveType": "常值",
+          "amplitude": "1.2",
+          "frequency": "1.0",
+          "outputFormat": "标量"
+        },
+        "pythonBinding": null
+      }
+    ],
+    "modelEdges": [
+      {
+        "id": "edge-1",
+        "sourceNodeId": "node-1",
+        "targetNodeId": "node-7",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-2",
+        "sourceNodeId": "node-3",
+        "targetNodeId": "node-7",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 1,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-3",
+        "sourceNodeId": "node-5",
+        "targetNodeId": "node-8",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-4",
+        "sourceNodeId": "node-7",
+        "targetNodeId": "node-8",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 1,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-5",
+        "sourceNodeId": "node-8",
+        "targetNodeId": "node-9",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-6",
+        "sourceNodeId": "node-8",
+        "targetNodeId": "node-9",
+        "sourcePortIndex": 1,
+        "targetPortIndex": 1,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-7",
+        "sourceNodeId": "node-9",
+        "targetNodeId": "node-10",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-8",
+        "sourceNodeId": "node-9",
+        "targetNodeId": "node-10",
+        "sourcePortIndex": 1,
+        "targetPortIndex": 1,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-9",
+        "sourceNodeId": "node-10",
+        "targetNodeId": "node-4",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-10",
+        "sourceNodeId": "node-10",
+        "targetNodeId": "node-3",
+        "sourcePortIndex": 1,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-11",
+        "sourceNodeId": "node-10",
+        "targetNodeId": "node-5",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-12",
+        "sourceNodeId": "node-2",
+        "targetNodeId": "node-6",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-13",
+        "sourceNodeId": "node-4",
+        "targetNodeId": "node-12",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-14",
+        "sourceNodeId": "node-13",
+        "targetNodeId": "node-6",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 1,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-15",
+        "sourceNodeId": "node-6",
+        "targetNodeId": "node-12",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 1,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-16",
+        "sourceNodeId": "node-10",
+        "targetNodeId": "node-11",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "lineType": "normal"
+      },
+      {
+        "id": "edge-17",
+        "sourceNodeId": "node-10",
+        "targetNodeId": "node-11",
+        "sourcePortIndex": 1,
+        "targetPortIndex": 1,
+        "lineType": "normal"
+      }
+    ],
+    "nodeSeq": 13,
+    "edgeSeq": 17,
+    "activeLineType": "normal",
+    "faultedBlks": [],
+    "importedFaultModels": []
+  }
+}

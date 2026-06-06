@@ -1,0 +1,236 @@
+<div class="overlay" id="ov-ifm">
+  <div class="modal" style="width:520px;height:480px;">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--red)">导入故障模型</div>
+      <button class="mclose" onclick="closeOv('ov-ifm')">✕</button>
+    </div>
+    <div class="mbody" style="flex-direction:column;">
+      <div class="ifm-body">
+        <!-- 文件拖放区 -->
+        <div class="ifm-top">
+          <div class="ifm-drop" onclick="simulateFileImport()">
+            <div class="ifm-drop-icon">📂</div>
+            <div class="ifm-drop-txt">点击选择 或 拖拽故障模型文件</div>
+            <div class="ifm-drop-sub">支持 .flt · .json · .xml 格式</div>
+          </div>
+        </div>
+        <!-- 已有文件列表 -->
+        <div class="ifm-list">
+          <div style="font-size:9px;color:var(--textd);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">可导入故障模型</div>
+          <div id="ifm-list-container"></div>
+        </div>
+      </div>
+      <!-- ★ 故障建模入口行 ★ -->
+      <div class="ifm-build-row">
+        <div class="ifm-build-hint">没有合适的模型？从模板库新建</div>
+        <button class="btn-build-fault" onclick="openFaultBuild()">⚡ 故障建模</button>
+      </div>
+    </div>
+    <div class="mfoot">
+      <div style="flex:1;font-size:11px;color:var(--textm)" id="ifm-sel-hint">已选：未选择故障模型</div>
+      <button class="btn-cancel" onclick="closeOv('ov-ifm')">取消</button>
+      <button class="btn-ok btn-ok-r" onclick="confirmImportFault()">确认导入</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="ov-tpl">
+  <div class="modal" style="width:820px;height:530px">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--purple)">⚡ 故障建模 · 模板库</div>
+      <button class="mclose" onclick="closeOv('ov-tpl')">✕</button>
+    </div>
+    <div class="mbody">
+      <div class="tpl-cats">
+        <div class="tcat-head">故障层级</div>
+        <div class="tpl-cat on" onclick="setCat(this,'physical')"><span>🔧</span><span>物理层</span><span class="tpl-cnt">5</span></div>
+        <div class="tpl-cat" onclick="setCat(this,'electrical')"><span>⚡</span><span>电气层</span><span class="tpl-cnt">4</span></div>
+        <div class="tpl-cat" onclick="setCat(this,'protocol')"><span>📡</span><span>协议层</span><span class="tpl-cnt">4</span></div>
+        <div style="height:1px;background:var(--border);margin:8px 4px"></div>
+        <div class="tcat-head">已选模板</div>
+        <div id="sel-list"><div style="font-size:10px;color:var(--textd);text-align:center;margin-top:6px">暂无</div></div>
+      </div>
+      <div class="tpl-grid" id="tgrid"></div>
+      <div class="tpl-detail" id="tdetail"><div class="tdph">← 选择模板查看详情</div></div>
+    </div>
+    <div class="mfoot">
+      <div style="flex:1;font-size:11px;color:var(--textm)" id="sel-cnt">已选 0 个故障模板</div>
+      <button class="btn-cancel" onclick="backToImport()">← 返回导入</button>
+      <button class="btn-ok btn-ok-p" onclick="confirmFM()">✓ 确认建模</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="ov-elec">
+  <div class="modal" style="width:860px;height:540px">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--red)">电气层故障注入</div>
+      <button class="mclose" onclick="closeOv('ov-elec')">✕</button>
+    </div>
+    <div class="mbody einj-body">
+      <div class="einj-side">
+        <div class="einj-side-head">
+          <div class="einj-side-title">已导入模型</div>
+          <div class="einj-side-sub">这里显示通过“导入故障模型”进入工作区的电气层故障。</div>
+        </div>
+        <div class="einj-import-list" id="einj-import-list"></div>
+      </div>
+      <div class="einj-main">
+        <div class="einj-target" id="einj-target"></div>
+        <div class="einj-grid" id="einj-template-grid"></div>
+      </div>
+      <div class="einj-detail">
+        <div class="einj-detail-head">
+          <div class="einj-detail-title">模型详情</div>
+          <div class="einj-detail-sub">可从已导入模型中选择，也可直接从电气层模板库导入并注入。</div>
+        </div>
+        <div class="einj-detail-body" id="einj-detail-body"></div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <div style="flex:1;font-size:11px;color:var(--textm)" id="einj-foot-hint">请选择一个电气层故障模型。</div>
+      <button class="btn-cancel" onclick="closeOv('ov-elec')">取消</button>
+      <button class="btn-ok btn-ok-r" onclick="confirmElectricalFaultInjection()">导入并注入</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="ov-proto">
+  <div class="modal" style="width:860px;height:540px">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--blue)">CAN 协议层故障注入</div>
+      <button class="mclose" onclick="closeOv('ov-proto')">✕</button>
+    </div>
+    <div class="mbody einj-body einj-protocol">
+      <div class="einj-side">
+        <div class="einj-side-head">
+          <div class="einj-side-title">已导入模型</div>
+          <div class="einj-side-sub">这里显示通过“导入故障模型”进入工作区的 CAN 协议层故障。</div>
+        </div>
+        <div class="einj-import-list" id="pinj-import-list"></div>
+      </div>
+      <div class="einj-main">
+        <div class="einj-target" id="pinj-target"></div>
+        <div class="einj-grid" id="pinj-template-grid"></div>
+      </div>
+      <div class="einj-detail">
+        <div class="einj-detail-head">
+          <div class="einj-detail-title">模型详情</div>
+          <div class="einj-detail-sub">当前仅支持对 CAN 总线注入协议层故障。</div>
+        </div>
+        <div class="einj-detail-body" id="pinj-detail-body"></div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <div style="flex:1;font-size:11px;color:var(--textm)" id="pinj-foot-hint">请选择一个 CAN 协议层故障模型。</div>
+      <button class="btn-cancel" onclick="closeOv('ov-proto')">取消</button>
+      <button class="btn-ok btn-ok-b" onclick="confirmProtocolFaultInjection()">导入并注入</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="ov-cfg">
+  <div class="modal" style="width:680px;height:490px">
+    <div class="mhead">
+      <div class="mtitle" style="color:var(--red)">⚙ 故障配置 · 注入参数</div>
+      <button class="mclose" onclick="closeOv('ov-cfg')">✕</button>
+    </div>
+    <div class="mbody">
+      <div class="cfg-form">
+        <div class="cfg-sec">
+          <div class="cfg-sec-title">目标组件</div>
+            <div class="cfg-grid">
+            <div class="cfg-f"><label>注入位置</label>
+              <select id="cftgt" onchange="upPrev()"></select>
+            </div>
+            <div class="cfg-f"><label>故障模型</label><select id="cfmdl" onchange="upPrev()"></select></div>
+          </div>
+        </div>
+        <div class="cfg-sec">
+          <div class="cfg-sec-title">注入层级</div>
+          <div class="layer-sel">
+            <div class="lbtn on" onclick="setLayer(this,'物理层')">🔧 物理层</div>
+            <div class="lbtn" onclick="setLayer(this,'电气层')">⚡ 电气层</div>
+            <div class="lbtn" onclick="setLayer(this,'协议层')">📡 协议层</div>
+          </div>
+        </div>
+        <div class="cfg-sec">
+          <div class="cfg-sec-title">故障模式</div>
+          <div class="cfg-grid">
+            <div class="cfg-f"><label>故障类型</label>
+              <select id="cftype" onchange="upPrev()">
+                <option>固定偏差 (Bias)</option><option>随机噪声 (Noise)</option>
+                <option>卡死 (Stuck-at)</option><option>缓变漂移 (Drift)</option><option>增益错误 (Gain)</option>
+              </select>
+            </div>
+            <div class="cfg-f"><label>持续方式</label>
+              <select id="cfpers" onchange="upPrev()">
+                <option>永久性 (Permanent)</option><option>间歇性 (Intermittent)</option><option>瞬态 (Transient)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="cfg-sec">
+          <div class="cfg-sec-title">时序参数</div>
+          <div class="cfg-grid">
+            <div class="cfg-f"><label>注入起始时间 (s)</label><input type="number" id="cfs" value="5.0" step="0.5" min="0" oninput="upPrev()"></div>
+            <div class="cfg-f"><label>持续时长 (s)</label><input type="number" id="cfd" value="3.0" step="0.5" min="0.1" oninput="upPrev()"></div>
+            <div class="cfg-f"><label>故障幅度</label><input type="number" id="cfmag" value="0.5" step="0.1" oninput="upPrev()"></div>
+            <div class="cfg-f"><label>仿真总时长 (s)</label><input type="number" id="cftot" value="20.0" step="1" min="1" oninput="upPrev()"></div>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-prev">
+        <div class="cprev-title">📊 配置预览</div>
+        <div style="font-size:9px;color:var(--textm);margin-bottom:4px">时序示意</div>
+        <div class="cfg-tl"><svg id="ctlsvg" width="100%" height="100%">
+          <polyline id="tln" points="" stroke="#c2d6ea" stroke-width="1" fill="none"/>
+          <rect id="tlr" x="0" y="0" width="0" height="100%" fill="rgba(220,38,38,0.07)"/>
+          <polyline id="tlf" points="" stroke="#dc2626" stroke-width="1.5" fill="none"/>
+          <line id="tll" x1="0" y1="0" x2="0" y2="72" stroke="#dc2626" stroke-width="1" stroke-dasharray="3,2" opacity="0.6"/>
+        </svg></div>
+        <div id="csumm" style="display:flex;flex-direction:column;gap:2px"></div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <button class="btn-cancel" onclick="closeOv('ov-cfg')">取消</button>
+      <button class="btn-ok btn-ok-r" onclick="confirmFC()">💾 保存配置</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="ov-scope">
+  <div class="modal" style="width:720px;height:450px">
+    <div class="mhead">
+      <div class="mtitle" id="scope-title" style="color:var(--green)">🔭 示波器 · 波形查看</div>
+      <button class="mclose" onclick="closeOv('ov-scope')">✕</button>
+    </div>
+    <div class="mbody" style="flex-direction:column">
+      <div class="scope-ctrl">
+        <button class="scbtn" onclick="drawScope()">⟳ 刷新</button>
+        <button class="scbtn" onclick="focusScopeLatest()">⌖ 最新</button>
+        <button class="scbtn" id="scmp" onclick="togCmp()">⚖ 对比模式</button>
+        <div id="scope-meta" style="font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--textm)">等待仿真数据</div>
+        <div class="scope-legend">
+          <div class="sleg"><div class="slegdot" style="background:var(--blue)"></div><span>正常</span></div>
+          <div class="sleg" id="sleg-f" style="display:none"><div class="slegdot" style="background:var(--red)"></div><span>故障</span></div>
+        </div>
+      </div>
+      <div class="scope-channels">
+        <div class="scope-ch" style="flex:2">
+          <div class="sch-lbl" id="sc1-lbl">CH1 · 时域波形</div>
+          <canvas id="sc1" style="width:100%;height:100%"></canvas>
+        </div>
+        <div class="scope-ch" style="flex:1">
+          <div class="sch-lbl" id="sc2-lbl">CH2 · 频谱</div>
+          <canvas id="sc2" style="width:100%;height:100%"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="mfoot">
+      <button class="btn-ok btn-ok-g" onclick="closeOv('ov-scope')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"><span id="ti"></span><span id="tm"></span></div>

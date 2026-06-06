@@ -1,0 +1,72 @@
+<div class="overlay" id="ov-ifm">
+  <div class="modal ifm-modal">
+    <div class="mhead">
+      <div>
+        <div class="mtitle" style="color:var(--red)">注入故障</div>
+        <div class="ifm-modal-sub">按当前系统模型筛选匹配的故障库，可选择一个或多个故障并配置参数后注入到画布组件或 CAN 边。</div>
+      </div>
+      <button class="mclose" onclick="closeOv('ov-ifm')">×</button>
+    </div>
+    <div class="mbody ifm-modal-body">
+      <div class="ifm-body">
+        <div class="ifm-catalog-head">
+          <div>
+            <div class="ifm-kicker">fault-types/fault-type-catalog.json</div>
+            <div class="ifm-head-title">无人机飞控故障类型库</div>
+            <div class="ifm-head-desc">覆盖物理层、电气层、协议层故障，包含定量公式、默认参数、推荐模块和观测信号。</div>
+          </div>
+          <div class="ifm-summary" id="ifm-summary">
+            <div class="ifm-summary-card">
+              <span>总数</span>
+              <strong id="ifm-total-count">0</strong>
+            </div>
+            <div class="ifm-summary-card">
+              <span>物理</span>
+              <strong id="ifm-physical-count">0</strong>
+            </div>
+            <div class="ifm-summary-card">
+              <span>电气</span>
+              <strong id="ifm-electrical-count">0</strong>
+            </div>
+            <div class="ifm-summary-card">
+              <span>协议</span>
+              <strong id="ifm-protocol-count">0</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="ifm-toolbar">
+          <div class="ifm-filters" role="tablist" aria-label="故障层级筛选">
+            <button class="ifm-filter on" type="button" data-fault-layer="all" onclick="setFaultCatalogLayerFilter('all')">全部</button>
+            <button class="ifm-filter" type="button" data-fault-layer="physical" onclick="setFaultCatalogLayerFilter('physical')">物理层</button>
+            <button class="ifm-filter" type="button" data-fault-layer="electrical" onclick="setFaultCatalogLayerFilter('electrical')">电气层</button>
+            <button class="ifm-filter" type="button" data-fault-layer="protocol" onclick="setFaultCatalogLayerFilter('protocol')">协议层</button>
+          </div>
+          <input class="ifm-search" id="fault-catalog-search" type="search" placeholder="搜索故障名称、参数或推荐模块" oninput="setFaultCatalogSearch(this.value)" />
+        </div>
+
+        <div class="ifm-content-grid">
+          <section class="ifm-list">
+            <div class="ifm-list-head">
+              <span>可注入故障</span>
+              <b id="ifm-visible-count">0</b>
+            </div>
+            <div id="ifm-list-container"></div>
+          </section>
+          <section class="ifm-detail" id="fault-type-detail">
+            <div class="ifm-detail-empty">选择一个故障类型查看定量模型和平台实现方式。</div>
+          </section>
+        </div>
+      </div>
+      <div class="ifm-build-row">
+        <div class="ifm-build-hint">当前库为无人机飞控系统故障库，仅在导入兼容飞控模型后可注入；其他系统需单独设计故障库。</div>
+        <button class="btn-build-fault" onclick="openFaultBuild()">故障建模</button>
+      </div>
+    </div>
+    <div class="mfoot">
+      <div style="flex:1;font-size:11px;color:var(--textm)" id="ifm-sel-hint">已选：未选择故障模型</div>
+      <button class="btn-cancel" onclick="closeOv('ov-ifm')">取消</button>
+      <button class="btn-ok btn-ok-r" onclick="confirmImportFault()">确认注入</button>
+    </div>
+  </div>
+</div>

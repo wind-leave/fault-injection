@@ -5298,18 +5298,52 @@ async function pickJsonFileText(){
     const input=document.createElement('input');
     input.type='file';
     input.accept='.json,application/json';
+    let settled=false;
+    let focusFallbackTimer=null;
+    const cleanup=()=>{
+      window.removeEventListener('focus',handleFocusReturn);
+      if(focusFallbackTimer){
+        clearTimeout(focusFallbackTimer);
+        focusFallbackTimer=null;
+      }
+    };
+    const settle=(value)=>{
+      if(settled){return;}
+      settled=true;
+      cleanup();
+      resolve(value);
+    };
+    const settleError=(error)=>{
+      if(settled){return;}
+      settled=true;
+      cleanup();
+      reject(error);
+    };
+    const handleFocusReturn=()=>{
+      if(focusFallbackTimer){
+        clearTimeout(focusFallbackTimer);
+      }
+      focusFallbackTimer=setTimeout(()=>{
+        focusFallbackTimer=null;
+        if(!settled&&(!input.files||input.files.length===0)){
+          settle(null);
+        }
+      },250);
+    };
     input.onchange=async ()=>{
       const file=input.files&&input.files[0];
       if(!file){
-        resolve(null);
+        settle(null);
         return;
       }
       try{
-        resolve(await file.text());
+        settle(await file.text());
       }catch(error){
-        reject(error);
+        settleError(error);
       }
     };
+    input.addEventListener('cancel',()=>settle(null),{once:true});
+    window.addEventListener('focus',handleFocusReturn);
     input.click();
   });
 }
@@ -9066,21 +9100,51 @@ window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__ = function(pkg,prepared){
 
 doImportSys = async function(){
   const btn=document.getElementById('btn-imp-sys');
+  const packageApi=window.__GZ_FLIGHT_MODEL_PACKAGE__;
   const resetButton=()=>{
     if(!btn){return;}
     btn.textContent='导入系统模型';
     btn.disabled=false;
   };
+  if(typeof packageApi?.importObject!=='function'){
+    toast('飞控模型导入桥接未就绪','w');
+    return {ok:false,reason:'import-bridge-not-ready'};
+  }
   if(btn){
-    btn.textContent='导入中...';
+    btn.textContent='选择文件...';
     btn.disabled=true;
   }
   try{
-    return await importBundledDefaultFlightModel();
+    const fileText=await pickJsonFileText();
+    if(!fileText){
+      toast('未选择系统模型 JSON 文件','w');
+      return {ok:false,reason:'file-selection-cancelled'};
+    }
+
+    let pkg=null;
+    try{
+      pkg=JSON.parse(fileText);
+    }catch(error){
+      toast('导入失败：JSON 解析错误','w');
+      return {ok:false,reason:'invalid-json'};
+    }
+
+    const result=packageApi.importObject(pkg);
+    if(!result?.ok){
+      toast((result?.errors||['飞控模型导入失败']).join('；'),'w');
+      return result||{ok:false,reason:'import-failed'};
+    }
+    try{
+      window.localStorage?.removeItem(WORKBENCH_STORAGE_KEY);
+    }catch(error){
+      console.warn('Failed to clear stale workbench snapshot after import',error);
+    }
+    toast(`系统模型“${pkg?.modelName||pkg?.modelId||'未命名模型'}”已导入`,'s');
+    return result;
   }catch(error){
-    console.warn('Failed to import bundled flight model package',error);
-    toast('飞控 Demo 模型导入失败，请稍后重试','w');
-    return {ok:false,errors:[error instanceof Error?error.message:'Failed to import bundled flight model package.']};
+    console.warn('Failed to import selected flight model package',error);
+    toast('系统模型导入失败，请稍后重试','w');
+    return {ok:false,errors:[error instanceof Error?error.message:'Failed to import selected flight model package.']};
   }finally{
     resetButton();
   }

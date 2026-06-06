@@ -223,6 +223,21 @@ function loadPublicPackage(fileName) {
   return JSON.parse(readFileSync(targetPath, 'utf8'));
 }
 
+function mockNextJsonFileSelection(fileText) {
+  vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function click() {
+    Object.defineProperty(this, 'files', {
+      configurable: true,
+      value: [
+        {
+          name: 'model-package.json',
+          text: async () => fileText
+        }
+      ]
+    });
+    this.onchange?.(new Event('change'));
+  });
+}
+
 function collectLinkedSubsystemNodes(snapshot) {
   const rootCanvas = snapshot?.canvases?.[snapshot?.rootCanvasId];
   if (!rootCanvas) {
@@ -1205,16 +1220,11 @@ describe('Flight model package app integration', () => {
     wrapper.unmount();
   });
 
-  it('keeps the startup canvas blank and imports the bundled UAV demo from the import action', async () => {
+  it('keeps the startup canvas blank and imports the selected local model JSON from the import action', async () => {
     const originalFetch = window.fetch;
-    const defaultPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    window.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => defaultPackage
-    }));
-    vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function click() {
-      this.onchange?.(new Event('change'));
-    });
+    const selectedPackage = loadPublicPackage('evtol_small_nonlinear.json');
+    window.fetch = vi.fn();
+    mockNextJsonFileSelection(JSON.stringify(selectedPackage));
 
     const wrapper = mount(App, { attachTo: document.body });
     try {
@@ -1228,22 +1238,72 @@ describe('Flight model package app integration', () => {
       await flushRuntime();
 
       expect(importResult).toMatchObject({ ok: true });
-      expect(window.fetch).toHaveBeenCalledWith(
-        'http://localhost:3000/model-packages/evtol_closed_loop_fault_demo.json'
-      );
+      expect(window.fetch).not.toHaveBeenCalled();
       expect(window.__GZ_STATE__.sysLoaded).toBe(true);
-      expect(window.__GZ_STATE__.modelNodes).toHaveLength(defaultPackage.workbenchSnapshot.modelNodes.length);
+      expect(window.__GZ_STATE__.modelNodes).toHaveLength(selectedPackage.workbenchSnapshot.modelNodes.length);
       expect(window.__GZ_STATE__.activeModelPackage).toMatchObject({
-        modelId: defaultPackage.modelId,
-        modelName: defaultPackage.modelName
+        modelId: selectedPackage.modelId,
+        modelName: selectedPackage.modelName
       });
-      expect(window.__GZ_STATE__.availableFaultModels.some((model) => model.id === 'gyro_zero_bias_offset')).toBe(true);
       expect(document.getElementById('empty')?.style.display).toBe('none');
       expect(document.getElementById('diagram')?.classList.contains('on')).toBe(true);
     } finally {
       window.fetch = originalFetch;
       wrapper.unmount();
     }
+  });
+
+  it('restores the import button when the local model JSON picker is cancelled', async () => {
+    vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function click() {
+      this.dispatchEvent(new Event('cancel'));
+    });
+
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const importButton = document.getElementById('btn-imp-sys');
+    const importPromise = window.doImportSys();
+    await flushRuntime();
+
+    expect(importButton?.textContent).toBe('导入系统模型');
+    expect(importButton?.disabled).toBe(false);
+    await expect(importPromise).resolves.toMatchObject({ ok: false, reason: 'file-selection-cancelled' });
+
+    wrapper.unmount();
+  });
+
+  it('imports the selected local model JSON when focus returns before the file change event', async () => {
+    const selectedPackage = loadPublicPackage('evtol_small_nonlinear.json');
+    vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function click() {
+      window.dispatchEvent(new Event('focus'));
+      setTimeout(() => {
+        Object.defineProperty(this, 'files', {
+          configurable: true,
+          value: [
+            {
+              name: 'model-package.json',
+              text: async () => JSON.stringify(selectedPackage)
+            }
+          ]
+        });
+        this.onchange?.(new Event('change'));
+      }, 20);
+    });
+
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const importResult = await window.doImportSys();
+    await flushRuntime();
+
+    expect(importResult).toMatchObject({ ok: true });
+    expect(window.__GZ_STATE__.activeModelPackage).toMatchObject({
+      modelId: selectedPackage.modelId,
+      modelName: selectedPackage.modelName
+    });
+    expect(document.getElementById('btn-imp-sys')?.textContent).toBe('导入系统模型');
+
+    wrapper.unmount();
   });
 
   it('force-loads the public demo over stale blank workspace state and opens fault injection directly', async () => {
@@ -1703,13 +1763,10 @@ describe('Flight model package app integration', () => {
     wrapper.unmount();
   });
 
-  it('ignores stale localStorage snapshots when the import action loads the bundled UAV demo', async () => {
+  it('ignores stale localStorage snapshots when the import action loads a selected local model JSON', async () => {
     const originalFetch = window.fetch;
-    const defaultPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    window.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => defaultPackage
-    }));
+    const selectedPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    window.fetch = vi.fn();
 
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -1740,20 +1797,18 @@ describe('Flight model package app integration', () => {
     });
 
     window.localStorage.setItem('gz-workbench-system-model', JSON.stringify(legacySnapshot));
-    vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function click() {
-      this.onchange?.(new Event('change'));
-    });
+    mockNextJsonFileSelection(JSON.stringify(selectedPackage));
 
     await window.doImportSys();
     await flushRuntime();
 
     expect(window.localStorage.getItem('gz-workbench-system-model')).toBeNull();
     expect(window.__GZ_STATE__.sysLoaded).toBe(true);
-    expect(window.__GZ_STATE__.modelNodes).toHaveLength(defaultPackage.workbenchSnapshot.modelNodes.length);
+    expect(window.__GZ_STATE__.modelNodes).toHaveLength(selectedPackage.workbenchSnapshot.modelNodes.length);
     expect(window.__GZ_STATE__.modelNodes.some((node) => node.props?.name === 'Legacy PID')).toBe(false);
     expect(window.__GZ_STATE__.activeModelPackage).toMatchObject({
-      modelId: defaultPackage.modelId,
-      modelName: defaultPackage.modelName
+      modelId: selectedPackage.modelId,
+      modelName: selectedPackage.modelName
     });
     window.fetch = originalFetch;
     wrapper.unmount();

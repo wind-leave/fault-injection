@@ -30,6 +30,8 @@ describe('left palette taxonomy', () => {
 
     expect(source).toContain('getPaletteGroups');
     expect(source).not.toContain('left-panel.html?raw');
+    expect(source).not.toContain('badgeIcons');
+    expect(source).not.toContain('badgeClassByType');
   });
 
   it('orders modeling entries by role and keeps analysis views out of the component palette', () => {
@@ -87,6 +89,19 @@ describe('left palette taxonomy', () => {
     ]);
     expect(groupBody(wrapper, 'can-lines').find('[data-line-type="normal"]').exists()).toBe(true);
     expect(groupBody(wrapper, 'can-lines').find('[data-line-type="can"]').exists()).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it('renders component palette icons from registry metadata', () => {
+    const wrapper = mountPalette();
+
+    expect(wrapper.find('[data-component="signal_source"] .citem-icon-badge').text()).toBe('S');
+    expect(wrapper.find('[data-component="sum_block"] .citem-icon-badge').text()).toBe('+');
+    expect(wrapper.find('[data-component="instrument_scope"] .citem-icon-badge').text()).toBe('波');
+    expect(wrapper.find('[data-component="instrument_scope"] .citem-icon-badge').classes()).toContain(
+      'citem-icon-badge--scope'
+    );
 
     wrapper.unmount();
   });

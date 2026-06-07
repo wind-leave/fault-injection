@@ -62,6 +62,16 @@ describe('component registry', () => {
       expect(definition.height).toEqual(expect.any(Number));
       expect(definition.defaults).toEqual(expect.any(Object));
       expect(Array.isArray(definition.defaults)).toBe(false);
+
+      if (definition.palette?.visible === false) {
+        return;
+      }
+
+      expect(definition.palette).toEqual(expect.any(Object));
+      expect(definition.palette.icon).toEqual(expect.any(String));
+      expect(definition.palette.icon).not.toHaveLength(0);
+      expect(definition.palette.iconClass).toEqual(expect.any(String));
+      expect(definition.palette.iconClass).not.toHaveLength(0);
     });
   });
 

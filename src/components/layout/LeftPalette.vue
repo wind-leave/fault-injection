@@ -8,40 +8,6 @@ const groupOpen = reactive(Object.fromEntries(
   paletteGroups.map((group) => [group.id, group.defaultOpen !== false])
 ));
 
-const badgeIcons = {
-  signal_source: 'S',
-  middle_var_assign: '中',
-  flow_block: 'F',
-  gain_block: '×',
-  sum_block: '+',
-  mux_block: 'M',
-  simulation_block: 'P',
-  subsystem_block: '子',
-  physical_fault_injector: 'F',
-  electrical_fault_injector: 'E',
-  protocol_fault_injector: 'P',
-  instrument_scope: '波',
-  instrument_spectrum: '谱',
-  instrument_logger: '记'
-};
-
-const badgeClassByType = {
-  signal_source: 'source',
-  middle_var_assign: 'middle',
-  flow_block: 'flow',
-  gain_block: 'gain',
-  sum_block: 'sum',
-  mux_block: 'mux',
-  simulation_block: 'simulation',
-  subsystem_block: 'subsystem',
-  physical_fault_injector: 'fault',
-  electrical_fault_injector: 'fault',
-  protocol_fault_injector: 'fault',
-  instrument_scope: 'scope',
-  instrument_spectrum: 'spectrum',
-  instrument_logger: 'logger'
-};
-
 function groupDomId(groupId) {
   return `g-${groupId}`;
 }
@@ -63,12 +29,12 @@ function componentClasses(component) {
 function badgeClass(component) {
   return [
     'citem-icon-badge',
-    `citem-icon-badge--${badgeClassByType[component.type] || 'source'}`
+    `citem-icon-badge--${component.palette?.iconClass || 'source'}`
   ];
 }
 
 function badgeIcon(component) {
-  return badgeIcons[component.type] || component.badge?.slice(0, 1) || component.label?.slice(0, 1) || '?';
+  return component.palette?.icon || component.badge?.slice(0, 1) || component.label?.slice(0, 1) || '?';
 }
 
 function lineToolClasses(component) {

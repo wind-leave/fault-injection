@@ -21,6 +21,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-source',
     width: 164,
     height: 84,
+    palette: {
+      icon: 'S',
+      iconClass: 'source'
+    },
     defaults: {
       name: '信号源',
       waveType: '正弦',
@@ -37,6 +41,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-assign',
     width: 176,
     height: 82,
+    palette: {
+      icon: '中',
+      iconClass: 'middle'
+    },
     defaults: {
       name: '中间变量赋值块',
       targetNodeId: '',
@@ -54,6 +62,10 @@ export const COMPONENT_REGISTRY = {
     width: 168,
     height: 88,
     title: '统一输入输出的数据类型和格式',
+    palette: {
+      icon: 'F',
+      iconClass: 'flow'
+    },
     defaults: {
       name: '信号适配块',
       inputName: '输入信号',
@@ -70,6 +82,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-gain',
     width: 156,
     height: 84,
+    palette: {
+      icon: '×',
+      iconClass: 'gain'
+    },
     defaults: {
       name: '增益块',
       gain: '1.0',
@@ -85,6 +101,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-sum',
     width: 164,
     height: 88,
+    palette: {
+      icon: '+',
+      iconClass: 'sum'
+    },
     defaults: {
       name: '求和块',
       inputCount: 2,
@@ -100,6 +120,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-mux',
     width: 164,
     height: 88,
+    palette: {
+      icon: 'M',
+      iconClass: 'mux'
+    },
     defaults: {
       name: 'Mux 块',
       inputCount: 2,
@@ -114,6 +138,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-sim',
     width: 174,
     height: 92,
+    palette: {
+      icon: 'P',
+      iconClass: 'simulation'
+    },
     defaults: {
       name: '仿真块',
       moduleType: '一阶函数',
@@ -131,6 +159,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-subsystem',
     width: 180,
     height: 92,
+    palette: {
+      icon: '子',
+      iconClass: 'subsystem'
+    },
     defaults: {
       name: '子系统块',
       description: '',
@@ -140,7 +172,9 @@ export const COMPONENT_REGISTRY = {
   subsystem_in_port: {
     type: 'subsystem_in_port',
     group: 'subsystem',
-    paletteVisible: false,
+    palette: {
+      visible: false
+    },
     label: '子系统输入口',
     badge: 'IN',
     className: 'b-subsystem-port-in',
@@ -153,7 +187,9 @@ export const COMPONENT_REGISTRY = {
   subsystem_out_port: {
     type: 'subsystem_out_port',
     group: 'subsystem',
-    paletteVisible: false,
+    palette: {
+      visible: false
+    },
     label: '子系统输出口',
     badge: 'OUT',
     className: 'b-subsystem-port-out',
@@ -171,6 +207,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-fault',
     width: 196,
     height: 96,
+    palette: {
+      icon: 'F',
+      iconClass: 'fault'
+    },
     defaults: {
       name: '物理层注入',
       faultType: '物理参数故障',
@@ -186,6 +226,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-fault',
     width: 196,
     height: 96,
+    palette: {
+      icon: 'E',
+      iconClass: 'fault'
+    },
     defaults: {
       name: '电气层注入',
       faultType: '电气信号故障',
@@ -201,6 +245,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-fault',
     width: 196,
     height: 96,
+    palette: {
+      icon: 'P',
+      iconClass: 'fault'
+    },
     defaults: {
       name: '协议层注入',
       faultType: '数字协议故障',
@@ -216,6 +264,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-inst',
     width: 150,
     height: 74,
+    palette: {
+      icon: '波',
+      iconClass: 'scope'
+    },
     defaults: {
       name: '示波器',
       instrumentType: '波形监测',
@@ -231,6 +283,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-inst',
     width: 158,
     height: 74,
+    palette: {
+      icon: '谱',
+      iconClass: 'spectrum'
+    },
     defaults: {
       name: '频谱分析仪',
       instrumentType: '频谱分析',
@@ -246,6 +302,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-inst',
     width: 158,
     height: 74,
+    palette: {
+      icon: '记',
+      iconClass: 'logger'
+    },
     defaults: {
       name: '数据记录仪',
       instrumentType: '数据记录',
@@ -263,6 +323,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-link',
     width: 154,
     height: 64,
+    palette: {
+      icon: '线',
+      iconClass: 'link'
+    },
     defaults: {
       name: '普通连接线',
       linkType: '普通连接线',
@@ -280,6 +344,10 @@ export const COMPONENT_REGISTRY = {
     className: 'b-link',
     width: 154,
     height: 64,
+    palette: {
+      icon: 'CAN',
+      iconClass: 'link'
+    },
     defaults: {
       name: 'CAN 总线',
       linkType: 'CAN 总线',
@@ -311,7 +379,7 @@ export function getPaletteGroups(groups = COMPONENT_GROUPS, registry = COMPONENT
   return groups.map((group) => ({
     ...clone(group),
     components: entries
-      .filter(([, item]) => item.group === group.id && item.paletteVisible !== false)
+      .filter(([, item]) => item.group === group.id && item.palette?.visible !== false)
       .map(([type, item]) => ({
         type,
         ...clone(item)

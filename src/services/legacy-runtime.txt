@@ -70,7 +70,7 @@ const SIM_MODULE_TYPES=['一阶函数','微分','积分'];
 const SIM_INTERFACE_LIMITS={inputs:[1,6],outputs:[1,6],middleVars:[0,6]};
 const SUBSYSTEM_INTERFACE_LIMITS={inputs:[0,6],outputs:[0,6]};
 
-const COMPONENT_LIBRARY={
+const COMPONENT_LIBRARY=window.__GZ_COMPONENT_LIBRARY__||{
   signal_source:{
     label:'信号源',
     badge:'信号',

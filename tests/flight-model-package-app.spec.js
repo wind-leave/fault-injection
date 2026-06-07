@@ -365,6 +365,21 @@ describe('Flight model package app integration', () => {
     wrapper.unmount();
   });
 
+  it('enables the run button after importing a runnable flight model package', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
+    await flushRuntime();
+
+    expect(importResult).toMatchObject({ ok: true });
+    expect(window.canInitializeSimulation()).toBe(true);
+    expect(document.getElementById('sbtn-run')?.classList.contains('sim-btn-disabled')).toBe(false);
+
+    wrapper.unmount();
+  });
+
   it('loads the closed-loop eVTOL package as the default flight-control model on demand', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();

@@ -3658,7 +3658,8 @@ function simEnableButtons(init,run,step,pause,stop){
 function updateSimbarEnabled(){
   if(!S.sysLoaded){simEnableButtons(false,false,false,false,false);return;}
   if(!SIM.inited){
-    simEnableButtons(canInitializeSimulation(),false,false,false,false);
+    const canStart=canInitializeSimulation();
+    simEnableButtons(canStart,canStart,false,false,false);
     return;
   }
   if(SIM.running&&!SIM.paused){simEnableButtons(false,false,false,true,true);return;}

@@ -47,9 +47,21 @@ describe('component registry', () => {
     ]);
   });
 
-  it('keeps each registry definition type aligned with its component key', () => {
+  it('defines complete metadata for every registered component', () => {
     Object.entries(COMPONENT_REGISTRY).forEach(([type, definition]) => {
       expect(definition.type).toBe(type);
+      expect(definition.group).toEqual(expect.any(String));
+      expect(definition.group).not.toHaveLength(0);
+      expect(definition.label).toEqual(expect.any(String));
+      expect(definition.label).not.toHaveLength(0);
+      expect(definition.badge).toEqual(expect.any(String));
+      expect(definition.badge).not.toHaveLength(0);
+      expect(definition.className).toEqual(expect.any(String));
+      expect(definition.className).not.toHaveLength(0);
+      expect(definition.width).toEqual(expect.any(Number));
+      expect(definition.height).toEqual(expect.any(Number));
+      expect(definition.defaults).toEqual(expect.any(Object));
+      expect(Array.isArray(definition.defaults)).toBe(false);
     });
   });
 
@@ -97,6 +109,15 @@ describe('component registry', () => {
         layerKey: 'physical'
       }
     });
+
+    Object.values(library).forEach((definition) => {
+      expect(definition).not.toHaveProperty('group');
+    });
+
+    expect(library.sum_block.defaults).not.toBe(COMPONENT_REGISTRY.sum_block.defaults);
+    expect(library.sum_block.defaults.signs).not.toBe(COMPONENT_REGISTRY.sum_block.defaults.signs);
+    library.sum_block.defaults.signs[0] = '-';
+    expect(COMPONENT_REGISTRY.sum_block.defaults.signs[0]).toBe('+');
   });
 
   it('groups palette components by registry group without mutating registry entries', () => {
@@ -114,6 +135,7 @@ describe('component registry', () => {
       'instruments',
       'can-lines'
     ]);
+    expect(paletteGroups[0]).not.toBe(COMPONENT_GROUPS[0]);
     expect(signalOps.components.map((item) => item.type)).toEqual([
       'flow_block',
       'gain_block',
@@ -132,5 +154,8 @@ describe('component registry', () => {
     expect(signalOps.components[0]).not.toBe(COMPONENT_REGISTRY.flow_block);
     expect(faults.components[0]).not.toBe(COMPONENT_REGISTRY.physical_fault_injector);
     expect(canLines.components[0]).not.toBe(COMPONENT_REGISTRY.link_normal);
+    expect(signalOps.components[0].defaults).not.toBe(COMPONENT_REGISTRY.flow_block.defaults);
+    signalOps.components[0].defaults.inputName = 'changed input';
+    expect(COMPONENT_REGISTRY.flow_block.defaults.inputName).not.toBe('changed input');
   });
 });

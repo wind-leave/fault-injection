@@ -47,6 +47,12 @@ describe('component registry', () => {
     ]);
   });
 
+  it('keeps each registry definition type aligned with its component key', () => {
+    Object.entries(COMPONENT_REGISTRY).forEach(([type, definition]) => {
+      expect(definition.type).toBe(type);
+    });
+  });
+
   it('builds legacy component library entries from registered components', () => {
     const library = buildComponentLibraryFromRegistry();
 

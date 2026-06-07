@@ -14,6 +14,7 @@ export const COMPONENT_GROUPS = [
 
 export const COMPONENT_REGISTRY = {
   signal_source: {
+    type: 'signal_source',
     group: 'signals',
     label: '信号源',
     badge: '信号',
@@ -29,6 +30,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   middle_var_assign: {
+    type: 'middle_var_assign',
     group: 'signals',
     label: '中间变量赋值块',
     badge: '赋值',
@@ -44,6 +46,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   flow_block: {
+    type: 'flow_block',
     group: 'signal-ops',
     label: '信号适配块',
     badge: '适配',
@@ -60,6 +63,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   gain_block: {
+    type: 'gain_block',
     group: 'signal-ops',
     label: '增益块',
     badge: '增益',
@@ -74,6 +78,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   sum_block: {
+    type: 'sum_block',
     group: 'signal-ops',
     label: '求和块',
     badge: '求和',
@@ -88,6 +93,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   mux_block: {
+    type: 'mux_block',
     group: 'signal-ops',
     label: 'Mux 块',
     badge: 'Mux',
@@ -101,6 +107,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   simulation_block: {
+    type: 'simulation_block',
     group: 'simulation',
     label: '仿真块',
     badge: '仿真',
@@ -117,6 +124,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   subsystem_block: {
+    type: 'subsystem_block',
     group: 'subsystem',
     label: '子系统块',
     badge: '子系统',
@@ -130,6 +138,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   subsystem_in_port: {
+    type: 'subsystem_in_port',
     group: 'subsystem',
     label: '子系统输入口',
     badge: 'IN',
@@ -141,6 +150,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   subsystem_out_port: {
+    type: 'subsystem_out_port',
     group: 'subsystem',
     label: '子系统输出口',
     badge: 'OUT',
@@ -152,6 +162,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   physical_fault_injector: {
+    type: 'physical_fault_injector',
     group: 'faults',
     label: '物理层注入',
     badge: '故障',
@@ -166,6 +177,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   electrical_fault_injector: {
+    type: 'electrical_fault_injector',
     group: 'faults',
     label: '电气层注入',
     badge: '故障',
@@ -180,6 +192,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   protocol_fault_injector: {
+    type: 'protocol_fault_injector',
     group: 'faults',
     label: '协议层注入',
     badge: '故障',
@@ -194,6 +207,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   instrument_scope: {
+    type: 'instrument_scope',
     group: 'instruments',
     label: '示波器',
     badge: '仪器',
@@ -208,6 +222,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   instrument_spectrum: {
+    type: 'instrument_spectrum',
     group: 'instruments',
     label: '频谱分析仪',
     badge: '仪器',
@@ -222,6 +237,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   instrument_logger: {
+    type: 'instrument_logger',
     group: 'instruments',
     label: '数据记录仪',
     badge: '仪器',
@@ -236,6 +252,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   link_normal: {
+    type: 'link_normal',
     group: 'can-lines',
     paletteKind: 'line-tool',
     lineType: 'normal',
@@ -252,6 +269,7 @@ export const COMPONENT_REGISTRY = {
     }
   },
   link_can: {
+    type: 'link_can',
     group: 'can-lines',
     paletteKind: 'line-tool',
     lineType: 'can',

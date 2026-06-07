@@ -365,6 +365,26 @@ describe('Flight model package app integration', () => {
     wrapper.unmount();
   });
 
+  it('exposes the component registry globals before evaluating the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    expect(window.__GZ_COMPONENT_GROUPS__.map((group) => group.id)).toContain('signal-ops');
+    expect(window.__GZ_COMPONENT_REGISTRY__.flow_block).toMatchObject({
+      type: 'flow_block',
+      group: 'signal-ops',
+      label: '信号适配块'
+    });
+    expect(window.__GZ_COMPONENT_LIBRARY__.flow_block).toMatchObject({
+      label: '信号适配块',
+      badge: '适配',
+      className: 'b-flow'
+    });
+    expect(window.__GZ_COMPONENT_LIBRARY__.flow_block).not.toHaveProperty('group');
+
+    wrapper.unmount();
+  });
+
   it('enables the run button after importing a runnable flight model package', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();

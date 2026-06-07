@@ -1,5 +1,10 @@
 import runtimeSource from './legacy-runtime.txt?raw';
 import {
+  COMPONENT_GROUPS,
+  COMPONENT_REGISTRY,
+  buildComponentLibraryFromRegistry
+} from './componentRegistry.js';
+import {
   applyFlightModelPackage,
   exportFlightModelPackage,
   validateFlightModelPackage
@@ -173,6 +178,9 @@ export function mountLegacyRuntime() {
     restoreWorkbenchSnapshot
   };
   window.__GZ_FAULT_TYPE_CATALOG__ = faultTypeCatalog;
+  window.__GZ_COMPONENT_GROUPS__ = COMPONENT_GROUPS;
+  window.__GZ_COMPONENT_REGISTRY__ = COMPONENT_REGISTRY;
+  window.__GZ_COMPONENT_LIBRARY__ = buildComponentLibraryFromRegistry(COMPONENT_REGISTRY);
   window.__GZ_FLIGHT_MODEL_PACKAGE__ = {
     validate(pkg) {
       return validateFlightModelPackage(pkg);

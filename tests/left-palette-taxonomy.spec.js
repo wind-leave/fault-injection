@@ -1,22 +1,44 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
+import LeftPalette from '../src/components/layout/LeftPalette.vue';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const markup = readFileSync(path.join(repoRoot, 'src', 'fragments', 'left-panel.html'), 'utf8');
 
-function groupBody(groupId) {
-  const bodyStart = markup.indexOf(`data-palette-body="${groupId}"`);
-  if (bodyStart === -1) return '';
-  const nextHead = markup.indexOf('data-palette-group=', bodyStart + 1);
-  return markup.slice(bodyStart, nextHead === -1 ? markup.length : nextHead);
+function mountPalette() {
+  return mount(LeftPalette, { attachTo: document.body });
+}
+
+function groupBody(wrapper, groupId) {
+  return wrapper.find(`[data-palette-body="${groupId}"]`);
+}
+
+function groupComponents(wrapper, groupId) {
+  return groupBody(wrapper, groupId)
+    .findAll('[data-component]')
+    .map((item) => item.attributes('data-component'));
 }
 
 describe('left palette taxonomy', () => {
+  it('renders the live palette from the component registry instead of the static fragment', () => {
+    const source = readFileSync(
+      path.join(repoRoot, 'src', 'components', 'layout', 'LeftPalette.vue'),
+      'utf8'
+    );
+
+    expect(source).toContain('getPaletteGroups');
+    expect(source).not.toContain('left-panel.html?raw');
+  });
+
   it('orders modeling entries by role and keeps analysis views out of the component palette', () => {
-    const groups = [...markup.matchAll(/data-palette-group="([^"]+)"[^>]*>[\s\S]*?<span class="lgroup-label">([^<]+)<\/span>/g)]
-      .map((match) => [match[1], match[2]]);
+    const wrapper = mountPalette();
+
+    const groups = wrapper.findAll('[data-palette-group]').map((head) => [
+      head.attributes('data-palette-group'),
+      head.find('.lgroup-label').text()
+    ]);
 
     expect(groups).toEqual([
       ['signals', '系统信号'],
@@ -25,35 +47,47 @@ describe('left palette taxonomy', () => {
       ['subsystem', '子系统'],
       ['faults', '故障组件'],
       ['instruments', '测量仪器'],
-      ['can-lines', '连接线']
+      ['can-lines', '总线与连接']
     ]);
-    expect(markup).not.toContain('诊断分析');
-    expect(markup).not.toContain('data-component="instrument_signal_flow"');
-    expect(markup).not.toContain('多信号流图</span>');
+    expect(wrapper.text()).not.toContain('诊断分析');
+    expect(wrapper.find('[data-component="instrument_signal_flow"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('多信号流图');
+
+    wrapper.unmount();
   });
 
   it('puts signal transforms, subsystem, authoring, instruments, and CAN tools in separate groups', () => {
-    expect(groupBody('signals')).toContain('data-component="signal_source"');
-    expect(groupBody('signals')).toContain('data-component="middle_var_assign"');
+    const wrapper = mountPalette();
 
-    expect(groupBody('signal-ops')).toContain('data-component="flow_block"');
-    expect(groupBody('signal-ops')).toContain('data-component="gain_block"');
-    expect(groupBody('signal-ops')).toContain('data-component="sum_block"');
-    expect(groupBody('signal-ops')).toContain('data-component="mux_block"');
+    expect(groupComponents(wrapper, 'signals')).toEqual([
+      'signal_source',
+      'middle_var_assign'
+    ]);
+    expect(groupComponents(wrapper, 'signal-ops')).toEqual([
+      'flow_block',
+      'gain_block',
+      'sum_block',
+      'mux_block'
+    ]);
+    expect(groupComponents(wrapper, 'simulation')).toEqual(['simulation_block']);
+    expect(groupBody(wrapper, 'simulation').find('[data-open-component-authoring]').exists()).toBe(true);
+    expect(groupComponents(wrapper, 'subsystem')).toEqual(['subsystem_block']);
+    expect(groupComponents(wrapper, 'faults')).toEqual([
+      'physical_fault_injector',
+      'electrical_fault_injector',
+      'protocol_fault_injector'
+    ]);
+    expect(groupBody(wrapper, 'faults').text()).toContain('物理层注入');
+    expect(groupBody(wrapper, 'faults').find('[data-open-fault-authoring-for-selected]').exists()).toBe(false);
+    expect(groupBody(wrapper, 'faults').text()).not.toContain('新增故障');
+    expect(groupComponents(wrapper, 'instruments')).toEqual([
+      'instrument_scope',
+      'instrument_spectrum',
+      'instrument_logger'
+    ]);
+    expect(groupBody(wrapper, 'can-lines').find('[data-line-type="normal"]').exists()).toBe(true);
+    expect(groupBody(wrapper, 'can-lines').find('[data-line-type="can"]').exists()).toBe(true);
 
-    expect(groupBody('simulation')).toContain('data-component="simulation_block"');
-    expect(groupBody('simulation')).toContain('data-open-component-authoring');
-    expect(groupBody('subsystem')).toContain('data-component="subsystem_block"');
-    expect(groupBody('faults')).toContain('data-component="physical_fault_injector"');
-    expect(groupBody('faults')).toContain('data-component="electrical_fault_injector"');
-    expect(groupBody('faults')).toContain('data-component="protocol_fault_injector"');
-    expect(groupBody('faults')).toContain('物理层注入');
-    expect(groupBody('faults')).not.toContain('data-open-fault-authoring-for-selected');
-    expect(groupBody('faults')).not.toContain('新增故障');
-    expect(groupBody('instruments')).toContain('data-component="instrument_scope"');
-    expect(groupBody('instruments')).toContain('data-component="instrument_spectrum"');
-    expect(groupBody('instruments')).toContain('data-component="instrument_logger"');
-    expect(groupBody('can-lines')).toContain('data-line-type="normal"');
-    expect(groupBody('can-lines')).toContain('data-line-type="can"');
+    wrapper.unmount();
   });
 });

@@ -140,6 +140,7 @@ export const COMPONENT_REGISTRY = {
   subsystem_in_port: {
     type: 'subsystem_in_port',
     group: 'subsystem',
+    paletteVisible: false,
     label: '子系统输入口',
     badge: 'IN',
     className: 'b-subsystem-port-in',
@@ -152,6 +153,7 @@ export const COMPONENT_REGISTRY = {
   subsystem_out_port: {
     type: 'subsystem_out_port',
     group: 'subsystem',
+    paletteVisible: false,
     label: '子系统输出口',
     badge: 'OUT',
     className: 'b-subsystem-port-out',
@@ -309,7 +311,7 @@ export function getPaletteGroups(groups = COMPONENT_GROUPS, registry = COMPONENT
   return groups.map((group) => ({
     ...clone(group),
     components: entries
-      .filter(([, item]) => item.group === group.id)
+      .filter(([, item]) => item.group === group.id && item.paletteVisible !== false)
       .map(([type, item]) => ({
         type,
         ...clone(item)

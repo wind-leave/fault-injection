@@ -3938,7 +3938,9 @@ function resolveNodeOutputs(nodeId,modeKey,time,dt,cache,visiting){
   }else if(node.type==='flow_block'){
     resolved=isPythonBoundFlowBlock(node)
       ?executeBoundFlowBlock(node,nodeState,inputValues,modeKey,time,dt)
-      :{outputs:[sanitizeSignalValue(inputValues[0]||0)],middleValues:[]};
+      :(window.__GZ_SIGNAL_COMPONENT_RUNTIME__?.evaluateFlowBlockOutputs
+        ?window.__GZ_SIGNAL_COMPONENT_RUNTIME__.evaluateFlowBlockOutputs(inputValues)
+        :{outputs:[sanitizeSignalValue(inputValues[0]||0)],middleValues:[]});
   }else if(node.type==='simulation_block'){
     resolved=buildSimulationResult(node,nodeState,inputValues,modeKey,time,dt);
   }else if(node.type.startsWith('fault_')){
@@ -7193,7 +7195,9 @@ function resolveNodeOutputsInCanvas(nodeId,canvasId,modeKey,time,dt,cache,visiti
   }else if(node.type==='subsystem_in_port'){
     resolved=resolveSubsystemInputBoundary(node,effectiveCanvasId,modeKey,time,dt,cache,visiting);
   }else if(node.type==='flow_block'){
-    resolved={outputs:[sanitizeSignalValue(inputValues[0]||0)],middleValues:[]};
+    resolved=window.__GZ_SIGNAL_COMPONENT_RUNTIME__?.evaluateFlowBlockOutputs
+      ?window.__GZ_SIGNAL_COMPONENT_RUNTIME__.evaluateFlowBlockOutputs(inputValues)
+      :{outputs:[sanitizeSignalValue(inputValues[0]||0)],middleValues:[]};
   }else if(node.type==='simulation_block'){
     resolved=isPythonBoundFlowBlock(node)
       ?applyAssignedMiddleValues(node,nodeState,executeBoundFlowBlock(node,nodeState,inputValues,modeKey,time,dt))
@@ -9429,6 +9433,13 @@ saveSelectedNode = function(){
 };
 
 function evaluateSignalUtilityOutputs(node,inputValues){
+  const runtime=window.__GZ_SIGNAL_COMPONENT_RUNTIME__;
+  if(runtime?.evaluateSignalUtilityOutputs){
+    const resolved=runtime.evaluateSignalUtilityOutputs(node,inputValues);
+    if(resolved){
+      return resolved;
+    }
+  }
   if(node.type==='gain_block'){
     const inputValue=sanitizeSignalValue(inputValues[0]??0);
     const gain=parseScalar(node.props?.gain,1);

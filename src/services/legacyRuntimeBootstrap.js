@@ -1,4 +1,5 @@
 import runtimeSource from './legacy-runtime.txt?raw';
+import * as signalComponentRuntime from './signalComponentRuntime.js';
 import {
   COMPONENT_GROUPS,
   COMPONENT_REGISTRY,
@@ -181,6 +182,7 @@ export function mountLegacyRuntime() {
   window.__GZ_COMPONENT_GROUPS__ = COMPONENT_GROUPS;
   window.__GZ_COMPONENT_REGISTRY__ = COMPONENT_REGISTRY;
   window.__GZ_COMPONENT_LIBRARY__ = buildComponentLibraryFromRegistry(COMPONENT_REGISTRY);
+  window.__GZ_SIGNAL_COMPONENT_RUNTIME__ = signalComponentRuntime;
   window.__GZ_FLIGHT_MODEL_PACKAGE__ = {
     validate(pkg) {
       return validateFlightModelPackage(pkg);
@@ -299,6 +301,10 @@ export function __resetLegacyRuntimeForTests() {
   delete window.__GZ_LEGACY_RUNTIME_BOOTED__;
   delete window.__GZ_WORKBENCH_SNAPSHOT__;
   delete window.__GZ_FAULT_TYPE_CATALOG__;
+  delete window.__GZ_COMPONENT_GROUPS__;
+  delete window.__GZ_COMPONENT_REGISTRY__;
+  delete window.__GZ_COMPONENT_LIBRARY__;
+  delete window.__GZ_SIGNAL_COMPONENT_RUNTIME__;
   delete window.__GZ_FLIGHT_MODEL_PACKAGE__;
   delete window.__GZ_LOAD_DEFAULT_FLIGHT_MODEL__;
   delete window.__GZ_DEFAULT_FLIGHT_MODEL_LOADING__;

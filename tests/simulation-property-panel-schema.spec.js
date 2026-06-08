@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { renderSimulationBlockFieldsFromSchema } from '../src/services/simulationPropertyPanelSchema.js';
+import {
+  readSimulationBlockValuesFromPanel,
+  renderSimulationBlockFieldsFromSchema
+} from '../src/services/simulationPropertyPanelSchema.js';
 
 const moduleTypes = ['一阶函数', '微分', '积分'];
 const portFormats = ['标量', '向量', '矩阵'];
@@ -85,5 +88,79 @@ describe('simulation property panel schema service', () => {
     expect(html).toContain('error -&gt; command');
     expect(html).not.toContain('id="sim-input-count"');
     expect(html).not.toContain('id="prop-moduleType"');
+  });
+
+  it('reads unbound simulation block values and normalizes interface counts', () => {
+    const node = {
+      type: 'simulation_block',
+      props: {
+        name: '仿真块',
+        moduleType: '一阶函数',
+        inputs: [{ name: '输入 1', type: '标量' }],
+        outputs: [{ name: '输出 1', type: '标量' }],
+        middleVars: [{ name: '中间量 1', type: '标量' }],
+        ffunctionNote: 'old'
+      }
+    };
+
+    document.body.innerHTML = renderSimulationBlockFieldsFromSchema(node, {
+      moduleTypes,
+      portFormats,
+      interfaceLimits
+    });
+
+    document.getElementById('prop-name').value = ' 仿真 A ';
+    document.getElementById('prop-moduleType').value = '积分';
+    document.getElementById('sim-input-count').value = '2';
+    document.getElementById('sim-output-count').value = '1';
+    document.getElementById('sim-middle-count').value = '0';
+    document.querySelector('.sim-intf-row[data-role="输入"] [data-sim-field="name"]').value = '';
+    document.querySelector('.sim-intf-row[data-role="输出"] [data-sim-field="name"]').value = '控制输出';
+    document.getElementById('prop-ffunctionNote').value = ' 新说明 ';
+
+    expect(readSimulationBlockValuesFromPanel(node, document, {
+      interfaceLimits
+    })).toEqual({
+      values: {
+        name: '仿真 A',
+        moduleType: '积分',
+        inputs: [
+          { name: '输入 1', type: '标量' },
+          { name: '输入 2', type: '标量' }
+        ],
+        outputs: [
+          { name: '控制输出', type: '标量' }
+        ],
+        middleVars: [],
+        ffunctionNote: '新说明'
+      },
+      shouldPruneInvalidEdges: true
+    });
+  });
+
+  it('reads only the editable name when a simulation block is Python-bound', () => {
+    document.body.innerHTML = `
+      <input id="prop-name" value=" Bound PID ">
+      <select id="prop-moduleType"><option value="积分" selected>积分</option></select>
+      <input id="sim-input-count" value="4">
+    `;
+
+    expect(readSimulationBlockValuesFromPanel({
+      type: 'simulation_block',
+      props: {
+        name: 'PID',
+        moduleType: '一阶函数',
+        inputs: [{ name: '输入 1', type: '标量' }],
+        outputs: [{ name: '输出 1', type: '标量' }],
+        middleVars: []
+      }
+    }, document, {
+      binding: { bound: true }
+    })).toEqual({
+      values: {
+        name: 'Bound PID'
+      },
+      shouldPruneInvalidEdges: false
+    });
   });
 });

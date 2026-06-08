@@ -31,6 +31,48 @@ function list(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function textValue(value, fallback = '') {
+  const text = String(value ?? '').trim();
+  return text || fallback;
+}
+
+function clampInterfaceCount(value, limits = [0, 6]) {
+  const parsed = Number.parseInt(value, 10);
+  const fallback = Number.isFinite(Number(limits[0])) ? Number(limits[0]) : 0;
+  const count = Number.isFinite(parsed) ? parsed : fallback;
+  return Math.min(
+    Number.isFinite(Number(limits[1])) ? Number(limits[1]) : count,
+    Math.max(fallback, count)
+  );
+}
+
+function normalizeSimulationInterfaceList(items, prefix, fallbackType = '标量', count = items.length) {
+  const base = list(items).map((item, index) => ({
+    name: textValue(item?.name, `${prefix} ${index + 1}`),
+    type: textValue(item?.type, fallbackType)
+  }));
+
+  while (base.length < count) {
+    base.push({
+      name: `${prefix} ${base.length + 1}`,
+      type: fallbackType
+    });
+  }
+
+  return base.slice(0, count);
+}
+
+function readSimulationInterfaceRows(documentLike, role, fallbackType = '标量') {
+  if (!documentLike?.querySelectorAll) {
+    return [];
+  }
+
+  return [...documentLike.querySelectorAll(`.sim-intf-row[data-role="${role}"]`)].map((row, index) => ({
+    name: textValue(row.querySelector('[data-sim-field="name"]')?.value, `${role} ${index + 1}`),
+    type: textValue(row.querySelector('[data-sim-field="type"]')?.value, fallbackType)
+  }));
+}
+
 function renderSimulationInterfaceRows(items, prefix, helpers = {}) {
   const escape = helpers.escapeHtml || escapeHtml;
   const portFormats = helpers.portFormats || DEFAULT_PORT_FORMATS;
@@ -157,4 +199,52 @@ export function renderSimulationBlockFieldsFromSchema(node, helpers = {}) {
     return renderBoundSimulationFields(node, binding, helpers);
   }
   return renderUnboundSimulationFields(node, helpers);
+}
+
+export function readSimulationBlockValuesFromPanel(node, documentLike, helpers = {}) {
+  const props = node?.props || {};
+  const binding = helpers.binding || null;
+  const name = textValue(documentLike?.getElementById?.('prop-name')?.value, props.name || '');
+
+  if (binding?.bound) {
+    return {
+      values: { name },
+      shouldPruneInvalidEdges: false
+    };
+  }
+
+  const limits = helpers.interfaceLimits || DEFAULT_INTERFACE_LIMITS;
+  const inputCount = clampInterfaceCount(documentLike?.getElementById?.('sim-input-count')?.value, limits.inputs);
+  const outputCount = clampInterfaceCount(documentLike?.getElementById?.('sim-output-count')?.value, limits.outputs);
+  const middleCount = clampInterfaceCount(documentLike?.getElementById?.('sim-middle-count')?.value, limits.middleVars);
+  const inputFallbackType = list(props.inputs)[0]?.type || '标量';
+  const outputFallbackType = list(props.outputs)[0]?.type || '标量';
+  const middleFallbackType = list(props.middleVars)[0]?.type || '标量';
+
+  return {
+    values: {
+      name,
+      moduleType: documentLike?.getElementById?.('prop-moduleType')?.value || props.moduleType,
+      inputs: normalizeSimulationInterfaceList(
+        readSimulationInterfaceRows(documentLike, '输入', '标量').slice(0, inputCount),
+        '输入',
+        inputFallbackType,
+        inputCount
+      ),
+      outputs: normalizeSimulationInterfaceList(
+        readSimulationInterfaceRows(documentLike, '输出', '标量').slice(0, outputCount),
+        '输出',
+        outputFallbackType,
+        outputCount
+      ),
+      middleVars: normalizeSimulationInterfaceList(
+        readSimulationInterfaceRows(documentLike, '中间变量', '标量').slice(0, middleCount),
+        '中间变量',
+        middleFallbackType,
+        middleCount
+      ),
+      ffunctionNote: textValue(documentLike?.getElementById?.('prop-ffunctionNote')?.value, props.ffunctionNote || '')
+    },
+    shouldPruneInvalidEdges: true
+  };
 }

@@ -103,6 +103,21 @@ function applySchemaPropertyValues(node){
   return true;
 }
 
+function applySimulationSchemaPropertyValues(node){
+  const api=window.__GZ_SIMULATION_PROPERTY_PANEL_SCHEMA__;
+  if(!node||node.type!=='simulation_block'||!api?.readSimulationBlockValuesFromPanel){return false;}
+  const result=api.readSimulationBlockValuesFromPanel(node,document,{
+    binding:ensureFlowNodePythonBinding(node),
+    interfaceLimits:SIM_INTERFACE_LIMITS
+  });
+  if(!result?.values){return false;}
+  node.props={...(node.props||{}),...result.values};
+  if(result.shouldPruneInvalidEdges){
+    pruneInvalidEdgesForNode(node);
+  }
+  return true;
+}
+
 window.savePropertyPanelTarget=function(){
   if(S.selBlk&&typeof saveSelectedNode==='function'){
     saveSelectedNode();
@@ -10499,6 +10514,7 @@ Object.assign(window,{
       node.props.outputName=document.getElementById('prop-outputName')?.value.trim()||'输出信号';
       node.props.outputFormat=document.getElementById('prop-outputFormat')?.value||'标量';
     }else if(node.type==='simulation_block'){
+      if(!applySimulationSchemaPropertyValues(node)){
       node.props.name=document.getElementById('prop-name')?.value.trim()||node.props.name;
       if(!isPythonBoundFlowBlock(node)){
         node.props.moduleType=document.getElementById('prop-moduleType')?.value||node.props.moduleType;
@@ -10510,6 +10526,7 @@ Object.assign(window,{
         node.props.middleVars=normalizeSimulationInterfaceList(readSimulationRowsClean('中间变量','标量').slice(0,middleCount),'中间变量',node.props.middleVars[0]?.type||'标量',middleCount);
         node.props.ffunctionNote=document.getElementById('prop-ffunctionNote')?.value.trim()||node.props.ffunctionNote||'';
         pruneInvalidEdgesForNode(node);
+      }
       }
     }else if(node.type?.startsWith('instrument_')){
       node.props.name=document.getElementById('prop-name')?.value.trim()||node.props.name;

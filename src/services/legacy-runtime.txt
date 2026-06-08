@@ -9957,6 +9957,19 @@ Object.assign(window,{
     normalizeSimulationInterfaces(node.props);
     normalizeBindingLabels(node);
     const binding=ensureFlowNodePythonBinding(node);
+    const simulationSchema=window.__GZ_SIMULATION_PROPERTY_PANEL_SCHEMA__;
+    if(simulationSchema?.renderSimulationBlockFieldsFromSchema){
+      return simulationSchema.renderSimulationBlockFieldsFromSchema(node,{
+        binding,
+        moduleTypes:SIM_MODULE_TYPES,
+        portFormats:PORT_FORMATS,
+        interfaceLimits:SIM_INTERFACE_LIMITS,
+        buildSelectOptions,
+        buildPythonBindingPortRows,
+        getPythonBindingSummary,
+        escapeHtml
+      });
+    }
     if(!binding.bound){
       return `
         <div class="pgroup">

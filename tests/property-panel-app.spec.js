@@ -110,6 +110,47 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
+  it('renders simulation block parameters through the extracted simulation schema', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const block = window.createNode('simulation_block', 300, 220);
+    await flushRuntime();
+
+    window.selectNode(block.id);
+    await flushRuntime();
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    expect(window.__GZ_SIMULATION_PROPERTY_PANEL_SCHEMA__).toBeTruthy();
+    expect(document.getElementById('prop-name')).not.toBeNull();
+    expect(document.getElementById('prop-moduleType')).not.toBeNull();
+    expect(document.getElementById('sim-input-count')).not.toBeNull();
+    expect(document.getElementById('sim-output-count')).not.toBeNull();
+    expect(document.getElementById('sim-middle-count')).not.toBeNull();
+    expect(document.querySelector('.sim-intf-row[data-role="输入"]')).not.toBeNull();
+    expect(document.querySelector('.sim-intf-row[data-role="输出"]')).not.toBeNull();
+    expect(document.querySelector('.sim-intf-row[data-role="中间变量"]')).not.toBeNull();
+
+    setFieldValue('#prop-name', '仿真 A');
+    setFieldValue('#prop-moduleType', '积分', 'change');
+    setFieldValue('.sim-intf-row[data-role="输入"] [data-sim-field="name"]', '误差输入');
+    setFieldValue('.sim-intf-row[data-role="输出"] [data-sim-field="name"]', '控制输出');
+    setFieldValue('.sim-intf-row[data-role="中间变量"] [data-sim-field="name"]', '积分状态');
+    setFieldValue('#prop-ffunctionNote', '接口说明');
+    document.querySelector('.props-save').click();
+    await flushRuntime();
+
+    expect(block.props.name).toBe('仿真 A');
+    expect(block.props.moduleType).toBe('积分');
+    expect(block.props.inputs[0].name).toBe('误差输入');
+    expect(block.props.outputs[0].name).toBe('控制输出');
+    expect(block.props.middleVars[0].name).toBe('积分状态');
+    expect(block.props.ffunctionNote).toBe('接口说明');
+
+    wrapper.unmount();
+  });
+
   it('can cancel injected faults and clears visual fault state from a component', async () => {
     const wrapper = await mountWorkbench();
 

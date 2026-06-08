@@ -1,4 +1,5 @@
 import runtimeSource from './legacy-runtime.txt?raw';
+import * as propertyPanelSchema from './propertyPanelSchema.js';
 import * as signalComponentRuntime from './signalComponentRuntime.js';
 import {
   COMPONENT_GROUPS,
@@ -182,6 +183,7 @@ export function mountLegacyRuntime() {
   window.__GZ_COMPONENT_GROUPS__ = COMPONENT_GROUPS;
   window.__GZ_COMPONENT_REGISTRY__ = COMPONENT_REGISTRY;
   window.__GZ_COMPONENT_LIBRARY__ = buildComponentLibraryFromRegistry(COMPONENT_REGISTRY);
+  window.__GZ_PROPERTY_PANEL_SCHEMA__ = propertyPanelSchema;
   window.__GZ_SIGNAL_COMPONENT_RUNTIME__ = signalComponentRuntime;
   window.__GZ_FLIGHT_MODEL_PACKAGE__ = {
     validate(pkg) {
@@ -304,6 +306,7 @@ export function __resetLegacyRuntimeForTests() {
   delete window.__GZ_COMPONENT_GROUPS__;
   delete window.__GZ_COMPONENT_REGISTRY__;
   delete window.__GZ_COMPONENT_LIBRARY__;
+  delete window.__GZ_PROPERTY_PANEL_SCHEMA__;
   delete window.__GZ_SIGNAL_COMPONENT_RUNTIME__;
   delete window.__GZ_FLIGHT_MODEL_PACKAGE__;
   delete window.__GZ_LOAD_DEFAULT_FLIGHT_MODEL__;

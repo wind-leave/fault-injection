@@ -70,6 +70,45 @@ const SIM_MODULE_TYPES=['一阶函数','微分','积分'];
 const SIM_INTERFACE_LIMITS={inputs:[1,6],outputs:[1,6],middleVars:[0,6]};
 const SUBSYSTEM_INTERFACE_LIMITS={inputs:[0,6],outputs:[0,6]};
 
+function getSimplePropertySchema(node){
+  const api=window.__GZ_PROPERTY_PANEL_SCHEMA__;
+  if(!node||!api?.getComponentPropertySchema){return null;}
+  return api.getComponentPropertySchema(node.type);
+}
+
+function renderSchemaPropertyFields(node){
+  const api=window.__GZ_PROPERTY_PANEL_SCHEMA__;
+  const schema=getSimplePropertySchema(node);
+  if(!schema||!api?.renderPropertyFieldsFromSchema){return '';}
+  return api.renderPropertyFieldsFromSchema(node,schema,{escapeHtml,buildSelectOptions});
+}
+
+function readSchemaPropertyValues(node){
+  const api=window.__GZ_PROPERTY_PANEL_SCHEMA__;
+  const schema=getSimplePropertySchema(node);
+  if(!schema||!api?.readPropertyValuesFromSchema){return null;}
+  return api.readPropertyValuesFromSchema(schema,document);
+}
+
+function applySchemaPropertyValues(node){
+  const values=readSchemaPropertyValues(node);
+  if(!values){return false;}
+  node.props={...(node.props||{}),...values};
+  if(node.type==='gain_block'||node.type==='sum_block'||node.type==='mux_block'){
+    normalizeSignalUtilityNode(node);
+  }
+  if(node.type==='sum_block'||node.type==='mux_block'){
+    pruneInvalidEdgesForNode(node);
+  }
+  return true;
+}
+
+window.savePropertyPanelTarget=function(){
+  if(S.selBlk&&typeof saveSelectedNode==='function'){
+    saveSelectedNode();
+  }
+};
+
 const COMPONENT_LIBRARY=window.__GZ_COMPONENT_LIBRARY__||{
   signal_source:{
     label:'信号源',
@@ -10379,7 +10418,9 @@ Object.assign(window,{
     const fault=S.faultedBlks.includes(node.id)||Boolean(node.injectedFault);
     const pythonBound=node.type==='simulation_block'&&isPythonBoundFlowBlock(node);
     let fields='';
-    if(node.type==='signal_source'){fields=buildSignalSourceFieldsClean(node);}
+    const schemaFields=renderSchemaPropertyFields(node);
+    if(schemaFields&&node.type!=='simulation_block'&&!node.type?.startsWith('instrument_')){fields=schemaFields;}
+    else if(node.type==='signal_source'){fields=buildSignalSourceFieldsClean(node);}
     else if(node.type==='flow_block'){fields=buildFlowBlockFields(node);}
     else if(node.type==='simulation_block'){fields=buildSimulationBlockFields(node);}
     else if(node.type==='middle_var_assign'){fields=buildMiddleAssignmentFields(node);}
@@ -10430,7 +10471,9 @@ Object.assign(window,{
   saveSelectedNode = function(){
     const node=getNode(S.selBlk);
     if(!node){return;}
-    if(node.type==='signal_source'){
+    if(applySchemaPropertyValues(node)){
+      // Saved through the extracted field schema.
+    }else if(node.type==='signal_source'){
       node.props.name=document.getElementById('prop-name')?.value.trim()||node.props.name;
       node.props.waveType=document.getElementById('prop-waveType')?.value||node.props.waveType;
       node.props.outputFormat=document.getElementById('prop-outputFormat')?.value||node.props.outputFormat;
@@ -11502,6 +11545,17 @@ Object.assign(window,{
   }
 
   function renderNodeParameterFields(node){
+    const schemaFields=renderSchemaPropertyFields(node);
+    if(schemaFields&&(
+      node.type==='signal_source'
+      || node.type==='flow_block'
+      || node.type==='gain_block'
+      || node.type==='sum_block'
+      || node.type==='mux_block'
+      || node.type==='instrument_scope'
+      || node.type==='instrument_logger'
+      || node.type==='instrument_spectrum'
+    )){return schemaFields;}
     if(node.type==='signal_source'){return renderSignalSourceFields(node);}
     if(node.type==='simulation_block'){return buildSimulationBlockFields(node);}
     if(node.type==='flow_block'){return buildFlowBlockFields(node);}
@@ -11521,7 +11575,7 @@ Object.assign(window,{
           ${node.type==='instrument_scope'?`<button type="button" class="props-secondary" onclick="openScope('${jsString(node.id)}')">查看波形</button>`:''}
           ${node.type==='flow_block'?`<button type="button" class="props-secondary" onclick="openPythonBindingDialog('${jsString(node.id)}')">${pythonBound?'重新绑定 Python':'绑定 Python 文件'}</button>`:''}
           ${node.type==='flow_block'&&pythonBound?`<button type="button" class="props-secondary" onclick="unbindPythonBinding('${jsString(node.id)}')">解除 Python 绑定</button>`:''}
-          <button type="button" class="props-save" onclick="savePropertyPanelTarget()">保存设置</button>
+          <button type="button" class="props-save" data-property-save-node>保存设置</button>
           <button type="button" class="props-danger" onclick="deleteSelectedNode()">删除模块</button>
         </div>
       </div>`;
@@ -11568,7 +11622,7 @@ Object.assign(window,{
           <div class="props-help">主通道字段会保存到当前连线；次级通道作为只读载荷上下文保留。</div>
         </div>
         <div class="props-actions">
-          <button type="button" class="props-save" onclick="savePropertyPanelTarget()">保存连线</button>
+          <button type="button" class="props-save" onclick="window.savePropertyPanelTarget()">保存连线</button>
           ${isProtocolInjectableEdge(edge)?`<button type="button" class="props-secondary props-protocol-action" onclick="openProtocolFaultImport()">注入协议故障</button>`:''}
           <button type="button" class="props-danger" onclick="deleteSelectedEdge()">删除连线</button>
         </div>
@@ -11598,7 +11652,7 @@ Object.assign(window,{
           <div class="props-help">这些字段会随连线保存，供多信号流图把一条 CAN 边解释为带通道、报文和故障传播策略的数据流。</div>
         </div>
         <div class="props-actions">
-          <button type="button" class="props-save" onclick="savePropertyPanelTarget()">保存连线</button>
+          <button type="button" class="props-save" onclick="window.savePropertyPanelTarget()">保存连线</button>
           ${isProtocolInjectableEdge(edge)?`<button type="button" class="props-secondary props-protocol-action" onclick="openProtocolFaultImport()">注入协议故障</button>`:''}
           <button type="button" class="props-danger" onclick="deleteSelectedEdge()">删除连线</button>
         </div>
@@ -12446,6 +12500,16 @@ Object.assign(window,{
     }
   }
 
+  function bindPropertyPanelNodeActions(host){
+    const saveButton=host?.querySelector?.('[data-property-save-node]');
+    if(!saveButton||saveButton.dataset.propertySaveNodeBound){return;}
+    saveButton.addEventListener('click',event=>{
+      event.preventDefault();
+      saveSelectedNode();
+    });
+    saveButton.dataset.propertySaveNodeBound='true';
+  }
+
   function renderScopeOverviewCompact(node){
     const incoming=typeof getIncomingEdgesForNode==='function'?getIncomingEdgesForNode(node.id):[];
     const configuredChannelLabel=(index)=>{
@@ -12689,6 +12753,7 @@ Object.assign(window,{
     else if(target.type==='instrument_scope'){pd.innerHTML=renderScopeOverviewCompact(target);}
     else{pd.innerHTML=renderNodeOverview(target);}
     bindFaultSlotEditorActions(pd);
+    bindPropertyPanelNodeActions(pd);
     bindScopeExportActions(target,pd);
     bindLegacyOverviewActions(target,pd);
     if(target.type==='simulation_block'){
@@ -12767,6 +12832,7 @@ Object.assign(window,{
     if(S.selEdge){saveSelectedEdgeMetadata();return;}
     if(S.selBlk){saveSelectedNode();}
   }
+  window.savePropertyPanelTarget=savePropertyPanelTarget;
 
   function syncFaultPayloadFromBindings(target){
     const active=Array.isArray(target.faultBindings)

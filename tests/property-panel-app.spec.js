@@ -78,6 +78,38 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
+  it('saves simple component parameters through the extracted property schema', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const gain = window.createNode('gain_block', 260, 220);
+    await flushRuntime();
+
+    window.selectNode(gain.id);
+    await flushRuntime();
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    expect(window.__GZ_PROPERTY_PANEL_SCHEMA__).toBeTruthy();
+    expect(document.getElementById('prop-gain')).not.toBeNull();
+
+    setFieldValue('#prop-name', '增益 A');
+    setFieldValue('#prop-gain', '3.5');
+    setFieldValue('#prop-inputFormat', '向量', 'change');
+    setFieldValue('#prop-outputFormat', '矩阵', 'change');
+    document.querySelector('.props-save').click();
+    await flushRuntime();
+
+    expect(gain.props).toMatchObject({
+      name: '增益 A',
+      gain: '3.5',
+      inputFormat: '向量',
+      outputFormat: '矩阵'
+    });
+
+    wrapper.unmount();
+  });
+
   it('can cancel injected faults and clears visual fault state from a component', async () => {
     const wrapper = await mountWorkbench();
 

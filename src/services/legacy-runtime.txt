@@ -18673,6 +18673,7 @@ function decorateDataflowEdges(){
     const runtimeLabel=runtimeLabelMap[String(runtimeValue)]||runtimeValue||'\u6309\u6545\u969c\u5e93\u5b9a\u4e49';
     const paramName=(key)=>paramLabelMap[key]||key;
     const paramEmpty='\u8be5\u6545\u969c\u6ca1\u6709\u989d\u5916\u53c2\u6570\u3002';
+    const faultTagPanelSchema=window.__GZ_FAULT_TAG_PANEL_SCHEMA__;
     const paramPreview=params.length?params.map(([key,value])=>`
       <div class="fault-tag-param-preview__row">
         <span>${escapeHtml(paramName(key))}</span>
@@ -18686,7 +18687,10 @@ function decorateDataflowEdges(){
       </label>
     `).join(''):`<div class="props-empty-inline">${paramEmpty}</div>`;
     if(S.propertyPanelTab==='parameters'){
-      pd.innerHTML=`
+      pd.innerHTML=faultTagPanelSchema?.renderFaultTagParameterPanel?faultTagPanelSchema.renderFaultTagParameterPanel({
+        tag,
+        parameters:tag.parameters||{}
+      }):`
         <div class="pgroup fault-tag-param-panel" data-fault-tag-param-panel="${escapeHtml(tag.id)}">
           <div class="pglbl">\u6545\u969c\u53c2\u6570</div>
           ${paramEditor}
@@ -18702,7 +18706,15 @@ function decorateDataflowEdges(){
         </div>
       `;
     }else{
-      pd.innerHTML=`
+      pd.innerHTML=faultTagPanelSchema?.renderFaultTagOverviewPanel?faultTagPanelSchema.renderFaultTagOverviewPanel({
+        tag,
+        parameters:tag.parameters||{},
+        targetName,
+        targetKindLabel,
+        layerLabel,
+        runtimeValue,
+        runtimeLabel
+      }):`
         <div class="pgroup fault-tag-inspector fault-tag-overview-panel" data-fault-tag-inspector="${escapeHtml(tag.id)}">
           <div class="pglbl">\u7ed1\u5b9a\u6982\u89c8</div>
           <div class="props-fault-card">
@@ -18744,6 +18756,9 @@ function decorateDataflowEdges(){
     const statusText=pd.querySelector('[data-fault-tag-param-status]');
     let committed=cloneBridgeValue(tag.parameters||{});
     const readDraft=()=>{
+      if(faultTagPanelSchema?.readFaultTagParameterDraftFromPanel){
+        return faultTagPanelSchema.readFaultTagParameterDraftFromPanel(pd);
+      }
       const draft={};
       inputs.forEach(input=>{
         const key=input.getAttribute('data-fault-tag-param');

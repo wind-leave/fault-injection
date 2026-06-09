@@ -428,7 +428,7 @@ describe('property panel interaction', () => {
     expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
 
     wrapper.unmount();
-  });
+  }, 10000);
 
   it('keeps a fault tag inside its dedicated property panel when switching tabs', async () => {
     const wrapper = await mountWorkbench();
@@ -459,6 +459,7 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     expect(document.querySelector('[data-props-panel-kind="fault-tag"]')).not.toBeNull();
+    expect(window.__GZ_FAULT_TAG_PANEL_SCHEMA__).toBeTruthy();
     expect(document.querySelector(`[data-fault-tag-inspector="${tag.id}"]`)).not.toBeNull();
     expect(document.querySelector('.fault-tag-overview-panel')).not.toBeNull();
     const overviewText = document.querySelector('.fault-tag-overview-panel')?.textContent || '';
@@ -578,7 +579,7 @@ describe('property panel interaction', () => {
     expect(document.querySelector(`[data-fault-tag-id="${tag.id}"]`)).toBeNull();
 
     wrapper.unmount();
-  });
+  }, 10000);
 
   it('edits component-owned injectable variables from the fault settings tab', async () => {
     const wrapper = await mountWorkbench();

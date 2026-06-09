@@ -1,6 +1,7 @@
 import runtimeSource from './legacy-runtime.txt?raw';
 import * as faultParameterPanelSchema from './faultParameterPanelSchema.js';
 import * as faultSlotPanelSchema from './faultSlotPanelSchema.js';
+import * as faultTagPanelSchema from './faultTagPanelSchema.js';
 import * as propertyPanelSchema from './propertyPanelSchema.js';
 import * as simulationPropertyPanelSchema from './simulationPropertyPanelSchema.js';
 import * as signalComponentRuntime from './signalComponentRuntime.js';
@@ -186,6 +187,7 @@ export function mountLegacyRuntime() {
   window.__GZ_FAULT_TYPE_CATALOG__ = faultTypeCatalog;
   window.__GZ_FAULT_PARAMETER_PANEL_SCHEMA__ = faultParameterPanelSchema;
   window.__GZ_FAULT_SLOT_PANEL_SCHEMA__ = faultSlotPanelSchema;
+  window.__GZ_FAULT_TAG_PANEL_SCHEMA__ = faultTagPanelSchema;
   window.__GZ_COMPONENT_GROUPS__ = COMPONENT_GROUPS;
   window.__GZ_COMPONENT_REGISTRY__ = COMPONENT_REGISTRY;
   window.__GZ_COMPONENT_LIBRARY__ = buildComponentLibraryFromRegistry(COMPONENT_REGISTRY);
@@ -313,6 +315,7 @@ export function __resetLegacyRuntimeForTests() {
   delete window.__GZ_FAULT_TYPE_CATALOG__;
   delete window.__GZ_FAULT_PARAMETER_PANEL_SCHEMA__;
   delete window.__GZ_FAULT_SLOT_PANEL_SCHEMA__;
+  delete window.__GZ_FAULT_TAG_PANEL_SCHEMA__;
   delete window.__GZ_COMPONENT_GROUPS__;
   delete window.__GZ_COMPONENT_REGISTRY__;
   delete window.__GZ_COMPONENT_LIBRARY__;

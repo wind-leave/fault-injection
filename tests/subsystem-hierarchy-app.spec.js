@@ -163,6 +163,7 @@ describe('subsystem hierarchy app integration', () => {
     await flushRuntime();
 
     const nameInput = document.getElementById('prop-name');
+    expect(window.__GZ_SUBSYSTEM_PROPERTY_PANEL_SCHEMA__).toBeTruthy();
     expect(nameInput).not.toBeNull();
     expect(document.getElementById('prop-linkType')).toBeNull();
     expect(document.getElementById('prop-sourcePort')).toBeNull();
@@ -341,6 +342,7 @@ describe('subsystem hierarchy app integration', () => {
 
     const inputCount = document.getElementById('subsystem-input-count');
     const outputCount = document.getElementById('subsystem-output-count');
+    expect(window.__GZ_SUBSYSTEM_PROPERTY_PANEL_SCHEMA__).toBeTruthy();
     expect(inputCount).not.toBeNull();
     expect(outputCount).not.toBeNull();
 

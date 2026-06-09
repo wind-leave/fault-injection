@@ -118,6 +118,17 @@ function applySimulationSchemaPropertyValues(node){
   return true;
 }
 
+function applySubsystemSchemaPropertyValues(node){
+  const api=window.__GZ_SUBSYSTEM_PROPERTY_PANEL_SCHEMA__;
+  if(!node||node.type!=='subsystem_block'||!api?.readSubsystemBlockValuesFromPanel){return false;}
+  const result=api.readSubsystemBlockValuesFromPanel(node,document,{
+    interfaceLimits:SUBSYSTEM_INTERFACE_LIMITS
+  });
+  if(!result?.values){return false;}
+  node.props={...(node.props||{}),...result.values};
+  return true;
+}
+
 window.savePropertyPanelTarget=function(){
   if(S.selBlk&&typeof saveSelectedNode==='function'){
     saveSelectedNode();
@@ -925,6 +936,16 @@ function buildSubsystemInterfaceRows(items,role){
 function buildSubsystemBlockFields(node){
   const canvas=ensureSubsystemCanvasNode(node);
   const intf=ensureSubsystemInterface(node);
+  const subsystemSchema=window.__GZ_SUBSYSTEM_PROPERTY_PANEL_SCHEMA__;
+  if(subsystemSchema?.renderSubsystemBlockFieldsFromSchema){
+    return subsystemSchema.renderSubsystemBlockFieldsFromSchema(node,{
+      canvasId:node.targetCanvasId||canvas?.id||'--',
+      interfaceLimits:SUBSYSTEM_INTERFACE_LIMITS,
+      portFormats:PORT_FORMATS,
+      buildSelectOptions,
+      escapeHtml
+    });
+  }
   return `
     <div class="pgroup">
       <div class="pglbl">子系统设置</div>
@@ -1026,6 +1047,15 @@ function syncSubsystemInterfaceCounts(){
   const node=getNode(S.selBlk);
   if(!node||node.type!=='subsystem_block'){return;}
   const nextProps=cloneDefaults(node.props);
+  const subsystemSchema=window.__GZ_SUBSYSTEM_PROPERTY_PANEL_SCHEMA__;
+  const schemaResult=subsystemSchema?.readSubsystemBlockValuesFromPanel?.({...node,props:nextProps},document,{
+    interfaceLimits:SUBSYSTEM_INTERFACE_LIMITS
+  });
+  if(schemaResult?.values){
+    Object.assign(nextProps,schemaResult.values);
+    renderPropertyPanel({...node,props:nextProps});
+    return;
+  }
   ensureSubsystemInterface(nextProps);
   nextProps.interface.inputs=readSubsystemInterfaceRows('input');
   nextProps.interface.outputs=readSubsystemInterfaceRows('output');
@@ -8397,6 +8427,16 @@ function renderTask3BoundaryPortPanel(node){
   const pe=document.getElementById('pe');
   const pd=document.getElementById('pd');
   const meta=COMPONENT_LIBRARY[node.type];
+  const subsystemSchema=window.__GZ_SUBSYSTEM_PROPERTY_PANEL_SCHEMA__;
+  if(subsystemSchema?.renderSubsystemBoundaryPortFieldsFromSchema){
+    pe.style.display='none';
+    pd.style.display='block';
+    pd.innerHTML=subsystemSchema.renderSubsystemBoundaryPortFieldsFromSchema(node,{
+      label:meta.label,
+      escapeHtml
+    });
+    return;
+  }
   const role=node.type==='subsystem_in_port'?'输入边界':'输出边界';
   pe.style.display='none';
   pd.style.display='block';
@@ -8433,6 +8473,7 @@ const __task3SaveSelectedNode = saveSelectedNode;
 saveSelectedNode = function(){
   const node=getNode(S.selBlk);
   if(node?.type==='subsystem_block'){
+    if(!applySubsystemSchemaPropertyValues(node)){
     node.props.name=document.getElementById('prop-name')?.value.trim()||node.props.name;
     node.props.description=document.getElementById('prop-description')?.value.trim()||'';
     ensureSubsystemInterface(node);
@@ -8440,6 +8481,7 @@ saveSelectedNode = function(){
     const outputCount=clampInterfaceCount(document.getElementById('subsystem-output-count')?.value,SUBSYSTEM_INTERFACE_LIMITS.outputs);
     node.props.interface.inputs=normalizeSubsystemInterfaceList(readSubsystemInterfaceRows('input').slice(0,inputCount),'输入',inputCount);
     node.props.interface.outputs=normalizeSubsystemInterfaceList(readSubsystemInterfaceRows('output').slice(0,outputCount),'输出',outputCount);
+    }
     const canvas=syncSubsystemBoundaryNodes(node);
     pruneInvalidEdgesForNode(node);
     if(canvas){

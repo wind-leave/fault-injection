@@ -1774,14 +1774,26 @@ const FAULT_PARAMETER_CHOICES={
 };
 
 function getFaultParameterLabel(key){
+  const api=window.__GZ_FAULT_PARAMETER_PANEL_SCHEMA__;
+  if(api?.getFaultParameterLabel){
+    return api.getFaultParameterLabel(key);
+  }
   return FAULT_PARAMETER_LABELS[key]||key;
 }
 
 function getFaultParameterChoices(key){
+  const api=window.__GZ_FAULT_PARAMETER_PANEL_SCHEMA__;
+  if(api?.getFaultParameterChoices){
+    return api.getFaultParameterChoices(key);
+  }
   return FAULT_PARAMETER_CHOICES[key]||[];
 }
 
 function getFaultParameterChoiceLabel(key,value){
+  const api=window.__GZ_FAULT_PARAMETER_PANEL_SCHEMA__;
+  if(api?.getFaultParameterChoiceLabel){
+    return api.getFaultParameterChoiceLabel(key,value);
+  }
   const match=getFaultParameterChoices(key).find(option=>String(option.value)===String(value));
   return match?.label||String(value??'');
 }
@@ -1791,6 +1803,10 @@ function safeFaultParamDomId(key){
 }
 
 function renderFaultParameterControl(key,value,dataAttributeName){
+  const api=window.__GZ_FAULT_PARAMETER_PANEL_SCHEMA__;
+  if(api?.renderFaultParameterControl){
+    return api.renderFaultParameterControl(key,value,dataAttributeName);
+  }
   const attrName=String(dataAttributeName||'data-fault-param');
   const attrValue=escapeHtml(key);
   const choices=getFaultParameterChoices(key);
@@ -12249,6 +12265,10 @@ Object.assign(window,{
   }
 
   function readPropertyPanelFaultParameterDraft(panel){
+    const api=window.__GZ_FAULT_PARAMETER_PANEL_SCHEMA__;
+    if(api?.readFaultParameterValuesFromPanel){
+      return api.readFaultParameterValuesFromPanel(panel,'data-target-fault-param');
+    }
     const draft={};
     panel?.querySelectorAll?.('[data-target-fault-param]')?.forEach(input=>{
       const key=input.getAttribute('data-target-fault-param');
@@ -12330,6 +12350,18 @@ Object.assign(window,{
     box.querySelectorAll('.target-fault-choice.is-selected').forEach(choice=>choice.classList.remove('is-selected'));
     box.querySelector(`[data-activate-compatible-fault="${jsString(model.id)}"][data-activate-fault-slot="${jsString(slotId)}"]`)?.classList.add('is-selected');
     const entries=Object.entries(model.defaultParameters||{});
+    const faultParameterSchema=window.__GZ_FAULT_PARAMETER_PANEL_SCHEMA__;
+    const parameterRows=faultParameterSchema?.renderFaultParameterRows
+      ?faultParameterSchema.renderFaultParameterRows(model.defaultParameters||{},{
+        dataAttributeName:'data-target-fault-param',
+        rowClassName:'target-fault-param-row',
+        emptyHtml:'<div class="target-fault-param-empty">No parameters</div>'
+      })
+      :entries.length?entries.map(([key,value])=>`
+          <label class="target-fault-param-row">
+            <span>${text(getFaultParameterLabel(key))}</span>
+            ${renderFaultParameterControl(key,value,'data-target-fault-param')}
+          </label>`).join(''):'<div class="target-fault-param-empty">No parameters</div>';
     const panel=document.createElement('form');
     panel.className='target-fault-parameters';
     panel.dataset.targetFaultParameters='true';
@@ -12340,11 +12372,7 @@ Object.assign(window,{
         <small>${text(slot?.slotName||slot?.name||slotId)} · ${text(slot?.bindingObject||slot?.targetVariable||slot?.variableKey||slotId)}</small>
       </div>
       <div class="target-fault-parameters__grid">
-        ${entries.length?entries.map(([key,value])=>`
-          <label class="target-fault-param-row">
-            <span>${text(getFaultParameterLabel(key))}</span>
-            ${renderFaultParameterControl(key,value,'data-target-fault-param')}
-          </label>`).join(''):'<div class="target-fault-param-empty">No parameters</div>'}
+        ${parameterRows}
       </div>
       <div class="target-fault-parameters__actions">
         <button type="button" data-cancel-target-fault>取消</button>

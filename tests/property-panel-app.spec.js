@@ -623,6 +623,7 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     expect(document.querySelector('[data-fault-slot-editor]')).not.toBeNull();
+    expect(window.__GZ_FAULT_SLOT_PANEL_SCHEMA__).toBeTruthy();
     expect(document.querySelector('.props-fault-slot-table')).not.toBeNull();
     expect(document.querySelector('.props-fault-slot-head')).not.toBeNull();
     expect(document.querySelectorAll('.props-layer-toggle')).toHaveLength(15);

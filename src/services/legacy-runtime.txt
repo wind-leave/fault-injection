@@ -12067,6 +12067,16 @@ Object.assign(window,{
     }
     const variables=getFaultConfigVariables(target);
     const declaration=normalizeFaultInjectionDeclaration(target,variables);
+    const faultSlotSchema=window.__GZ_FAULT_SLOT_PANEL_SCHEMA__;
+    if(faultSlotSchema?.renderFaultSlotEditorFromSchema){
+      return faultSlotSchema.renderFaultSlotEditorFromSchema({
+        variables,
+        declaration,
+        layers:FAULT_SLOT_CONFIG_LAYERS,
+        layerLabels:FAULT_SLOT_CONFIG_LABELS,
+        roleLabels:FAULT_SLOT_ROLE_LABELS
+      });
+    }
     const selectedCount=FAULT_SLOT_CONFIG_LAYERS.reduce((count,layer)=>count+list(declaration[layer]).length,0);
     const rows=variables.map(variable=>{
       const layerChecks=FAULT_SLOT_CONFIG_LAYERS.map(layer=>{
@@ -12182,14 +12192,19 @@ Object.assign(window,{
     if(!node||isEdgeTarget(node)) return false;
     const editor=document.querySelector('[data-fault-slot-editor]');
     if(!editor) return false;
-    const declaration={physical:[],electrical:[],protocol:[]};
-    editor.querySelectorAll('[data-fault-slot-layer][data-fault-slot-var]').forEach(input=>{
-      if(!input.checked) return;
-      const layer=input.dataset.faultSlotLayer;
-      const key=input.dataset.faultSlotVar;
-      if(!declaration[layer]||!key||declaration[layer].includes(key)) return;
-      declaration[layer].push(key);
-    });
+    const faultSlotSchema=window.__GZ_FAULT_SLOT_PANEL_SCHEMA__;
+    const declaration=faultSlotSchema?.readFaultSlotDeclarationFromPanel
+      ?faultSlotSchema.readFaultSlotDeclarationFromPanel(editor,FAULT_SLOT_CONFIG_LAYERS)
+      :{physical:[],electrical:[],protocol:[]};
+    if(!faultSlotSchema?.readFaultSlotDeclarationFromPanel){
+      editor.querySelectorAll('[data-fault-slot-layer][data-fault-slot-var]').forEach(input=>{
+        if(!input.checked) return;
+        const layer=input.dataset.faultSlotLayer;
+        const key=input.dataset.faultSlotVar;
+        if(!declaration[layer]||!key||declaration[layer].includes(key)) return;
+        declaration[layer].push(key);
+      });
+    }
     node.props=node.props||{};
     const nextFaultSlots=buildFaultSlotsFromPanelDeclaration(node,declaration);
     node.props.faultInjection=declaration;

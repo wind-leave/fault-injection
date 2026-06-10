@@ -20401,7 +20401,18 @@ function decorateDataflowEdges(){
       ...(parameterOverrides||{})
     };
     const bindingObject=getFaultSlotBindingObject(slot);
-    const instance={
+    const injectionForm=getFaultInjectionForm(target,model.layer||slot.layer||optionFilters.layer);
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    const instance=runtimeService?.createFaultInstanceRecord?runtimeService.createFaultInstanceRecord({
+      target,
+      model,
+      slot,
+      targetKind,
+      slotId,
+      parameters,
+      bindingObject,
+      injectionForm
+    }):{
       instanceId:`fault-inst-${Date.now()}-${Math.random().toString(16).slice(2,8)}`,
       faultTypeId:model.id,
       targetKind,
@@ -20409,7 +20420,7 @@ function decorateDataflowEdges(){
       slotId,
       slotName:slot.slotName||slot.name||'',
       layer:model.layer||slot.layer||'electrical',
-      injectionForm:getFaultInjectionForm(target,model.layer||slot.layer||optionFilters.layer),
+      injectionForm,
       bindingObject,
       targetVariable:bindingObject,
       targetField:slot.targetField||'',
@@ -20440,14 +20451,21 @@ function decorateDataflowEdges(){
 
   function createCapabilityRuntimePayload(model,parameters={}){
     const api=window.__GZ_FAULT_INJECTION_RUNTIME__||null;
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
     if(api?.createInjectedFaultPayload){
       const payload=api.createInjectedFaultPayload(model,parameters);
-      return {
+      const fallback={
         ...payload,
         parameters:cloneCapabilityValue(parameters)
       };
+      return runtimeService?.createRuntimePayloadFromInstance?runtimeService.createRuntimePayloadFromInstance({
+        model,
+        instance:{faultTypeId:model?.id||'',displayName:model?.displayName||model?.name||model?.id||''},
+        parameters,
+        basePayload:fallback
+      }):fallback;
     }
-    return {
+    const fallback={
       modelId:model?.id||'',
       faultTypeId:model?.id||'',
       name:model?.displayName||model?.name||model?.id||'故障模型',
@@ -20457,6 +20475,12 @@ function decorateDataflowEdges(){
       modelClass:model?.modelClass||model?.faultClass||'',
       parameters:cloneCapabilityValue(parameters)
     };
+    return runtimeService?.createRuntimePayloadFromInstance?runtimeService.createRuntimePayloadFromInstance({
+      model,
+      instance:{faultTypeId:model?.id||'',displayName:fallback.name},
+      parameters,
+      basePayload:fallback
+    }):fallback;
   }
 
   function appendCapabilityRuntimeBinding(target,model,payload,targetKind){
@@ -20562,19 +20586,31 @@ function decorateDataflowEdges(){
     state.faultTags=tags.filter(tag=>tag.faultModelId!==faultModelId);
     const box=getCapabilityTagPosition(target);
     const hostNodeId=getCapabilityHostNodeId(target);
-    const tag={
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    const targetName=getCapabilityTargetName(target);
+    const layerLabel=typeof getLayerLabel==='function'?getLayerLabel(model.layer):model.layer;
+    const tag=runtimeService?.createFaultTagRecord?runtimeService.createFaultTagRecord({
+      instance,
+      model,
+      target,
+      payload,
+      box,
+      hostNodeId,
+      targetName,
+      layerLabel
+    }):{
       id:`fault-tag-${safeCapabilityId(faultModelId)}`,
       type:'fault_tag',
       faultModelId,
       faultModelName:instance.displayName||model.displayName||model.name||faultModelId,
       name:instance.displayName||model.displayName||model.name||faultModelId,
-      layer:typeof getLayerLabel==='function'?getLayerLabel(model.layer):model.layer,
+      layer:layerLabel,
       modelClass:model.modelClass||model.faultClass||'故障',
       runtimeBehavior:model.runtimeBehavior||payload?.runtimeBehavior||'',
       targetKind:instance.targetKind,
       targetId:instance.targetId,
       hostNodeId,
-      targetName:getCapabilityTargetName(target),
+      targetName,
       slotId:instance.slotId||'',
       slotName:instance.slotName||'',
       bindingObject:instance.bindingObject||'',
@@ -20595,7 +20631,11 @@ function decorateDataflowEdges(){
     state.faultTags.push(tag);
     if(!Array.isArray(state.faultInjectionLinks)) state.faultInjectionLinks=[];
     state.faultInjectionLinks=state.faultInjectionLinks.filter(link=>link.faultModelId!==faultModelId);
-    state.faultInjectionLinks.push({
+    const link=runtimeService?.createFaultTagLinkRecord?runtimeService.createFaultTagLinkRecord({
+      instance,
+      tag,
+      label:'故障注入'
+    }):{
       id:`fault-link-${safeCapabilityId(faultModelId)}-target`,
       faultModelId,
       sourceTagId:tag.id,
@@ -20603,7 +20643,8 @@ function decorateDataflowEdges(){
       targetEdgeId:instance.targetKind==='edge'?instance.targetId:null,
       role:'fault-tag-attachment',
       label:'故障注入'
-    });
+    };
+    state.faultInjectionLinks.push(link);
     if(instance.targetKind!=='edge'&&hostNodeId&&!state.faultedBlks.includes(hostNodeId)){
       state.faultedBlks.push(hostNodeId);
     }

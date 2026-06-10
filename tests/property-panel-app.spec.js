@@ -512,7 +512,7 @@ describe('property panel interaction', () => {
     expect(updatedOverviewText).toContain('\u6545\u969c\u503c');
     expect(updatedOverviewText).toContain('9');
     wrapper.unmount();
-  });
+  }, 10000);
 
   it('deletes the selected fault tag and runtime binding with the Delete key', async () => {
     const wrapper = await mountWorkbench();

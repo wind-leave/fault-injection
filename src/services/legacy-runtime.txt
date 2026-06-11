@@ -20726,6 +20726,7 @@ function decorateDataflowEdges(){
 
   function mirrorFaultInstanceToRuntimeTarget(instance,model,target){
     if(!instance||!model||!target) return null;
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
     const payload=createCapabilityRuntimePayload(model,instance.parameters||{});
     payload.modelId=instance.faultTypeId;
     payload.faultTypeId=instance.faultTypeId;
@@ -20738,6 +20739,33 @@ function decorateDataflowEdges(){
     payload.targetVariable=instance.targetVariable||instance.bindingObject||'';
     payload.targetField=instance.targetField||'';
     payload.injectionForm=instance.injectionForm||getFaultInjectionForm(target,payload.layer);
+    if(runtimeService?.applyFaultBindingToState){
+      const state=getState();
+      const result=runtimeService.applyFaultBindingToState(state,target,{
+        model,
+        instance,
+        payload,
+        tag:{
+          box:getCapabilityTagPosition(target),
+          hostNodeId:getCapabilityHostNodeId(target),
+          targetName:getCapabilityTargetName(target),
+          layerLabel:typeof getLayerLabel==='function'?getLayerLabel(model.layer):model.layer
+        },
+        link:{label:'鏁呴殰娉ㄥ叆'}
+      });
+      if(result?.target){
+        Object.keys(target).forEach(key=>{
+          if(!(key in result.target)){
+            delete target[key];
+          }
+        });
+        Object.assign(target,result.target);
+      }
+      if(result?.state){
+        Object.assign(state,result.state);
+      }
+      return result?.payload||payload;
+    }
     target.injectedFault=payload;
     appendCapabilityRuntimeBinding(target,model,payload,instance.targetKind);
     if(instance.targetKind==='node'&&!S.faultedBlks.includes(target.id)){
@@ -20747,7 +20775,6 @@ function decorateDataflowEdges(){
     pushFaultRuntimeRecord('activeFaults',payload);
     pushFaultRuntimeRecord('appliedFaults',payload);
     const state=getState();
-    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
     if(runtimeService?.upsertInjectedFaultMap){
       state.injectedFaultMap=runtimeService.upsertInjectedFaultMap(state.injectedFaultMap,payload);
     }else{

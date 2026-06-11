@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyFaultBindingToState,
   createFaultRemovalRef,
   createFaultInstanceRecord,
   createFaultTagLinkRecord,
@@ -230,6 +231,106 @@ describe('fault binding runtime service', () => {
       { id: 'other-link', faultModelId: 'other' },
       link
     ]);
+  });
+
+  it('applies a fault binding to target and runtime state', () => {
+    const instance = createFaultInstanceRecord({
+      target,
+      model,
+      slot,
+      targetKind: 'node',
+      parameters: { bias: '0.2', start: 0 },
+      bindingObject: 'gyro_rate',
+      injectionForm: 'signal-transform',
+      instanceId: 'fault-inst-fixed'
+    });
+    const payload = createRuntimePayloadFromInstance({
+      model,
+      instance,
+      parameters: instance.parameters,
+      basePayload: {
+        modelId: model.id,
+        name: model.name,
+        runtimeBehavior: model.runtimeBehavior
+      }
+    });
+    const state = {
+      faultedBlks: ['node-controller'],
+      faultInstances: [{ instanceId: 'old', faultTypeId: 'other_fault' }],
+      injectedFaults: [],
+      activeFaults: [],
+      appliedFaults: [],
+      injectedFaultMap: {},
+      faultTags: [],
+      faultInjectionLinks: []
+    };
+
+    const result = applyFaultBindingToState(state, { ...target, faultBindings: [] }, {
+      model,
+      instance,
+      payload,
+      tag: {
+        box: { x: 10, y: 20, w: 204, h: 76 },
+        hostNodeId: 'node-imu',
+        targetName: 'IMU',
+        layerLabel: 'Electrical'
+      },
+      link: { label: 'Fault link' }
+    });
+
+    expect(result.target.injectedFault).toEqual(payload);
+    expect(result.target.faultBindings).toEqual([{
+      bindingId: 'fault-inst-fixed::node-imu',
+      faultModelId: 'gyro_zero_bias',
+      faultTypeId: 'gyro_zero_bias',
+      name: 'Gyro zero bias fault',
+      layer: 'electrical',
+      runtimeBehavior: 'additive_bias',
+      parameters: { bias: '0.2', start: 0 },
+      targetKind: 'node',
+      targetId: 'node-imu',
+      slotId: 'electrical:gyro_rate',
+      slotName: 'Gyro rate',
+      bindingObject: 'gyro_rate',
+      targetVariable: 'gyro_rate',
+      targetField: 'outputs.gyro_rate',
+      injectionForm: 'signal-transform',
+      visualRole: 'fault-source',
+      propagationMode: 'signalTransform',
+      canPropagate: true,
+      active: true,
+      injectedFault: payload
+    }]);
+    expect(result.state.faultInstances).toEqual([
+      { instanceId: 'old', faultTypeId: 'other_fault' },
+      instance
+    ]);
+    expect(result.state.injectedFaults).toEqual([{ ...payload, faultId: 'gyro_zero_bias', status: 'active' }]);
+    expect(result.state.activeFaults).toEqual([{ ...payload, faultId: 'gyro_zero_bias', status: 'active' }]);
+    expect(result.state.appliedFaults).toEqual([{ ...payload, faultId: 'gyro_zero_bias', status: 'active' }]);
+    expect(result.state.injectedFaultMap).toEqual({
+      gyro_zero_bias: { ...payload, status: 'active' }
+    });
+    expect(result.state.faultTags).toEqual([
+      expect.objectContaining({
+        id: 'fault-tag-gyro_zero_bias',
+        faultModelId: 'gyro_zero_bias',
+        targetId: 'node-imu',
+        hostNodeId: 'node-imu',
+        x: 10,
+        y: 20
+      })
+    ]);
+    expect(result.state.faultInjectionLinks).toEqual([{
+      id: 'fault-link-gyro_zero_bias-target',
+      faultModelId: 'gyro_zero_bias',
+      sourceTagId: 'fault-tag-gyro_zero_bias',
+      targetNodeId: 'node-imu',
+      targetEdgeId: null,
+      role: 'fault-tag-attachment',
+      label: 'Fault link'
+    }]);
+    expect(result.state.faultedBlks).toEqual(['node-controller', 'node-imu']);
   });
 
   it('creates and matches normalized removal references for fault bindings', () => {

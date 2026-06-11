@@ -337,6 +337,38 @@ export function createFaultTagLinkRecord(options = {}) {
   };
 }
 
+export function createFaultBindingRecord(options = {}) {
+  const target = options.target || {};
+  const model = options.model || {};
+  const instance = options.instance || {};
+  const payload = clone(options.payload || {});
+  const targetKind = instance.targetKind || options.targetKind || (target.sourceNodeId && target.targetNodeId ? 'edge' : 'node');
+  const propagationMode = options.propagationMode || (payload.layer === 'protocol' ? 'protocolEdge' : 'signalTransform');
+
+  return {
+    bindingId: options.bindingId || `${payload.instanceId || payload.modelId || payload.name || 'fault'}::${target.id || ''}`,
+    faultModelId: payload.modelId || instance.faultTypeId || model.id || '',
+    faultTypeId: payload.faultTypeId || payload.modelId || instance.faultTypeId || model.id || '',
+    name: payload.name || instance.displayName || model.displayName || model.name || model.id || '鏁呴殰妯″瀷',
+    layer: payload.layer || instance.layer || model.layer || 'electrical',
+    runtimeBehavior: payload.runtimeBehavior || model.runtimeBehavior || '',
+    parameters: clone(payload.parameters || instance.parameters || {}),
+    targetKind,
+    targetId: target.id || instance.targetId || '',
+    slotId: payload.slotId || instance.slotId || '',
+    slotName: payload.slotName || instance.slotName || '',
+    bindingObject: payload.bindingObject || instance.bindingObject || '',
+    targetVariable: payload.targetVariable || instance.targetVariable || payload.bindingObject || instance.bindingObject || '',
+    targetField: payload.targetField || instance.targetField || '',
+    injectionForm: payload.injectionForm || instance.injectionForm || '',
+    visualRole: options.visualRole || 'fault-source',
+    propagationMode,
+    canPropagate: options.canPropagate ?? propagationMode !== 'localOnly',
+    active: options.active ?? true,
+    injectedFault: payload
+  };
+}
+
 export function upsertFaultInstanceRecord(records = [], instance = {}) {
   return [
     ...list(records).filter((item) => !instanceMatches(item, instance)),
@@ -387,6 +419,88 @@ export function upsertFaultTagLinkRecord(records = [], link = {}) {
     ...list(records).filter((item) => !modelId || faultModelIdOf(item) !== modelId),
     clone(link)
   ];
+}
+
+export function applyFaultBindingToState(state = {}, target = {}, options = {}) {
+  const model = options.model || {};
+  const instance = options.instance || {};
+  const payload = options.payload || createRuntimePayloadFromInstance({
+    model,
+    instance,
+    parameters: instance.parameters || model.defaultParameters || {},
+    basePayload: options.basePayload || {}
+  });
+  const nextTarget = {
+    ...(target || {}),
+    injectedFault: clone(payload)
+  };
+  const binding = options.binding || createFaultBindingRecord({
+    target,
+    model,
+    instance,
+    payload,
+    targetKind: options.targetKind,
+    bindingId: options.bindingId,
+    propagationMode: options.propagationMode,
+    canPropagate: options.canPropagate,
+    visualRole: options.visualRole
+  });
+  const currentBindings = list(target.faultBindings);
+  const bindingIndex = currentBindings.findIndex((item) => item.bindingId === binding.bindingId || item.faultModelId === binding.faultModelId);
+  nextTarget.faultBindings = bindingIndex >= 0
+    ? currentBindings.map((item, index) => (index === bindingIndex ? clone(binding) : item))
+    : [...currentBindings, clone(binding)];
+
+  const nextState = { ...(state || {}) };
+  nextState.faultInstances = upsertFaultInstanceRecord(nextState.faultInstances, instance);
+  nextState.injectedFaults = upsertFaultRuntimeRecord(nextState.injectedFaults, payload);
+  nextState.activeFaults = upsertFaultRuntimeRecord(nextState.activeFaults, payload);
+  nextState.appliedFaults = upsertFaultRuntimeRecord(nextState.appliedFaults, payload);
+  nextState.injectedFaultMap = upsertInjectedFaultMap(nextState.injectedFaultMap, payload);
+
+  if (nextState.activeModelPackage) {
+    nextState.activeModelPackage = {
+      ...nextState.activeModelPackage,
+      faultInstances: clone(nextState.faultInstances)
+    };
+  }
+
+  const targetKind = binding.targetKind || instance.targetKind || options.targetKind || 'node';
+  const hostNodeId = options.tag?.hostNodeId || (targetKind === 'node' ? (target.id || instance.targetId || '') : (target.sourceNodeId || ''));
+  if (targetKind !== 'edge' && hostNodeId) {
+    const faultedBlks = list(nextState.faultedBlks);
+    nextState.faultedBlks = faultedBlks.includes(hostNodeId) ? faultedBlks : [...faultedBlks, hostNodeId];
+  }
+
+  if (options.tag !== false) {
+    const tag = options.tagRecord || createFaultTagRecord({
+      instance,
+      model,
+      target,
+      payload,
+      box: options.tag?.box,
+      hostNodeId,
+      targetName: options.tag?.targetName,
+      layerLabel: options.tag?.layerLabel,
+      fallbackModelClass: options.tag?.fallbackModelClass,
+      tagId: options.tag?.tagId
+    });
+    const link = options.linkRecord || createFaultTagLinkRecord({
+      instance,
+      tag,
+      id: options.link?.id,
+      label: options.link?.label
+    });
+    nextState.faultTags = upsertFaultTagRecord(nextState.faultTags, tag);
+    nextState.faultInjectionLinks = upsertFaultTagLinkRecord(nextState.faultInjectionLinks, link);
+  }
+
+  return {
+    target: nextTarget,
+    state: nextState,
+    payload,
+    binding
+  };
 }
 
 export function removeFaultRuntimeArtifactsFromState(state = {}, refs = [], options = {}) {

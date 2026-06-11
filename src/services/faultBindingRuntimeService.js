@@ -43,6 +43,85 @@ function runtimeRecordMatches(record = {}, payload = {}) {
     || Boolean(record.faultTypeId && payload.modelId && record.faultTypeId === payload.modelId);
 }
 
+function removalIdOf(value = {}) {
+  return value?.faultModelId
+    || value?.faultTypeId
+    || value?.modelId
+    || value?.faultId
+    || value?.id
+    || value?.injectedFault?.faultModelId
+    || value?.injectedFault?.faultTypeId
+    || value?.injectedFault?.modelId
+    || value?.injectedFault?.faultId
+    || '';
+}
+
+function removalInstanceIdOf(value = {}) {
+  return value?.instanceId || value?.injectedFault?.instanceId || '';
+}
+
+function removalSlotIdOf(value = {}) {
+  return value?.slotId || value?.targetSlotId || value?.injectedFault?.slotId || value?.target?.slotId || '';
+}
+
+function removalTargetKindOf(value = {}, fallback = 'node') {
+  return value?.targetKind || value?.target?.targetKind || value?.target?.kind || value?.injectedFault?.targetKind || fallback;
+}
+
+function removalTargetIdOf(value = {}, fallback = '') {
+  return value?.targetId
+    || value?.target?.targetId
+    || value?.target?.id
+    || value?.injectedFault?.targetId
+    || value?.targetNodeId
+    || value?.targetEdgeId
+    || fallback;
+}
+
+function recordMatchesRemovalRef(record = {}, ref = {}) {
+  if (!record || !ref) {
+    return false;
+  }
+  const recordTargetKind = removalTargetKindOf(record, ref.targetKind);
+  const recordTargetId = removalTargetIdOf(record, ref.targetId);
+  if (recordTargetId && recordTargetId !== ref.targetId) {
+    return false;
+  }
+  if (recordTargetKind && recordTargetKind !== ref.targetKind) {
+    return false;
+  }
+
+  const recordInstanceId = removalInstanceIdOf(record);
+  if (ref.instanceId && recordInstanceId && recordInstanceId === ref.instanceId) {
+    return true;
+  }
+
+  const recordFaultId = removalIdOf(record);
+  if (ref.faultId && recordFaultId && recordFaultId === ref.faultId) {
+    const recordSlotId = removalSlotIdOf(record);
+    return !ref.slotId || !recordSlotId || recordSlotId === ref.slotId;
+  }
+
+  return false;
+}
+
+function recordMatchesAnyRemovalRef(record = {}, refs = []) {
+  return refs.some((ref) => recordMatchesRemovalRef(record, ref));
+}
+
+function hasRemainingActiveFaultId(state = {}, faultId = '') {
+  if (!faultId) {
+    return false;
+  }
+
+  return [
+    ...list(state.faultInstances),
+    ...list(state.activeFaults),
+    ...list(state.injectedFaults),
+    ...list(state.appliedFaults)
+  ].some((item) => item?.active !== false && removalIdOf(item) === faultId);
+}
+
 export function createFaultInstanceRecord(options = {}) {
   const target = options.target || {};
   const model = options.model || {};
@@ -205,4 +284,92 @@ export function upsertFaultTagLinkRecord(records = [], link = {}) {
     ...list(records).filter((item) => !modelId || faultModelIdOf(item) !== modelId),
     clone(link)
   ];
+}
+
+export function removeFaultRuntimeArtifactsFromState(state = {}, refs = [], options = {}) {
+  const normalizedRefs = list(refs).filter((ref) => ref && (ref.instanceId || ref.faultId || ref.bindingId));
+  const nextState = { ...(state || {}) };
+  const removedTagIds = new Set();
+  let changed = false;
+
+  if (!normalizedRefs.length) {
+    return { state: nextState, changed, removedTagIds: [] };
+  }
+
+  ['activeFaults', 'injectedFaults', 'appliedFaults', 'selectedFaults', 'faultInjectionResults'].forEach((key) => {
+    if (!Array.isArray(nextState[key])) {
+      return;
+    }
+    const filtered = nextState[key].filter((item) => !recordMatchesAnyRemovalRef(item, normalizedRefs));
+    if (filtered.length !== nextState[key].length) {
+      nextState[key] = filtered;
+      changed = true;
+    }
+  });
+
+  if (Array.isArray(nextState.faultInstances)) {
+    const disabledAt = options.now || new Date().toISOString();
+    const disabledReason = options.disabledReason || 'fault-cleared-from-property-panel';
+    nextState.faultInstances = nextState.faultInstances.map((instance) => {
+      if (!recordMatchesAnyRemovalRef(instance, normalizedRefs) || instance.active === false) {
+        return instance;
+      }
+      changed = true;
+      return {
+        ...instance,
+        active: false,
+        enabled: false,
+        disabledAt,
+        disabledReason
+      };
+    });
+  }
+
+  if (Array.isArray(nextState.faultTags)) {
+    nextState.faultTags
+      .filter((tag) => recordMatchesAnyRemovalRef(tag, normalizedRefs))
+      .map((tag) => tag.id)
+      .filter(Boolean)
+      .forEach((tagId) => removedTagIds.add(tagId));
+
+    const filteredTags = nextState.faultTags.filter((tag) => !recordMatchesAnyRemovalRef(tag, normalizedRefs));
+    if (filteredTags.length !== nextState.faultTags.length) {
+      nextState.faultTags = filteredTags;
+      changed = true;
+    }
+  }
+
+  if (Array.isArray(nextState.faultInjectionLinks) && removedTagIds.size) {
+    const targetId = options.target?.id || '';
+    const filteredLinks = nextState.faultInjectionLinks.filter((link) => {
+      if (removedTagIds.has(link.sourceTagId)) {
+        return false;
+      }
+      if (targetId && (link.targetNodeId === targetId || link.targetEdgeId === targetId)) {
+        return !normalizedRefs.some((ref) => ref.faultId && removalIdOf(link) === ref.faultId);
+      }
+      return true;
+    });
+    if (filteredLinks.length !== nextState.faultInjectionLinks.length) {
+      nextState.faultInjectionLinks = filteredLinks;
+      changed = true;
+    }
+  }
+
+  if (nextState.injectedFaultMap && typeof nextState.injectedFaultMap === 'object') {
+    const nextMap = { ...nextState.injectedFaultMap };
+    normalizedRefs.forEach((ref) => {
+      if (
+        ref.faultId
+        && !hasRemainingActiveFaultId(nextState, ref.faultId)
+        && Object.prototype.hasOwnProperty.call(nextMap, ref.faultId)
+      ) {
+        delete nextMap[ref.faultId];
+        changed = true;
+      }
+    });
+    nextState.injectedFaultMap = nextMap;
+  }
+
+  return { state: nextState, changed, removedTagIds: [...removedTagIds] };
 }

@@ -13047,6 +13047,22 @@ Object.assign(window,{
   function removeFaultRuntimeArtifacts(targetKind,target,refs){
     const normalizedRefs=(refs||[]).filter(ref=>ref&&(ref.instanceId||ref.faultId||ref.bindingId));
     if(!normalizedRefs.length) return false;
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    if(runtimeService?.removeFaultRuntimeArtifactsFromState){
+      const result=runtimeService.removeFaultRuntimeArtifactsFromState(S,normalizedRefs,{
+        target,
+        targetKind,
+        now:new Date().toISOString(),
+        disabledReason:'fault-cleared-from-property-panel'
+      });
+      if(result?.state){
+        Object.assign(S,result.state);
+      }
+      if(S.activeModelPackage&&Array.isArray(S.faultInstances)){
+        S.activeModelPackage.faultInstances=cloneFaultPanelData(S.faultInstances);
+      }
+      return Boolean(result?.changed);
+    }
     let changed=false;
     ['activeFaults','injectedFaults','appliedFaults','selectedFaults','faultInjectionResults'].forEach(key=>{
       if(!Array.isArray(S[key])) return;

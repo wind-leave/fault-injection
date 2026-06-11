@@ -4,6 +4,7 @@ import {
   createFaultTagLinkRecord,
   createFaultTagRecord,
   createRuntimePayloadFromInstance,
+  removeFaultRuntimeArtifactsFromState,
   upsertFaultInstanceRecord,
   upsertFaultRuntimeRecord,
   upsertFaultTagLinkRecord,
@@ -225,5 +226,105 @@ describe('fault binding runtime service', () => {
       { id: 'other-link', faultModelId: 'other' },
       link
     ]);
+  });
+
+  it('removes runtime artifacts for cleared fault bindings', () => {
+    const state = {
+      injectedFaults: [
+        { instanceId: 'fault-inst-1', modelId: 'gyro_zero_bias', targetId: 'node-imu', targetKind: 'node' },
+        { instanceId: 'fault-inst-2', modelId: 'other_fault', targetId: 'node-controller', targetKind: 'node' }
+      ],
+      activeFaults: [
+        { instanceId: 'fault-inst-1', modelId: 'gyro_zero_bias', targetId: 'node-imu', targetKind: 'node' }
+      ],
+      appliedFaults: [
+        { instanceId: 'fault-inst-1', modelId: 'gyro_zero_bias', targetId: 'node-imu', targetKind: 'node' }
+      ],
+      selectedFaults: [
+        { faultTypeId: 'gyro_zero_bias', targetId: 'node-imu', targetKind: 'node' }
+      ],
+      faultInjectionResults: [
+        { faultId: 'gyro_zero_bias', targetId: 'node-imu', targetKind: 'node' }
+      ],
+      faultInstances: [
+        {
+          instanceId: 'fault-inst-1',
+          faultTypeId: 'gyro_zero_bias',
+          targetId: 'node-imu',
+          targetKind: 'node',
+          slotId: 'electrical:gyro_rate',
+          active: true
+        },
+        {
+          instanceId: 'fault-inst-2',
+          faultTypeId: 'other_fault',
+          targetId: 'node-controller',
+          targetKind: 'node',
+          active: true
+        }
+      ],
+      faultTags: [
+        { id: 'tag-gyro', faultModelId: 'gyro_zero_bias', targetId: 'node-imu', targetKind: 'node' },
+        { id: 'tag-other', faultModelId: 'other_fault', targetId: 'node-controller', targetKind: 'node' }
+      ],
+      faultInjectionLinks: [
+        { id: 'link-gyro', faultModelId: 'gyro_zero_bias', sourceTagId: 'tag-gyro', targetNodeId: 'node-imu' },
+        { id: 'link-other', faultModelId: 'other_fault', sourceTagId: 'tag-other', targetNodeId: 'node-controller' }
+      ],
+      injectedFaultMap: {
+        gyro_zero_bias: { modelId: 'gyro_zero_bias' },
+        other_fault: { modelId: 'other_fault' }
+      }
+    };
+
+    const result = removeFaultRuntimeArtifactsFromState(state, [{
+      instanceId: 'fault-inst-1',
+      faultId: 'gyro_zero_bias',
+      targetId: 'node-imu',
+      targetKind: 'node',
+      slotId: 'electrical:gyro_rate'
+    }], {
+      target: { id: 'node-imu' },
+      now: '2026-06-11T00:00:00.000Z',
+      disabledReason: 'test-clear'
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.state.injectedFaults).toEqual([
+      { instanceId: 'fault-inst-2', modelId: 'other_fault', targetId: 'node-controller', targetKind: 'node' }
+    ]);
+    expect(result.state.activeFaults).toEqual([]);
+    expect(result.state.appliedFaults).toEqual([]);
+    expect(result.state.selectedFaults).toEqual([]);
+    expect(result.state.faultInjectionResults).toEqual([]);
+    expect(result.state.faultInstances).toEqual([
+      {
+        instanceId: 'fault-inst-1',
+        faultTypeId: 'gyro_zero_bias',
+        targetId: 'node-imu',
+        targetKind: 'node',
+        slotId: 'electrical:gyro_rate',
+        active: false,
+        enabled: false,
+        disabledAt: '2026-06-11T00:00:00.000Z',
+        disabledReason: 'test-clear'
+      },
+      {
+        instanceId: 'fault-inst-2',
+        faultTypeId: 'other_fault',
+        targetId: 'node-controller',
+        targetKind: 'node',
+        active: true
+      }
+    ]);
+    expect(result.state.faultTags).toEqual([
+      { id: 'tag-other', faultModelId: 'other_fault', targetId: 'node-controller', targetKind: 'node' }
+    ]);
+    expect(result.state.faultInjectionLinks).toEqual([
+      { id: 'link-other', faultModelId: 'other_fault', sourceTagId: 'tag-other', targetNodeId: 'node-controller' }
+    ]);
+    expect(result.state.injectedFaultMap).toEqual({
+      other_fault: { modelId: 'other_fault' }
+    });
   });
 });

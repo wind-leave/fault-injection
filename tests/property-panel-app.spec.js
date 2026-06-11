@@ -110,6 +110,14 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
+  it('exposes a fault UI refresh orchestration entry point', async () => {
+    const wrapper = await mountWorkbench();
+
+    expect(window.refreshFaultUiAfterChange).toEqual(expect.any(Function));
+
+    wrapper.unmount();
+  });
+
   it('renders simulation block parameters through the extracted simulation schema', async () => {
     const wrapper = await mountWorkbench();
 

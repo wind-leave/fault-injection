@@ -12211,12 +12211,7 @@ Object.assign(window,{
     node.faultSlots=nextFaultSlots;
     pruneFaultBindingsForSlots(node);
     syncFaultSlotPackageState(node);
-    markTopologyDirty('fault');
-    renderModelNodes();
-    renderEdges();
-    renderTypedPropertyPanel(node);
-    syncConfigTargets(node.id);
-    updateUI();
+    refreshFaultUiAfterChange(node,{syncConfigTargetId:node.id});
     toast('故障槽位已保存','s');
     return true;
   }
@@ -12292,6 +12287,21 @@ Object.assign(window,{
     return draft;
   }
 
+  function refreshFaultUiAfterChange(target=null,options={}){
+    const shouldMarkTopology=options.markTopology!==false;
+    const shouldRenderNodes=options.renderNodes!==false;
+    const shouldRenderEdges=options.renderEdges!==false;
+    const shouldRenderPanel=options.renderPanel!==false;
+    const shouldUpdateUi=options.updateUi!==false;
+    if(shouldMarkTopology) markTopologyDirty('fault');
+    if(shouldRenderNodes) renderModelNodes();
+    if(shouldRenderEdges) renderEdges();
+    if(shouldRenderPanel&&target) renderTypedPropertyPanel(target);
+    if(options.syncConfigTargetId) syncConfigTargets(options.syncConfigTargetId);
+    if(shouldUpdateUi) updateUI();
+  }
+  window.refreshFaultUiAfterChange=refreshFaultUiAfterChange;
+
   function createPropertyPanelFallbackFault(target,model,slot,parameters){
     const targetKind=isEdgeTarget(target)?'edge':'node';
     const slotId=getPropertyPanelSlotId(slot);
@@ -12348,11 +12358,7 @@ Object.assign(window,{
       if(result?.state){
         Object.assign(S,result.state);
       }
-      markTopologyDirty('fault');
-      renderModelNodes();
-      renderEdges();
-      renderTypedPropertyPanel(target);
-      updateUI();
+      refreshFaultUiAfterChange(target);
       return {ok:true,instance:plan.instance,model,slot};
     }
     const instance={
@@ -12411,11 +12417,7 @@ Object.assign(window,{
     if(existingIndex>=0) target.faultBindings[existingIndex]=binding;
     else target.faultBindings.push(binding);
     if(targetKind==='node'&&Array.isArray(S.faultedBlks)&&!S.faultedBlks.includes(target.id)) S.faultedBlks.push(target.id);
-    markTopologyDirty('fault');
-    renderModelNodes();
-    renderEdges();
-    renderTypedPropertyPanel(target);
-    updateUI();
+    refreshFaultUiAfterChange(target);
     return {ok:true,instance,model,slot};
   }
 
@@ -13225,11 +13227,7 @@ Object.assign(window,{
         delete SIM.actual.edgeStates[target.id];
       }
     }
-    markTopologyDirty('fault');
-    renderModelNodes();
-    renderEdges();
-    renderTypedPropertyPanel(target);
-    updateUI();
+    refreshFaultUiAfterChange(target);
   }
 
   function resolveFaultTarget(targetKind,targetId){
@@ -20899,10 +20897,7 @@ function decorateDataflowEdges(){
     const created=createFaultInstanceForTarget(target,faultTypeId,parameterOverrides,options);
     if(!created.ok) return created;
     mirrorFaultInstanceToRuntimeTarget(created.instance,created.model,target);
-    markTopologyDirty('fault');
-    renderModelNodes();
-    renderEdges();
-    updateUI();
+    refreshFaultUiAfterChange(null,{renderPanel:false});
     return created;
   }
 

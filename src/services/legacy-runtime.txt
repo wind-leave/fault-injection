@@ -20608,6 +20608,14 @@ function decorateDataflowEdges(){
   function createCapabilityRuntimePayload(model,parameters={}){
     const api=window.__GZ_FAULT_INJECTION_RUNTIME__||null;
     const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    if(runtimeService?.createRuntimePayloadWithAdapter){
+      return runtimeService.createRuntimePayloadWithAdapter({
+        adapter:api,
+        model,
+        parameters,
+        instance:{faultTypeId:model?.id||'',displayName:model?.displayName||model?.name||model?.id||''}
+      });
+    }
     if(api?.createInjectedFaultPayload){
       const payload=api.createInjectedFaultPayload(model,parameters);
       const fallback={
@@ -20641,6 +20649,17 @@ function decorateDataflowEdges(){
 
   function appendCapabilityRuntimeBinding(target,model,payload,targetKind){
     const api=window.__GZ_FAULT_INJECTION_RUNTIME__||null;
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    if(runtimeService?.createRuntimeFaultBindingWithAdapter){
+      runtimeService.createRuntimeFaultBindingWithAdapter({
+        adapter:api,
+        target,
+        model,
+        payload,
+        targetKind
+      });
+      return;
+    }
     if(api?.createFaultBinding&&api?.appendFaultBinding){
       const binding=api.createFaultBinding(model||payload,payload,{
         targetId:target.id||'',

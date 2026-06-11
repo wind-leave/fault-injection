@@ -6,7 +6,9 @@ import {
   createFaultInstanceRecord,
   createFaultTagLinkRecord,
   createFaultTagRecord,
+  createRuntimeFaultBindingWithAdapter,
   createRuntimePayloadFromInstance,
+  createRuntimePayloadWithAdapter,
   faultRecordMatchesRemovalRef,
   getCompatibleFaultModelsForTarget,
   getCompatibleFaultOptionsForTarget,
@@ -296,6 +298,121 @@ describe('fault binding runtime service', () => {
       role: 'fault-tag-attachment',
       label: '故障注入'
     });
+  });
+
+  it('creates runtime payloads through an optional fault runtime adapter', () => {
+    const adapter = {
+      createInjectedFaultPayload: (faultModel, parameters) => ({
+        modelId: faultModel.id,
+        name: `${faultModel.name} adapter`,
+        layer: faultModel.layer,
+        runtimeBehavior: faultModel.runtimeBehavior,
+        parameters,
+        adapterOnly: true
+      })
+    };
+
+    expect(createRuntimePayloadWithAdapter({
+      adapter,
+      model,
+      parameters: { bias: '0.3' },
+      instance: {
+        faultTypeId: model.id,
+        displayName: model.displayName,
+        slotId: slot.slotId,
+        slotName: slot.slotName,
+        bindingObject: slot.bindingObject,
+        targetField: slot.targetField,
+        injectionForm: 'module-variable'
+      }
+    })).toMatchObject({
+      modelId: 'gyro_zero_bias',
+      faultTypeId: 'gyro_zero_bias',
+      name: 'Gyro zero bias fault',
+      adapterOnly: true,
+      parameters: { bias: '0.3' },
+      slotId: 'electrical:gyro_rate',
+      bindingObject: 'gyro_rate',
+      targetField: 'outputs.gyro_rate',
+      injectionForm: 'module-variable'
+    });
+
+    expect(createRuntimePayloadWithAdapter({
+      model,
+      parameters: { bias: '0.4' },
+      instance: { faultTypeId: model.id, displayName: model.displayName }
+    })).toMatchObject({
+      modelId: 'gyro_zero_bias',
+      faultTypeId: 'gyro_zero_bias',
+      name: 'Gyro zero bias fault',
+      parameters: { bias: '0.4' }
+    });
+  });
+
+  it('creates and appends runtime fault bindings through an optional adapter', () => {
+    const targetWithAdapter = { id: 'node-imu', faultBindings: [] };
+    const payload = {
+      modelId: model.id,
+      faultTypeId: model.id,
+      instanceId: 'fault-inst-fixed',
+      name: model.displayName,
+      layer: model.layer,
+      runtimeBehavior: model.runtimeBehavior,
+      parameters: { bias: '0.2' },
+      slotId: slot.slotId,
+      slotName: slot.slotName,
+      bindingObject: slot.bindingObject,
+      targetField: slot.targetField,
+      injectionForm: 'module-variable'
+    };
+    const adapter = {
+      createFaultBinding: (faultModel, injectedFault, context) => ({
+        bindingId: `adapter-${injectedFault.modelId}`,
+        faultModelId: faultModel.id,
+        targetId: context.targetId,
+        targetKind: context.targetKind,
+        injectedFault
+      }),
+      appendFaultBinding: (target, binding) => {
+        target.faultBindings.push(binding);
+      }
+    };
+
+    const adapterBinding = createRuntimeFaultBindingWithAdapter({
+      adapter,
+      target: targetWithAdapter,
+      model,
+      payload,
+      targetKind: 'node'
+    });
+
+    expect(adapterBinding).toMatchObject({
+      bindingId: 'adapter-gyro_zero_bias',
+      faultModelId: 'gyro_zero_bias',
+      targetId: 'node-imu',
+      slotId: 'electrical:gyro_rate',
+      bindingObject: 'gyro_rate',
+      targetVariable: 'gyro_rate',
+      targetField: 'outputs.gyro_rate',
+      injectionForm: 'module-variable'
+    });
+    expect(targetWithAdapter.faultBindings).toEqual([adapterBinding]);
+
+    const targetWithoutAdapter = { id: 'node-imu', faultBindings: [] };
+    const fallbackBinding = createRuntimeFaultBindingWithAdapter({
+      target: targetWithoutAdapter,
+      model,
+      payload,
+      targetKind: 'node'
+    });
+
+    expect(fallbackBinding).toMatchObject({
+      bindingId: 'fault-inst-fixed::node-imu',
+      faultModelId: 'gyro_zero_bias',
+      propagationMode: 'signalTransform',
+      active: true
+    });
+    expect(targetWithoutAdapter.faultBindings).toEqual([fallbackBinding]);
   });
 
   it('upserts runtime state records by their fault identity', () => {

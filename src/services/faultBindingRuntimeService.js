@@ -558,6 +558,50 @@ export function createRuntimePayloadFromInstance(options = {}) {
   };
 }
 
+export function createRuntimePayloadWithAdapter(options = {}) {
+  const adapter = options.adapter || null;
+  const model = options.model || {};
+  const parameters = clone(options.parameters || {});
+  const instance = options.instance || {};
+
+  if (adapter?.createInjectedFaultPayload) {
+    const payload = adapter.createInjectedFaultPayload(model, parameters);
+    return createRuntimePayloadFromInstance({
+      model,
+      instance: {
+        faultTypeId: model?.id || model?.faultTypeId || '',
+        displayName: model?.displayName || model?.name || model?.id || '',
+        ...instance
+      },
+      parameters,
+      basePayload: {
+        ...payload,
+        parameters
+      }
+    });
+  }
+
+  return createRuntimePayloadFromInstance({
+    model,
+    instance: {
+      faultTypeId: model?.id || model?.faultTypeId || '',
+      displayName: model?.displayName || model?.name || model?.id || '',
+      ...instance
+    },
+    parameters,
+    basePayload: {
+      modelId: model?.id || model?.faultTypeId || '',
+      faultTypeId: model?.id || model?.faultTypeId || '',
+      name: model?.displayName || model?.name || model?.id || '鏁呴殰妯″瀷',
+      layer: model?.layer || 'electrical',
+      runtimeBehavior: model?.runtimeBehavior || '',
+      faultKind: model?.faultClass || model?.modelClass || '',
+      modelClass: model?.modelClass || model?.faultClass || '',
+      parameters
+    }
+  });
+}
+
 export function createFaultTagRecord(options = {}) {
   const instance = options.instance || {};
   const model = options.model || {};
@@ -647,6 +691,45 @@ export function createFaultBindingRecord(options = {}) {
     active: options.active ?? true,
     injectedFault: payload
   };
+}
+
+export function createRuntimeFaultBindingWithAdapter(options = {}) {
+  const adapter = options.adapter || null;
+  const target = options.target || {};
+  const model = options.model || {};
+  const payload = clone(options.payload || {});
+  const targetKind = options.targetKind || (target.sourceNodeId && target.targetNodeId ? 'edge' : 'node');
+
+  if (adapter?.createFaultBinding && adapter?.appendFaultBinding) {
+    const binding = adapter.createFaultBinding(model || payload, payload, {
+      targetId: target.id || '',
+      targetKind
+    });
+    binding.slotId = payload.slotId || binding.slotId || '';
+    binding.slotName = payload.slotName || binding.slotName || '';
+    binding.bindingObject = payload.bindingObject || binding.bindingObject || '';
+    binding.targetVariable = payload.targetVariable || binding.targetVariable || binding.bindingObject || '';
+    binding.targetField = payload.targetField || binding.targetField || '';
+    binding.injectionForm = payload.injectionForm || binding.injectionForm || '';
+    adapter.appendFaultBinding(target, binding);
+    return binding;
+  }
+
+  const binding = createFaultBindingRecord({
+    target,
+    model,
+    payload,
+    targetKind,
+    propagationMode: options.propagationMode,
+    canPropagate: options.canPropagate,
+    visualRole: options.visualRole
+  });
+  const currentBindings = list(target.faultBindings);
+  const index = currentBindings.findIndex((item) => item.bindingId === binding.bindingId || item.faultModelId === binding.faultModelId);
+  target.faultBindings = index >= 0
+    ? currentBindings.map((item, itemIndex) => (itemIndex === index ? binding : item))
+    : [...currentBindings, binding];
+  return binding;
 }
 
 export function upsertFaultInstanceRecord(records = [], instance = {}) {

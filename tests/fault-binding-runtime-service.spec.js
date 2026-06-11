@@ -6,6 +6,7 @@ import {
   createFaultTagRecord,
   createRuntimePayloadFromInstance,
   faultRecordMatchesRemovalRef,
+  refreshFaultCancellationState,
   removeFaultRuntimeArtifactsFromState,
   syncFaultPayloadFromBindings,
   upsertFaultInstanceRecord,
@@ -338,6 +339,84 @@ describe('fault binding runtime service', () => {
       },
       changed: true
     });
+  });
+
+  it('refreshes fault cancellation state for nodes and edges', () => {
+    const nodeTarget = {
+      id: 'node-imu',
+      injectedFault: { modelId: 'gyro_zero_bias', name: 'Gyro zero bias' },
+      faultBindings: [
+        { faultModelId: 'gyro_zero_bias', active: false }
+      ]
+    };
+    const state = {
+      faultedBlks: ['node-imu', 'node-controller']
+    };
+    const simulation = {
+      actual: {
+        nodeStates: {
+          'node-imu': {
+            bindingStates: { gyro_rate: 1 },
+            output: 2
+          },
+          'node-controller': {
+            bindingStates: { command: 1 }
+          }
+        },
+        edgeStates: {
+          'edge-can': { frame: 'stale' }
+        }
+      }
+    };
+
+    const nodeResult = refreshFaultCancellationState(state, simulation, {
+      targetKind: 'node',
+      target: nodeTarget,
+      hasActiveFault: false
+    });
+
+    expect(nodeResult.target).toEqual({
+      id: 'node-imu',
+      faultBindings: nodeTarget.faultBindings
+    });
+    expect(nodeResult.state.faultedBlks).toEqual(['node-controller']);
+    expect(nodeResult.simulation.actual.nodeStates['node-imu']).toEqual({ output: 2 });
+    expect(nodeResult.simulation.actual.nodeStates['node-controller']).toEqual({
+      bindingStates: { command: 1 }
+    });
+    expect(nodeResult.simulation.actual.edgeStates['edge-can']).toEqual({ frame: 'stale' });
+    expect(nodeResult.changed).toBe(true);
+
+    const activeNodeResult = refreshFaultCancellationState(state, simulation, {
+      targetKind: 'node',
+      target: {
+        id: 'node-imu',
+        faultBindings: [
+          {
+            faultModelId: 'sensor_noise',
+            active: true,
+            injectedFault: { modelId: 'sensor_noise', name: 'Sensor noise' }
+          }
+        ]
+      }
+    });
+
+    expect(activeNodeResult.state.faultedBlks).toEqual(['node-imu', 'node-controller']);
+    expect(activeNodeResult.target.injectedFault).toEqual({ modelId: 'sensor_noise', name: 'Sensor noise' });
+    expect(activeNodeResult.simulation.actual.nodeStates['node-imu']).toEqual({
+      bindingStates: { gyro_rate: 1 },
+      output: 2
+    });
+
+    const edgeResult = refreshFaultCancellationState(nodeResult.state, nodeResult.simulation, {
+      targetKind: 'edge',
+      target: { id: 'edge-can' },
+      hasActiveFault: false
+    });
+
+    expect(edgeResult.simulation.actual.edgeStates).toEqual({});
+    expect(edgeResult.state.faultedBlks).toEqual(['node-controller']);
+    expect(edgeResult.changed).toBe(true);
   });
 
   it('removes runtime artifacts for cleared fault bindings', () => {

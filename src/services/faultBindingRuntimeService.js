@@ -171,6 +171,60 @@ export function syncFaultPayloadFromBindings(target = {}) {
   };
 }
 
+export function refreshFaultCancellationState(state = {}, simulation = {}, options = {}) {
+  const target = options.target || {};
+  const targetKind = options.targetKind || 'node';
+  const targetId = target?.id || '';
+  const targetSync = syncFaultPayloadFromBindings(target);
+  const nextState = { ...(state || {}) };
+  const nextSimulation = {
+    ...(simulation || {}),
+    actual: {
+      ...(simulation?.actual || {})
+    }
+  };
+  let changed = targetSync.changed;
+  const hasActiveFault = options.hasActiveFault ?? (
+    Boolean(targetSync.target?.injectedFault)
+    || (Array.isArray(targetSync.target?.faultBindings)
+      && targetSync.target.faultBindings.some((binding) => binding && binding.active !== false))
+  );
+
+  if (targetKind === 'node' && targetId && !hasActiveFault) {
+    if (Array.isArray(nextState.faultedBlks)) {
+      const nextFaultedBlks = nextState.faultedBlks.filter((id) => id !== targetId);
+      if (nextFaultedBlks.length !== nextState.faultedBlks.length) {
+        nextState.faultedBlks = nextFaultedBlks;
+        changed = true;
+      }
+    }
+
+    if (simulation?.actual?.nodeStates?.[targetId]?.bindingStates) {
+      nextSimulation.actual.nodeStates = {
+        ...(simulation.actual.nodeStates || {}),
+        [targetId]: {
+          ...(simulation.actual.nodeStates[targetId] || {})
+        }
+      };
+      delete nextSimulation.actual.nodeStates[targetId].bindingStates;
+      changed = true;
+    }
+  }
+
+  if (targetKind === 'edge' && targetId && simulation?.actual?.edgeStates?.[targetId]) {
+    nextSimulation.actual.edgeStates = { ...(simulation.actual.edgeStates || {}) };
+    delete nextSimulation.actual.edgeStates[targetId];
+    changed = true;
+  }
+
+  return {
+    target: targetSync.target,
+    state: nextState,
+    simulation: nextSimulation,
+    changed
+  };
+}
+
 export function createFaultInstanceRecord(options = {}) {
   const target = options.target || {};
   const model = options.model || {};

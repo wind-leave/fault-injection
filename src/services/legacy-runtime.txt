@@ -13137,15 +13137,34 @@ Object.assign(window,{
 
   function refreshFaultCancellation(targetKind,target){
     if(!target){return;}
-    syncFaultPayloadFromBindings(target);
-    if(targetKind==='node'&&!hasActiveFaultForPanel(target)){
-      S.faultedBlks=(S.faultedBlks||[]).filter((id)=>id!==target.id);
-      if(SIM?.actual?.nodeStates?.[target.id]){
-        delete SIM.actual.nodeStates[target.id].bindingStates;
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    if(runtimeService?.refreshFaultCancellationState){
+      const result=runtimeService.refreshFaultCancellationState(S,SIM,{targetKind,target});
+      if(result?.target){
+        Object.keys(target).forEach(key=>{
+          if(!(key in result.target)){
+            delete target[key];
+          }
+        });
+        Object.assign(target,result.target);
       }
-    }
-    if(targetKind==='edge'&&SIM?.actual?.edgeStates?.[target.id]){
-      delete SIM.actual.edgeStates[target.id];
+      if(result?.state){
+        Object.assign(S,result.state);
+      }
+      if(result?.simulation){
+        Object.assign(SIM,result.simulation);
+      }
+    }else{
+      syncFaultPayloadFromBindings(target);
+      if(targetKind==='node'&&!hasActiveFaultForPanel(target)){
+        S.faultedBlks=(S.faultedBlks||[]).filter((id)=>id!==target.id);
+        if(SIM?.actual?.nodeStates?.[target.id]){
+          delete SIM.actual.nodeStates[target.id].bindingStates;
+        }
+      }
+      if(targetKind==='edge'&&SIM?.actual?.edgeStates?.[target.id]){
+        delete SIM.actual.edgeStates[target.id];
+      }
     }
     markTopologyDirty('fault');
     renderModelNodes();

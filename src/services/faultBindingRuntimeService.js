@@ -136,6 +136,41 @@ function hasRemainingActiveFaultId(state = {}, faultId = '') {
   ].some((item) => item?.active !== false && removalIdOf(item) === faultId);
 }
 
+export function syncFaultPayloadFromBindings(target = {}) {
+  const nextTarget = { ...(target || {}) };
+  const activeBindings = Array.isArray(target?.faultBindings)
+    ? target.faultBindings.filter((binding) => binding && binding.active !== false)
+    : [];
+
+  if (activeBindings.length > 0) {
+    const binding = activeBindings[0];
+    const nextPayload = binding.injectedFault || target.injectedFault || {
+      modelId: binding.faultModelId,
+      name: binding.name,
+      layer: binding.layer,
+      runtimeBehavior: binding.runtimeBehavior,
+      parameters: binding.parameters || {}
+    };
+
+    const previous = JSON.stringify(nextTarget.injectedFault ?? null);
+    const next = JSON.stringify(nextPayload ?? null);
+    nextTarget.injectedFault = clone(nextPayload);
+
+    return {
+      target: nextTarget,
+      changed: previous !== next
+    };
+  }
+
+  const hadInjectedFault = Object.prototype.hasOwnProperty.call(nextTarget, 'injectedFault');
+  delete nextTarget.injectedFault;
+
+  return {
+    target: nextTarget,
+    changed: hadInjectedFault
+  };
+}
+
 export function createFaultInstanceRecord(options = {}) {
   const target = options.target || {};
   const model = options.model || {};

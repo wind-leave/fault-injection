@@ -12950,6 +12950,19 @@ Object.assign(window,{
   window.savePropertyPanelTarget=savePropertyPanelTarget;
 
   function syncFaultPayloadFromBindings(target){
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    if(runtimeService?.syncFaultPayloadFromBindings){
+      const result=runtimeService.syncFaultPayloadFromBindings(target);
+      if(result?.target){
+        Object.keys(target||{}).forEach(key=>{
+          if(!(key in result.target)){
+            delete target[key];
+          }
+        });
+        Object.assign(target,result.target);
+      }
+      return Boolean(result?.changed);
+    }
     const active=Array.isArray(target.faultBindings)
       ?target.faultBindings.filter((binding)=>binding&&binding.active!==false)
       :[];

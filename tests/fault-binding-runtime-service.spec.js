@@ -7,6 +7,7 @@ import {
   createRuntimePayloadFromInstance,
   faultRecordMatchesRemovalRef,
   removeFaultRuntimeArtifactsFromState,
+  syncFaultPayloadFromBindings,
   upsertFaultInstanceRecord,
   upsertFaultRuntimeRecord,
   upsertFaultTagLinkRecord,
@@ -272,6 +273,71 @@ describe('fault binding runtime service', () => {
       targetId: 'node-controller',
       slotId: 'electrical:gyro_rate'
     }, ref)).toBe(false);
+  });
+
+  it('syncs target injected fault from remaining active bindings', () => {
+    const targetWithRemainingBinding = {
+      id: 'node-imu',
+      injectedFault: { modelId: 'old_fault', name: 'Old fault' },
+      faultBindings: [
+        {
+          faultModelId: 'gyro_zero_bias',
+          name: 'Gyro zero bias',
+          layer: 'electrical',
+          runtimeBehavior: 'additive_bias',
+          parameters: { bias: '0.2' },
+          active: false
+        },
+        {
+          faultModelId: 'sensor_noise',
+          name: 'Sensor noise',
+          layer: 'electrical',
+          runtimeBehavior: 'additive_noise',
+          parameters: { sigma: '0.05' },
+          active: true,
+          injectedFault: {
+            modelId: 'sensor_noise',
+            name: 'Sensor noise payload',
+            parameters: { sigma: '0.05' }
+          }
+        }
+      ]
+    };
+
+    expect(syncFaultPayloadFromBindings(targetWithRemainingBinding)).toEqual({
+      target: {
+        ...targetWithRemainingBinding,
+        injectedFault: {
+          modelId: 'sensor_noise',
+          name: 'Sensor noise payload',
+          parameters: { sigma: '0.05' }
+        }
+      },
+      changed: true
+    });
+
+    const targetWithoutRemainingBinding = {
+      id: 'node-imu',
+      injectedFault: { modelId: 'gyro_zero_bias', name: 'Gyro zero bias' },
+      faultBindings: [
+        {
+          faultModelId: 'gyro_zero_bias',
+          name: 'Gyro zero bias',
+          layer: 'electrical',
+          runtimeBehavior: 'additive_bias',
+          parameters: { bias: '0.2' },
+          active: false
+        }
+      ]
+    };
+
+    expect(syncFaultPayloadFromBindings(targetWithoutRemainingBinding)).toEqual({
+      target: {
+        id: 'node-imu',
+        faultBindings: targetWithoutRemainingBinding.faultBindings
+      },
+      changed: true
+    });
   });
 
   it('removes runtime artifacts for cleared fault bindings', () => {

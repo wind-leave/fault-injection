@@ -20429,8 +20429,12 @@ function decorateDataflowEdges(){
       active:true,
       visual:{expanded:false}
     };
-    ensureFaultInstances().push(instance);
     const state=getState();
+    if(window.__GZ_FAULT_BINDING_RUNTIME__?.upsertFaultInstanceRecord){
+      state.faultInstances=window.__GZ_FAULT_BINDING_RUNTIME__.upsertFaultInstanceRecord(state.faultInstances,instance);
+    }else{
+      ensureFaultInstances().push(instance);
+    }
     if(state.activeModelPackage){
       state.activeModelPackage.faultInstances=cloneCapabilityValue(state.faultInstances);
     }
@@ -20439,6 +20443,11 @@ function decorateDataflowEdges(){
 
   function pushFaultRuntimeRecord(key,payload){
     const state=getState();
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    if(runtimeService?.upsertFaultRuntimeRecord){
+      state[key]=runtimeService.upsertFaultRuntimeRecord(state[key],payload);
+      return;
+    }
     if(!Array.isArray(state[key])) state[key]=[];
     state[key]=state[key].filter(item=>(
       item?.instanceId!==payload.instanceId
@@ -20628,9 +20637,12 @@ function decorateDataflowEdges(){
       w:box.w,
       h:box.h
     };
-    state.faultTags.push(tag);
+    if(runtimeService?.upsertFaultTagRecord){
+      state.faultTags=runtimeService.upsertFaultTagRecord(state.faultTags,tag);
+    }else{
+      state.faultTags.push(tag);
+    }
     if(!Array.isArray(state.faultInjectionLinks)) state.faultInjectionLinks=[];
-    state.faultInjectionLinks=state.faultInjectionLinks.filter(link=>link.faultModelId!==faultModelId);
     const link=runtimeService?.createFaultTagLinkRecord?runtimeService.createFaultTagLinkRecord({
       instance,
       tag,
@@ -20644,7 +20656,12 @@ function decorateDataflowEdges(){
       role:'fault-tag-attachment',
       label:'故障注入'
     };
-    state.faultInjectionLinks.push(link);
+    if(runtimeService?.upsertFaultTagLinkRecord){
+      state.faultInjectionLinks=runtimeService.upsertFaultTagLinkRecord(state.faultInjectionLinks,link);
+    }else{
+      state.faultInjectionLinks=state.faultInjectionLinks.filter(item=>item.faultModelId!==faultModelId);
+      state.faultInjectionLinks.push(link);
+    }
     if(instance.targetKind!=='edge'&&hostNodeId&&!state.faultedBlks.includes(hostNodeId)){
       state.faultedBlks.push(hostNodeId);
     }
@@ -20674,8 +20691,13 @@ function decorateDataflowEdges(){
     pushFaultRuntimeRecord('activeFaults',payload);
     pushFaultRuntimeRecord('appliedFaults',payload);
     const state=getState();
-    if(!state.injectedFaultMap||typeof state.injectedFaultMap!=='object') state.injectedFaultMap={};
-    state.injectedFaultMap[payload.modelId]={...cloneCapabilityValue(payload),status:'active'};
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    if(runtimeService?.upsertInjectedFaultMap){
+      state.injectedFaultMap=runtimeService.upsertInjectedFaultMap(state.injectedFaultMap,payload);
+    }else{
+      if(!state.injectedFaultMap||typeof state.injectedFaultMap!=='object') state.injectedFaultMap={};
+      state.injectedFaultMap[payload.modelId]={...cloneCapabilityValue(payload),status:'active'};
+    }
     createCapabilityFaultTag(instance,model,target,payload);
     return payload;
   }

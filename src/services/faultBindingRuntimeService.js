@@ -18,6 +18,31 @@ function getSlotName(slot = {}) {
   return firstText(slot.slotName, slot.name, slot.label);
 }
 
+function list(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function faultModelIdOf(value = {}) {
+  return value.faultModelId || value.faultTypeId || value.modelId || value.faultId || '';
+}
+
+function instanceMatches(left = {}, right = {}) {
+  if (left.instanceId && right.instanceId && left.instanceId === right.instanceId) {
+    return true;
+  }
+  return Boolean(left.faultTypeId && right.faultTypeId && left.faultTypeId === right.faultTypeId)
+    && (left.targetKind || '') === (right.targetKind || '')
+    && (left.targetId || '') === (right.targetId || '')
+    && (left.slotId || '') === (right.slotId || '');
+}
+
+function runtimeRecordMatches(record = {}, payload = {}) {
+  return Boolean(record.instanceId && payload.instanceId && record.instanceId === payload.instanceId)
+    || Boolean(record.modelId && payload.modelId && record.modelId === payload.modelId)
+    || Boolean(record.faultModelId && payload.modelId && record.faultModelId === payload.modelId)
+    || Boolean(record.faultTypeId && payload.modelId && record.faultTypeId === payload.modelId);
+}
+
 export function createFaultInstanceRecord(options = {}) {
   const target = options.target || {};
   const model = options.model || {};
@@ -128,4 +153,56 @@ export function createFaultTagLinkRecord(options = {}) {
     role: 'fault-tag-attachment',
     label: options.label || '故障注入'
   };
+}
+
+export function upsertFaultInstanceRecord(records = [], instance = {}) {
+  return [
+    ...list(records).filter((item) => !instanceMatches(item, instance)),
+    clone(instance)
+  ];
+}
+
+export function upsertFaultRuntimeRecord(records = [], payload = {}) {
+  const modelId = payload.modelId || payload.faultTypeId || payload.faultModelId || '';
+  const record = {
+    ...clone(payload),
+    faultId: modelId,
+    faultTypeId: modelId,
+    status: 'active'
+  };
+
+  return [
+    ...list(records).filter((item) => !runtimeRecordMatches(item, { ...payload, modelId })),
+    record
+  ];
+}
+
+export function upsertInjectedFaultMap(map = {}, payload = {}) {
+  const modelId = payload.modelId || payload.faultTypeId || payload.faultModelId || '';
+  if (!modelId) {
+    return { ...(map || {}) };
+  }
+  return {
+    ...(map || {}),
+    [modelId]: {
+      ...clone(payload),
+      status: 'active'
+    }
+  };
+}
+
+export function upsertFaultTagRecord(records = [], tag = {}) {
+  const modelId = faultModelIdOf(tag);
+  return [
+    ...list(records).filter((item) => !modelId || faultModelIdOf(item) !== modelId),
+    clone(tag)
+  ];
+}
+
+export function upsertFaultTagLinkRecord(records = [], link = {}) {
+  const modelId = faultModelIdOf(link);
+  return [
+    ...list(records).filter((item) => !modelId || faultModelIdOf(item) !== modelId),
+    clone(link)
+  ];
 }

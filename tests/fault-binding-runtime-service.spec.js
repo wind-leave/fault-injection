@@ -3,7 +3,12 @@ import {
   createFaultInstanceRecord,
   createFaultTagLinkRecord,
   createFaultTagRecord,
-  createRuntimePayloadFromInstance
+  createRuntimePayloadFromInstance,
+  upsertFaultInstanceRecord,
+  upsertFaultRuntimeRecord,
+  upsertFaultTagLinkRecord,
+  upsertFaultTagRecord,
+  upsertInjectedFaultMap
 } from '../src/services/faultBindingRuntimeService.js';
 
 describe('fault binding runtime service', () => {
@@ -141,5 +146,84 @@ describe('fault binding runtime service', () => {
       role: 'fault-tag-attachment',
       label: '故障注入'
     });
+  });
+
+  it('upserts runtime state records by their fault identity', () => {
+    const previousInstance = {
+      instanceId: 'old-instance',
+      faultTypeId: 'gyro_zero_bias',
+      targetKind: 'node',
+      targetId: 'node-imu',
+      slotId: 'electrical:gyro_rate',
+      parameters: { bias: '0.1' }
+    };
+    const nextInstance = {
+      ...previousInstance,
+      instanceId: 'new-instance',
+      parameters: { bias: '0.2' }
+    };
+
+    expect(upsertFaultInstanceRecord([previousInstance], nextInstance)).toEqual([nextInstance]);
+
+    const payload = {
+      instanceId: 'new-instance',
+      modelId: 'gyro_zero_bias',
+      faultTypeId: 'gyro_zero_bias',
+      name: 'Gyro zero bias fault',
+      parameters: { bias: '0.2' }
+    };
+
+    expect(upsertFaultRuntimeRecord([
+      { instanceId: 'new-instance', modelId: 'old', status: 'active' },
+      { instanceId: 'other', modelId: 'other', status: 'active' }
+    ], payload)).toEqual([
+      { instanceId: 'other', modelId: 'other', status: 'active' },
+      {
+        ...payload,
+        faultId: 'gyro_zero_bias',
+        status: 'active'
+      }
+    ]);
+
+    expect(upsertInjectedFaultMap({ old: { status: 'active' } }, payload)).toEqual({
+      old: { status: 'active' },
+      gyro_zero_bias: {
+        ...payload,
+        status: 'active'
+      }
+    });
+  });
+
+  it('upserts visual fault tag and link records by fault model id', () => {
+    const tag = {
+      id: 'fault-tag-gyro_zero_bias',
+      faultModelId: 'gyro_zero_bias',
+      name: 'Gyro zero bias fault'
+    };
+    const link = {
+      id: 'fault-link-gyro_zero_bias-target',
+      faultModelId: 'gyro_zero_bias',
+      sourceTagId: tag.id,
+      targetNodeId: 'node-imu',
+      targetEdgeId: null,
+      role: 'fault-tag-attachment',
+      label: 'Fault link'
+    };
+
+    expect(upsertFaultTagRecord([
+      { id: 'stale-tag', faultModelId: 'gyro_zero_bias' },
+      { id: 'other-tag', faultModelId: 'other' }
+    ], tag)).toEqual([
+      { id: 'other-tag', faultModelId: 'other' },
+      tag
+    ]);
+
+    expect(upsertFaultTagLinkRecord([
+      { id: 'stale-link', faultModelId: 'gyro_zero_bias' },
+      { id: 'other-link', faultModelId: 'other' }
+    ], link)).toEqual([
+      { id: 'other-link', faultModelId: 'other' },
+      link
+    ]);
   });
 });

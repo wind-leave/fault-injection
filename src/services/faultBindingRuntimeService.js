@@ -30,6 +30,25 @@ function normalizeFaultLayer(value = '') {
   return '';
 }
 
+function normalizeFaultTargetKindFilter(value = '') {
+  const raw = String(value || '').trim();
+  if (raw === 'edge' || raw === 'line') {
+    return 'edge';
+  }
+  if (raw === 'node' || raw === 'module' || raw === 'component') {
+    return 'node';
+  }
+  return raw === 'any' ? 'any' : '';
+}
+
+function normalizeFaultOptionFilters(filters = {}) {
+  const source = typeof filters === 'string' ? { layer: filters } : (filters || {});
+  return {
+    layer: normalizeFaultLayer(source.layer || source.layerKey || source.injectorLayer || source.faultLayer),
+    targetKind: normalizeFaultTargetKindFilter(source.targetKind || source.kind || source.targetKindFilter)
+  };
+}
+
 function getBindingObject(slot = {}) {
   return firstText(slot.bindingObject, slot.targetVariable, slot.variableKey, slot.parameterKey, slot.varName, slot.key);
 }
@@ -48,6 +67,123 @@ function getFaultInjectionForm(target = {}, layer = '') {
 
 function list(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function getCapabilitySlots(entry = {}) {
+  if (!entry) {
+    return [];
+  }
+  if (list(entry.faultSlots).length) {
+    return list(entry.faultSlots);
+  }
+  if (entry.slotId || list(entry.allowedFaultIds).length || list(entry.allowedFaultTypeIds).length) {
+    return [entry];
+  }
+  return [];
+}
+
+function getAllowedFaultIds(slot = {}) {
+  return list(slot.allowedFaultIds).length ? list(slot.allowedFaultIds) : list(slot.allowedFaultTypeIds);
+}
+
+function getCapabilitySlotLayer(slot = {}) {
+  const layer = String(slot.layer || slot.layerKey || '').trim();
+  return layer || 'electrical';
+}
+
+function normalizedFaultText(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getCapabilitySlotModelTokens(slot = {}) {
+  return [
+    ...list(slot.allowedModels),
+    ...list(slot.allowedFaultModels),
+    ...list(slot.runtimeBehaviors)
+  ].map(normalizedFaultText).filter(Boolean);
+}
+
+function getFaultModelTokens(model = {}) {
+  const tokens = [
+    model.id,
+    model.faultTypeId,
+    model.runtimeBehavior,
+    model.modelClass,
+    model.faultClass,
+    model.faultKind
+  ].map(normalizedFaultText).filter(Boolean);
+  if (tokens.includes('additive_bias') || tokens.includes('parameter_bias')) {
+    tokens.push('bias');
+  }
+  if (tokens.includes('packet_loss')) {
+    tokens.push('dropout');
+  }
+  if (tokens.includes('fixed_delay') || tokens.includes('jitter_delay')) {
+    tokens.push('delay');
+  }
+  if (tokens.includes('freeze')) {
+    tokens.push('stale');
+  }
+  if (tokens.includes('tamper')) {
+    tokens.push('tamper');
+  }
+  return [...new Set(tokens)];
+}
+
+function capabilitySlotAllowsModel(slot = {}, model = {}) {
+  const modelId = model.id || model.faultTypeId || '';
+  const allowedIds = getAllowedFaultIds(slot);
+  if (allowedIds.length) {
+    return allowedIds.includes(modelId);
+  }
+  const slotLayer = getCapabilitySlotLayer(slot);
+  const modelLayer = model.layer || model.layerKey || 'electrical';
+  if (slotLayer !== modelLayer) {
+    return false;
+  }
+  const allowedModelTokens = getCapabilitySlotModelTokens(slot);
+  if (!allowedModelTokens.length) {
+    return true;
+  }
+  const modelTokens = getFaultModelTokens(model);
+  return allowedModelTokens.some((token) => modelTokens.includes(token));
+}
+
+function faultOptionMatchesFilters(option = {}, target = {}, filters = {}) {
+  const normalized = normalizeFaultOptionFilters(filters);
+  if (normalized.targetKind && normalized.targetKind !== 'any' && inferTargetKind(target) !== normalized.targetKind) {
+    return false;
+  }
+  if (normalized.layer) {
+    const slotLayer = normalizeFaultLayer(getCapabilitySlotLayer(option.slot));
+    const modelLayer = normalizeFaultLayer(option.model?.layer || option.model?.layerKey || slotLayer);
+    return slotLayer === normalized.layer && (!modelLayer || modelLayer === normalized.layer);
+  }
+  return true;
+}
+
+function defaultsFromParameterSchema(parameters = {}) {
+  return Object.fromEntries(Object.entries(parameters || {}).map(([key, value]) => [
+    key,
+    value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'default') ? value.default : value
+  ]));
+}
+
+function normalizeCapabilityFaultModel(model = {}) {
+  if (!model) {
+    return null;
+  }
+  const id = model.id || model.faultTypeId || '';
+  const defaultParameters = Object.keys(model.defaultParameters || {}).length
+    ? model.defaultParameters
+    : defaultsFromParameterSchema(model.parameters);
+  return {
+    ...model,
+    id,
+    name: model.name || model.displayName || id,
+    displayName: model.displayName || model.name || id,
+    defaultParameters: clone(defaultParameters || {})
+  };
 }
 
 function faultModelIdOf(value = {}) {
@@ -277,6 +413,62 @@ export function createFaultInstanceRecord(options = {}) {
     active: options.active ?? true,
     visual: clone(options.visual || { expanded: false })
   };
+}
+
+export function getCompatibleFaultOptionsForTarget(target = {}, options = {}) {
+  if (!target?.id) {
+    return [];
+  }
+  const targetKind = inferTargetKind(target);
+  const capability = list(options.capabilityMap).find((entry) => (
+    entry?.targetId === target.id && (entry.targetKind || targetKind) === targetKind
+  )) || null;
+  if (!capability) {
+    return [];
+  }
+
+  const slots = getCapabilitySlots(capability);
+  const models = list(options.faultModels)
+    .map(normalizeCapabilityFaultModel)
+    .filter(Boolean);
+  const seen = new Set();
+
+  return slots.flatMap((slot, index) => {
+    const slotId = getSlotId(slot, `slot-${index + 1}`);
+    return models
+      .filter((model) => capabilitySlotAllowsModel(slot, model))
+      .map((model) => {
+        const key = `${model.id}::${slotId}`;
+        if (seen.has(key)) {
+          return null;
+        }
+        seen.add(key);
+        return { model, slot, slotId };
+      })
+      .filter(Boolean);
+  }).filter((option) => faultOptionMatchesFilters(option, target, options.filters));
+}
+
+export function getCompatibleFaultModelsForTarget(target = {}, options = {}) {
+  const seen = new Set();
+  return getCompatibleFaultOptionsForTarget(target, options)
+    .map((option) => option.model)
+    .filter((model) => {
+      if (!model?.id || seen.has(model.id)) {
+        return false;
+      }
+      seen.add(model.id);
+      return true;
+    });
+}
+
+export function getCompatibleSlotForFault(target = {}, faultTypeId = '', slotId = '', options = {}) {
+  const matches = getCompatibleFaultOptionsForTarget(target, options)
+    .filter((option) => option.model?.id === faultTypeId);
+  if (slotId) {
+    return matches.find((option) => option.slotId === slotId)?.slot || null;
+  }
+  return matches[0]?.slot || null;
 }
 
 export function createFaultInstancePlan(options = {}) {

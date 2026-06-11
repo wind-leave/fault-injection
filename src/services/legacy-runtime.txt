@@ -20368,6 +20368,14 @@ function decorateDataflowEdges(){
   }
 
   function getCompatibleFaultOptionsForTarget(target,filters={}){
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    if(runtimeService?.getCompatibleFaultOptionsForTarget){
+      return runtimeService.getCompatibleFaultOptionsForTarget(target,{
+        capabilityMap:getActiveFaultCapabilityMap(),
+        faultModels:getActiveFaultTypeCatalog(),
+        filters
+      });
+    }
     const capability=getFaultCapabilityForTarget(target);
     if(!capability) return [];
     const slots=getCapabilitySlots(capability);

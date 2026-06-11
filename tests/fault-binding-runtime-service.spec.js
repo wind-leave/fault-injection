@@ -8,6 +8,9 @@ import {
   createFaultTagRecord,
   createRuntimePayloadFromInstance,
   faultRecordMatchesRemovalRef,
+  getCompatibleFaultModelsForTarget,
+  getCompatibleFaultOptionsForTarget,
+  getCompatibleSlotForFault,
   refreshFaultCancellationState,
   removeFaultRuntimeArtifactsFromState,
   syncFaultPayloadFromBindings,
@@ -130,6 +133,91 @@ describe('fault binding runtime service', () => {
       model,
       slot
     });
+  });
+
+  it('selects compatible fault options from target capability slots', () => {
+    const capabilityMap = [{
+      targetId: 'node-imu',
+      targetKind: 'node',
+      faultSlots: [
+        {
+          slotId: 'electrical:gyro_rate',
+          slotName: 'Gyro rate',
+          layer: 'electrical',
+          allowedFaultIds: ['gyro_zero_bias']
+        },
+        {
+          slotId: 'electrical:accel',
+          slotName: 'Acceleration',
+          layer: 'electrical',
+          runtimeBehaviors: ['additive_noise']
+        },
+        {
+          slotId: 'protocol:can_frame',
+          slotName: 'CAN frame',
+          layer: 'protocol',
+          allowedFaultIds: ['can_delay']
+        }
+      ]
+    }];
+    const faultModels = [
+      model,
+      {
+        id: 'sensor_noise',
+        name: 'Sensor noise',
+        layer: 'electrical',
+        runtimeBehavior: 'additive_noise',
+        parameters: { sigma: { default: 0.05 } }
+      },
+      {
+        id: 'can_delay',
+        name: 'CAN delay',
+        layer: 'protocol',
+        runtimeBehavior: 'fixed_delay'
+      }
+    ];
+
+    const options = getCompatibleFaultOptionsForTarget(target, {
+      capabilityMap,
+      faultModels,
+      filters: { layer: 'electrical', targetKind: 'node' }
+    });
+
+    expect(options).toEqual([
+      {
+        model: expect.objectContaining({
+          id: 'gyro_zero_bias',
+          defaultParameters: { bias: 0.1, start: 0 }
+        }),
+        slot: capabilityMap[0].faultSlots[0],
+        slotId: 'electrical:gyro_rate'
+      },
+      {
+        model: expect.objectContaining({
+          id: 'sensor_noise',
+          defaultParameters: { sigma: 0.05 }
+        }),
+        slot: capabilityMap[0].faultSlots[1],
+        slotId: 'electrical:accel'
+      }
+    ]);
+
+    expect(getCompatibleFaultModelsForTarget(target, {
+      capabilityMap,
+      faultModels,
+      filters: { layer: 'electrical' }
+    }).map((item) => item.id)).toEqual(['gyro_zero_bias', 'sensor_noise']);
+
+    expect(getCompatibleSlotForFault(target, 'sensor_noise', '', {
+      capabilityMap,
+      faultModels
+    })).toBe(capabilityMap[0].faultSlots[1]);
+
+    expect(getCompatibleSlotForFault(target, 'can_delay', 'protocol:can_frame', {
+      capabilityMap,
+      faultModels,
+      filters: { layer: 'protocol' }
+    })).toBe(capabilityMap[0].faultSlots[2]);
   });
 
   it('creates runtime payload and visual tag records from an instance', () => {

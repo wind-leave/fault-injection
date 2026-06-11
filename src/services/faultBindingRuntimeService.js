@@ -18,6 +18,34 @@ function getSlotName(slot = {}) {
   return firstText(slot.slotName, slot.name, slot.label);
 }
 
+function inferTargetKind(target = {}) {
+  return target?.sourceNodeId && target?.targetNodeId ? 'edge' : 'node';
+}
+
+function normalizeFaultLayer(value = '') {
+  const raw = String(value || '').trim();
+  if (raw === 'physical' || raw === 'electrical' || raw === 'protocol') {
+    return raw;
+  }
+  return '';
+}
+
+function getBindingObject(slot = {}) {
+  return firstText(slot.bindingObject, slot.targetVariable, slot.variableKey, slot.parameterKey, slot.varName, slot.key);
+}
+
+function getFaultInjectionForm(target = {}, layer = '') {
+  const targetKind = inferTargetKind(target);
+  const normalizedLayer = normalizeFaultLayer(layer);
+  if (targetKind === 'edge' && normalizedLayer === 'protocol') {
+    return 'protocol-bus';
+  }
+  if (targetKind === 'edge') {
+    return 'signal-edge';
+  }
+  return 'module-variable';
+}
+
 function list(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -248,6 +276,66 @@ export function createFaultInstanceRecord(options = {}) {
     parameters,
     active: options.active ?? true,
     visual: clone(options.visual || { expanded: false })
+  };
+}
+
+export function createFaultInstancePlan(options = {}) {
+  const target = options.target || {};
+  const model = options.model || null;
+  const slot = options.slot || null;
+  if (!target?.id || !model || !slot) {
+    return { ok: false, error: 'incompatible-target' };
+  }
+
+  const targetKind = options.targetKind || inferTargetKind(target);
+  const slotId = getSlotId(slot, options.slotId || '');
+  const faultTypeId = model.id || model.faultTypeId || model.modelId || '';
+  const duplicate = list(options.existingInstances).find((instance) => (
+    instance?.active !== false
+    && instance.targetKind === targetKind
+    && instance.targetId === target.id
+    && instance.faultTypeId === faultTypeId
+    && (!slotId || instance.slotId === slotId)
+  )) || null;
+
+  if (duplicate) {
+    return {
+      ok: false,
+      error: 'duplicate-fault-instance',
+      instance: duplicate,
+      model,
+      slot
+    };
+  }
+
+  const parameters = {
+    ...(model.defaultParameters || {}),
+    ...(options.parameterOverrides || {})
+  };
+  const bindingObject = options.bindingObject || getBindingObject(slot);
+  const injectionForm = options.injectionForm || getFaultInjectionForm(target, model.layer || slot.layer || options.layer);
+  const instance = createFaultInstanceRecord({
+    target,
+    model,
+    slot,
+    targetKind,
+    slotId,
+    parameters,
+    bindingObject,
+    injectionForm,
+    instanceId: options.instanceId
+  });
+
+  return {
+    ok: true,
+    instance,
+    model,
+    slot,
+    targetKind,
+    slotId,
+    parameters,
+    bindingObject,
+    injectionForm
   };
 }
 

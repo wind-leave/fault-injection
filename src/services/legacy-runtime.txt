@@ -20448,10 +20448,6 @@ function decorateDataflowEdges(){
     }
     const targetKind=inferFaultTargetKind(target);
     const slotId=getCapabilitySlotId(slot);
-    const duplicate=findExistingFaultInstanceForTarget(target,model.id,slot);
-    if(duplicate){
-      return {ok:false,error:'duplicate-fault-instance',instance:duplicate,model,slot};
-    }
     const parameters={
       ...(model.defaultParameters||{}),
       ...(parameterOverrides||{})
@@ -20459,6 +20455,34 @@ function decorateDataflowEdges(){
     const bindingObject=getFaultSlotBindingObject(slot);
     const injectionForm=getFaultInjectionForm(target,model.layer||slot.layer||optionFilters.layer);
     const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    if(runtimeService?.createFaultInstancePlan){
+      const plan=runtimeService.createFaultInstancePlan({
+        target,
+        model,
+        slot,
+        existingInstances:ensureFaultInstances(),
+        parameterOverrides,
+        targetKind,
+        slotId,
+        bindingObject,
+        injectionForm
+      });
+      if(!plan.ok){
+        return plan;
+      }
+      const state=getState();
+      state.faultInstances=runtimeService.upsertFaultInstanceRecord
+        ?runtimeService.upsertFaultInstanceRecord(state.faultInstances,plan.instance)
+        :[...ensureFaultInstances(),plan.instance];
+      if(state.activeModelPackage){
+        state.activeModelPackage.faultInstances=cloneCapabilityValue(state.faultInstances);
+      }
+      return {ok:true,instance:plan.instance,model,slot};
+    }
+    const duplicate=findExistingFaultInstanceForTarget(target,model.id,slot);
+    if(duplicate){
+      return {ok:false,error:'duplicate-fault-instance',instance:duplicate,model,slot};
+    }
     const instance=runtimeService?.createFaultInstanceRecord?runtimeService.createFaultInstanceRecord({
       target,
       model,

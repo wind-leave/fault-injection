@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyFaultBindingToState,
+  createFaultInstancePlan,
   createFaultRemovalRef,
   createFaultInstanceRecord,
   createFaultTagLinkRecord,
@@ -73,6 +74,61 @@ describe('fault binding runtime service', () => {
       parameters: { bias: '0.2', start: 0 },
       active: true,
       visual: { expanded: false }
+    });
+  });
+
+  it('creates a fault instance plan and rejects duplicate active instances', () => {
+    const plan = createFaultInstancePlan({
+      target,
+      model,
+      slot,
+      existingInstances: [],
+      parameterOverrides: { bias: '0.2' },
+      instanceId: 'fault-inst-planned'
+    });
+
+    expect(plan).toEqual({
+      ok: true,
+      instance: {
+        instanceId: 'fault-inst-planned',
+        faultTypeId: 'gyro_zero_bias',
+        targetKind: 'node',
+        targetId: 'node-imu',
+        slotId: 'electrical:gyro_rate',
+        slotName: 'Gyro rate',
+        layer: 'electrical',
+        injectionForm: 'module-variable',
+        bindingObject: 'gyro_rate',
+        targetVariable: 'gyro_rate',
+        targetField: 'outputs.gyro_rate',
+        displayName: 'Gyro zero bias fault',
+        parameters: { bias: '0.2', start: 0 },
+        active: true,
+        visual: { expanded: false }
+      },
+      model,
+      slot,
+      targetKind: 'node',
+      slotId: 'electrical:gyro_rate',
+      parameters: { bias: '0.2', start: 0 },
+      bindingObject: 'gyro_rate',
+      injectionForm: 'module-variable'
+    });
+
+    const duplicate = createFaultInstancePlan({
+      target,
+      model,
+      slot,
+      existingInstances: [plan.instance],
+      parameterOverrides: { bias: '0.3' }
+    });
+
+    expect(duplicate).toEqual({
+      ok: false,
+      error: 'duplicate-fault-instance',
+      instance: plan.instance,
+      model,
+      slot
     });
   });
 

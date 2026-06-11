@@ -13002,6 +13002,10 @@ Object.assign(window,{
   }
 
   function makeFaultRemovalRef(targetKind,target,binding=null,index=0){
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    if(runtimeService?.createFaultRemovalRef){
+      return runtimeService.createFaultRemovalRef(targetKind,target,binding,index);
+    }
     const source=binding||target?.injectedFault||{};
     const bindingId=binding?(binding.bindingId||`legacy-${binding.faultModelId||index}`):'';
     return {
@@ -13015,6 +13019,10 @@ Object.assign(window,{
   }
 
   function faultRecordMatchesRemovalRef(record,ref){
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    if(runtimeService?.faultRecordMatchesRemovalRef){
+      return runtimeService.faultRecordMatchesRemovalRef(record,ref);
+    }
     if(!record||!ref) return false;
     const recordTargetKind=getFaultRemovalTargetKind(record,ref.targetKind);
     const recordTargetId=getFaultRemovalTargetId(record,ref.targetId);

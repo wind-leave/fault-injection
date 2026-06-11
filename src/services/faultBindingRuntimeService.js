@@ -78,7 +78,21 @@ function removalTargetIdOf(value = {}, fallback = '') {
     || fallback;
 }
 
-function recordMatchesRemovalRef(record = {}, ref = {}) {
+export function createFaultRemovalRef(targetKind = 'node', target = {}, binding = null, index = 0) {
+  const source = binding || target?.injectedFault || {};
+  const bindingId = binding ? (binding.bindingId || `legacy-${removalIdOf(binding) || index}`) : '';
+
+  return {
+    targetKind,
+    targetId: target?.id || '',
+    bindingId,
+    instanceId: removalInstanceIdOf(source),
+    faultId: removalIdOf(source),
+    slotId: removalSlotIdOf(source)
+  };
+}
+
+export function faultRecordMatchesRemovalRef(record = {}, ref = {}) {
   if (!record || !ref) {
     return false;
   }
@@ -106,7 +120,7 @@ function recordMatchesRemovalRef(record = {}, ref = {}) {
 }
 
 function recordMatchesAnyRemovalRef(record = {}, refs = []) {
-  return refs.some((ref) => recordMatchesRemovalRef(record, ref));
+  return refs.some((ref) => faultRecordMatchesRemovalRef(record, ref));
 }
 
 function hasRemainingActiveFaultId(state = {}, faultId = '') {

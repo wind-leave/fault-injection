@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createFaultRemovalRef,
   createFaultInstanceRecord,
   createFaultTagLinkRecord,
   createFaultTagRecord,
   createRuntimePayloadFromInstance,
+  faultRecordMatchesRemovalRef,
   removeFaultRuntimeArtifactsFromState,
   upsertFaultInstanceRecord,
   upsertFaultRuntimeRecord,
@@ -226,6 +228,50 @@ describe('fault binding runtime service', () => {
       { id: 'other-link', faultModelId: 'other' },
       link
     ]);
+  });
+
+  it('creates and matches normalized removal references for fault bindings', () => {
+    const binding = {
+      bindingId: 'binding-gyro-zero',
+      faultModelId: 'gyro_zero_bias',
+      instanceId: 'fault-inst-1',
+      slotId: 'electrical:gyro_rate',
+      targetKind: 'node',
+      targetId: 'node-imu'
+    };
+
+    const ref = createFaultRemovalRef('node', target, binding, 0);
+
+    expect(ref).toEqual({
+      targetKind: 'node',
+      targetId: 'node-imu',
+      bindingId: 'binding-gyro-zero',
+      instanceId: 'fault-inst-1',
+      faultId: 'gyro_zero_bias',
+      slotId: 'electrical:gyro_rate'
+    });
+
+    expect(faultRecordMatchesRemovalRef({
+      instanceId: 'fault-inst-1',
+      modelId: 'gyro_zero_bias',
+      targetKind: 'node',
+      targetId: 'node-imu',
+      slotId: 'electrical:gyro_rate'
+    }, ref)).toBe(true);
+
+    expect(faultRecordMatchesRemovalRef({
+      modelId: 'gyro_zero_bias',
+      targetKind: 'node',
+      targetId: 'node-imu',
+      slotId: 'electrical:accel'
+    }, ref)).toBe(false);
+
+    expect(faultRecordMatchesRemovalRef({
+      modelId: 'gyro_zero_bias',
+      targetKind: 'node',
+      targetId: 'node-controller',
+      slotId: 'electrical:gyro_rate'
+    }, ref)).toBe(false);
   });
 
   it('removes runtime artifacts for cleared fault bindings', () => {

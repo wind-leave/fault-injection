@@ -908,6 +908,30 @@ describe('property panel interaction', () => {
       slotId: 'electrical:torque_request',
       bindingObject: 'torque_request'
     }));
+    expect(state.injectedFaults).toContainEqual(expect.objectContaining({
+      modelId: 'sensor_additive_bias',
+      targetVariable: 'torque_request',
+      slotId: 'electrical:torque_request',
+      status: 'active'
+    }));
+    expect(state.activeFaults).toContainEqual(expect.objectContaining({
+      modelId: 'sensor_additive_bias',
+      targetVariable: 'torque_request',
+      slotId: 'electrical:torque_request',
+      status: 'active'
+    }));
+    expect(state.appliedFaults).toContainEqual(expect.objectContaining({
+      modelId: 'sensor_additive_bias',
+      targetVariable: 'torque_request',
+      slotId: 'electrical:torque_request',
+      status: 'active'
+    }));
+    expect(state.injectedFaultMap.sensor_additive_bias).toEqual(expect.objectContaining({
+      modelId: 'sensor_additive_bias',
+      targetVariable: 'torque_request',
+      slotId: 'electrical:torque_request',
+      status: 'active'
+    }));
 
     window.setPropertyPanelTab('faults');
     await flushRuntime();

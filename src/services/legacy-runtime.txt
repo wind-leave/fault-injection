@@ -12296,6 +12296,65 @@ Object.assign(window,{
     const targetKind=isEdgeTarget(target)?'edge':'node';
     const slotId=getPropertyPanelSlotId(slot);
     const bindingObject=plainValue(slot?.bindingObject||slot?.targetVariable||slot?.variableKey||slot?.parameterKey||slotId,slotId);
+    const injectionForm=getFaultInjectionForm(target,model.layer||slot?.layer);
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    if(runtimeService?.createFaultInstancePlan&&runtimeService?.createRuntimePayloadFromInstance&&runtimeService?.applyFaultBindingToState){
+      const plan=runtimeService.createFaultInstancePlan({
+        target,
+        model,
+        slot,
+        existingInstances:Array.isArray(S.faultInstances)?S.faultInstances:[],
+        parameterOverrides:parameters,
+        targetKind,
+        slotId,
+        bindingObject,
+        injectionForm
+      });
+      if(!plan.ok){
+        return plan;
+      }
+      const payload=runtimeService.createRuntimePayloadFromInstance({
+        model,
+        instance:plan.instance,
+        parameters:plan.instance.parameters,
+        basePayload:{
+          modelId:model.id,
+          faultTypeId:model.id,
+          name:plan.instance.displayName,
+          layer:plan.instance.layer,
+          runtimeBehavior:model.runtimeBehavior||'',
+          parameters:cloneFaultPanelData(plan.instance.parameters),
+          slotId,
+          slotName:plan.instance.slotName,
+          bindingObject,
+          targetVariable:bindingObject,
+          targetField:plan.instance.targetField
+        }
+      });
+      const result=runtimeService.applyFaultBindingToState(S,target,{
+        model,
+        instance:plan.instance,
+        payload,
+        bindingId:`${model.id}::${target.id}::${slotId}`
+      });
+      if(result?.target){
+        Object.keys(target).forEach(key=>{
+          if(!(key in result.target)){
+            delete target[key];
+          }
+        });
+        Object.assign(target,result.target);
+      }
+      if(result?.state){
+        Object.assign(S,result.state);
+      }
+      markTopologyDirty('fault');
+      renderModelNodes();
+      renderEdges();
+      renderTypedPropertyPanel(target);
+      updateUI();
+      return {ok:true,instance:plan.instance,model,slot};
+    }
     const instance={
       instanceId:`fault-inst-${Date.now()}-${Math.random().toString(16).slice(2,8)}`,
       faultTypeId:model.id,

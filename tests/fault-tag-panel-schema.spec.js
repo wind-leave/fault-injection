@@ -11,6 +11,7 @@ describe('fault tag panel schema service', () => {
     name: 'Bias <fault>',
     layer: 'electrical',
     runtimeBehavior: 'bias',
+    bindingObject: 'gyro_rate',
     parameters: {
       bias: '5',
       start: '1'
@@ -27,6 +28,10 @@ describe('fault tag panel schema service', () => {
     expect(html).toContain('data-fault-tag-inspector="fault-tag-1"');
     expect(html).toContain('Bias &lt;fault&gt;');
     expect(html).toContain('IMU &lt;sensor&gt;');
+    expect(html).toContain('\u76ee\u6807\u53c2\u6570');
+    expect(html).toContain('gyro_rate');
+    expect(html.indexOf('\u76ee\u6807\u5bf9\u8c61')).toBeLessThan(html.indexOf('\u76ee\u6807\u53c2\u6570'));
+    expect(html.indexOf('\u76ee\u6807\u53c2\u6570')).toBeLessThan(html.indexOf('\u76ee\u6807\u7c7b\u578b'));
     expect(html).toContain('电气层');
     expect(html).toContain('偏差故障');
     expect(html).toContain('偏置值');

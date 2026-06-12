@@ -825,6 +825,146 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('adds a diagnostic test point from the dataflow add button', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 220, 220);
+    const sensor = window.createNode('airspeed_sensor', 460, 220);
+
+    window.__GZ_STATE__.modelEdges.push({
+      id: 'edge-airspeed-output',
+      lineType: 'normal',
+      sourceNodeId: source.id,
+      targetNodeId: sensor.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0,
+      signalId: 'airspeed.true',
+      sourcePort: { displayName: '真实空速', type: 'scalar' },
+      targetPort: { displayName: '真实空速', type: 'scalar' }
+    });
+    window.renderEdges();
+    window.setCanvasView('dataflow');
+    await flushRuntime();
+
+    const panel = document.getElementById('dataflow-panel');
+    const select = panel?.querySelector('[data-testpoint-edge-select]');
+    const button = panel?.querySelector('[data-add-testpoint-from-edge]');
+
+    expect(select).not.toBeNull();
+    expect(button).not.toBeNull();
+    select.value = 'edge-airspeed-output';
+    button.click();
+    await flushRuntime();
+
+    const model = window.buildDiagnosticTestPointModel();
+    expect(model.positions.map((point) => point.edgeId)).toEqual(['edge-airspeed-output']);
+    expect(model.installed).toHaveLength(0);
+    expect(document.getElementById('dataflow-panel')?.textContent).toContain('信号源 1 -> 空速传感器 1');
+    expect(document.getElementById('tm')?.textContent).toContain('测点已添加，请点击测点卡片完成安装。');
+
+    wrapper.unmount();
+  });
+
+  it('selects, installs, and deletes a fixed diagnostic test point from dataflow header actions', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 220, 220);
+    const sensor = window.createNode('airspeed_sensor', 460, 220);
+
+    window.__GZ_STATE__.modelEdges.push({
+      id: 'edge-delete-testpoint',
+      lineType: 'normal',
+      sourceNodeId: source.id,
+      targetNodeId: sensor.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0,
+      signalId: 'airspeed.delete',
+      sourcePort: { displayName: '真实空速', type: 'scalar' },
+      targetPort: { displayName: '真实空速', type: 'scalar' }
+    });
+    window.renderEdges();
+    window.addDiagnosticTestPointFromEdge('edge-delete-testpoint');
+    window.setCanvasView('dataflow');
+    await flushRuntime();
+
+    let model = window.buildDiagnosticTestPointModel();
+    const point = model.positions.find((item) => item.edgeId === 'edge-delete-testpoint');
+    expect(point).toBeTruthy();
+    const pointCard = document.querySelector(`[data-fixed-testpoint-position="${point.pointId}"]`);
+    expect(pointCard).not.toBeNull();
+    expect(pointCard.querySelector('[data-delete-fixed-testpoint]')).toBeNull();
+    const fixedPanel = document.querySelector('.tp-console-panel--points');
+    const detectPanel = document.querySelectorAll('.tp-console-panel')[1];
+    expect(fixedPanel?.querySelector('[data-install-all-testpoints]')?.textContent).toContain('全部安装');
+    expect(detectPanel?.querySelector('[data-clear-testpoints]')?.textContent).toContain('全部移除');
+
+    pointCard.click();
+    await flushRuntime();
+
+    expect(window.__GZ_STATE__.selectedDiagnosticTestPointId).toBe(point.pointId);
+    expect(window.buildDiagnosticTestPointModel().installed).toHaveLength(0);
+
+    const installButton = document.querySelector('[data-install-testpoint]');
+    expect(installButton).not.toBeNull();
+    installButton.click();
+    await flushRuntime();
+
+    model = window.buildDiagnosticTestPointModel();
+    expect(model.installed.some((item) => item.pointId === point.pointId)).toBe(true);
+
+    const deleteButton = document.querySelector('[data-delete-fixed-testpoint]');
+    expect(deleteButton).not.toBeNull();
+    expect(deleteButton?.textContent).toContain('删除测点');
+    deleteButton.click();
+    await flushRuntime();
+
+    model = window.buildDiagnosticTestPointModel();
+    expect(model.positions.some((item) => item.edgeId === 'edge-delete-testpoint')).toBe(false);
+    expect(model.candidateEdges.some((edge) => edge.id === 'edge-delete-testpoint')).toBe(true);
+    expect(document.querySelector(`[data-fixed-testpoint-position="${point.pointId}"]`)).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('shows manually added dataflow test points after importing the closed-loop demo', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
+    await flushRuntime();
+
+    window.setCanvasView('dataflow');
+    await flushRuntime();
+
+    const before = window.buildDiagnosticTestPointModel();
+    expect(before.positions.some((point) => point.edgeId === 'edge-command-scope')).toBe(false);
+    expect(before.candidateEdges.some((edge) => edge.id === 'edge-command-scope')).toBe(true);
+
+    const panel = document.getElementById('dataflow-panel');
+    const select = panel?.querySelector('[data-testpoint-edge-select]');
+    const button = panel?.querySelector('[data-add-testpoint-from-edge]');
+    expect(select).not.toBeNull();
+    expect(button).not.toBeNull();
+
+    select.value = 'edge-command-scope';
+    button.click();
+    await flushRuntime();
+
+    const after = window.buildDiagnosticTestPointModel();
+    const addedPoint = after.positions.find((point) => point.edgeId === 'edge-command-scope');
+    expect(addedPoint).toBeTruthy();
+    expect(document.getElementById('dataflow-panel')?.querySelector(
+      `[data-fixed-testpoint-position="${addedPoint.pointId}"]`
+    )).not.toBeNull();
+
+    wrapper.unmount();
+  });
+
   it('toggles fixed diagnostic point markers from the fault view', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -2446,27 +2586,58 @@ describe('canvas layout cleanup', () => {
     const dMatrixHeaderRule = findCssRule(componentsCss, '.d-matrix-header');
     const dMatrixTitleRule = findCssRule(componentsCss, '.d-matrix-header h2');
     const dMatrixHeaderCopyRule = findCssRule(componentsCss, '.d-matrix-header p');
+    const dMatrixSummaryRule = findCssRule(componentsCss, '.d-matrix-summary');
+    const dMatrixChromeRule = findCssRule(componentsCss, '.canvas-wrap[data-view="dmatrix"] .canvas-chrome');
+    const dMatrixTabsRule = findCssRule(componentsCss, '.canvas-wrap[data-view="dmatrix"] .canvas-tabs');
     const canvasChromeRule = findCssRule(componentsCss, '.canvas-chrome');
     const canvasTabsRule = findCssRule(componentsCss, '.canvas-tabs');
     const tableWrapRule = findCssRule(componentsCss, '.d-matrix-table-wrap');
+    const tableStickyBodyRule = findCssRule(componentsCss, '.d-matrix-table td.d-matrix-sticky');
+    const tableStickyHeaderRule = findCssRule(componentsCss, '.d-matrix-table th.d-matrix-sticky');
+    const troubleshootingPathRule = findCssRule(componentsCss, '.troubleshooting-path');
     const exportRule = findCssRule(componentsCss, '.d-matrix-export');
     expect(componentsCss).toContain('.canvas-wrap[data-view="dmatrix"] .canvas-floating');
     expect(componentsCss).toContain('.canvas-wrap[data-view="dmatrix"] .canvas-tools');
     expect(componentsCss).toContain('.canvas-wrap[data-view="dmatrix"] .canvas-sim-dock');
-    expect(dMatrixPanelRule).toMatch(/top\s*:\s*46px/);
+    expect(dMatrixPanelRule).toMatch(/top\s*:\s*48px/);
     expect(dMatrixPanelRule).toMatch(/z-index\s*:\s*var\(--canvas-layer-panel\)/);
+    expect(dMatrixChromeRule).toMatch(/grid-template-rows\s*:\s*48px/);
+    expect(dMatrixChromeRule).toMatch(/height\s*:\s*48px/);
+    expect(dMatrixTabsRule).toMatch(/grid-row\s*:\s*1/);
     expect(componentsCss).toMatch(/--canvas-layer-panel\s*:\s*11/);
     expect(canvasChromeRule).toMatch(/z-index\s*:\s*20/);
     expect(canvasTabsRule).toMatch(/background\s*:\s*#fff/);
     expect(dMatrixPanelRule).toMatch(/overflow\s*:\s*hidden/);
     expect(dMatrixPanelRule).toMatch(/border-radius\s*:\s*0/);
     expect(dMatrixPanelRule).not.toMatch(/box-shadow/);
+    expect(dMatrixRule).toMatch(/min-width\s*:\s*0/);
+    expect(dMatrixRule).toMatch(/position\s*:\s*relative/);
     expect(dMatrixRule).toMatch(/font-family\s*:\s*"IBM Plex Sans"/);
+    expect(dMatrixRule).toMatch(/isolation\s*:\s*isolate/);
     expect(dMatrixHeaderRule).toMatch(/align-items\s*:\s*center/);
+    expect(dMatrixHeaderRule).toMatch(/position\s*:\s*relative/);
+    expect(dMatrixHeaderRule).toMatch(/z-index\s*:\s*10/);
     expect(dMatrixTitleRule).toMatch(/font-size\s*:\s*22px/);
     expect(dMatrixHeaderCopyRule).toMatch(/display\s*:\s*none/);
+    expect(dMatrixSummaryRule).toMatch(/position\s*:\s*relative/);
+    expect(dMatrixSummaryRule).toMatch(/z-index\s*:\s*9/);
     expect(tableWrapRule).toMatch(/min-height\s*:\s*0/);
+    expect(tableWrapRule).toMatch(/position\s*:\s*relative/);
+    expect(tableWrapRule).toMatch(/z-index\s*:\s*1/);
+    expect(tableStickyBodyRule).toMatch(/z-index\s*:\s*3/);
+    expect(tableStickyHeaderRule).toMatch(/top\s*:\s*0/);
+    expect(tableStickyHeaderRule).toMatch(/z-index\s*:\s*5/);
+    expect(troubleshootingPathRule).toMatch(/z-index\s*:\s*12/);
     expect(exportRule).toMatch(/border-radius\s*:\s*0/);
+
+    const firstPathAction = panel?.querySelector('[data-build-troubleshooting-path]');
+    expect(firstPathAction).not.toBeNull();
+    firstPathAction.click();
+    await flushRuntime();
+    const pathPanel = panel?.querySelector('[data-troubleshooting-path-panel]');
+    expect(pathPanel).not.toBeNull();
+    expect(pathPanel?.textContent).toContain('最优排故路径');
+    expect(pathPanel?.querySelector('[data-close-troubleshooting-path]')).not.toBeNull();
 
     const csv = window.exportDetectionMatrixCsv({ download: false });
     expect(csv).toContain('故障类型');

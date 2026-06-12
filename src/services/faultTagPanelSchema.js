@@ -37,6 +37,7 @@ const COPY = {
   overviewTitle: '绑定概览',
   parametersTitle: '故障参数',
   targetObject: '目标对象',
+  targetParameter: '目标参数',
   targetType: '目标类型',
   runtimeBehavior: '运行行为',
   injected: '已注入',
@@ -47,6 +48,7 @@ const COPY = {
   emptyParameters: '该故障没有额外参数。',
   fallbackFaultName: '故障',
   fallbackLayer: '未指定层级',
+  fallbackTargetParameter: '未关联',
   fallbackRuntime: '按故障库定义'
 };
 
@@ -73,6 +75,25 @@ export function getFaultTagRuntimeLabel(value) {
 
 export function getFaultTagParameterLabel(key) {
   return PARAMETER_LABELS[key] || key;
+}
+
+function firstText(...values) {
+  const value = values.find((item) => item !== undefined && item !== null && String(item).trim() !== '');
+  return value === undefined ? '' : String(value);
+}
+
+export function getFaultTagTargetParameter(tag = {}) {
+  return firstText(
+    tag.bindingObject,
+    tag.targetVariable,
+    tag.targetField,
+    tag.injectedFault?.bindingObject,
+    tag.injectedFault?.targetVariable,
+    tag.injectedFault?.targetField,
+    tag.slotName,
+    tag.slotId,
+    COPY.fallbackTargetParameter
+  );
 }
 
 function renderParameterPreviewRows(parameters = {}) {
@@ -112,6 +133,7 @@ export function renderFaultTagOverviewPanel(options = {}) {
   const runtimeValue = options.runtimeValue || tag.runtimeBehavior || tag.mathModel || tag.modelClass || '';
   const runtimeLabel = options.runtimeLabel || getFaultTagRuntimeLabel(runtimeValue);
   const targetName = options.targetName || tag.targetName || tag.targetId || '目标对象';
+  const targetParameter = options.targetParameter || getFaultTagTargetParameter(tag);
   const targetKindLabel = options.targetKindLabel || (tag.targetKind === 'edge' ? '连接线' : '模块');
 
   return `
@@ -128,6 +150,7 @@ export function renderFaultTagOverviewPanel(options = {}) {
           </div>
           <div class="fault-tag-binding-card">
             <div><span>${escapeHtml(COPY.targetObject)}</span><strong>${escapeHtml(targetName)}</strong></div>
+            <div><span>${escapeHtml(COPY.targetParameter)}</span><strong>${escapeHtml(targetParameter)}</strong></div>
             <div><span>${escapeHtml(COPY.targetType)}</span><strong>${escapeHtml(targetKindLabel)}</strong></div>
             <div><span>${escapeHtml(COPY.runtimeBehavior)}</span><strong>${escapeHtml(runtimeLabel)}</strong></div>
           </div>

@@ -38,6 +38,26 @@ function setCheckboxValue(selector, checked) {
   field.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
+function visiblePropertyTabs() {
+  return Array.from(document.querySelectorAll('[data-props-tab]'))
+    .filter((button) => !button.hidden)
+    .map((button) => button.dataset.propsTab);
+}
+
+function dispatchPointer(target, type, init = {}) {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: init.clientX ?? 0,
+    clientY: init.clientY ?? 0,
+    button: init.button ?? 0
+  });
+  Object.defineProperty(event, 'pointerId', {
+    value: init.pointerId ?? 1
+  });
+  target.dispatchEvent(event);
+}
+
 describe('property panel interaction', () => {
   afterEach(() => {
     window.localStorage.clear();
@@ -434,6 +454,96 @@ describe('property panel interaction', () => {
     window.selectNode(injector.id);
     await flushRuntime();
     expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
+    expect(visiblePropertyTabs()).toEqual(['overview']);
+
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+    expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
+    expect(document.querySelector('[data-props-tab="overview"]')?.classList.contains('is-active')).toBe(true);
+    expect(visiblePropertyTabs()).toEqual(['overview']);
+
+    window.setPropertyPanelTab('faults');
+    await flushRuntime();
+    expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
+    expect(document.querySelector('[data-props-tab="overview"]')?.classList.contains('is-active')).toBe(true);
+    expect(visiblePropertyTabs()).toEqual(['overview']);
+
+    wrapper.unmount();
+  }, 10000);
+
+  it('keeps unbound fault injector tabs to overview only when selected from other panel states', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 220, 220);
+    const injector = window.createNode('protocol_fault_injector', 420, 260);
+    await flushRuntime();
+
+    window.selectNode(source.id);
+    await flushRuntime();
+    expect(visiblePropertyTabs()).toEqual(['overview', 'parameters', 'faults', 'outputs']);
+
+    window.selectNode(injector.id);
+    await flushRuntime();
+    expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
+    expect(visiblePropertyTabs()).toEqual(['overview']);
+
+    const viewport = document.getElementById('canvas-viewport');
+    dispatchPointer(viewport, 'pointerdown', { pointerId: 11, clientX: 24, clientY: 24 });
+    dispatchPointer(viewport, 'pointerup', { pointerId: 11, clientX: 24, clientY: 24 });
+    await flushRuntime();
+    expect(visiblePropertyTabs()).toEqual(['overview']);
+
+    window.selectNode(injector.id);
+    await flushRuntime();
+    expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
+    expect(visiblePropertyTabs()).toEqual(['overview']);
+
+    wrapper.unmount();
+  });
+
+  it('keeps bound fault component tabs to overview and parameters when selected from other panel states', async () => {
+    const wrapper = await mountWorkbench();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
+    expect(importResult).toMatchObject({ ok: true });
+
+    const source = window.__GZ_STATE__.modelNodes.find((node) => node.type === 'signal_source');
+    const edge = window.__GZ_STATE__.modelEdges.find((item) => item.id === 'edge-motor-motor1');
+    const injector = window.createNode('protocol_fault_injector', 420, 260);
+    await flushRuntime();
+
+    const bindResult = window.bindLayeredFaultInjectorToTarget(injector.id, {
+      targetKind: 'edge',
+      targetId: edge.id,
+      mathModel: 'tamper',
+      parameters: { value: 1, start: 0, duration: '', mode: 'overwrite' }
+    });
+    await flushRuntime();
+
+    expect(bindResult).toMatchObject({ ok: true });
+    const tag = window.__GZ_STATE__.faultTags[0];
+
+    window.selectNode(source.id);
+    await flushRuntime();
+    expect(visiblePropertyTabs()).toEqual(['overview', 'parameters', 'faults', 'outputs']);
+
+    window.selectFaultTag(tag.id);
+    await flushRuntime();
+    expect(document.querySelector('[data-props-panel-kind="fault-tag"]')).not.toBeNull();
+    expect(visiblePropertyTabs()).toEqual(['overview', 'parameters']);
+
+    const viewport = document.getElementById('canvas-viewport');
+    dispatchPointer(viewport, 'pointerdown', { pointerId: 12, clientX: 24, clientY: 24 });
+    dispatchPointer(viewport, 'pointerup', { pointerId: 12, clientX: 24, clientY: 24 });
+    await flushRuntime();
+    expect(visiblePropertyTabs()).toEqual(['overview']);
+
+    window.selectFaultTag(tag.id);
+    await flushRuntime();
+    expect(document.querySelector('[data-props-panel-kind="fault-tag"]')).not.toBeNull();
+    expect(visiblePropertyTabs()).toEqual(['overview', 'parameters']);
 
     wrapper.unmount();
   }, 10000);
@@ -473,6 +583,10 @@ describe('property panel interaction', () => {
     const overviewText = document.querySelector('.fault-tag-overview-panel')?.textContent || '';
     expect(overviewText).toContain('\u7ed1\u5b9a\u6982\u89c8');
     expect(overviewText).toContain('\u76ee\u6807\u5bf9\u8c61');
+    expect(overviewText).toContain('\u76ee\u6807\u53c2\u6570');
+    expect(overviewText).toContain('motor.command.m1');
+    expect(overviewText.indexOf('\u76ee\u6807\u5bf9\u8c61')).toBeLessThan(overviewText.indexOf('\u76ee\u6807\u53c2\u6570'));
+    expect(overviewText.indexOf('\u76ee\u6807\u53c2\u6570')).toBeLessThan(overviewText.indexOf('\u76ee\u6807\u7c7b\u578b'));
     expect(overviewText).toContain('\u76ee\u6807\u7c7b\u578b');
     expect(overviewText).toContain('\u8fd0\u884c\u884c\u4e3a');
     expect(overviewText).toContain('\u6545\u969c\u53c2\u6570');

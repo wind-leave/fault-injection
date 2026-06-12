@@ -151,6 +151,140 @@ export const COMPONENT_REGISTRY = {
       ffunctionNote: '当前预留 Python 函数接口，可在后续导入函数定义。'
     }
   },
+  airspeed_sensor: {
+    type: 'airspeed_sensor',
+    nodeType: 'simulation_block',
+    templateId: 'airspeed_sensor',
+    group: 'simulation',
+    label: '空速传感器',
+    badge: '仿真',
+    className: 'b-sim',
+    width: 196,
+    height: 116,
+    title: '测量真实空速并输出带零偏和比例系数的空速信号',
+    palette: {
+      icon: '空',
+      iconClass: 'simulation'
+    },
+    defaults: {
+      name: '空速传感器',
+      moduleType: '传感器模型',
+      inputs: [{ name: '真实空速', type: '标量', varName: 'true_airspeed', unit: 'm/s' }],
+      outputs: [{ name: '测量空速', type: '标量', varName: 'measured_airspeed', unit: 'm/s' }],
+      middleVars: [],
+      parameters: [
+        { key: 'bias', name: '零偏', layer: 'physical', default: 0, unit: 'm/s' },
+        { key: 'scale', name: '比例系数', layer: 'physical', default: 1 }
+      ],
+      ffunctionNote: '内置空速传感器模型：measured_airspeed = (true_airspeed + bias) * scale'
+    },
+    ports: {
+      inputs: [
+        {
+          id: 'input-0',
+          portId: 'input-0',
+          signalId: 'airspeed_sensor.true_airspeed',
+          varName: 'true_airspeed',
+          name: '真实空速',
+          displayName: '真实空速',
+          type: 'float',
+          unit: 'm/s',
+          direction: 'input'
+        }
+      ],
+      outputs: [
+        {
+          id: 'output-0',
+          portId: 'output-0',
+          signalId: 'airspeed_sensor.measured_airspeed',
+          varName: 'measured_airspeed',
+          name: '测量空速',
+          displayName: '测量空速',
+          type: 'float',
+          unit: 'm/s',
+          direction: 'output'
+        }
+      ]
+    },
+    pythonBinding: {
+      bound: true,
+      moduleId: 'airspeed_sensor',
+      fileName: 'airspeed_sensor.py',
+      moduleName: 'airspeed_sensor',
+      moduleCategory: '传感器模型',
+      description: '空速传感器模型',
+      entryFunction: 'process',
+      parsedInterface: {
+        fileName: 'airspeed_sensor.py',
+        moduleName: 'airspeed_sensor',
+        description: '空速传感器模型',
+        entryFunction: 'process',
+        inputs: [
+          { name: 'true_airspeed', displayName: '真实空速', type: 'float', comment: '真实空速', default: null },
+          { name: 'bias', displayName: '零偏', type: 'float', comment: '零偏', default: 0 },
+          { name: 'scale', displayName: '比例系数', type: 'float', comment: '比例系数', default: 1 }
+        ],
+        outputs: [
+          { name: 'measured_airspeed', displayName: '测量空速', type: 'float', comment: '测量空速' }
+        ],
+        middleVars: [],
+        rawSource: 'def process(true_airspeed: float, bias: float = 0.0, scale: float = 1.0):\n    measured_airspeed = (true_airspeed + bias) * scale\n    return measured_airspeed\n'
+      },
+      rawSource: 'def process(true_airspeed: float, bias: float = 0.0, scale: float = 1.0):\n    measured_airspeed = (true_airspeed + bias) * scale\n    return measured_airspeed\n',
+      executionMode: 'mock',
+      executionConfig: {
+        endpoint: 'http://127.0.0.1:8765/api/python-flow/execute',
+        timeoutMs: 3000
+      },
+      portMapping: {
+        inputs: [
+          {
+            portId: 'input-0',
+            signalId: 'airspeed_sensor.true_airspeed',
+            varName: 'true_airspeed',
+            displayName: '真实空速',
+            type: 'float',
+            default: null,
+            comment: '真实空速',
+            connected: false
+          }
+        ],
+        outputs: [
+          {
+            portId: 'output-0',
+            signalId: 'airspeed_sensor.measured_airspeed',
+            varName: 'measured_airspeed',
+            displayName: '测量空速',
+            type: 'float',
+            comment: '测量空速'
+          }
+        ],
+        middleVars: []
+      }
+    },
+    faultSlots: [
+      {
+        slotId: 'physical:airspeed_bias',
+        slotName: '空速零偏',
+        displayName: '空速零偏',
+        layer: 'physical',
+        kind: 'parameter',
+        targetField: 'parameters.bias',
+        allowedModels: ['bias'],
+        allowedFaultTypeIds: ['airspeed_bias_offset']
+      },
+      {
+        slotId: 'physical:airspeed_scale',
+        slotName: '比例系数漂移',
+        displayName: '比例系数漂移',
+        layer: 'physical',
+        kind: 'parameter',
+        targetField: 'parameters.scale',
+        allowedModels: ['drift'],
+        allowedFaultTypeIds: ['airspeed_scale_drift']
+      }
+    ]
+  },
   subsystem_block: {
     type: 'subsystem_block',
     group: 'subsystem',
@@ -365,9 +499,14 @@ export function buildComponentLibraryFromRegistry(registry = COMPONENT_REGISTRY)
         label: item.label,
         badge: item.badge,
         className: item.className,
+        nodeType: item.nodeType,
+        templateId: item.templateId,
         width: item.width,
         height: item.height,
-        defaults: clone(item.defaults)
+        defaults: clone(item.defaults),
+        ports: item.ports ? clone(item.ports) : undefined,
+        pythonBinding: item.pythonBinding ? clone(item.pythonBinding) : undefined,
+        faultSlots: item.faultSlots ? clone(item.faultSlots) : undefined
       }
     ])
   );

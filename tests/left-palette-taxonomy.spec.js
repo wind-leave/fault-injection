@@ -71,7 +71,8 @@ describe('left palette taxonomy', () => {
       'sum_block',
       'mux_block'
     ]);
-    expect(groupComponents(wrapper, 'simulation')).toEqual(['simulation_block']);
+    expect(groupComponents(wrapper, 'simulation')).toEqual(['simulation_block', 'airspeed_sensor']);
+    expect(groupBody(wrapper, 'simulation').text()).toContain('空速传感器');
     expect(groupBody(wrapper, 'simulation').find('[data-open-component-authoring]').exists()).toBe(true);
     expect(groupComponents(wrapper, 'subsystem')).toEqual(['subsystem_block']);
     expect(groupComponents(wrapper, 'faults')).toEqual([

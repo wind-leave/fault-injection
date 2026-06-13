@@ -12307,6 +12307,9 @@ Object.assign(window,{
     if(shouldRenderPanel&&target) renderTypedPropertyPanel(target);
     if(options.syncConfigTargetId) syncConfigTargets(options.syncConfigTargetId);
     if(shouldUpdateUi) updateUI();
+    if(document.getElementById('cw')?.dataset.view==='dmatrix'&&typeof window.renderDetectionMatrixPanel==='function'){
+      try{window.renderDetectionMatrixPanel();}catch(err){console.warn('[fault-runtime] renderDetectionMatrixPanel failed',err);}
+    }
   }
   window.refreshFaultUiAfterChange=refreshFaultUiAfterChange;
 
@@ -21447,7 +21450,7 @@ function decorateDataflowEdges(){
 
   function getVisualFaultTagModels(){
     const state=getState();
-    return arr(state.faultTags).map(tag=>{
+    return arr(state.faultTags).filter(tag=>tag?.active!==false&&tag?.enabled!==false).map(tag=>{
       const targetKind=tag.targetKind||tag.target?.kind||'';
       const targetId=tag.targetId||tag.target?.id||'';
       return {
@@ -21881,18 +21884,21 @@ function decorateDataflowEdges(){
     const map=new Map();
     ['injectedFaults','activeFaults','faultInstances','selectedFaults','appliedFaults'].forEach(key=>{
       arr(state[key]).forEach(item=>{
+        if(item?.active===false||item?.enabled===false) return;
         const id=getFaultKey(item);
         if(id&&!map.has(id)) map.set(id,item);
       });
     });
     getRuntimeNodes().forEach(node=>{
       arr(node.faults).concat(node.injectedFault?[node.injectedFault]:[]).forEach(item=>{
+        if(item?.active===false||item?.enabled===false) return;
         const id=getFaultKey(item);
         if(id&&!map.has(id)) map.set(id,{...(typeof item==='object'?item:{}),targetNodeId:node.id});
       });
     });
     getRuntimeEdges().forEach(edge=>{
       arr(edge.faults).concat(edge.injectedFault?[edge.injectedFault]:[]).concat(edge.fault?[edge.fault]:[]).forEach(item=>{
+        if(item?.active===false||item?.enabled===false) return;
         const id=getFaultKey(item);
         if(id&&!map.has(id)) map.set(id,{...(typeof item==='object'?item:{}),targetEdgeId:edge.id});
       });

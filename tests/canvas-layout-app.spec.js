@@ -825,6 +825,86 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('removes an injected runtime fault row from the D matrix when the fault is cancelled', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 220, 220);
+    const controller = window.createNode('simulation_block', 460, 220);
+    const scope = window.createNode('instrument_scope', 700, 220);
+    const state = window.__GZ_STATE__;
+    state.modelEdges.push(
+      {
+        id: 'edge-command-input',
+        lineType: 'normal',
+        sourceNodeId: source.id,
+        targetNodeId: controller.id,
+        sourcePortIndex: 0,
+        targetPortIndex: 0,
+        signalId: 'manual.command'
+      },
+      {
+        id: 'edge-controller-output',
+        lineType: 'normal',
+        sourceNodeId: controller.id,
+        targetNodeId: scope.id,
+        sourcePortIndex: 0,
+        targetPortIndex: 0,
+        signalId: 'manual.output',
+        injectedFault: {
+          id: 'runtime-output-bias',
+          modelId: 'runtime-output-bias',
+          name: 'Runtime Output Bias',
+          layer: 'electrical',
+          targetEdgeId: 'edge-controller-output',
+          affectedEdges: ['edge-controller-output']
+        },
+        faultBindings: [
+          {
+            bindingId: 'binding-runtime-output-bias',
+            faultModelId: 'runtime-output-bias',
+            name: 'Runtime Output Bias',
+            layer: 'electrical',
+            active: true
+          }
+        ]
+      }
+    );
+    state.faultInstances = [
+      {
+        instanceId: 'fault-inst-runtime-output-bias',
+        faultTypeId: 'runtime-output-bias',
+        targetKind: 'edge',
+        targetId: 'edge-controller-output',
+        targetEdgeId: 'edge-controller-output',
+        active: true,
+        affectedEdges: ['edge-controller-output']
+      }
+    ];
+    window.renderEdges();
+    await flushRuntime();
+
+    const addResult = window.addDiagnosticTestPointFromEdge('edge-controller-output');
+    expect(addResult).toMatchObject({ ok: true });
+    expect(window.installDiagnosticTestPoint(addResult.point.pointId)).toBe(true);
+
+    window.setCanvasView('dmatrix');
+    await flushRuntime();
+    const matrixBeforeRemove = window.buildDetectionMatrixModel();
+    expect(matrixBeforeRemove.rows.map((row) => `${row.faultId} ${row.faultName}`).join('\n')).toContain('runtime-output-bias');
+    expect(document.getElementById('d-matrix-panel')?.textContent).toContain('runtime-output-bias');
+
+    expect(window.removeFaultBinding('edge', 'edge-controller-output', 'binding-runtime-output-bias')).toBe(true);
+    await flushRuntime();
+
+    const matrixAfterRemove = window.buildDetectionMatrixModel();
+    expect(matrixAfterRemove.rows.map((row) => `${row.faultId} ${row.faultName}`).join('\n')).not.toContain('runtime-output-bias');
+    expect(document.getElementById('d-matrix-panel')?.textContent).not.toContain('runtime-output-bias');
+
+    wrapper.unmount();
+  });
+
   it('adds a diagnostic test point from the dataflow add button', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();

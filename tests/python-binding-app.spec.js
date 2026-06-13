@@ -153,6 +153,8 @@ describe('Python binding app integration', () => {
     });
     expect(window.__GZ_STATE__.modelNodes.at(-1)).toBe(node);
     const block = document.getElementById(`b-${node.id}`);
+    expect(block?.querySelector('.blk-kicker')?.textContent).toBe('仿真');
+    expect(block?.querySelector('.node-card__python-chip')).toBeNull();
     expect(block?.querySelector('.blk-lbl')?.textContent).toBe('空速传感器 1');
     expect(block?.querySelector('.blk-lbl')?.textContent).not.toBe('airspeed_sensor.py');
     expect(block?.getAttribute('title')).toContain('airspeed_sensor.py');

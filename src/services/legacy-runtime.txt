@@ -2120,8 +2120,7 @@ function renderModelNodes(){
       :'';
     el.innerHTML=`
       <div class="fbadge">F</div>
-      ${pythonBound?'<div class="node-card__python-chip">Py</div>':''}
-      <div class="blk-kicker">${pythonBound?'已绑定 Python':(faulted&&!isFaultNodeType(node.type)?`${meta.badge} 故障` : meta.badge)}</div>
+      <div class="blk-kicker">${faulted&&!isFaultNodeType(node.type)?`${meta.badge} 故障` : meta.badge}</div>
       <div class="blk-lbl">${escapeHtml(nodeTitle)}</div>
       <div class="blk-sub">${escapeHtml(nodeSubtitle)}</div>
       ${faultTagToggle}`;
@@ -4449,7 +4448,6 @@ function ensurePythonBindingRuntimeStyles(){
   style.id='python-binding-runtime-style';
   style.textContent=`
     .blk.python-bound{border-color:rgba(49,114,222,0.92);box-shadow:0 16px 28px rgba(40,102,196,0.18);}
-    .node-card__python-chip{position:absolute;left:10px;top:8px;z-index:2;display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 6px;border-radius:999px;background:linear-gradient(135deg,#387dff 0%,#63a7ff 100%);color:#fff;font:700 10px/1 "JetBrains Mono","Consolas",monospace;box-shadow:0 8px 18px rgba(56,125,255,0.22);}
     .node-port.is-connected .node-port__inner{background:currentColor;box-shadow:0 0 0 2px rgba(255,255,255,0.9),0 0 0 4px rgba(56,125,255,0.18);}
     .node-port__label{position:absolute;font:600 10px/1.15 "JetBrains Mono","Consolas",monospace;color:#365a84;white-space:nowrap;pointer-events:none;}
     .node-port--input .node-port__label{right:100%;margin-right:9px;top:50%;transform:translateY(-50%);text-align:right;}
@@ -5047,7 +5045,7 @@ renderModelNodes = function(){
       const kicker=el.querySelector('.blk-kicker');
       const sub=el.querySelector('.blk-sub');
       if(pythonBound){
-        if(kicker){kicker.textContent='Python 已绑定';}
+        if(kicker){kicker.textContent='仿真';}
         if(sub){sub.textContent=`仿真块 · ${getPythonBindingSummary(node)}`;}
       }else if(kicker){
         kicker.textContent='仿真';
@@ -6675,8 +6673,7 @@ renderModelNodes = function(){
     const showInlinePortLabels=!(pythonBound&&node.type==='simulation_block');
     el.innerHTML=`
       <div class="fbadge">F</div>
-      ${pythonBound?'<div class="node-card__python-chip">Py</div>':''}
-      <div class="blk-kicker">${pythonBound?'已绑定 Python':(faulted&&!isFaultNodeType(node.type)?`${meta.badge} 故障`:meta.badge)}</div>
+      <div class="blk-kicker">${faulted&&!isFaultNodeType(node.type)?`${meta.badge} 故障`:meta.badge}</div>
       <div class="blk-lbl">${escapeHtml(nodeTitle)}</div>
       <div class="blk-sub">${escapeHtml(nodeSubtitle)}</div>`;
 
@@ -10620,7 +10617,7 @@ Object.assign(window,{
       if(node.type==='simulation_block'&&isPythonBoundFlowBlock(node)){
         const kicker=el.querySelector('.blk-kicker');
         const sub=el.querySelector('.blk-sub');
-        if(kicker){kicker.textContent='Python 已绑定';}
+        if(kicker){kicker.textContent='仿真';}
         if(sub){sub.textContent=`仿真块 · ${getPythonBindingSummary(node)}`;}
         const ports=getNodePorts(node);
         [...el.querySelectorAll('.node-port--input')].forEach((portEl,index)=>{

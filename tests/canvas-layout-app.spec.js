@@ -905,6 +905,48 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('shows layered fault runtime behavior and target parameter in D matrix rows', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
+    await flushRuntime();
+
+    expect(importResult).toMatchObject({ ok: true });
+
+    const state = window.__GZ_STATE__;
+    const controller = state.modelNodes.find((node) => node.id === 'node-controller');
+    const physicalInjector = window.createNode('physical_fault_injector', 420, 260);
+    await flushRuntime();
+
+    const result = window.bindLayeredFaultInjectorToTarget(physicalInjector.id, {
+      targetKind: 'node',
+      targetId: controller.id,
+      slotId: 'physical:controller_gain',
+      mathModel: 'bias',
+      parameters: { bias: 0.2, start: 1, duration: 3 }
+    });
+    await flushRuntime();
+
+    expect(result).toMatchObject({
+      ok: true,
+      bindingObject: 'controller_gain'
+    });
+
+    window.setCanvasView('dmatrix');
+    await flushRuntime();
+
+    const matrixPanel = document.getElementById('d-matrix-panel');
+    const targetRow = Array.from(matrixPanel?.querySelectorAll('tbody tr') || [])
+      .find((row) => row.textContent?.includes('controller_gain'));
+    expect(targetRow).not.toBeNull();
+    expect(targetRow?.querySelector('.d-matrix-sticky strong')?.textContent).toBe('偏差故障');
+    expect(targetRow?.querySelector('.d-matrix-sticky small')?.textContent).toBe('controller_gain');
+
+    wrapper.unmount();
+  });
+
   it('adds a diagnostic test point from the dataflow add button', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();

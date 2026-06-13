@@ -2110,7 +2110,7 @@ function renderModelNodes(){
       el.style.paddingTop='';
       el.style.paddingBottom='';
     }
-    const nodeTitle=pythonBound?(node.pythonBinding?.fileName||node.props.name):node.props.name;
+    const nodeTitle=node.props.name;
     const nodeSubtitle=pythonBound?`流程块 · ${getPythonBindingSummary(node)}`:buildNodeSubtitle(node);
     const faultTagToggle=nodeFaultTags.length
       ?`<button type="button" class="fault-node-toggle${expandedFaultTags.length?' is-open':''}" data-fault-tags-toggle="${escapeHtml(node.id)}">
@@ -6670,7 +6670,7 @@ renderModelNodes = function(){
       el.style.paddingBottom='';
     }
 
-    const nodeTitle=pythonBound?(node.pythonBinding?.fileName||node.props.name):node.props.name;
+    const nodeTitle=node.props.name;
     const nodeSubtitle=buildNodeSubtitle(node);
     const showInlinePortLabels=!(pythonBound&&node.type==='simulation_block');
     el.innerHTML=`
@@ -22227,11 +22227,60 @@ function decorateDataflowEdges(){
     return fault?.category||fault?.layer||'故障';
   }
 
+  function getDMatrixRuntimeBehaviorLabel(fault){
+    const value=fault?.runtimeBehavior
+      ||fault?.mathModel
+      ||fault?.faultRuntimeBehavior
+      ||fault?.injectedFault?.runtimeBehavior
+      ||fault?.injectedFault?.mathModel
+      ||'';
+    if(!value) return '';
+    const labels={
+      bias:'偏差故障',
+      stuck:'卡死故障',
+      freeze:'卡死故障',
+      drift:'漂移故障',
+      step:'阶跃故障',
+      degradation:'退化故障',
+      noise:'噪声故障',
+      tamper:'数据篡改',
+      delay:'延迟故障',
+      dropout:'丢包故障',
+      stale:'旧值重放',
+      overwrite:'覆盖写入'
+    };
+    return labels[String(value)]||(typeof getFaultRuntimeLabel==='function'?getFaultRuntimeLabel(value):String(value));
+  }
+
+  function getDMatrixTargetParameterText(fault){
+    return fault?.bindingObject
+      ||fault?.targetVariable
+      ||fault?.variableKey
+      ||fault?.parameterKey
+      ||fault?.targetField
+      ||fault?.injectedFault?.bindingObject
+      ||fault?.injectedFault?.targetVariable
+      ||fault?.injectedFault?.variableKey
+      ||fault?.injectedFault?.parameterKey
+      ||fault?.injectedFault?.targetField
+      ||'';
+  }
+
+  function getDMatrixFaultDisplay(fault){
+    const behaviorLabel=getDMatrixRuntimeBehaviorLabel(fault);
+    const targetParameter=getDMatrixTargetParameterText(fault);
+    if(behaviorLabel&&targetParameter){
+      return {title:behaviorLabel,detail:targetParameter};
+    }
+    return {title:fault?.name||getFaultKey(fault),detail:getFaultKey(fault)};
+  }
+
   window.buildDetectionMatrixModel=function(){
     const points=getConfiguredPoints();
     const faults=getRuntimeFaultLibrary();
     const rows=faults.map(fault=>{
       const affectedEdges=getFaultAffectedEdges(fault);
+      const display=getDMatrixFaultDisplay(fault);
       const cells=points.map(point=>{
         const explicitCell=getExplicitDetectionMatrixCell(point,fault);
         const detectable=explicitCell?explicitCell.detectable:(arr(point.detects).includes(getFaultKey(fault))||affectedEdges.has(point.edgeId));
@@ -22248,6 +22297,8 @@ function decorateDataflowEdges(){
       return {
         faultId:getFaultKey(fault),
         faultName:fault.name||getFaultKey(fault),
+        faultDisplayName:display.title,
+        faultDisplayDetail:display.detail,
         layer:getFaultLayerText(fault),
         category:fault.category||fault.modelClass||fault.layer||'故障',
         targetLabel:getFaultTargetText(fault),
@@ -22408,8 +22459,8 @@ function decorateDataflowEdges(){
             ${rows.map(row=>`
               <tr>
                 <td class="d-matrix-sticky">
-                  <strong>${html(row.faultName)}</strong>
-                  <small>${html(row.faultId)}</small>
+                  <strong>${html(row.faultDisplayName||row.faultName)}</strong>
+                  <small>${html(row.faultDisplayDetail||row.faultId)}</small>
                 </td>
                 <td>${html(row.targetLabel)}</td>
                 <td>${html(row.layer)}</td>

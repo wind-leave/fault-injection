@@ -152,6 +152,10 @@ describe('Python binding app integration', () => {
       ]
     });
     expect(window.__GZ_STATE__.modelNodes.at(-1)).toBe(node);
+    const block = document.getElementById(`b-${node.id}`);
+    expect(block?.querySelector('.blk-lbl')?.textContent).toBe('空速传感器 1');
+    expect(block?.querySelector('.blk-lbl')?.textContent).not.toBe('airspeed_sensor.py');
+    expect(block?.getAttribute('title')).toContain('airspeed_sensor.py');
 
     wrapper.unmount();
   });
@@ -183,7 +187,9 @@ describe('Python binding app integration', () => {
 
     const reboundBlock = document.getElementById(`b-${simId}`);
     expect(reboundBlock?.className).toContain('python-bound');
-    expect(reboundBlock?.textContent).toContain('pid_controller.py');
+    expect(reboundBlock?.querySelector('.blk-lbl')?.textContent).toBe('仿真块 1');
+    expect(reboundBlock?.textContent).not.toContain('pid_controller.py');
+    expect(reboundBlock?.getAttribute('title')).toContain('pid_controller.py');
     expect(reboundBlock?.querySelectorAll('.node-port--input').length).toBe(2);
     expect(reboundBlock?.querySelectorAll('.node-port--output:not(.node-port--top)').length).toBe(1);
     expect(reboundBlock?.querySelectorAll('.node-port--top').length).toBe(1);

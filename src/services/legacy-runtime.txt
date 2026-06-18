@@ -401,6 +401,10 @@ function cloneDefaults(value){
 }
 
 function createEmptyCanvasRecord(id,name,parentSubsystemNodeId=null){
+  const api=window.__GZ_CANVAS_STATE__;
+  if(api?.createEmptyCanvasRecord){
+    return api.createEmptyCanvasRecord(id,name,parentSubsystemNodeId);
+  }
   return {
     id,
     name,
@@ -412,6 +416,11 @@ function createEmptyCanvasRecord(id,name,parentSubsystemNodeId=null){
 }
 
 function ensureWorkbenchCanvasState(){
+  const api=window.__GZ_CANVAS_STATE__;
+  if(api?.ensureWorkbenchCanvasState){
+    api.ensureWorkbenchCanvasState(S);
+    return;
+  }
   if(!S.canvases||typeof S.canvases!=='object'){
     S.canvases={};
   }
@@ -440,15 +449,28 @@ function ensureWorkbenchCanvasState(){
 }
 
 function getCanvasRecord(canvasId=S.activeCanvasId){
+  const api=window.__GZ_CANVAS_STATE__;
+  if(api?.getCanvasRecord){
+    return api.getCanvasRecord(S,canvasId);
+  }
   ensureWorkbenchCanvasState();
   return S.canvases[canvasId]||null;
 }
 
 function getActiveCanvasRecord(){
+  const api=window.__GZ_CANVAS_STATE__;
+  if(api?.getActiveCanvasRecord){
+    return api.getActiveCanvasRecord(S);
+  }
   return getCanvasRecord(S.activeCanvasId);
 }
 
 function syncActiveCanvasViewportFromState(){
+  const api=window.__GZ_CANVAS_STATE__;
+  if(api?.syncActiveCanvasViewportFromState){
+    api.syncActiveCanvasViewportFromState(S);
+    return;
+  }
   ensureWorkbenchCanvasState();
   const canvas=getActiveCanvasRecord();
   if(!canvas){return;}
@@ -460,6 +482,11 @@ function syncActiveCanvasViewportFromState(){
 }
 
 function restoreActiveCanvasViewport(canvasId=S.activeCanvasId){
+  const api=window.__GZ_CANVAS_STATE__;
+  if(api?.restoreActiveCanvasViewport){
+    api.restoreActiveCanvasViewport(S,canvasId);
+    return;
+  }
   ensureWorkbenchCanvasState();
   const viewport=getCanvasRecord(canvasId)?.viewport||{};
   S.canvasScale=Number.isFinite(viewport.scale)?viewport.scale:1;
@@ -468,6 +495,10 @@ function restoreActiveCanvasViewport(canvasId=S.activeCanvasId){
 }
 
 function setActiveCanvasRecord(canvasId,trail=null){
+  const api=window.__GZ_CANVAS_STATE__;
+  if(api?.setActiveCanvasRecord){
+    return api.setActiveCanvasRecord(S,canvasId,trail);
+  }
   ensureWorkbenchCanvasState();
   if(!S.canvases[canvasId]){
     return false;
@@ -488,10 +519,18 @@ function setActiveCanvasRecord(canvasId,trail=null){
 }
 
 function getSubsystemCanvasId(nodeId){
+  const api=window.__GZ_CANVAS_STATE__;
+  if(api?.getSubsystemCanvasId){
+    return api.getSubsystemCanvasId(nodeId);
+  }
   return `canvas-${nodeId}`;
 }
 
 function createSubsystemCanvas(node){
+  const api=window.__GZ_CANVAS_STATE__;
+  if(api?.createSubsystemCanvas){
+    return api.createSubsystemCanvas(S,node);
+  }
   const canvasId=getSubsystemCanvasId(node.id);
   if(!S.canvases[canvasId]){
     S.canvases[canvasId]=createEmptyCanvasRecord(canvasId,node.props?.name||'子系统',node.id);
@@ -501,7 +540,11 @@ function createSubsystemCanvas(node){
 }
 
 function openCanvasRecord(canvasId,trail=null){
-  if(!setActiveCanvasRecord(canvasId,trail)){
+  const api=window.__GZ_CANVAS_STATE__;
+  const opened=api?.openCanvasRecord
+    ?api.openCanvasRecord(S,canvasId,trail)
+    :setActiveCanvasRecord(canvasId,trail);
+  if(!opened){
     return false;
   }
   S.selBlk=null;
@@ -544,6 +587,18 @@ function renderCanvasBreadcrumbs(){
   if(!host){return;}
   ensureWorkbenchCanvasState();
   const trail=S.canvasTrail.filter(Boolean);
+  const api=window.__GZ_CANVAS_RENDER__;
+  if(api?.renderCanvasBreadcrumbs){
+    api.renderCanvasBreadcrumbs(host,{
+      rootCanvasId:S.rootCanvasId,
+      activeCanvasId:S.activeCanvasId,
+      trail,
+      getCanvasRecord,
+      navigateToCanvas,
+      escapeHtml
+    });
+    return;
+  }
   host.innerHTML=trail.map((canvasId,index)=>{
     const canvas=getCanvasRecord(canvasId);
     const label=canvasId===S.rootCanvasId?'顶层':(canvas?.name||canvasId);
@@ -1170,6 +1225,19 @@ function renderFaultCatalogList(){
   if(!S.selectedFaultCatalogId&&S.availableFaultModels.length){
     S.selectedFaultCatalogId=S.availableFaultModels[0].id;
   }
+  const hint=document.getElementById('ifm-sel-hint');
+  const api=window.__GZ_FAULT_CATALOG_RENDER__;
+  if(api?.renderFaultCatalogList){
+    api.renderFaultCatalogList(container,hint,{
+      models:S.availableFaultModels,
+      importedModels:S.importedFaultModels,
+      selectedId:S.selectedFaultCatalogId,
+      buildMeta:buildFaultCatalogMeta,
+      getLayerLabel,
+      onSelect:selectFaultCatalogModel
+    });
+    return;
+  }
   container.innerHTML='';
   if(S.availableFaultModels.length===0){
     container.innerHTML='<div class="ifm-empty">当前没有可导入的故障模型，请先从模板库新建。</div>';
@@ -1206,9 +1274,14 @@ function getElectricalInjectableNodes(){
 }
 
 function clearCanvasSelection(){
-  S.selBlk=null;
-  S.selEdge=null;
-  S.selFaultTag=null;
+  const api=window.__GZ_CANVAS_SELECTION__;
+  if(api?.clearCanvasSelectionState){
+    api.clearCanvasSelectionState(S);
+  }else{
+    S.selBlk=null;
+    S.selEdge=null;
+    S.selFaultTag=null;
+  }
   renderModelNodes();
   renderPropertyPanel(null);
 }
@@ -1537,15 +1610,30 @@ function getNodePorts(node){
 }
 
 function canvasNumber(value,fallback=0){
+  const api=window.__GZ_CANVAS_GRAPH__;
+  if(api?.canvasNumber){
+    return api.canvasNumber(value,fallback);
+  }
   const numeric=Number(value);
   return Number.isFinite(numeric)?numeric:fallback;
 }
 
 function isFiniteCanvasPoint(point){
+  const api=window.__GZ_CANVAS_GRAPH__;
+  if(api?.isFiniteCanvasPoint){
+    return api.isFiniteCanvasPoint(point);
+  }
   return Boolean(point)&&Number.isFinite(point.x)&&Number.isFinite(point.y);
 }
 
 function getPortInfo(node,direction,index=0){
+  const api=window.__GZ_CANVAS_GRAPH__;
+  if(api?.resolvePortInfo){
+    return api.resolvePortInfo(node,direction,index,{
+      ports:getNodePorts(node),
+      componentLibrary:COMPONENT_LIBRARY
+    });
+  }
   const ports=getNodePorts(node)[direction==='input'?'inputs':'outputs'];
   const port=ports[index];
   if(!port){return null;}
@@ -1583,6 +1671,10 @@ function getPortInfo(node,direction,index=0){
 }
 
 function buildEdgePath(start,end){
+  const api=window.__GZ_CANVAS_GRAPH__;
+  if(api?.buildEdgePath){
+    return api.buildEdgePath(start,end);
+  }
   if(!isFiniteCanvasPoint(start)||!isFiniteCanvasPoint(end)){
     return 'M 0 0 C 0 0, 0 0, 0 0';
   }
@@ -1707,6 +1799,13 @@ function clearPendingConnection(){
 }
 
 function markTopologyDirty(scope='system'){
+  const api=window.__GZ_CANVAS_SELECTION__;
+  if(api?.markTopologyDirty){
+    api.markTopologyDirty(S,typeof SIM!=='undefined'?SIM:null,scope,{
+      clearSimLoop:typeof clearSimLoop==='function'?clearSimLoop:null
+    });
+    return;
+  }
   if(scope==='system'){
     S.systemSaved=false;
   }
@@ -3058,6 +3157,17 @@ function setCat(el,cat){
 
 function renderTpls(cat){
   const g=document.getElementById('tgrid');g.innerHTML='';
+  const api=window.__GZ_FAULT_TEMPLATE_RENDER__;
+  if(api?.renderFaultTemplateGrid){
+    api.renderFaultTemplateGrid(g,{
+      category:cat,
+      templates:TPLS[cat]||[],
+      selectedTemplates:S.selTpls,
+      onToggle:(template,card)=>toggleTpl(template,card)
+    });
+    showTplDetail({...((TPLS[cat]||[])[0]||{}),layer:cat});
+    return;
+  }
   (TPLS[cat]||[]).forEach(t=>{
     const sel=S.selTpls.some(s=>s.id===t.id);
     const d=document.createElement('div');
@@ -3080,6 +3190,12 @@ function toggleTpl(t,card){
 }
 
 function showTplDetail(t){
+  const host=document.getElementById('tdetail');
+  const api=window.__GZ_FAULT_TEMPLATE_RENDER__;
+  if(host&&api?.renderFaultTemplateDetail){
+    api.renderFaultTemplateDetail(host,t,{getLayerLabel});
+    return;
+  }
   if(!t?.id){
     document.getElementById('tdetail').innerHTML='<div class="tdph">→ 选择模板查看详情</div>';
     return;
@@ -5403,10 +5519,34 @@ function renderAll(){
 }
 
 async function pickJsonFileText(){
+  if(typeof window.showOpenFilePicker==='function'){
+    try{
+      const handles=await window.showOpenFilePicker({
+        multiple:false,
+        types:[
+          {
+            description:'JSON files',
+            accept:{
+              'application/json':['.json']
+            }
+          }
+        ]
+      });
+      const file=await handles?.[0]?.getFile?.();
+      return file?await file.text():null;
+    }catch(error){
+      if(error?.name==='AbortError'){
+        return null;
+      }
+      throw error;
+    }
+  }
+
   return new Promise((resolve,reject)=>{
     const input=document.createElement('input');
     input.type='file';
     input.accept='.json,application/json';
+    input.style.cssText='position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;';
     let settled=false;
     let focusFallbackTimer=null;
     const cleanup=()=>{
@@ -5415,6 +5555,7 @@ async function pickJsonFileText(){
         clearTimeout(focusFallbackTimer);
         focusFallbackTimer=null;
       }
+      input.remove();
     };
     const settle=(value)=>{
       if(settled){return;}
@@ -5437,7 +5578,7 @@ async function pickJsonFileText(){
         if(!settled&&(!input.files||input.files.length===0)){
           settle(null);
         }
-      },250);
+      },3000);
     };
     input.onchange=async ()=>{
       const file=input.files&&input.files[0];
@@ -5453,6 +5594,7 @@ async function pickJsonFileText(){
     };
     input.addEventListener('cancel',()=>settle(null),{once:true});
     window.addEventListener('focus',handleFocusReturn);
+    document.body.appendChild(input);
     input.click();
   });
 }
@@ -8561,6 +8703,10 @@ function cloneIfPresentTask5(value){
 }
 
 function getTask5SelectedNodeIds(){
+  const api=window.__GZ_CANVAS_SELECTION__;
+  if(api?.normalizeSelectedNodeIds){
+    return api.normalizeSelectedNodeIds(S);
+  }
   const next=[...new Set((Array.isArray(S.selectedNodeIds)?S.selectedNodeIds:[]).filter(id=>typeof id==='string'&&!!getNode(id)))];
   S.selectedNodeIds=next;
   if(S.selectionAnchorId&&!next.includes(S.selectionAnchorId)){
@@ -8580,6 +8726,10 @@ function clearTask5NodeSelectionState(){
 }
 
 function applyTask5NodeSelection(ids,focusId=''){
+  const api=window.__GZ_CANVAS_SELECTION__;
+  if(api?.applyNodeSelection){
+    return api.applyNodeSelection(S,ids,focusId);
+  }
   const next=[...new Set((Array.isArray(ids)?ids:[]).filter(id=>typeof id==='string'&&!!getNode(id)))];
   S.selectedNodeIds=next;
   S.selectionAnchorId=focusId&&next.includes(focusId)?focusId:(next[next.length-1]||'');
@@ -11141,9 +11291,9 @@ Object.assign(window,{
 
 // --- Typed property panel, fault cancellation, and edge signal metadata ---
 (function(){
-  const PANEL_TABS=['overview','parameters','faults','outputs'];
+  const PANEL_TABS=['overview','parameters','faults','testpoints','outputs'];
   const SCOPE_TAB_LABELS={overview:'\u5c5e\u6027',parameters:'\u91c7\u6837\u4e0e\u901a\u9053',outputs:'\u5bfc\u51fa\u8bbe\u7f6e'};
-  const TAB_LABELS={overview:'属性',parameters:'参数配置',faults:'故障设置',outputs:'输出配置'};
+  const TAB_LABELS={overview:'属性',parameters:'参数配置',faults:'故障设置',testpoints:'测点设置',outputs:'输出配置'};
   S.propertyPanelTab=PANEL_TABS.includes(S.propertyPanelTab)?S.propertyPanelTab:'overview';
 
   function text(value,fallback=''){
@@ -11189,11 +11339,12 @@ Object.assign(window,{
   }
 
   function getAvailablePropertyTabs(kind){
+    if(kind==='edge'){return ['overview','parameters','faults','testpoints','outputs'];}
     if(kind==='fault-tag'){return ['overview','parameters'];}
     if(kind==='fault-injector'){return ['overview'];}
     if(kind==='scope'){return ['overview','parameters','outputs'];}
     if(kind==='empty'){return ['overview'];}
-    return PANEL_TABS.slice();
+    return ['overview','parameters','faults','outputs'];
   }
 
   function getPropertyTabLabel(tab,kind){
@@ -12643,6 +12794,247 @@ Object.assign(window,{
       </div>`;
   }
 
+  function getEdgeConfiguredTestPoints(edge){
+    const state=S;
+    const matchesEdge=point=>(point?.edgeId||point?.edgeID||point?.targetEdgeId||'')===edge?.id;
+    const seen=new Set();
+    const collect=(points,prefix)=>list(points).filter(matchesEdge).map((point,index)=>{
+      const pointId=point.pointId||point.id||`${prefix}-${edge?.id||'edge'}-${index+1}`;
+      return {
+        ...point,
+        pointId,
+        id:point.id||pointId,
+        edgeId:edge?.id||point.edgeId||point.targetEdgeId||'',
+        detects:list(point.detects)
+      };
+    }).filter(point=>{
+      const key=point.pointId||point.id;
+      if(!key||seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return [
+      ...collect(state.manualDiagnosticTestPoints,'tp-manual-edge'),
+      ...collect(state.diagnosticTestPoints,'tp-config-edge'),
+      ...collect(state.testPoints,'tp-config-edge')
+    ];
+  }
+
+  function getEdgeTestPointSourceFaultOptions(edge){
+    const source=getNode(edge?.sourceNodeId);
+    const options=source?getPropertyPanelFaultOptions(source):[];
+    const seen=new Set();
+    return options.map(option=>option.model).filter(model=>{
+      const id=model?.id||model?.faultTypeId||'';
+      if(!id||seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }
+
+  function getEdgeTestPointDefaultName(edge){
+    const source=getNode(edge?.sourceNodeId);
+    const target=getNode(edge?.targetNodeId);
+    return edge?.label
+      || edge?.signalName
+      || edge?.name
+      || edge?.signalId
+      || `${source?.props?.name||source?.name||edge?.sourceNodeId||'Source'} -> ${target?.props?.name||target?.name||edge?.targetNodeId||'Target'}`;
+  }
+
+  function createEdgeTestPointDraft(edge){
+    const state=S;
+    const pointCount=list(state.diagnosticTestPoints).length+list(state.testPoints).length+list(state.manualDiagnosticTestPoints).length;
+    const existingIds=new Set([
+      ...list(state.diagnosticTestPoints),
+      ...list(state.testPoints),
+      ...list(state.manualDiagnosticTestPoints)
+    ].map(point=>point?.pointId||point?.id).filter(Boolean));
+    let index=1;
+    let pointId=`tp-${edge.id}-${index}`;
+    while(existingIds.has(pointId)){
+      index+=1;
+      pointId=`tp-${edge.id}-${index}`;
+    }
+    return {
+      pointId,
+      id:pointId,
+      shortName:`M${pointCount+1}`,
+      name:getEdgeTestPointDefaultName(edge),
+      edgeId:edge.id,
+      signalId:edge.signalId||'',
+      channelId:edge.channelId||'',
+      sourceName:getNode(edge.sourceNodeId)?.props?.name||edge.sourceNodeId||'',
+      targetName:getNode(edge.targetNodeId)?.props?.name||edge.targetNodeId||'',
+      detects:[],
+      manuallyAdded:true
+    };
+  }
+
+  function addEdgeManualTestPoint(edge){
+    if(!edge?.id) return null;
+    const state=S;
+    if(!Array.isArray(state.manualDiagnosticTestPoints)) state.manualDiagnosticTestPoints=[];
+    const manualPoint=createEdgeTestPointDraft(edge);
+    state.manualDiagnosticTestPoints.push(manualPoint);
+    state.diagnosticTestPointManualCleared=false;
+    delete state.compactDiagnosticFixedPoints;
+    delete state.compactDiagnosticFixedPointSignature;
+    delete state.compactDiagnosticPointSignature;
+    return manualPoint;
+  }
+
+  function findManualEdgeTestPoint(edge,pointId){
+    return list(S.manualDiagnosticTestPoints).find(point=>
+      (point.pointId||point.id)===pointId
+      && (point.edgeId||point.edgeID||point.targetEdgeId||'')===edge?.id
+    )||null;
+  }
+
+  function renderEdgeTestPointFaultOptions(edge,point){
+    const selected=new Set(list(point?.detects));
+    const options=getEdgeTestPointSourceFaultOptions(edge);
+    if(!options.length){
+      return '<div class="props-empty-state">源节点暂无可注入故障类型</div>';
+    }
+    return options.map(model=>{
+      const id=model.id||model.faultTypeId;
+      const checked=selected.has(id)?'checked':'';
+      return `
+        <label class="props-layer-toggle edge-testpoint-fault-option">
+          <input type="checkbox" data-edge-testpoint-fault="${text(id)}" ${checked}>
+          <span>${text(model.displayName||model.name||id)}</span>
+        </label>`;
+    }).join('');
+  }
+
+  function renderEdgeTestPointCard(edge,point,index){
+    const pointId=point.pointId||point.id||`tp-${edge.id}-${index+1}`;
+    return `
+      <div class="edge-testpoint-card" data-edge-testpoint-card="${text(pointId)}">
+        <div class="edge-testpoint-card-head">
+          <span>${text(point.shortName||`M${index+1}`)}</span>
+        </div>
+        <div class="props-field">
+          <label>测点名称</label>
+          <input data-edge-testpoint-name value="${text(point.name||getEdgeTestPointDefaultName(edge))}">
+        </div>
+        <div class="pgroup edge-testpoint-fault-group">
+          <div class="pglbl">可检测故障</div>
+          <div class="props-fault-slot-layers edge-testpoint-fault-list" data-edge-testpoint-fault-list>
+            ${renderEdgeTestPointFaultOptions(edge,point)}
+          </div>
+        </div>
+        <div class="props-actions edge-testpoint-actions">
+          <button type="button" class="props-save" data-save-edge-testpoint="${text(pointId)}">保存测点</button>
+          <button type="button" class="props-danger" data-delete-edge-testpoint="${text(pointId)}">删除测点</button>
+        </div>
+      </div>`;
+  }
+
+  function renderEdgeTestPoints(edge){
+    const points=getEdgeConfiguredTestPoints(edge);
+    return `
+      <div class="props-form" data-edge-testpoint-panel>
+        <div class="pgroup">
+          <div class="pglbl">测点设置</div>
+          <div class="props-help">测点绑定到当前连线，可检测故障来自源节点可注入的故障类型。</div>
+          <div class="edge-testpoint-list">
+            ${points.length
+              ?points.map((point,index)=>renderEdgeTestPointCard(edge,point,index)).join('')
+              :'<div class="props-empty-state">当前连线尚未配置测点。</div>'}
+          </div>
+        </div>
+        <div class="props-actions">
+          <button type="button" class="props-save" data-add-edge-testpoint>新增测点</button>
+          <button type="button" class="props-danger" onclick="deleteSelectedEdge()">删除连线</button>
+        </div>
+      </div>`;
+  }
+
+  function saveEdgeTestPointFromPanel(edge,pointId){
+    if(!edge?.id||!pointId) return false;
+    if(!Array.isArray(S.manualDiagnosticTestPoints)) S.manualDiagnosticTestPoints=[];
+    let point=findManualEdgeTestPoint(edge,pointId);
+    if(!point){
+      const configured=getEdgeConfiguredTestPoints(edge).find(item=>(item.pointId||item.id)===pointId);
+      if(!configured) return false;
+      point={
+        ...configured,
+        pointId,
+        id:pointId,
+        edgeId:edge.id,
+        manuallyAdded:true,
+        detects:list(configured.detects)
+      };
+      S.manualDiagnosticTestPoints.push(point);
+    }
+    if(!point) return false;
+    const card=Array.from(document.querySelectorAll('[data-edge-testpoint-card]'))
+      .find(item=>item.dataset.edgeTestpointCard===pointId);
+    if(!card) return false;
+    const nameInput=card.querySelector('[data-edge-testpoint-name]');
+    point.name=nameInput?.value?.trim()||point.name||getEdgeTestPointDefaultName(edge);
+    point.detects=Array.from(card.querySelectorAll('[data-edge-testpoint-fault]:checked'))
+      .map(input=>input.dataset.edgeTestpointFault)
+      .filter(Boolean);
+    point.signalId=edge.signalId||point.signalId||'';
+    point.channelId=edge.channelId||point.channelId||'';
+    point.sourceName=getNode(edge.sourceNodeId)?.props?.name||point.sourceName||edge.sourceNodeId||'';
+    point.targetName=getNode(edge.targetNodeId)?.props?.name||point.targetName||edge.targetNodeId||'';
+    S.selectedDiagnosticTestPointId=point.pointId;
+    delete S.compactDiagnosticFixedPoints;
+    delete S.compactDiagnosticFixedPointSignature;
+    delete S.compactDiagnosticPointSignature;
+    S.diagnosticScanResults=[];
+    S.lastDiagnosticTestPointResult=null;
+    S.testPointDiagnosis=null;
+    markTopologyDirty('diagnostic');
+    renderTypedPropertyPanel(edge);
+    if(typeof refreshDiagnosisViews==='function') refreshDiagnosisViews();
+    toast('测点已保存','s');
+    return true;
+  }
+
+  function deleteEdgeTestPointFromPanel(edge,pointId){
+    if(!edge?.id||!pointId||!Array.isArray(S.manualDiagnosticTestPoints)) return false;
+    const before=S.manualDiagnosticTestPoints.length;
+    S.manualDiagnosticTestPoints=S.manualDiagnosticTestPoints.filter(point=>{
+      const currentId=point.pointId||point.id;
+      const edgeId=point.edgeId||point.edgeID||point.targetEdgeId||'';
+      return !(currentId===pointId&&edgeId===edge.id);
+    });
+    if(S.manualDiagnosticTestPoints.length===before) return false;
+    if(S.selectedDiagnosticTestPointId===pointId) S.selectedDiagnosticTestPointId='';
+    delete S.compactDiagnosticFixedPoints;
+    delete S.compactDiagnosticFixedPointSignature;
+    delete S.compactDiagnosticPointSignature;
+    S.diagnosticScanResults=[];
+    S.lastDiagnosticTestPointResult=null;
+    S.testPointDiagnosis=null;
+    markTopologyDirty('diagnostic');
+    renderTypedPropertyPanel(edge);
+    if(typeof refreshDiagnosisViews==='function') refreshDiagnosisViews();
+    toast('测点已删除','s');
+    return true;
+  }
+
+  function bindEdgeTestPointActions(edge,host){
+    host?.querySelector?.('[data-add-edge-testpoint]')?.addEventListener('click',event=>{
+      event.preventDefault();
+      addEdgeManualTestPoint(edge);
+      renderTypedPropertyPanel(edge);
+    });
+    host?.querySelectorAll?.('[data-save-edge-testpoint]')?.forEach(button=>button.addEventListener('click',event=>{
+      event.preventDefault();
+      saveEdgeTestPointFromPanel(edge,button.dataset.saveEdgeTestpoint);
+    }));
+    host?.querySelectorAll?.('[data-delete-edge-testpoint]')?.forEach(button=>button.addEventListener('click',event=>{
+      event.preventDefault();
+      deleteEdgeTestPointFromPanel(edge,button.dataset.deleteEdgeTestpoint);
+    }));
+  }
+
   function bindLegacyOverviewActions(target,host){
     if(S.propertyPanelTab!=='overview'||!needsLegacyOverviewCompat(target)){return;}
     if(target.type==='instrument_scope'){
@@ -12925,9 +13317,11 @@ Object.assign(window,{
     if(isEdgeTarget(target)){
       if(S.propertyPanelTab==='parameters'){pd.innerHTML=renderEdgeParameters(target);}
       else if(S.propertyPanelTab==='faults'){pd.innerHTML=renderFaults(target);}
+      else if(S.propertyPanelTab==='testpoints'){pd.innerHTML=renderEdgeTestPoints(target);}
       else if(S.propertyPanelTab==='outputs'){pd.innerHTML=renderEdgeOutputs(target);}
       else{pd.innerHTML=renderEdgeOverview(target);}
       bindFaultSlotEditorActions(pd);
+      bindEdgeTestPointActions(target,pd);
       return;
     }
     if(S.propertyPanelTab==='parameters'){pd.innerHTML=renderNodeParameters(target);}
@@ -17841,8 +18235,28 @@ function decorateDataflowEdges(){
     if(!selectedVisible&&visible.length){
       S.selectedFaultCatalogId=visible[0].id;
     }
-    container.innerHTML='';
+    const hint=document.getElementById('ifm-sel-hint');
+    const api=window.__GZ_FAULT_CATALOG_RENDER__;
     setText('ifm-visible-count',visible.length);
+    if(api?.renderFaultCatalogList){
+      api.renderFaultCatalogList(container,hint,{
+        models:visible,
+        importedModels:S.importedFaultModels,
+        selectedId:S.selectedFaultCatalogId,
+        renderItem:renderFaultCatalogItem,
+        emptyMessage:'没有匹配的故障类型。请调整层级筛选或搜索关键词。',
+        getLayerLabel,
+        selectIgnoreSelector:'[data-clear-selected-fault-catalog]',
+        onSelect:selectFaultCatalogModel
+      });
+      if(visible.length===0){
+        renderFaultTypeDetail(null);
+      }else{
+        renderFaultTypeDetail(getFaultCatalogModel(S.selectedFaultCatalogId));
+      }
+      return;
+    }
+    container.innerHTML='';
     if(visible.length===0){
       container.innerHTML='<div class="ifm-empty">没有匹配的故障类型。请调整层级筛选或搜索关键词。</div>';
       renderFaultTypeDetail(null);
@@ -17862,7 +18276,6 @@ function decorateDataflowEdges(){
       renderFaultTypeDetail(getFaultCatalogModel(S.selectedFaultCatalogId));
     }
     const selected=getFaultCatalogModel(S.selectedFaultCatalogId);
-    const hint=document.getElementById('ifm-sel-hint');
     if(hint){
       hint.textContent=selected
         ?`已选：${selected.name} · ${getLayerLabel(selected.layer)}`
@@ -21668,6 +22081,19 @@ function decorateDataflowEdges(){
       }));
   }
 
+  function appendAutomaticDiagnosticPoints(points,runtimeEdges){
+    const usedEdges=new Set(points.map(point=>point.edgeId).filter(Boolean));
+    runtimeEdges.forEach(edge=>{
+      if(!edge?.id||usedEdges.has(edge.id)) return;
+      points.push({
+        ...pointForEdge(edge,points.length),
+        autoAdded:true
+      });
+      usedEdges.add(edge.id);
+    });
+    return points;
+  }
+
   function edgeSourceId(edge){
     return edge?.source||edge?.from||edge?.sourceNodeId||edge?.sourceId||'';
   }
@@ -21788,11 +22214,11 @@ function decorateDataflowEdges(){
         edgeId:point.edgeId||point.edgeID||point.targetEdgeId||'',
         detects:arr(point.detects)
       }));
-      const usedKeys=new Set(points.map(point=>point.edgeId||point.pointId).filter(Boolean));
+      const usedKeys=new Set(points.map(point=>point.pointId||point.id).filter(Boolean));
       manualConfigured.forEach((point,manualIndex)=>{
         const pointId=point.pointId||point.id||`tp-manual-${manualIndex}`;
         const edgeId=point.edgeId||point.edgeID||point.targetEdgeId||'';
-        const key=edgeId||pointId;
+        const key=pointId;
         if(key&&usedKeys.has(key)) return;
         if(key) usedKeys.add(key);
         points.push({
@@ -21816,18 +22242,9 @@ function decorateDataflowEdges(){
         manuallyAdded:true
       }));
     }else{
-      const existing=typeof window.getSemanticTestPoints==='function'?arr(window.getSemanticTestPoints()):[];
-      points=state.workspaceSource!=='blank'&&existing.length?existing.map((point,index)=>({
-        ...point,
-        pointId:point.pointId||point.id||`tp-semantic-${index}`,
-        shortName:point.shortName||point.code||`M${index+1}`,
-        name:point.nameZh||point.labelZh||EDGE_NAME_ZH[point.edgeId||point.edgeID||point.targetEdgeId]||point.name||point.label||point.position||`测点 ${index+1}`,
-        edgeId:point.edgeId||point.edgeID||point.targetEdgeId||'',
-        detects:arr(point.detects)
-      })):[];
+      points=[];
     }
     points=points.filter(point=>diagnosticPointBelongsToActiveCanvas(point,runtimeEdges,runtimeNodes));
-    const faultLibrary=getRuntimeFaultLibrary();
     points=points.map((point,index)=>{
       const edge=runtimeEdges.find(item=>item.id===point.edgeId);
       const sourceName=point.sourceName||edgeEndpointName(edge||{},'source');
@@ -21840,7 +22257,7 @@ function decorateDataflowEdges(){
         sourceName,
         targetName,
         name:point.nameZh||point.labelZh||EDGE_NAME_ZH[point.edgeId]||point.name||point.label||`${sourceName} -> ${targetName}`,
-        detects:Array.from(new Set(arr(point.detects).concat(faultLibrary.filter(fault=>getFaultAffectedEdges(fault).has(point.edgeId)).map(fault=>fault.id))))
+        detects:Array.from(new Set(arr(point.detects)))
       };
     });
     if(runtimeEdges.length){
@@ -21922,17 +22339,21 @@ function decorateDataflowEdges(){
     return getFaultAffectedEdges(model).has(point.edgeId);
   }
 
+  function getDiagnosticPointSearchText(point){
+    return String(point.name||'').toLowerCase();
+  }
+
   function renderPointCard(point,installed,scanResult){
     const abnormal=scanResult?.status==='abnormal';
     return `
-      <div class="tp-console-point-card${installed?' is-installed':''}${abnormal?' is-abnormal':''}${getState().selectedDiagnosticTestPointId===point.pointId?' is-selected':''}" data-fixed-testpoint-position="${html(point.pointId)}">
+      <div class="tp-console-point-card${installed?' is-installed':''}${abnormal?' is-abnormal':''}${getState().selectedDiagnosticTestPointId===point.pointId?' is-selected':''}" data-fixed-testpoint-position="${html(point.pointId)}" data-testpoint-search-text="${html(getDiagnosticPointSearchText(point))}">
         <button class="tp-console-point" type="button" data-select-testpoint="${html(point.pointId)}">
           <span class="tp-console-point__code">${html(point.shortName)}</span>
           <span class="tp-console-point__main">
             <strong>${html(point.name)}</strong>
             <small>${html(point.sourceName||point.signalId||point.edgeId)}${point.targetName?` -> ${html(point.targetName)}`:''}</small>
           </span>
-          <span class="tp-console-point__state">${abnormal?'异常':(installed?'已安装':'未安装')}</span>
+          <span class="tp-console-point__state">${abnormal?'异常':(installed?'已启用':'未启用')}</span>
         </button>
       </div>
     `;
@@ -21963,7 +22384,7 @@ function decorateDataflowEdges(){
     return `
       <div class="tp-result-summary${abnormalCount?' is-abnormal':' is-ok'}">
         <strong>${abnormalCount?`${abnormalCount} 个测点疑似异常`:'未发现异常测点'}</strong>
-        <span>${results.length} 个已安装测点已检测</span>
+        <span>${results.length} 个已启用测点已检测</span>
       </div>
       <div class="tp-result-list">
         ${results.map(result=>{
@@ -22001,12 +22422,65 @@ function decorateDataflowEdges(){
     `;
   }
 
+  function matchesDiagnosticPointSearch(point,query){
+    const normalized=String(query||'').trim().toLowerCase();
+    if(!normalized) return true;
+    return getDiagnosticPointSearchText(point).includes(normalized);
+  }
+
+  function applyDiagnosticPointSearchFilter(root,query){
+    if(!root) return;
+    const normalized=String(query||'').trim().toLowerCase();
+    let visibleCount=0;
+    root.querySelectorAll('[data-fixed-testpoint-position]').forEach(card=>{
+      const matched=!normalized||String(card.getAttribute('data-testpoint-search-text')||'').includes(normalized);
+      card.hidden=!matched;
+      card.style.display=matched?'':'none';
+      if(matched) visibleCount+=1;
+    });
+    const count=root.querySelector('[data-testpoint-match-count]');
+    if(count) count.textContent=String(visibleCount);
+    const empty=root.querySelector('[data-testpoint-search-empty]');
+    if(empty){
+      empty.hidden=visibleCount>0;
+      empty.style.display=visibleCount>0?'none':'';
+    }
+  }
+
+  window.searchDiagnosticTestPointsFromButton=function(button){
+    const root=button?.closest?.('[data-testpoint-workbench]')||document;
+    const value=root.querySelector('[data-testpoint-search]')?.value||'';
+    const state=getState();
+    state.diagnosticTestPointSearchDraft=value;
+    state.diagnosticTestPointSearchQuery=value;
+    applyDiagnosticPointSearchFilter(root,value);
+  };
+
+  function bindDiagnosticPointSearchControls(root){
+    const host=root?.querySelector?.('[data-testpoint-workbench]')||root;
+    const input=host?.querySelector?.('[data-testpoint-search]');
+    const button=host?.querySelector?.('[data-testpoint-search-submit]');
+    if(input){
+      input.oninput=()=>{
+        getState().diagnosticTestPointSearchDraft=input.value||'';
+      };
+    }
+    if(button){
+      button.onclick=event=>{
+        event?.preventDefault?.();
+        window.searchDiagnosticTestPointsFromButton(button);
+      };
+    }
+  }
+
   function renderCompactDiagnosisConsole(){
     const points=getConfiguredPoints();
     const installedIds=new Set(getInstalledPointIds(points));
     const installed=points.filter(point=>installedIds.has(point.pointId));
     const faults=getInjectedFaults();
-    const candidateEdges=getCandidateDiagnosticEdges(points);
+    const searchQuery=String(getState().diagnosticTestPointSearchQuery||'');
+    const searchDraft=String(getState().diagnosticTestPointSearchDraft??searchQuery);
+    const visiblePoints=points.filter(point=>matchesDiagnosticPointSearch(point,searchQuery));
     const scanByPoint=new Map(arr(getState().diagnosticScanResults).map(result=>[result.pointId,result]));
     const selectedPointId=points.some(point=>point.pointId===getState().selectedDiagnosticTestPointId)
       ?getState().selectedDiagnosticTestPointId
@@ -22022,8 +22496,8 @@ function decorateDataflowEdges(){
           </div>
           <div class="tp-console-stats">
             <span><b>${points.length}</b> 固定测点</span>
-            <span><b>${installed.length}</b> 已安装</span>
-            <span><b>${candidateEdges.length}</b> 候选连线</span>
+            <span><b>${installed.length}</b> 已启用</span>
+            <span><b data-testpoint-match-count>${visiblePoints.length}</b> 匹配测点</span>
             <span><b>${faults.length}</b> 当前故障</span>
           </div>
         </header>
@@ -22032,22 +22506,20 @@ function decorateDataflowEdges(){
             <div class="tp-panel-head">
               <strong>固定测点</strong>
               <span class="tp-panel-actions">
-                <button type="button" data-install-testpoint="${html(installPointId)}" ${installPointId?'':'disabled'}>安装测点</button>
-                <button type="button" data-delete-fixed-testpoint="${html(selectedPointId)}" ${selectedPointId?'':'disabled'}>删除测点</button>
-                <button type="button" data-install-all-testpoints>全部安装</button>
+                <button type="button" data-install-testpoint="${html(installPointId)}" ${installPointId?'':'disabled'}>启用测点</button>
+                <button type="button" data-install-all-testpoints>全部启用</button>
               </span>
             </div>
             <div class="tp-manual-point-add">
-              <select data-testpoint-edge-select ${candidateEdges.length?'':'disabled'}>
-                ${candidateEdges.length?candidateEdges.map(edge=>`<option value="${html(edge.id)}">${html(edge.label)}${edge.signalId?` · ${html(edge.signalId)}`:''}</option>`).join(''):`<option value="">暂无可添加连线</option>`}
-              </select>
-              <button type="button" data-add-testpoint-from-edge ${candidateEdges.length?'':'disabled'}>添加测点</button>
+              <input type="search" data-testpoint-search value="${html(searchDraft)}" placeholder="输入测点名称，如：姿态指令" aria-label="搜索测点">
+              <button type="button" data-testpoint-search-submit>搜索</button>
             </div>
             <select class="tp-hidden-select" data-testpoint-position-select aria-hidden="true" tabindex="-1">
               ${points.map(point=>`<option value="${html(point.pointId)}" ${point.pointId===selectedPointId?'selected':''}>${html(point.name)}</option>`).join('')}
             </select>
             <div class="tp-point-grid">
-              ${points.map(point=>renderPointCard(point,installedIds.has(point.pointId),scanByPoint.get(point.pointId))).join('')}
+              ${visiblePoints.map(point=>renderPointCard(point,installedIds.has(point.pointId),scanByPoint.get(point.pointId))).join('')}
+              <div class="tp-empty" data-testpoint-search-empty ${visiblePoints.length?'hidden':''}>没有匹配的测点。</div>
             </div>
           </section>
           <section class="tp-console-panel">
@@ -22059,7 +22531,7 @@ function decorateDataflowEdges(){
               </span>
             </div>
             <div class="tp-installed-list">
-              ${installed.length?installed.map(point=>renderInstalledPoint(point,scanByPoint.get(point.pointId))).join(''):`<div class="tp-empty">先从左侧安装测点。</div>`}
+              ${installed.length?installed.map(point=>renderInstalledPoint(point,scanByPoint.get(point.pointId))).join(''):`<div class="tp-empty">先从左侧启用测点。</div>`}
             </div>
           </section>
           <section class="tp-console-panel">
@@ -22273,7 +22745,8 @@ function decorateDataflowEdges(){
   }
 
   window.buildDetectionMatrixModel=function(){
-    const points=getConfiguredPoints();
+    const pointModel=window.buildDiagnosticTestPointModel();
+    const points=arr(pointModel.installed);
     const faults=getRuntimeFaultLibrary();
     const rows=faults.map(fault=>{
       const affectedEdges=getFaultAffectedEdges(fault);
@@ -22388,7 +22861,7 @@ function decorateDataflowEdges(){
       steps,
       summary:steps.length
         ?`优先检查 ${steps[0].pointCode} ${steps[0].pointName}，再按剩余候选继续确认。`
-        :'该故障暂无可检测测点，需补充 D 矩阵或安装测点。'
+        :'该故障暂无可检测测点，请先在检测栏启用测点。'
     };
   };
 
@@ -22484,13 +22957,13 @@ function decorateDataflowEdges(){
           <div>
             <span>故障诊断矩阵</span>
             <h2>D矩阵</h2>
-            <p>按当前飞控 demo 的固定测点，列出每类故障能否在对应测点被检测到。</p>
+            <p>按检测栏内已启用测点，列出每类故障能否在对应测点被检测到。</p>
           </div>
           <button type="button" class="d-matrix-export" data-d-matrix-export>导出 CSV</button>
         </header>
         <div class="d-matrix-summary">
           <span><b>${model.summary.faultCount}</b><em>故障类型</em></span>
-          <span><b>${model.summary.pointCount}</b><em>固定测点</em></span>
+          <span><b>${model.summary.pointCount}</b><em>已启用测点</em></span>
           <span><b>${model.summary.detectableCells}</b><em>可检测关系</em></span>
         </div>
         ${renderDetectionMatrixTable(model)}
@@ -22946,6 +23419,7 @@ function decorateDataflowEdges(){
         return;
       }
       host.innerHTML=renderCompactDiagnosisConsole();
+      bindDiagnosticPointSearchControls(host);
       return;
     }
     try{
@@ -23351,6 +23825,26 @@ function decorateDataflowEdges(){
     if(typeof renderEdges!=='undefined') renderEdges=window.renderEdges;
   }
 
+  if(typeof document!=='undefined'&&!window.__compactDiagnosisSearchEvents){
+    window.__compactDiagnosisSearchEvents=true;
+    const handleDiagnosticPointSearchInput=event=>{
+      const search=event.target.closest?.('[data-testpoint-search]');
+      if(!search) return;
+      getState().diagnosticTestPointSearchDraft=search.value||'';
+    };
+    const handleDiagnosticPointSearchClick=event=>{
+      const searchSubmit=event.target.closest?.('[data-testpoint-search-submit]');
+      if(!searchSubmit) return;
+      event.preventDefault();
+      window.searchDiagnosticTestPointsFromButton(searchSubmit);
+    };
+    document.addEventListener('input',handleDiagnosticPointSearchInput);
+    document.addEventListener('click',handleDiagnosticPointSearchClick);
+    window.__GZ_RUNTIME_LISTENERS__=window.__GZ_RUNTIME_LISTENERS__||{};
+    window.__GZ_RUNTIME_LISTENERS__.diagnosticPointSearchInput=handleDiagnosticPointSearchInput;
+    window.__GZ_RUNTIME_LISTENERS__.diagnosticPointSearchClick=handleDiagnosticPointSearchClick;
+  }
+
   if(typeof document!=='undefined'&&!window.__compactDiagnosisConsoleEvents){
     window.__compactDiagnosisConsoleEvents=true;
     document.addEventListener('click',event=>{
@@ -23359,24 +23853,6 @@ function decorateDataflowEdges(){
         event.preventDefault();
         const located=window.locateFaultCatalogInjectionTarget?.(locateFault.getAttribute('data-locate-fault-injection'));
         if(located&&typeof toast==='function') toast('已在画布中标出注入位置','s');
-        return;
-      }
-      const addFromEdge=event.target.closest?.('[data-add-testpoint-from-edge]');
-      if(addFromEdge){
-        event.preventDefault();
-        const root=addFromEdge.closest('[data-testpoint-workbench]')||document;
-        const select=root.querySelector('[data-testpoint-edge-select]');
-        const edgeId=addFromEdge.getAttribute('data-add-testpoint-from-edge')||select?.value||'';
-        if(!edgeId){
-          if(typeof toast==='function') toast('暂无可添加的候选连线，请先在画布中连接模块。','w');
-          return;
-        }
-        const result=window.addDiagnosticTestPointFromEdge(edgeId);
-        if(typeof toast==='function'){
-          if(result?.ok&&result.existed) toast('该连线已添加为固定测点。','w');
-          else if(result?.ok) toast('测点已添加，请点击测点卡片完成安装。','s');
-          else toast('测点添加失败，请检查候选连线是否仍然存在。','w');
-        }
         return;
       }
       const install=event.target.closest?.('[data-install-testpoint]');

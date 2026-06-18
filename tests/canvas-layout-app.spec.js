@@ -152,6 +152,165 @@ describe('canvas layout cleanup', () => {
     __resetLegacyRuntimeForTests();
   });
 
+  it('exposes extracted canvas graph geometry helpers to the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    expect(window.__GZ_CANVAS_GRAPH__).toBeTruthy();
+    expect(typeof window.__GZ_CANVAS_GRAPH__.resolvePortInfo).toBe('function');
+    expect(typeof window.__GZ_CANVAS_GRAPH__.buildEdgePath).toBe('function');
+
+    const source = {
+      type: 'signal_source',
+      x: 100,
+      y: 80
+    };
+    const ports = {
+      inputs: [],
+      outputs: [{ key: 'signal', label: '输出' }]
+    };
+    const sourcePort = window.__GZ_CANVAS_GRAPH__.resolvePortInfo(source, 'output', 0, {
+      ports,
+      componentLibrary: window.__GZ_COMPONENT_LIBRARY__
+    });
+    const targetPort = { x: 360, y: 112, side: 'left' };
+
+    expect(sourcePort).toMatchObject({
+      x: 264,
+      y: 122,
+      side: 'right'
+    });
+    expect(window.__GZ_CANVAS_GRAPH__.buildEdgePath(sourcePort, targetPort)).toBe(
+      'M 264 122 C 328 122, 296 112, 360 112'
+    );
+
+    wrapper.unmount();
+  });
+
+  it('exposes extracted canvas state helpers to the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    expect(window.__GZ_CANVAS_STATE__).toBeTruthy();
+    expect(typeof window.__GZ_CANVAS_STATE__.createSubsystemCanvas).toBe('function');
+    expect(typeof window.__GZ_CANVAS_STATE__.openCanvasRecord).toBe('function');
+
+    window.doCreateBlankWorkspace();
+    const subsystem = window.createNode('subsystem_block', 320, 180);
+    const canvas = window.__GZ_CANVAS_STATE__.createSubsystemCanvas(window.__GZ_STATE__, subsystem);
+
+    expect(canvas.id).toBe(subsystem.targetCanvasId);
+    expect(canvas.parentSubsystemNodeId).toBe(subsystem.id);
+    expect(window.__GZ_CANVAS_STATE__.openCanvasRecord(
+      window.__GZ_STATE__,
+      canvas.id,
+      ['canvas-root', canvas.id]
+    )).toBe(true);
+    expect(window.__GZ_STATE__.activeCanvasId).toBe(canvas.id);
+    expect(window.__GZ_STATE__.canvasTrail).toEqual(['canvas-root', canvas.id]);
+
+    wrapper.unmount();
+  });
+
+  it('exposes extracted canvas selection helpers to the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    expect(window.__GZ_CANVAS_SELECTION__).toBeTruthy();
+    expect(typeof window.__GZ_CANVAS_SELECTION__.getNode).toBe('function');
+    expect(typeof window.__GZ_CANVAS_SELECTION__.clearCanvasSelectionState).toBe('function');
+    expect(typeof window.__GZ_CANVAS_SELECTION__.markTopologyDirty).toBe('function');
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 120, 160);
+    window.selectNode(source.id);
+    await flushRuntime();
+
+    expect(window.__GZ_CANVAS_SELECTION__.getNode(window.__GZ_STATE__, source.id)).toBe(source);
+    expect(window.__GZ_STATE__.selBlk).toBe(source.id);
+
+    window.__GZ_CANVAS_SELECTION__.clearCanvasSelectionState(window.__GZ_STATE__);
+    expect(window.__GZ_STATE__.selBlk).toBeNull();
+    expect(window.__GZ_STATE__.selEdge).toBeNull();
+
+    window.__GZ_STATE__.systemSaved = true;
+    window.__GZ_STATE__.step = 3;
+    window.__GZ_STATE__.simDone = true;
+    window.__GZ_CANVAS_SELECTION__.markTopologyDirty(window.__GZ_STATE__, window.__GZ_SIM__, 'system');
+    expect(window.__GZ_STATE__.systemSaved).toBe(false);
+    expect(window.__GZ_STATE__.step).toBe(1);
+    expect(window.__GZ_SIM__.running).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it('exposes extracted canvas render helpers to the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    expect(window.__GZ_CANVAS_RENDER__).toBeTruthy();
+    expect(typeof window.__GZ_CANVAS_RENDER__.renderCanvasBreadcrumbs).toBe('function');
+    expect(typeof window.__GZ_CANVAS_RENDER__.createEdgeDomElements).toBe('function');
+
+    const host = document.createElement('div');
+    window.__GZ_CANVAS_RENDER__.renderCanvasBreadcrumbs(host, {
+      rootCanvasId: 'canvas-root',
+      activeCanvasId: 'canvas-child',
+      trail: ['canvas-root', 'canvas-child'],
+      getCanvasRecord(canvasId) {
+        return canvasId === 'canvas-child' ? { name: '子系统' } : { name: '顶层' };
+      }
+    });
+
+    expect(host.querySelectorAll('[data-canvas-id]')).toHaveLength(2);
+    expect(host.querySelector('[aria-current="page"]')?.textContent).toContain('子系统');
+
+    wrapper.unmount();
+  });
+
+  it('exposes extracted fault template render helpers to the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    expect(window.__GZ_FAULT_TEMPLATE_RENDER__).toBeTruthy();
+    expect(typeof window.__GZ_FAULT_TEMPLATE_RENDER__.renderFaultTemplateGrid).toBe('function');
+    expect(typeof window.__GZ_FAULT_TEMPLATE_RENDER__.renderFaultTemplateDetail).toBe('function');
+
+    const host = document.createElement('div');
+    window.__GZ_FAULT_TEMPLATE_RENDER__.renderFaultTemplateGrid(host, {
+      category: 'physical',
+      templates: [{ id: 'fault-a', name: 'Fault A', desc: 'Fault desc', tags: ['tag'], c: '#2563eb' }],
+      selectedTemplates: []
+    });
+
+    expect(host.querySelectorAll('.tcard')).toHaveLength(1);
+    expect(host.querySelector('.tcard-name')?.textContent).toBe('Fault A');
+
+    wrapper.unmount();
+  });
+
+  it('exposes extracted fault catalog render helpers to the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    expect(window.__GZ_FAULT_CATALOG_RENDER__).toBeTruthy();
+    expect(typeof window.__GZ_FAULT_CATALOG_RENDER__.renderFaultCatalogList).toBe('function');
+
+    const host = document.createElement('div');
+    const hint = document.createElement('div');
+    window.__GZ_FAULT_CATALOG_RENDER__.renderFaultCatalogList(host, hint, {
+      models: [{ id: 'fault-a', name: 'Fault A', layer: 'physical', tags: ['tag'] }],
+      importedModels: [],
+      selectedId: 'fault-a',
+      getLayerLabel: () => 'Physical Layer'
+    });
+
+    expect(host.querySelectorAll('.ifm-item')).toHaveLength(1);
+    expect(hint.textContent).toBe('已选：Fault A · Physical Layer');
+
+    wrapper.unmount();
+  });
+
   it('exposes one-click layout cleanup and arranges imported model edges left-to-right', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -697,7 +856,10 @@ describe('canvas layout cleanup', () => {
     const installablePosition = initialModel.positions.find((point) => !point.installed);
 
     expect(semantic.measurementPoints.length).toBeGreaterThanOrEqual(initialModel.positions.length);
-    expect(initialModel.positions).toHaveLength(pkg.diagnosticModel.testPoints.length);
+    expect(initialModel.positions.length).toBeGreaterThanOrEqual(pkg.diagnosticModel.testPoints.length);
+    expect(pkg.diagnosticModel.testPoints.every((point) =>
+      initialModel.positions.some((position) => position.pointId === point.pointId)
+    )).toBe(true);
     expect(initialModel.installed.length).toBe(0);
     expect(installablePosition).toBeTruthy();
     expect(initialModel.positions.every((point) =>
@@ -721,7 +883,7 @@ describe('canvas layout cleanup', () => {
     expect(panel?.querySelector('[data-install-testpoint]')).not.toBeNull();
     expect(panel?.querySelectorAll('[data-installed-testpoint]').length).toBe(afterInstall.installed.length);
     expect(panel?.querySelector(`[data-installed-testpoint="${installablePosition.pointId}"]`)).not.toBeNull();
-    expect(panel?.querySelector(`[data-fixed-testpoint-position="${installablePosition.pointId}"]`)?.textContent).toContain('已安装');
+    expect(panel?.querySelector(`[data-fixed-testpoint-position="${installablePosition.pointId}"]`)?.textContent).toContain('已启用');
 
     expect(window.removeDiagnosticTestPoint(installablePosition.pointId)).toBe(true);
     const afterRemove = window.buildDiagnosticTestPointModel();
@@ -736,7 +898,7 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
-  it('derives measurement points and D matrix rows from a manually built workspace', async () => {
+  it('builds measurement points and D matrix rows only from configured workspace test points', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
@@ -785,22 +947,19 @@ describe('canvas layout cleanup', () => {
     window.renderEdges();
     await flushRuntime();
 
-    const emptyTestPointModel = window.buildDiagnosticTestPointModel();
-    expect(emptyTestPointModel.positions).toHaveLength(0);
-    expect(emptyTestPointModel.candidateEdges.map((edge) => edge.id)).toEqual([
-      'edge-manual-command',
-      'edge-manual-output'
-    ]);
-    const addResult = window.addDiagnosticTestPointFromEdge('edge-manual-output');
-    expect(addResult).toMatchObject({
-      ok: true,
-      point: expect.objectContaining({
-        edgeId: 'edge-manual-output'
-      })
+    const automaticTestPointModel = window.buildDiagnosticTestPointModel();
+    expect(automaticTestPointModel.positions).toEqual([]);
+
+    const addResult = window.addDiagnosticTestPointFromEdge('edge-manual-output', {
+      name: 'Manual output measurement',
+      detects: ['manual-output-bias']
     });
+    expect(addResult).toMatchObject({ ok: true });
+
     const testPointModel = window.buildDiagnosticTestPointModel();
-    expect(testPointModel.positions.map((point) => point.edgeId)).toEqual(['edge-manual-output']);
-    const outputPoint = testPointModel.positions[0];
+    const outputPoint = testPointModel.positions.find((point) => point.edgeId === 'edge-manual-output');
+    expect(outputPoint).toBeTruthy();
+    expect(outputPoint.detects).toEqual(['manual-output-bias']);
     expect(window.installDiagnosticTestPoint(outputPoint.pointId)).toBe(true);
     expect(window.buildDiagnosticTestPointModel().installed.map((point) => point.edgeId)).toEqual(['edge-manual-output']);
 
@@ -947,7 +1106,7 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
-  it('adds a diagnostic test point from the dataflow add button', async () => {
+  it('does not automatically list dataflow edges as fixed diagnostic test points', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
@@ -971,25 +1130,21 @@ describe('canvas layout cleanup', () => {
     await flushRuntime();
 
     const panel = document.getElementById('dataflow-panel');
-    const select = panel?.querySelector('[data-testpoint-edge-select]');
-    const button = panel?.querySelector('[data-add-testpoint-from-edge]');
+    const search = panel?.querySelector('[data-testpoint-search]');
 
-    expect(select).not.toBeNull();
-    expect(button).not.toBeNull();
-    select.value = 'edge-airspeed-output';
-    button.click();
-    await flushRuntime();
+    expect(search).not.toBeNull();
+    expect(panel?.querySelector('[data-testpoint-edge-select]')).toBeNull();
+    expect(panel?.querySelector('[data-add-testpoint-from-edge]')).toBeNull();
 
     const model = window.buildDiagnosticTestPointModel();
-    expect(model.positions.map((point) => point.edgeId)).toEqual(['edge-airspeed-output']);
+    expect(model.positions).toEqual([]);
     expect(model.installed).toHaveLength(0);
-    expect(document.getElementById('dataflow-panel')?.textContent).toContain('信号源 1 -> 空速传感器 1');
-    expect(document.getElementById('tm')?.textContent).toContain('测点已添加，请点击测点卡片完成安装。');
+    expect(document.getElementById('dataflow-panel')?.querySelector('[data-fixed-testpoint-position]')).toBeNull();
 
     wrapper.unmount();
   });
 
-  it('selects, installs, and deletes a fixed diagnostic test point from dataflow header actions', async () => {
+  it('selects and installs a fixed diagnostic test point from dataflow header actions', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
@@ -1021,8 +1176,11 @@ describe('canvas layout cleanup', () => {
     expect(pointCard.querySelector('[data-delete-fixed-testpoint]')).toBeNull();
     const fixedPanel = document.querySelector('.tp-console-panel--points');
     const detectPanel = document.querySelectorAll('.tp-console-panel')[1];
-    expect(fixedPanel?.querySelector('[data-install-all-testpoints]')?.textContent).toContain('全部安装');
+    expect(fixedPanel?.querySelector('[data-install-testpoint]')?.textContent).toContain('启用测点');
+    expect(fixedPanel?.querySelector('[data-install-all-testpoints]')?.textContent).toContain('全部启用');
     expect(detectPanel?.querySelector('[data-clear-testpoints]')?.textContent).toContain('全部移除');
+    expect(detectPanel?.textContent).toContain('先从左侧启用测点。');
+    expect(detectPanel?.textContent).not.toContain('先从左侧安装测点。');
 
     pointCard.click();
     await flushRuntime();
@@ -1037,22 +1195,14 @@ describe('canvas layout cleanup', () => {
 
     model = window.buildDiagnosticTestPointModel();
     expect(model.installed.some((item) => item.pointId === point.pointId)).toBe(true);
-
-    const deleteButton = document.querySelector('[data-delete-fixed-testpoint]');
-    expect(deleteButton).not.toBeNull();
-    expect(deleteButton?.textContent).toContain('删除测点');
-    deleteButton.click();
-    await flushRuntime();
-
-    model = window.buildDiagnosticTestPointModel();
-    expect(model.positions.some((item) => item.edgeId === 'edge-delete-testpoint')).toBe(false);
-    expect(model.candidateEdges.some((edge) => edge.id === 'edge-delete-testpoint')).toBe(true);
-    expect(document.querySelector(`[data-fixed-testpoint-position="${point.pointId}"]`)).toBeNull();
+    expect(document.querySelector('[data-delete-fixed-testpoint]')).toBeNull();
+    expect(document.querySelector(`[data-fixed-testpoint-position="${point.pointId}"]`)).not.toBeNull();
 
     wrapper.unmount();
   });
 
-  it('shows manually added dataflow test points after importing the closed-loop demo', async () => {
+  it('searches configured dataflow test points after importing the closed-loop demo', async () => {
+    window.__compactDiagnosisConsoleEvents = true;
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
@@ -1068,21 +1218,67 @@ describe('canvas layout cleanup', () => {
     expect(before.candidateEdges.some((edge) => edge.id === 'edge-command-scope')).toBe(true);
 
     const panel = document.getElementById('dataflow-panel');
-    const select = panel?.querySelector('[data-testpoint-edge-select]');
-    const button = panel?.querySelector('[data-add-testpoint-from-edge]');
-    expect(select).not.toBeNull();
-    expect(button).not.toBeNull();
+    const search = panel?.querySelector('[data-testpoint-search]');
+    const searchButton = panel?.querySelector('[data-testpoint-search-submit]');
+    expect(search).not.toBeNull();
+    expect(searchButton).not.toBeNull();
+    const allPointCount = document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]').length;
 
-    select.value = 'edge-command-scope';
-    button.click();
+    ['姿', '姿态', '姿态指令'].forEach((value) => {
+      search.value = value;
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flushRuntime();
+    expect(Array.from(document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]') || [])
+      .filter((element) => !element.hidden).length)
+      .toBe(allPointCount);
+
+    searchButton.click();
     await flushRuntime();
 
     const after = window.buildDiagnosticTestPointModel();
-    const addedPoint = after.positions.find((point) => point.edgeId === 'edge-command-scope');
+    const addedPoint = after.positions.find((point) => String(point.name || '').includes('姿态指令'));
     expect(addedPoint).toBeTruthy();
+    expect(document.getElementById('dataflow-panel')?.querySelector('[data-testpoint-search]')?.value)
+      .toBe('姿态指令');
     expect(document.getElementById('dataflow-panel')?.querySelector(
       `[data-fixed-testpoint-position="${addedPoint.pointId}"]`
     )).not.toBeNull();
+    expect(Array.from(document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]') || [])
+      .filter((element) => !element.hidden).length)
+      .toBe(1);
+    expect(Array.from(document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]') || [])
+      .filter((element) => element.style.display !== 'none').length)
+      .toBe(1);
+
+    const nameSearch = document.getElementById('dataflow-panel')?.querySelector('[data-testpoint-search]');
+    const nameSearchButton = document.getElementById('dataflow-panel')?.querySelector('[data-testpoint-search-submit]');
+    nameSearch.value = 'edge-command-scope';
+    nameSearch.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushRuntime();
+    expect(Array.from(document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]') || [])
+      .filter((element) => !element.hidden).length)
+      .toBe(1);
+
+    nameSearchButton.click();
+    await flushRuntime();
+
+    expect(Array.from(document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]') || [])
+      .filter((element) => !element.hidden).length)
+      .toBe(0);
+    expect(Array.from(document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]') || [])
+      .filter((element) => element.style.display !== 'none').length)
+      .toBe(0);
+    expect(document.getElementById('dataflow-panel')?.textContent).toContain('没有匹配的测点。');
+
+    nameSearch.value = 'M1';
+    nameSearch.dispatchEvent(new Event('input', { bubbles: true }));
+    nameSearchButton.click();
+    await flushRuntime();
+
+    expect(Array.from(document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]') || [])
+      .filter((element) => element.style.display !== 'none').length)
+      .toBe(0);
 
     wrapper.unmount();
   });
@@ -2672,6 +2868,8 @@ describe('canvas layout cleanup', () => {
     expect(importResult).toMatchObject({ ok: true });
     expect(typeof window.buildDetectionMatrixModel).toBe('function');
     expect(typeof window.exportDetectionMatrixCsv).toBe('function');
+    expect(window.buildDetectionMatrixModel().points).toHaveLength(0);
+    window.installAllDiagnosticTestPoints();
 
     const matrix = window.buildDetectionMatrixModel();
     expect(matrix.points.length).toBeGreaterThanOrEqual(10);
@@ -2701,6 +2899,8 @@ describe('canvas layout cleanup', () => {
     expect(panel?.querySelector('[data-d-matrix-view]')).not.toBeNull();
     expect(panel?.querySelector('[data-d-matrix-export]')).not.toBeNull();
     expect(panel?.textContent).toContain('D矩阵');
+    expect(panel?.textContent).toContain('已启用测点');
+    expect(panel?.textContent).not.toContain('固定测点');
 
     const componentsCss = readComponentsCss();
     const dMatrixPanelRule = findCssRule(componentsCss, '.d-matrix-panel');

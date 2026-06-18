@@ -1217,6 +1217,133 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
+  it('adds and edits multiple edge diagnostic test points from the edge property panel', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('simulation_block', 180, 220);
+    const target = window.createNode('instrument_scope', 480, 220);
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    source.props.name = 'Source controller';
+    target.props.name = 'Output scope';
+    source.faultSlots = [
+      {
+        slotId: 'electrical:output:torque',
+        slotName: 'Torque output',
+        layer: 'electrical',
+        allowedFaultTypeIds: ['source_bias', 'source_noise']
+      }
+    ];
+    state.activeModelPackage = {
+      modelId: 'testpoint-config-package',
+      faultTypeCatalog: [
+        { id: 'source_bias', name: 'Source bias', layer: 'electrical' },
+        { id: 'source_noise', name: 'Source noise', layer: 'electrical' },
+        { id: 'target_fault', name: 'Target fault', layer: 'electrical' }
+      ],
+      faultLibrary: [
+        { id: 'source_bias', name: 'Source bias', layer: 'electrical' },
+        { id: 'source_noise', name: 'Source noise', layer: 'electrical' },
+        { id: 'target_fault', name: 'Target fault', layer: 'electrical' }
+      ],
+      faultCapabilityMap: [
+        {
+          targetKind: 'node',
+          targetId: source.id,
+          faultSlots: source.faultSlots
+        }
+      ]
+    };
+    state.modelEdges.push({
+      id: 'edge-source-scope-testpoint',
+      lineType: 'normal',
+      sourceNodeId: source.id,
+      targetNodeId: target.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0,
+      signalId: 'controller.output'
+    });
+    window.renderModelNodes();
+    window.renderEdges();
+    window.selectEdge('edge-source-scope-testpoint');
+    await flushRuntime();
+
+    expect(visiblePropertyTabs()).toContain('testpoints');
+    window.setPropertyPanelTab('testpoints');
+    await flushRuntime();
+
+    expect(document.querySelector('[data-edge-testpoint-panel]')).not.toBeNull();
+    expect(document.querySelector('[data-add-edge-testpoint]')).not.toBeNull();
+    expect(document.querySelector('[data-edge-testpoint-fault="target_fault"]')).toBeNull();
+
+    document.querySelector('[data-add-edge-testpoint]').click();
+    await flushRuntime();
+
+    document.querySelector('[data-add-edge-testpoint]').click();
+    await flushRuntime();
+
+    const cards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
+    expect(cards).toHaveLength(2);
+    expect(cards[0].querySelector('[data-edge-testpoint-fault="source_bias"]')).not.toBeNull();
+    expect(cards[0].querySelector('[data-edge-testpoint-fault="source_noise"]')).not.toBeNull();
+    expect(cards[0].querySelector('[data-edge-testpoint-fault="target_fault"]')).toBeNull();
+    expect(cards[0].querySelector('[data-edge-testpoint-fault-list]')).not.toBeNull();
+    expect(cards[1].querySelector('[data-edge-testpoint-fault-list]')).not.toBeNull();
+    expect(cards[0].querySelector('[data-delete-edge-testpoint]')).not.toBeNull();
+    expect(cards[1].querySelector('[data-delete-edge-testpoint]')).not.toBeNull();
+
+    cards[0].querySelector('[data-edge-testpoint-name]').value = 'Controller output monitor A';
+    cards[0].querySelector('[data-edge-testpoint-name]').dispatchEvent(new Event('input', { bubbles: true }));
+    cards[0].querySelector('[data-edge-testpoint-fault="source_bias"]').checked = true;
+    cards[0].querySelector('[data-edge-testpoint-fault="source_bias"]').dispatchEvent(new Event('change', { bubbles: true }));
+    cards[0].querySelector('[data-save-edge-testpoint]').click();
+    await flushRuntime();
+
+    const refreshedCards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
+    refreshedCards[1].querySelector('[data-edge-testpoint-name]').value = 'Controller output monitor B';
+    refreshedCards[1].querySelector('[data-edge-testpoint-name]').dispatchEvent(new Event('input', { bubbles: true }));
+    refreshedCards[1].querySelector('[data-edge-testpoint-fault="source_noise"]').checked = true;
+    refreshedCards[1].querySelector('[data-edge-testpoint-fault="source_noise"]').dispatchEvent(new Event('change', { bubbles: true }));
+    refreshedCards[1].querySelector('[data-save-edge-testpoint]').click();
+    await flushRuntime();
+
+    const points = state.manualDiagnosticTestPoints.filter((item) => item.edgeId === 'edge-source-scope-testpoint');
+    expect(points).toHaveLength(2);
+    expect(points.map((point) => point.name)).toEqual([
+      'Controller output monitor A',
+      'Controller output monitor B'
+    ]);
+    expect(points.map((point) => point.detects)).toEqual([
+      ['source_bias'],
+      ['source_noise']
+    ]);
+    expect(new Set(points.map((point) => point.pointId)).size).toBe(2);
+
+    const diagnosticPositions = window.buildDiagnosticTestPointModel().positions
+      .filter((item) => item.edgeId === 'edge-source-scope-testpoint');
+    expect(diagnosticPositions).toHaveLength(2);
+
+    document.querySelector('[data-edge-testpoint-card] [data-delete-edge-testpoint]').click();
+    await flushRuntime();
+
+    const remainingPoints = state.manualDiagnosticTestPoints.filter((item) => item.edgeId === 'edge-source-scope-testpoint');
+    expect(remainingPoints).toHaveLength(1);
+    expect(remainingPoints[0]).toMatchObject({
+      name: 'Controller output monitor B',
+      detects: ['source_noise']
+    });
+
+    const remainingCards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
+    expect(remainingCards).toHaveLength(1);
+    expect(remainingCards[0].querySelector('[data-edge-testpoint-name]').value).toBe('Controller output monitor B');
+    expect(window.buildDiagnosticTestPointModel().positions
+      .filter((item) => item.edgeId === 'edge-source-scope-testpoint')).toHaveLength(1);
+
+    wrapper.unmount();
+  });
+
   it('renders CAN edge inspector sections for route, channels, faults, and diagnostics', async () => {
     const wrapper = await mountWorkbench();
 

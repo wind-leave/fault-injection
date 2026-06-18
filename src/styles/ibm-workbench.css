@@ -1954,6 +1954,58 @@ header{
   box-shadow:inset 0 0 0 2px #ffffff;
 }
 
+.edge-testpoint-list{
+  display:grid;
+  gap:12px;
+}
+
+.edge-testpoint-card{
+  display:grid;
+  gap:10px;
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  background:#ffffff;
+}
+
+.edge-testpoint-card-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  color:var(--text2);
+  font-family:var(--font-data);
+  font-size:11px;
+}
+
+.edge-testpoint-fault-group{
+  margin:0;
+}
+
+.edge-testpoint-fault-list{
+  grid-template-columns:repeat(auto-fit,minmax(136px,1fr));
+  gap:6px;
+}
+
+.edge-testpoint-fault-option{
+  min-width:0;
+  justify-content:flex-start;
+  padding:8px;
+  line-height:1.35;
+}
+
+.edge-testpoint-fault-option span{
+  justify-content:flex-start;
+  min-width:0;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+
+.edge-testpoint-actions{
+  justify-content:flex-end;
+  padding-top:0;
+}
+
 .props-fault-section > .props-help{
   padding:12px 16px 14px;
   border-top:1px solid var(--border);

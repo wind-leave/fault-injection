@@ -1,0 +1,106 @@
+import math
+
+
+SUPPORTED_NODE_TYPES = {
+    "signal_source",
+    "flow_block",
+    "simulation_block",
+    "gain_block",
+    "sum_block",
+    "mux_block",
+    "instrument_scope",
+}
+
+LIMITS = {
+    "max_duration": 60.0,
+    "min_step_size": 0.001,
+    "max_step_size": 1.0,
+    "max_nodes": 200,
+    "max_edges": 400,
+    "max_faults": 50,
+    "max_measurement_points": 100,
+}
+
+
+class SimulationBackendError(Exception):
+    def __init__(self, error_code, field, message):
+        super().__init__(message)
+        self.error_code = error_code
+        self.field = field
+        self.message = message
+
+    def to_response(self, run_id=""):
+        return {
+            "runId": run_id,
+            "status": "error",
+            "errorCode": self.error_code,
+            "field": self.field,
+            "message": self.message,
+        }
+
+
+def ensure_mapping(value, field):
+    if not isinstance(value, dict):
+        raise SimulationBackendError("INVALID_SCHEMA", field, f"{field} must be an object")
+    return value
+
+
+def ensure_list(value, field):
+    if not isinstance(value, list):
+        raise SimulationBackendError("INVALID_SCHEMA", field, f"{field} must be an array")
+    return value
+
+
+def ensure_number(value, field):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        raise SimulationBackendError("INVALID_SCHEMA", field, f"{field} must be a finite number")
+    return float(value)
+
+
+def validate_numeric_parameters(parameters, field):
+    if parameters is None:
+        return {}
+    ensure_mapping(parameters, field)
+    for key, value in parameters.items():
+        ensure_number(value, f"{field}.{key}")
+    return parameters
+
+
+def validate_executable_package(package):
+    ensure_mapping(package, "request")
+    if package.get("schemaVersion") != 1:
+        raise SimulationBackendError("INVALID_SCHEMA", "schemaVersion", "schemaVersion must be 1")
+
+    config = ensure_mapping(package.get("simulationConfig"), "simulationConfig")
+    duration = ensure_number(config.get("duration"), "simulationConfig.duration")
+    step_size = ensure_number(config.get("stepSize"), "simulationConfig.stepSize")
+    if duration <= 0 or duration > LIMITS["max_duration"]:
+        raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "simulationConfig.duration", "duration is outside the allowed range")
+    if step_size < LIMITS["min_step_size"] or step_size > LIMITS["max_step_size"]:
+        raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "simulationConfig.stepSize", "stepSize is outside the allowed range")
+
+    nodes = ensure_list(package.get("nodes"), "nodes")
+    edges = ensure_list(package.get("edges"), "edges")
+    faults = ensure_list(package.get("faultInstances", []), "faultInstances")
+    measurement_points = ensure_list(package.get("measurementPoints", []), "measurementPoints")
+
+    if len(nodes) > LIMITS["max_nodes"]:
+        raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "nodes", "too many nodes")
+    if len(edges) > LIMITS["max_edges"]:
+        raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "edges", "too many edges")
+    if len(faults) > LIMITS["max_faults"]:
+        raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "faultInstances", "too many fault instances")
+    if len(measurement_points) > LIMITS["max_measurement_points"]:
+        raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "measurementPoints", "too many measurement points")
+
+    for index, node in enumerate(nodes):
+        ensure_mapping(node, f"nodes[{index}]")
+        node_id = node.get("id")
+        if not isinstance(node_id, str) or not node_id:
+            raise SimulationBackendError("INVALID_SCHEMA", f"nodes[{index}].id", "node id is required")
+        node_type = node.get("type")
+        if node_type not in SUPPORTED_NODE_TYPES:
+            raise SimulationBackendError("UNSUPPORTED_NODE_TYPE", f"nodes[{index}].type", f"unsupported node type: {node_type}")
+        validate_numeric_parameters(node.get("parameters", {}), f"nodes[{index}].parameters")
+
+    return package

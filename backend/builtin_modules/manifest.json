@@ -1,0 +1,22 @@
+{
+  "modules": [
+    {
+      "moduleId": "passthrough",
+      "importPath": "backend.builtin_modules.passthrough",
+      "entryFunction": "process",
+      "inputs": ["input"],
+      "outputs": ["output"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "gain",
+      "importPath": "backend.builtin_modules.gain",
+      "entryFunction": "process",
+      "inputs": ["input"],
+      "outputs": ["output"],
+      "parameters": {
+        "gain": {"type": "number", "min": -20, "max": 20, "default": 1}
+      }
+    }
+  ]
+}

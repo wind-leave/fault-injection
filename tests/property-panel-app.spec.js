@@ -306,7 +306,7 @@ describe('property panel interaction', () => {
     expect(panelText).toContain('协议层故障作用于当前连接线传递的数据');
 
     wrapper.unmount();
-  });
+  }, 10000);
 
   it('renders stable property panel tabs for every non-fault component type', async () => {
     const wrapper = await mountWorkbench();

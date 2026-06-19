@@ -1,4 +1,23 @@
 import runtimeSource from './legacy-runtime.txt?raw';
+import * as canvasGraph from './canvasGraph.js';
+import * as canvasRender from './canvasRenderService.js';
+import * as canvasSelection from './canvasSelectionService.js';
+import * as canvasState from './canvasStateService.js';
+import * as faultBindingRuntimeService from './faultBindingRuntimeService.js';
+import * as faultCatalogRender from './faultCatalogRenderService.js';
+import * as faultTemplateRender from './faultTemplateRenderService.js';
+import * as faultParameterPanelSchema from './faultParameterPanelSchema.js';
+import * as faultSlotPanelSchema from './faultSlotPanelSchema.js';
+import * as faultTagPanelSchema from './faultTagPanelSchema.js';
+import * as propertyPanelSchema from './propertyPanelSchema.js';
+import * as simulationPropertyPanelSchema from './simulationPropertyPanelSchema.js';
+import * as signalComponentRuntime from './signalComponentRuntime.js';
+import * as subsystemPropertyPanelSchema from './subsystemPropertyPanelSchema.js';
+import {
+  COMPONENT_GROUPS,
+  COMPONENT_REGISTRY,
+  buildComponentLibraryFromRegistry
+} from './componentRegistry.js';
 import {
   applyFlightModelPackage,
   exportFlightModelPackage,
@@ -172,7 +191,24 @@ export function mountLegacyRuntime() {
     createWorkbenchSnapshot,
     restoreWorkbenchSnapshot
   };
+  window.__GZ_CANVAS_GRAPH__ = canvasGraph;
+  window.__GZ_CANVAS_RENDER__ = canvasRender;
+  window.__GZ_CANVAS_SELECTION__ = canvasSelection;
+  window.__GZ_CANVAS_STATE__ = canvasState;
+  window.__GZ_FAULT_BINDING_RUNTIME__ = faultBindingRuntimeService;
+  window.__GZ_FAULT_CATALOG_RENDER__ = faultCatalogRender;
+  window.__GZ_FAULT_TEMPLATE_RENDER__ = faultTemplateRender;
   window.__GZ_FAULT_TYPE_CATALOG__ = faultTypeCatalog;
+  window.__GZ_FAULT_PARAMETER_PANEL_SCHEMA__ = faultParameterPanelSchema;
+  window.__GZ_FAULT_SLOT_PANEL_SCHEMA__ = faultSlotPanelSchema;
+  window.__GZ_FAULT_TAG_PANEL_SCHEMA__ = faultTagPanelSchema;
+  window.__GZ_COMPONENT_GROUPS__ = COMPONENT_GROUPS;
+  window.__GZ_COMPONENT_REGISTRY__ = COMPONENT_REGISTRY;
+  window.__GZ_COMPONENT_LIBRARY__ = buildComponentLibraryFromRegistry(COMPONENT_REGISTRY);
+  window.__GZ_PROPERTY_PANEL_SCHEMA__ = propertyPanelSchema;
+  window.__GZ_SIMULATION_PROPERTY_PANEL_SCHEMA__ = simulationPropertyPanelSchema;
+  window.__GZ_SUBSYSTEM_PROPERTY_PANEL_SCHEMA__ = subsystemPropertyPanelSchema;
+  window.__GZ_SIGNAL_COMPONENT_RUNTIME__ = signalComponentRuntime;
   window.__GZ_FLIGHT_MODEL_PACKAGE__ = {
     validate(pkg) {
       return validateFlightModelPackage(pkg);
@@ -285,12 +321,35 @@ export function __resetLegacyRuntimeForTests() {
     if (runtimeListeners.canvasCommandFullscreenChange) {
       document.removeEventListener('fullscreenchange', runtimeListeners.canvasCommandFullscreenChange);
     }
+    if (runtimeListeners.diagnosticPointSearchInput) {
+      document.removeEventListener('input', runtimeListeners.diagnosticPointSearchInput);
+    }
+    if (runtimeListeners.diagnosticPointSearchClick) {
+      document.removeEventListener('click', runtimeListeners.diagnosticPointSearchClick);
+    }
   }
 
   mounted = false;
   delete window.__GZ_LEGACY_RUNTIME_BOOTED__;
   delete window.__GZ_WORKBENCH_SNAPSHOT__;
+  delete window.__GZ_CANVAS_GRAPH__;
+  delete window.__GZ_CANVAS_RENDER__;
+  delete window.__GZ_CANVAS_SELECTION__;
+  delete window.__GZ_CANVAS_STATE__;
+  delete window.__GZ_FAULT_BINDING_RUNTIME__;
+  delete window.__GZ_FAULT_CATALOG_RENDER__;
+  delete window.__GZ_FAULT_TEMPLATE_RENDER__;
   delete window.__GZ_FAULT_TYPE_CATALOG__;
+  delete window.__GZ_FAULT_PARAMETER_PANEL_SCHEMA__;
+  delete window.__GZ_FAULT_SLOT_PANEL_SCHEMA__;
+  delete window.__GZ_FAULT_TAG_PANEL_SCHEMA__;
+  delete window.__GZ_COMPONENT_GROUPS__;
+  delete window.__GZ_COMPONENT_REGISTRY__;
+  delete window.__GZ_COMPONENT_LIBRARY__;
+  delete window.__GZ_PROPERTY_PANEL_SCHEMA__;
+  delete window.__GZ_SIMULATION_PROPERTY_PANEL_SCHEMA__;
+  delete window.__GZ_SUBSYSTEM_PROPERTY_PANEL_SCHEMA__;
+  delete window.__GZ_SIGNAL_COMPONENT_RUNTIME__;
   delete window.__GZ_FLIGHT_MODEL_PACKAGE__;
   delete window.__GZ_LOAD_DEFAULT_FLIGHT_MODEL__;
   delete window.__GZ_DEFAULT_FLIGHT_MODEL_LOADING__;
@@ -303,6 +362,7 @@ export function __resetLegacyRuntimeForTests() {
   delete window.__GZ_PYTHON_BINDING_EVENTS__;
   delete window.__GZ_SCOPE_WINDOW_DRAG_BOUND__;
   delete window.__GZ_RUNTIME_LISTENERS__;
+  delete window.__compactDiagnosisSearchEvents;
   delete window.__visualInjectionRemoveWrapped;
   delete window.__visualInjectionRenderModelNodesWrapped;
   delete window.__faultTaskLoaderUpdateWrapped;

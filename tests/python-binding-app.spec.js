@@ -107,6 +107,61 @@ describe('Python binding app integration', () => {
     __resetLegacyRuntimeForTests();
   });
 
+  it('creates the built-in airspeed sensor template as a bound simulation block', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const node = window.createNode('airspeed_sensor', 420, 320);
+    await flushRuntime();
+
+    expect(node).toMatchObject({
+      type: 'simulation_block',
+      templateId: 'airspeed_sensor',
+      props: {
+        name: '空速传感器 1',
+        moduleType: '传感器模型',
+        inputs: [{ name: '真实空速', type: '标量', varName: 'true_airspeed', unit: 'm/s' }],
+        outputs: [{ name: '测量空速', type: '标量', varName: 'measured_airspeed', unit: 'm/s' }],
+        parameters: [
+          { key: 'bias', name: '零偏', layer: 'physical', default: 0, unit: 'm/s' },
+          { key: 'scale', name: '比例系数', layer: 'physical', default: 1 }
+        ]
+      },
+      pythonBinding: {
+        bound: true,
+        moduleId: 'airspeed_sensor',
+        fileName: 'airspeed_sensor.py',
+        moduleName: 'airspeed_sensor',
+        entryFunction: 'process',
+        portMapping: {
+          inputs: [expect.objectContaining({ varName: 'true_airspeed', displayName: '真实空速' })],
+          outputs: [expect.objectContaining({ varName: 'measured_airspeed', displayName: '测量空速' })]
+        }
+      },
+      faultSlots: [
+        expect.objectContaining({
+          slotId: 'physical:airspeed_bias',
+          layer: 'physical',
+          targetField: 'parameters.bias'
+        }),
+        expect.objectContaining({
+          slotId: 'physical:airspeed_scale',
+          layer: 'physical',
+          targetField: 'parameters.scale'
+        })
+      ]
+    });
+    expect(window.__GZ_STATE__.modelNodes.at(-1)).toBe(node);
+    const block = document.getElementById(`b-${node.id}`);
+    expect(block?.querySelector('.blk-kicker')?.textContent).toBe('仿真');
+    expect(block?.querySelector('.node-card__python-chip')).toBeNull();
+    expect(block?.querySelector('.blk-lbl')?.textContent).toBe('空速传感器 1');
+    expect(block?.querySelector('.blk-lbl')?.textContent).not.toBe('airspeed_sensor.py');
+    expect(block?.getAttribute('title')).toContain('airspeed_sensor.py');
+
+    wrapper.unmount();
+  });
+
   it('binds a simulation block and rebuilds visible ports on the canvas', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -134,7 +189,9 @@ describe('Python binding app integration', () => {
 
     const reboundBlock = document.getElementById(`b-${simId}`);
     expect(reboundBlock?.className).toContain('python-bound');
-    expect(reboundBlock?.textContent).toContain('pid_controller.py');
+    expect(reboundBlock?.querySelector('.blk-lbl')?.textContent).toBe('仿真块 1');
+    expect(reboundBlock?.textContent).not.toContain('pid_controller.py');
+    expect(reboundBlock?.getAttribute('title')).toContain('pid_controller.py');
     expect(reboundBlock?.querySelectorAll('.node-port--input').length).toBe(2);
     expect(reboundBlock?.querySelectorAll('.node-port--output:not(.node-port--top)').length).toBe(1);
     expect(reboundBlock?.querySelectorAll('.node-port--top').length).toBe(1);

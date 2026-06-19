@@ -152,6 +152,165 @@ describe('canvas layout cleanup', () => {
     __resetLegacyRuntimeForTests();
   });
 
+  it('exposes extracted canvas graph geometry helpers to the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    expect(window.__GZ_CANVAS_GRAPH__).toBeTruthy();
+    expect(typeof window.__GZ_CANVAS_GRAPH__.resolvePortInfo).toBe('function');
+    expect(typeof window.__GZ_CANVAS_GRAPH__.buildEdgePath).toBe('function');
+
+    const source = {
+      type: 'signal_source',
+      x: 100,
+      y: 80
+    };
+    const ports = {
+      inputs: [],
+      outputs: [{ key: 'signal', label: '输出' }]
+    };
+    const sourcePort = window.__GZ_CANVAS_GRAPH__.resolvePortInfo(source, 'output', 0, {
+      ports,
+      componentLibrary: window.__GZ_COMPONENT_LIBRARY__
+    });
+    const targetPort = { x: 360, y: 112, side: 'left' };
+
+    expect(sourcePort).toMatchObject({
+      x: 264,
+      y: 122,
+      side: 'right'
+    });
+    expect(window.__GZ_CANVAS_GRAPH__.buildEdgePath(sourcePort, targetPort)).toBe(
+      'M 264 122 C 328 122, 296 112, 360 112'
+    );
+
+    wrapper.unmount();
+  });
+
+  it('exposes extracted canvas state helpers to the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    expect(window.__GZ_CANVAS_STATE__).toBeTruthy();
+    expect(typeof window.__GZ_CANVAS_STATE__.createSubsystemCanvas).toBe('function');
+    expect(typeof window.__GZ_CANVAS_STATE__.openCanvasRecord).toBe('function');
+
+    window.doCreateBlankWorkspace();
+    const subsystem = window.createNode('subsystem_block', 320, 180);
+    const canvas = window.__GZ_CANVAS_STATE__.createSubsystemCanvas(window.__GZ_STATE__, subsystem);
+
+    expect(canvas.id).toBe(subsystem.targetCanvasId);
+    expect(canvas.parentSubsystemNodeId).toBe(subsystem.id);
+    expect(window.__GZ_CANVAS_STATE__.openCanvasRecord(
+      window.__GZ_STATE__,
+      canvas.id,
+      ['canvas-root', canvas.id]
+    )).toBe(true);
+    expect(window.__GZ_STATE__.activeCanvasId).toBe(canvas.id);
+    expect(window.__GZ_STATE__.canvasTrail).toEqual(['canvas-root', canvas.id]);
+
+    wrapper.unmount();
+  });
+
+  it('exposes extracted canvas selection helpers to the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    expect(window.__GZ_CANVAS_SELECTION__).toBeTruthy();
+    expect(typeof window.__GZ_CANVAS_SELECTION__.getNode).toBe('function');
+    expect(typeof window.__GZ_CANVAS_SELECTION__.clearCanvasSelectionState).toBe('function');
+    expect(typeof window.__GZ_CANVAS_SELECTION__.markTopologyDirty).toBe('function');
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 120, 160);
+    window.selectNode(source.id);
+    await flushRuntime();
+
+    expect(window.__GZ_CANVAS_SELECTION__.getNode(window.__GZ_STATE__, source.id)).toBe(source);
+    expect(window.__GZ_STATE__.selBlk).toBe(source.id);
+
+    window.__GZ_CANVAS_SELECTION__.clearCanvasSelectionState(window.__GZ_STATE__);
+    expect(window.__GZ_STATE__.selBlk).toBeNull();
+    expect(window.__GZ_STATE__.selEdge).toBeNull();
+
+    window.__GZ_STATE__.systemSaved = true;
+    window.__GZ_STATE__.step = 3;
+    window.__GZ_STATE__.simDone = true;
+    window.__GZ_CANVAS_SELECTION__.markTopologyDirty(window.__GZ_STATE__, window.__GZ_SIM__, 'system');
+    expect(window.__GZ_STATE__.systemSaved).toBe(false);
+    expect(window.__GZ_STATE__.step).toBe(1);
+    expect(window.__GZ_SIM__.running).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it('exposes extracted canvas render helpers to the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    expect(window.__GZ_CANVAS_RENDER__).toBeTruthy();
+    expect(typeof window.__GZ_CANVAS_RENDER__.renderCanvasBreadcrumbs).toBe('function');
+    expect(typeof window.__GZ_CANVAS_RENDER__.createEdgeDomElements).toBe('function');
+
+    const host = document.createElement('div');
+    window.__GZ_CANVAS_RENDER__.renderCanvasBreadcrumbs(host, {
+      rootCanvasId: 'canvas-root',
+      activeCanvasId: 'canvas-child',
+      trail: ['canvas-root', 'canvas-child'],
+      getCanvasRecord(canvasId) {
+        return canvasId === 'canvas-child' ? { name: '子系统' } : { name: '顶层' };
+      }
+    });
+
+    expect(host.querySelectorAll('[data-canvas-id]')).toHaveLength(2);
+    expect(host.querySelector('[aria-current="page"]')?.textContent).toContain('子系统');
+
+    wrapper.unmount();
+  });
+
+  it('exposes extracted fault template render helpers to the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    expect(window.__GZ_FAULT_TEMPLATE_RENDER__).toBeTruthy();
+    expect(typeof window.__GZ_FAULT_TEMPLATE_RENDER__.renderFaultTemplateGrid).toBe('function');
+    expect(typeof window.__GZ_FAULT_TEMPLATE_RENDER__.renderFaultTemplateDetail).toBe('function');
+
+    const host = document.createElement('div');
+    window.__GZ_FAULT_TEMPLATE_RENDER__.renderFaultTemplateGrid(host, {
+      category: 'physical',
+      templates: [{ id: 'fault-a', name: 'Fault A', desc: 'Fault desc', tags: ['tag'], c: '#2563eb' }],
+      selectedTemplates: []
+    });
+
+    expect(host.querySelectorAll('.tcard')).toHaveLength(1);
+    expect(host.querySelector('.tcard-name')?.textContent).toBe('Fault A');
+
+    wrapper.unmount();
+  });
+
+  it('exposes extracted fault catalog render helpers to the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    expect(window.__GZ_FAULT_CATALOG_RENDER__).toBeTruthy();
+    expect(typeof window.__GZ_FAULT_CATALOG_RENDER__.renderFaultCatalogList).toBe('function');
+
+    const host = document.createElement('div');
+    const hint = document.createElement('div');
+    window.__GZ_FAULT_CATALOG_RENDER__.renderFaultCatalogList(host, hint, {
+      models: [{ id: 'fault-a', name: 'Fault A', layer: 'physical', tags: ['tag'] }],
+      importedModels: [],
+      selectedId: 'fault-a',
+      getLayerLabel: () => 'Physical Layer'
+    });
+
+    expect(host.querySelectorAll('.ifm-item')).toHaveLength(1);
+    expect(hint.textContent).toBe('已选：Fault A · Physical Layer');
+
+    wrapper.unmount();
+  });
+
   it('exposes one-click layout cleanup and arranges imported model edges left-to-right', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -697,7 +856,10 @@ describe('canvas layout cleanup', () => {
     const installablePosition = initialModel.positions.find((point) => !point.installed);
 
     expect(semantic.measurementPoints.length).toBeGreaterThanOrEqual(initialModel.positions.length);
-    expect(initialModel.positions).toHaveLength(pkg.diagnosticModel.testPoints.length);
+    expect(initialModel.positions.length).toBeGreaterThanOrEqual(pkg.diagnosticModel.testPoints.length);
+    expect(pkg.diagnosticModel.testPoints.every((point) =>
+      initialModel.positions.some((position) => position.pointId === point.pointId)
+    )).toBe(true);
     expect(initialModel.installed.length).toBe(0);
     expect(installablePosition).toBeTruthy();
     expect(initialModel.positions.every((point) =>
@@ -721,7 +883,7 @@ describe('canvas layout cleanup', () => {
     expect(panel?.querySelector('[data-install-testpoint]')).not.toBeNull();
     expect(panel?.querySelectorAll('[data-installed-testpoint]').length).toBe(afterInstall.installed.length);
     expect(panel?.querySelector(`[data-installed-testpoint="${installablePosition.pointId}"]`)).not.toBeNull();
-    expect(panel?.querySelector(`[data-fixed-testpoint-position="${installablePosition.pointId}"]`)?.textContent).toContain('已安装');
+    expect(panel?.querySelector(`[data-fixed-testpoint-position="${installablePosition.pointId}"]`)?.textContent).toContain('已启用');
 
     expect(window.removeDiagnosticTestPoint(installablePosition.pointId)).toBe(true);
     const afterRemove = window.buildDiagnosticTestPointModel();
@@ -736,7 +898,7 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
-  it('derives measurement points and D matrix rows from a manually built workspace', async () => {
+  it('builds measurement points and D matrix rows only from configured workspace test points', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
@@ -785,22 +947,19 @@ describe('canvas layout cleanup', () => {
     window.renderEdges();
     await flushRuntime();
 
-    const emptyTestPointModel = window.buildDiagnosticTestPointModel();
-    expect(emptyTestPointModel.positions).toHaveLength(0);
-    expect(emptyTestPointModel.candidateEdges.map((edge) => edge.id)).toEqual([
-      'edge-manual-command',
-      'edge-manual-output'
-    ]);
-    const addResult = window.addDiagnosticTestPointFromEdge('edge-manual-output');
-    expect(addResult).toMatchObject({
-      ok: true,
-      point: expect.objectContaining({
-        edgeId: 'edge-manual-output'
-      })
+    const automaticTestPointModel = window.buildDiagnosticTestPointModel();
+    expect(automaticTestPointModel.positions).toEqual([]);
+
+    const addResult = window.addDiagnosticTestPointFromEdge('edge-manual-output', {
+      name: 'Manual output measurement',
+      detects: ['manual-output-bias']
     });
+    expect(addResult).toMatchObject({ ok: true });
+
     const testPointModel = window.buildDiagnosticTestPointModel();
-    expect(testPointModel.positions.map((point) => point.edgeId)).toEqual(['edge-manual-output']);
-    const outputPoint = testPointModel.positions[0];
+    const outputPoint = testPointModel.positions.find((point) => point.edgeId === 'edge-manual-output');
+    expect(outputPoint).toBeTruthy();
+    expect(outputPoint.detects).toEqual(['manual-output-bias']);
     expect(window.installDiagnosticTestPoint(outputPoint.pointId)).toBe(true);
     expect(window.buildDiagnosticTestPointModel().installed.map((point) => point.edgeId)).toEqual(['edge-manual-output']);
 
@@ -821,6 +980,305 @@ describe('canvas layout cleanup', () => {
     window.setCanvasView('dmatrix');
     await flushRuntime();
     expect(document.getElementById('d-matrix-panel')?.textContent).toContain('manual-output-bias');
+
+    wrapper.unmount();
+  });
+
+  it('removes an injected runtime fault row from the D matrix when the fault is cancelled', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 220, 220);
+    const controller = window.createNode('simulation_block', 460, 220);
+    const scope = window.createNode('instrument_scope', 700, 220);
+    const state = window.__GZ_STATE__;
+    state.modelEdges.push(
+      {
+        id: 'edge-command-input',
+        lineType: 'normal',
+        sourceNodeId: source.id,
+        targetNodeId: controller.id,
+        sourcePortIndex: 0,
+        targetPortIndex: 0,
+        signalId: 'manual.command'
+      },
+      {
+        id: 'edge-controller-output',
+        lineType: 'normal',
+        sourceNodeId: controller.id,
+        targetNodeId: scope.id,
+        sourcePortIndex: 0,
+        targetPortIndex: 0,
+        signalId: 'manual.output',
+        injectedFault: {
+          id: 'runtime-output-bias',
+          modelId: 'runtime-output-bias',
+          name: 'Runtime Output Bias',
+          layer: 'electrical',
+          targetEdgeId: 'edge-controller-output',
+          affectedEdges: ['edge-controller-output']
+        },
+        faultBindings: [
+          {
+            bindingId: 'binding-runtime-output-bias',
+            faultModelId: 'runtime-output-bias',
+            name: 'Runtime Output Bias',
+            layer: 'electrical',
+            active: true
+          }
+        ]
+      }
+    );
+    state.faultInstances = [
+      {
+        instanceId: 'fault-inst-runtime-output-bias',
+        faultTypeId: 'runtime-output-bias',
+        targetKind: 'edge',
+        targetId: 'edge-controller-output',
+        targetEdgeId: 'edge-controller-output',
+        active: true,
+        affectedEdges: ['edge-controller-output']
+      }
+    ];
+    window.renderEdges();
+    await flushRuntime();
+
+    const addResult = window.addDiagnosticTestPointFromEdge('edge-controller-output');
+    expect(addResult).toMatchObject({ ok: true });
+    expect(window.installDiagnosticTestPoint(addResult.point.pointId)).toBe(true);
+
+    window.setCanvasView('dmatrix');
+    await flushRuntime();
+    const matrixBeforeRemove = window.buildDetectionMatrixModel();
+    expect(matrixBeforeRemove.rows.map((row) => `${row.faultId} ${row.faultName}`).join('\n')).toContain('runtime-output-bias');
+    expect(document.getElementById('d-matrix-panel')?.textContent).toContain('runtime-output-bias');
+
+    expect(window.removeFaultBinding('edge', 'edge-controller-output', 'binding-runtime-output-bias')).toBe(true);
+    await flushRuntime();
+
+    const matrixAfterRemove = window.buildDetectionMatrixModel();
+    expect(matrixAfterRemove.rows.map((row) => `${row.faultId} ${row.faultName}`).join('\n')).not.toContain('runtime-output-bias');
+    expect(document.getElementById('d-matrix-panel')?.textContent).not.toContain('runtime-output-bias');
+
+    wrapper.unmount();
+  });
+
+  it('shows layered fault runtime behavior and target parameter in D matrix rows', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
+    await flushRuntime();
+
+    expect(importResult).toMatchObject({ ok: true });
+
+    const state = window.__GZ_STATE__;
+    const controller = state.modelNodes.find((node) => node.id === 'node-controller');
+    const physicalInjector = window.createNode('physical_fault_injector', 420, 260);
+    await flushRuntime();
+
+    const result = window.bindLayeredFaultInjectorToTarget(physicalInjector.id, {
+      targetKind: 'node',
+      targetId: controller.id,
+      slotId: 'physical:controller_gain',
+      mathModel: 'bias',
+      parameters: { bias: 0.2, start: 1, duration: 3 }
+    });
+    await flushRuntime();
+
+    expect(result).toMatchObject({
+      ok: true,
+      bindingObject: 'controller_gain'
+    });
+
+    window.setCanvasView('dmatrix');
+    await flushRuntime();
+
+    const matrixPanel = document.getElementById('d-matrix-panel');
+    const targetRow = Array.from(matrixPanel?.querySelectorAll('tbody tr') || [])
+      .find((row) => row.textContent?.includes('controller_gain'));
+    expect(targetRow).not.toBeNull();
+    expect(targetRow?.querySelector('.d-matrix-sticky strong')?.textContent).toBe('偏差故障');
+    expect(targetRow?.querySelector('.d-matrix-sticky small')?.textContent).toBe('controller_gain');
+
+    wrapper.unmount();
+  });
+
+  it('does not automatically list dataflow edges as fixed diagnostic test points', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 220, 220);
+    const sensor = window.createNode('airspeed_sensor', 460, 220);
+
+    window.__GZ_STATE__.modelEdges.push({
+      id: 'edge-airspeed-output',
+      lineType: 'normal',
+      sourceNodeId: source.id,
+      targetNodeId: sensor.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0,
+      signalId: 'airspeed.true',
+      sourcePort: { displayName: '真实空速', type: 'scalar' },
+      targetPort: { displayName: '真实空速', type: 'scalar' }
+    });
+    window.renderEdges();
+    window.setCanvasView('dataflow');
+    await flushRuntime();
+
+    const panel = document.getElementById('dataflow-panel');
+    const search = panel?.querySelector('[data-testpoint-search]');
+
+    expect(search).not.toBeNull();
+    expect(panel?.querySelector('[data-testpoint-edge-select]')).toBeNull();
+    expect(panel?.querySelector('[data-add-testpoint-from-edge]')).toBeNull();
+
+    const model = window.buildDiagnosticTestPointModel();
+    expect(model.positions).toEqual([]);
+    expect(model.installed).toHaveLength(0);
+    expect(document.getElementById('dataflow-panel')?.querySelector('[data-fixed-testpoint-position]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('selects and installs a fixed diagnostic test point from dataflow header actions', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 220, 220);
+    const sensor = window.createNode('airspeed_sensor', 460, 220);
+
+    window.__GZ_STATE__.modelEdges.push({
+      id: 'edge-delete-testpoint',
+      lineType: 'normal',
+      sourceNodeId: source.id,
+      targetNodeId: sensor.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0,
+      signalId: 'airspeed.delete',
+      sourcePort: { displayName: '真实空速', type: 'scalar' },
+      targetPort: { displayName: '真实空速', type: 'scalar' }
+    });
+    window.renderEdges();
+    window.addDiagnosticTestPointFromEdge('edge-delete-testpoint');
+    window.setCanvasView('dataflow');
+    await flushRuntime();
+
+    let model = window.buildDiagnosticTestPointModel();
+    const point = model.positions.find((item) => item.edgeId === 'edge-delete-testpoint');
+    expect(point).toBeTruthy();
+    const pointCard = document.querySelector(`[data-fixed-testpoint-position="${point.pointId}"]`);
+    expect(pointCard).not.toBeNull();
+    expect(pointCard.querySelector('[data-delete-fixed-testpoint]')).toBeNull();
+    const fixedPanel = document.querySelector('.tp-console-panel--points');
+    const detectPanel = document.querySelectorAll('.tp-console-panel')[1];
+    expect(fixedPanel?.querySelector('[data-install-testpoint]')?.textContent).toContain('启用测点');
+    expect(fixedPanel?.querySelector('[data-install-all-testpoints]')?.textContent).toContain('全部启用');
+    expect(detectPanel?.querySelector('[data-clear-testpoints]')?.textContent).toContain('全部移除');
+    expect(detectPanel?.textContent).toContain('先从左侧启用测点。');
+    expect(detectPanel?.textContent).not.toContain('先从左侧安装测点。');
+
+    pointCard.click();
+    await flushRuntime();
+
+    expect(window.__GZ_STATE__.selectedDiagnosticTestPointId).toBe(point.pointId);
+    expect(window.buildDiagnosticTestPointModel().installed).toHaveLength(0);
+
+    const installButton = document.querySelector('[data-install-testpoint]');
+    expect(installButton).not.toBeNull();
+    installButton.click();
+    await flushRuntime();
+
+    model = window.buildDiagnosticTestPointModel();
+    expect(model.installed.some((item) => item.pointId === point.pointId)).toBe(true);
+    expect(document.querySelector('[data-delete-fixed-testpoint]')).toBeNull();
+    expect(document.querySelector(`[data-fixed-testpoint-position="${point.pointId}"]`)).not.toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('searches configured dataflow test points after importing the closed-loop demo', async () => {
+    window.__compactDiagnosisConsoleEvents = true;
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
+    await flushRuntime();
+
+    window.setCanvasView('dataflow');
+    await flushRuntime();
+
+    const before = window.buildDiagnosticTestPointModel();
+    expect(before.positions.some((point) => point.edgeId === 'edge-command-scope')).toBe(false);
+    expect(before.candidateEdges.some((edge) => edge.id === 'edge-command-scope')).toBe(true);
+
+    const panel = document.getElementById('dataflow-panel');
+    const search = panel?.querySelector('[data-testpoint-search]');
+    const searchButton = panel?.querySelector('[data-testpoint-search-submit]');
+    expect(search).not.toBeNull();
+    expect(searchButton).not.toBeNull();
+    const allPointCount = document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]').length;
+
+    ['姿', '姿态', '姿态指令'].forEach((value) => {
+      search.value = value;
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await flushRuntime();
+    expect(Array.from(document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]') || [])
+      .filter((element) => !element.hidden).length)
+      .toBe(allPointCount);
+
+    searchButton.click();
+    await flushRuntime();
+
+    const after = window.buildDiagnosticTestPointModel();
+    const addedPoint = after.positions.find((point) => String(point.name || '').includes('姿态指令'));
+    expect(addedPoint).toBeTruthy();
+    expect(document.getElementById('dataflow-panel')?.querySelector('[data-testpoint-search]')?.value)
+      .toBe('姿态指令');
+    expect(document.getElementById('dataflow-panel')?.querySelector(
+      `[data-fixed-testpoint-position="${addedPoint.pointId}"]`
+    )).not.toBeNull();
+    expect(Array.from(document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]') || [])
+      .filter((element) => !element.hidden).length)
+      .toBe(1);
+    expect(Array.from(document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]') || [])
+      .filter((element) => element.style.display !== 'none').length)
+      .toBe(1);
+
+    const nameSearch = document.getElementById('dataflow-panel')?.querySelector('[data-testpoint-search]');
+    const nameSearchButton = document.getElementById('dataflow-panel')?.querySelector('[data-testpoint-search-submit]');
+    nameSearch.value = 'edge-command-scope';
+    nameSearch.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushRuntime();
+    expect(Array.from(document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]') || [])
+      .filter((element) => !element.hidden).length)
+      .toBe(1);
+
+    nameSearchButton.click();
+    await flushRuntime();
+
+    expect(Array.from(document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]') || [])
+      .filter((element) => !element.hidden).length)
+      .toBe(0);
+    expect(Array.from(document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]') || [])
+      .filter((element) => element.style.display !== 'none').length)
+      .toBe(0);
+    expect(document.getElementById('dataflow-panel')?.textContent).toContain('没有匹配的测点。');
+
+    nameSearch.value = 'M1';
+    nameSearch.dispatchEvent(new Event('input', { bubbles: true }));
+    nameSearchButton.click();
+    await flushRuntime();
+
+    expect(Array.from(document.getElementById('dataflow-panel')?.querySelectorAll('[data-fixed-testpoint-position]') || [])
+      .filter((element) => element.style.display !== 'none').length)
+      .toBe(0);
 
     wrapper.unmount();
   });
@@ -1889,7 +2347,7 @@ describe('canvas layout cleanup', () => {
     expect(maxScopeDiff(combinedActual, combinedReference, 1, 3)).toBeGreaterThan(1);
 
     wrapper.unmount();
-  }, 15000);
+  }, 30000);
 
   it('routes Python-bound output through protocol dropout faults before scope sampling', async () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => createCanvasContextStub());
@@ -1994,7 +2452,7 @@ describe('canvas layout cleanup', () => {
     expect(Math.max(...lateValues.map(Math.abs))).toBeLessThan(0.16);
 
     wrapper.unmount();
-  }, 15000);
+  }, 30000);
 
   it('stops dragging a scope window after pointer cancellation', async () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => createCanvasContextStub());
@@ -2099,6 +2557,40 @@ describe('canvas layout cleanup', () => {
     expect(saved.model.edges.length).toBeGreaterThan(0);
     expect(saved.samples.actual.scopeSamples['node-scope'].ch1.length).toBeGreaterThan(0);
     expect(saved.samples.reference.scopeSamples['node-scope'].ch1.length).toBeGreaterThan(0);
+    expect(saved.renderData).toMatchObject({
+      devices: expect.any(Array),
+      connections: expect.any(Array)
+    });
+    const scopeRenderDevice = saved.renderData.devices.find((device) => device.id === 'node-scope');
+    expect(scopeRenderDevice).toMatchObject({
+      id: 'node-scope',
+      type: 'instrument_scope',
+      channels: {
+        ch1: {
+          dataType: 'number',
+          series: expect.any(Array)
+        }
+      }
+    });
+    expect(scopeRenderDevice.channels.ch1.series.length).toBeGreaterThan(0);
+    expect(scopeRenderDevice.channels.ch1.series[0]).toEqual(
+      expect.objectContaining({
+        t: expect.any(Number),
+        value: expect.any(Number)
+      })
+    );
+    expect(saved.renderData.connections.length).toBeGreaterThan(0);
+    const scopeConnection = saved.renderData.connections.find((connection) => connection.targetDeviceId === 'node-scope');
+    expect(scopeConnection).toEqual(
+      expect.objectContaining({
+        id: expect.any(String),
+        sourceDeviceId: expect.any(String),
+        targetDeviceId: 'node-scope'
+      })
+    );
+    expect(scopeConnection).not.toHaveProperty('status');
+    expect(scopeConnection).not.toHaveProperty('testPoints');
+    expect(scopeConnection).not.toHaveProperty('channels');
     expect(saved.summary.faultCount).toBeGreaterThanOrEqual(0);
 
     wrapper.unmount();
@@ -2410,6 +2902,8 @@ describe('canvas layout cleanup', () => {
     expect(importResult).toMatchObject({ ok: true });
     expect(typeof window.buildDetectionMatrixModel).toBe('function');
     expect(typeof window.exportDetectionMatrixCsv).toBe('function');
+    expect(window.buildDetectionMatrixModel().points).toHaveLength(0);
+    window.installAllDiagnosticTestPoints();
 
     const matrix = window.buildDetectionMatrixModel();
     expect(matrix.points.length).toBeGreaterThanOrEqual(10);
@@ -2439,6 +2933,8 @@ describe('canvas layout cleanup', () => {
     expect(panel?.querySelector('[data-d-matrix-view]')).not.toBeNull();
     expect(panel?.querySelector('[data-d-matrix-export]')).not.toBeNull();
     expect(panel?.textContent).toContain('D矩阵');
+    expect(panel?.textContent).toContain('已启用测点');
+    expect(panel?.textContent).not.toContain('固定测点');
 
     const componentsCss = readComponentsCss();
     const dMatrixPanelRule = findCssRule(componentsCss, '.d-matrix-panel');
@@ -2446,27 +2942,58 @@ describe('canvas layout cleanup', () => {
     const dMatrixHeaderRule = findCssRule(componentsCss, '.d-matrix-header');
     const dMatrixTitleRule = findCssRule(componentsCss, '.d-matrix-header h2');
     const dMatrixHeaderCopyRule = findCssRule(componentsCss, '.d-matrix-header p');
+    const dMatrixSummaryRule = findCssRule(componentsCss, '.d-matrix-summary');
+    const dMatrixChromeRule = findCssRule(componentsCss, '.canvas-wrap[data-view="dmatrix"] .canvas-chrome');
+    const dMatrixTabsRule = findCssRule(componentsCss, '.canvas-wrap[data-view="dmatrix"] .canvas-tabs');
     const canvasChromeRule = findCssRule(componentsCss, '.canvas-chrome');
     const canvasTabsRule = findCssRule(componentsCss, '.canvas-tabs');
     const tableWrapRule = findCssRule(componentsCss, '.d-matrix-table-wrap');
+    const tableStickyBodyRule = findCssRule(componentsCss, '.d-matrix-table td.d-matrix-sticky');
+    const tableStickyHeaderRule = findCssRule(componentsCss, '.d-matrix-table th.d-matrix-sticky');
+    const troubleshootingPathRule = findCssRule(componentsCss, '.troubleshooting-path');
     const exportRule = findCssRule(componentsCss, '.d-matrix-export');
     expect(componentsCss).toContain('.canvas-wrap[data-view="dmatrix"] .canvas-floating');
     expect(componentsCss).toContain('.canvas-wrap[data-view="dmatrix"] .canvas-tools');
     expect(componentsCss).toContain('.canvas-wrap[data-view="dmatrix"] .canvas-sim-dock');
-    expect(dMatrixPanelRule).toMatch(/top\s*:\s*46px/);
+    expect(dMatrixPanelRule).toMatch(/top\s*:\s*48px/);
     expect(dMatrixPanelRule).toMatch(/z-index\s*:\s*var\(--canvas-layer-panel\)/);
+    expect(dMatrixChromeRule).toMatch(/grid-template-rows\s*:\s*48px/);
+    expect(dMatrixChromeRule).toMatch(/height\s*:\s*48px/);
+    expect(dMatrixTabsRule).toMatch(/grid-row\s*:\s*1/);
     expect(componentsCss).toMatch(/--canvas-layer-panel\s*:\s*11/);
     expect(canvasChromeRule).toMatch(/z-index\s*:\s*20/);
     expect(canvasTabsRule).toMatch(/background\s*:\s*#fff/);
     expect(dMatrixPanelRule).toMatch(/overflow\s*:\s*hidden/);
     expect(dMatrixPanelRule).toMatch(/border-radius\s*:\s*0/);
     expect(dMatrixPanelRule).not.toMatch(/box-shadow/);
+    expect(dMatrixRule).toMatch(/min-width\s*:\s*0/);
+    expect(dMatrixRule).toMatch(/position\s*:\s*relative/);
     expect(dMatrixRule).toMatch(/font-family\s*:\s*"IBM Plex Sans"/);
+    expect(dMatrixRule).toMatch(/isolation\s*:\s*isolate/);
     expect(dMatrixHeaderRule).toMatch(/align-items\s*:\s*center/);
+    expect(dMatrixHeaderRule).toMatch(/position\s*:\s*relative/);
+    expect(dMatrixHeaderRule).toMatch(/z-index\s*:\s*10/);
     expect(dMatrixTitleRule).toMatch(/font-size\s*:\s*22px/);
     expect(dMatrixHeaderCopyRule).toMatch(/display\s*:\s*none/);
+    expect(dMatrixSummaryRule).toMatch(/position\s*:\s*relative/);
+    expect(dMatrixSummaryRule).toMatch(/z-index\s*:\s*9/);
     expect(tableWrapRule).toMatch(/min-height\s*:\s*0/);
+    expect(tableWrapRule).toMatch(/position\s*:\s*relative/);
+    expect(tableWrapRule).toMatch(/z-index\s*:\s*1/);
+    expect(tableStickyBodyRule).toMatch(/z-index\s*:\s*3/);
+    expect(tableStickyHeaderRule).toMatch(/top\s*:\s*0/);
+    expect(tableStickyHeaderRule).toMatch(/z-index\s*:\s*5/);
+    expect(troubleshootingPathRule).toMatch(/z-index\s*:\s*12/);
     expect(exportRule).toMatch(/border-radius\s*:\s*0/);
+
+    const firstPathAction = panel?.querySelector('[data-build-troubleshooting-path]');
+    expect(firstPathAction).not.toBeNull();
+    firstPathAction.click();
+    await flushRuntime();
+    const pathPanel = panel?.querySelector('[data-troubleshooting-path-panel]');
+    expect(pathPanel).not.toBeNull();
+    expect(pathPanel?.textContent).toContain('最优排故路径');
+    expect(pathPanel?.querySelector('[data-close-troubleshooting-path]')).not.toBeNull();
 
     const csv = window.exportDetectionMatrixCsv({ download: false });
     expect(csv).toContain('故障类型');

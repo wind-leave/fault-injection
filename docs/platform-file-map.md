@@ -114,3 +114,6 @@
 - 固定的电气层、物理层、协议层注入入口。
 - 故障标签作为组件或连线的附属实例存在。
 - 不承诺任意外部模型自动匹配当前故障库。
+## Backend Simulation Service
+
+`backend/` contains the restricted model-package simulation backend. It validates executable packages, resolves whitelisted Python modules, compiles supported canvas graphs, runs reference and actual simulations, and serves `POST /api/simulations/run`.

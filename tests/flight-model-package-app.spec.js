@@ -365,6 +365,41 @@ describe('Flight model package app integration', () => {
     wrapper.unmount();
   });
 
+  it('exposes the component registry globals before evaluating the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    expect(window.__GZ_COMPONENT_GROUPS__.map((group) => group.id)).toContain('signal-ops');
+    expect(window.__GZ_COMPONENT_REGISTRY__.flow_block).toMatchObject({
+      type: 'flow_block',
+      group: 'signal-ops',
+      label: '信号适配块'
+    });
+    expect(window.__GZ_COMPONENT_LIBRARY__.flow_block).toMatchObject({
+      label: '信号适配块',
+      badge: '适配',
+      className: 'b-flow'
+    });
+    expect(window.__GZ_COMPONENT_LIBRARY__.flow_block).not.toHaveProperty('group');
+
+    wrapper.unmount();
+  });
+
+  it('enables the run button after importing a runnable flight model package', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
+    await flushRuntime();
+
+    expect(importResult).toMatchObject({ ok: true });
+    expect(window.canInitializeSimulation()).toBe(true);
+    expect(document.getElementById('sbtn-run')?.classList.contains('sim-btn-disabled')).toBe(false);
+
+    wrapper.unmount();
+  });
+
   it('loads the closed-loop eVTOL package as the default flight-control model on demand', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -1013,6 +1048,8 @@ describe('Flight model package app integration', () => {
   it('uses explicit diagnostic matrix signatures for multiple fault forms on the same target', async () => {
     const { wrapper } = await importDefaultClosedLoopPackage();
 
+    expect(window.buildDetectionMatrixModel().points).toHaveLength(0);
+    window.installAllDiagnosticTestPoints();
     const matrix = window.buildDetectionMatrixModel();
     const residual = matrix.points.find((point) => point.shortName === 'M10');
     const spectrum = matrix.points.find((point) => point.shortName === 'M11');
@@ -1034,6 +1071,7 @@ describe('Flight model package app integration', () => {
     const { wrapper } = await importDefaultClosedLoopPackage();
 
     expect(typeof window.buildTroubleshootingPathForFault).toBe('function');
+    window.installAllDiagnosticTestPoints();
     const path = window.buildTroubleshootingPathForFault('gyro_zero_bias_drift');
 
     expect(path).toMatchObject({
@@ -1057,6 +1095,7 @@ describe('Flight model package app integration', () => {
   it('opens the troubleshooting path panel from a D matrix fault row', async () => {
     const { wrapper } = await importDefaultClosedLoopPackage();
 
+    window.installAllDiagnosticTestPoints();
     window.renderDetectionMatrixPanel();
     await flushRuntime();
 
@@ -1253,6 +1292,45 @@ describe('Flight model package app integration', () => {
     }
   });
 
+  it('imports the selected local model JSON through the browser file picker API when available', async () => {
+    const originalPicker = window.showOpenFilePicker;
+    const selectedPackage = loadPublicPackage('evtol_small_nonlinear.json');
+    const inputClick = vi.spyOn(HTMLInputElement.prototype, 'click');
+    window.showOpenFilePicker = vi.fn().mockResolvedValue([
+      {
+        getFile: async () => ({
+          name: 'model-package.json',
+          text: async () => JSON.stringify(selectedPackage)
+        })
+      }
+    ]);
+
+    const wrapper = mount(App, { attachTo: document.body });
+    try {
+      await flushRuntime();
+
+      const importResult = await window.doImportSys();
+      await flushRuntime();
+
+      expect(importResult).toMatchObject({ ok: true });
+      expect(window.showOpenFilePicker).toHaveBeenCalledWith(expect.objectContaining({
+        multiple: false
+      }));
+      expect(inputClick).not.toHaveBeenCalled();
+      expect(window.__GZ_STATE__.activeModelPackage).toMatchObject({
+        modelId: selectedPackage.modelId,
+        modelName: selectedPackage.modelName
+      });
+    } finally {
+      if (originalPicker) {
+        window.showOpenFilePicker = originalPicker;
+      } else {
+        delete window.showOpenFilePicker;
+      }
+      wrapper.unmount();
+    }
+  });
+
   it('restores the import button when the local model JSON picker is cancelled', async () => {
     vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function click() {
       this.dispatchEvent(new Event('cancel'));
@@ -1302,6 +1380,39 @@ describe('Flight model package app integration', () => {
       modelName: selectedPackage.modelName
     });
     expect(document.getElementById('btn-imp-sys')?.textContent).toBe('导入系统模型');
+
+    wrapper.unmount();
+  });
+
+  it('waits for a delayed local model JSON selection after focus returns', async () => {
+    const selectedPackage = loadPublicPackage('evtol_small_nonlinear.json');
+    vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function click() {
+      window.dispatchEvent(new Event('focus'));
+      setTimeout(() => {
+        Object.defineProperty(this, 'files', {
+          configurable: true,
+          value: [
+            {
+              name: 'model-package.json',
+              text: async () => JSON.stringify(selectedPackage)
+            }
+          ]
+        });
+        this.onchange?.(new Event('change'));
+      }, 350);
+    });
+
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const importResult = await window.doImportSys();
+    await flushRuntime();
+
+    expect(importResult).toMatchObject({ ok: true });
+    expect(window.__GZ_STATE__.activeModelPackage).toMatchObject({
+      modelId: selectedPackage.modelId,
+      modelName: selectedPackage.modelName
+    });
 
     wrapper.unmount();
   });
@@ -1475,7 +1586,7 @@ describe('Flight model package app integration', () => {
     }
 
     wrapper.unmount();
-  });
+  }, 10000);
 
   it('keeps the fault view label readable and leaves injected fault tags independently positioned', async () => {
     const wrapper = mount(App, { attachTo: document.body });

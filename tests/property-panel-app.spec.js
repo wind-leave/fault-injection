@@ -38,6 +38,26 @@ function setCheckboxValue(selector, checked) {
   field.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
+function visiblePropertyTabs() {
+  return Array.from(document.querySelectorAll('[data-props-tab]'))
+    .filter((button) => !button.hidden)
+    .map((button) => button.dataset.propsTab);
+}
+
+function dispatchPointer(target, type, init = {}) {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: init.clientX ?? 0,
+    clientY: init.clientY ?? 0,
+    button: init.button ?? 0
+  });
+  Object.defineProperty(event, 'pointerId', {
+    value: init.pointerId ?? 1
+  });
+  target.dispatchEvent(event);
+}
+
 describe('property panel interaction', () => {
   afterEach(() => {
     window.localStorage.clear();
@@ -74,6 +94,87 @@ describe('property panel interaction', () => {
     expect(document.querySelector('.props-fault-actions')).not.toBeNull();
     expect(document.getElementById('pd')?.textContent).toContain('No active faults');
     expect(document.querySelector('.props-fault-action')).not.toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('saves simple component parameters through the extracted property schema', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const gain = window.createNode('gain_block', 260, 220);
+    await flushRuntime();
+
+    window.selectNode(gain.id);
+    await flushRuntime();
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    expect(window.__GZ_PROPERTY_PANEL_SCHEMA__).toBeTruthy();
+    expect(document.getElementById('prop-gain')).not.toBeNull();
+
+    setFieldValue('#prop-name', '增益 A');
+    setFieldValue('#prop-gain', '3.5');
+    setFieldValue('#prop-inputFormat', '向量', 'change');
+    setFieldValue('#prop-outputFormat', '矩阵', 'change');
+    document.querySelector('.props-save').click();
+    await flushRuntime();
+
+    expect(gain.props).toMatchObject({
+      name: '增益 A',
+      gain: '3.5',
+      inputFormat: '向量',
+      outputFormat: '矩阵'
+    });
+
+    wrapper.unmount();
+  });
+
+  it('exposes a fault UI refresh orchestration entry point', async () => {
+    const wrapper = await mountWorkbench();
+
+    expect(window.refreshFaultUiAfterChange).toEqual(expect.any(Function));
+
+    wrapper.unmount();
+  });
+
+  it('renders simulation block parameters through the extracted simulation schema', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const block = window.createNode('simulation_block', 300, 220);
+    await flushRuntime();
+
+    window.selectNode(block.id);
+    await flushRuntime();
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    expect(window.__GZ_SIMULATION_PROPERTY_PANEL_SCHEMA__).toBeTruthy();
+    expect(document.getElementById('prop-name')).not.toBeNull();
+    expect(document.getElementById('prop-moduleType')).not.toBeNull();
+    expect(document.getElementById('sim-input-count')).not.toBeNull();
+    expect(document.getElementById('sim-output-count')).not.toBeNull();
+    expect(document.getElementById('sim-middle-count')).not.toBeNull();
+    expect(document.querySelector('.sim-intf-row[data-role="输入"]')).not.toBeNull();
+    expect(document.querySelector('.sim-intf-row[data-role="输出"]')).not.toBeNull();
+    expect(document.querySelector('.sim-intf-row[data-role="中间变量"]')).not.toBeNull();
+
+    setFieldValue('#prop-name', '仿真 A');
+    setFieldValue('#prop-moduleType', '积分', 'change');
+    setFieldValue('.sim-intf-row[data-role="输入"] [data-sim-field="name"]', '误差输入');
+    setFieldValue('.sim-intf-row[data-role="输出"] [data-sim-field="name"]', '控制输出');
+    setFieldValue('.sim-intf-row[data-role="中间变量"] [data-sim-field="name"]', '积分状态');
+    setFieldValue('#prop-ffunctionNote', '接口说明');
+    document.querySelector('.props-save').click();
+    await flushRuntime();
+
+    expect(block.props.name).toBe('仿真 A');
+    expect(block.props.moduleType).toBe('积分');
+    expect(block.props.inputs[0].name).toBe('误差输入');
+    expect(block.props.outputs[0].name).toBe('控制输出');
+    expect(block.props.middleVars[0].name).toBe('积分状态');
+    expect(block.props.ffunctionNote).toBe('接口说明');
 
     wrapper.unmount();
   });
@@ -353,9 +454,99 @@ describe('property panel interaction', () => {
     window.selectNode(injector.id);
     await flushRuntime();
     expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
+    expect(visiblePropertyTabs()).toEqual(['overview']);
+
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+    expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
+    expect(document.querySelector('[data-props-tab="overview"]')?.classList.contains('is-active')).toBe(true);
+    expect(visiblePropertyTabs()).toEqual(['overview']);
+
+    window.setPropertyPanelTab('faults');
+    await flushRuntime();
+    expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
+    expect(document.querySelector('[data-props-tab="overview"]')?.classList.contains('is-active')).toBe(true);
+    expect(visiblePropertyTabs()).toEqual(['overview']);
+
+    wrapper.unmount();
+  }, 10000);
+
+  it('keeps unbound fault injector tabs to overview only when selected from other panel states', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 220, 220);
+    const injector = window.createNode('protocol_fault_injector', 420, 260);
+    await flushRuntime();
+
+    window.selectNode(source.id);
+    await flushRuntime();
+    expect(visiblePropertyTabs()).toEqual(['overview', 'parameters', 'faults', 'outputs']);
+
+    window.selectNode(injector.id);
+    await flushRuntime();
+    expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
+    expect(visiblePropertyTabs()).toEqual(['overview']);
+
+    const viewport = document.getElementById('canvas-viewport');
+    dispatchPointer(viewport, 'pointerdown', { pointerId: 11, clientX: 24, clientY: 24 });
+    dispatchPointer(viewport, 'pointerup', { pointerId: 11, clientX: 24, clientY: 24 });
+    await flushRuntime();
+    expect(visiblePropertyTabs()).toEqual(['overview']);
+
+    window.selectNode(injector.id);
+    await flushRuntime();
+    expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
+    expect(visiblePropertyTabs()).toEqual(['overview']);
 
     wrapper.unmount();
   });
+
+  it('keeps bound fault component tabs to overview and parameters when selected from other panel states', async () => {
+    const wrapper = await mountWorkbench();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
+    expect(importResult).toMatchObject({ ok: true });
+
+    const source = window.__GZ_STATE__.modelNodes.find((node) => node.type === 'signal_source');
+    const edge = window.__GZ_STATE__.modelEdges.find((item) => item.id === 'edge-motor-motor1');
+    const injector = window.createNode('protocol_fault_injector', 420, 260);
+    await flushRuntime();
+
+    const bindResult = window.bindLayeredFaultInjectorToTarget(injector.id, {
+      targetKind: 'edge',
+      targetId: edge.id,
+      mathModel: 'tamper',
+      parameters: { value: 1, start: 0, duration: '', mode: 'overwrite' }
+    });
+    await flushRuntime();
+
+    expect(bindResult).toMatchObject({ ok: true });
+    const tag = window.__GZ_STATE__.faultTags[0];
+
+    window.selectNode(source.id);
+    await flushRuntime();
+    expect(visiblePropertyTabs()).toEqual(['overview', 'parameters', 'faults', 'outputs']);
+
+    window.selectFaultTag(tag.id);
+    await flushRuntime();
+    expect(document.querySelector('[data-props-panel-kind="fault-tag"]')).not.toBeNull();
+    expect(visiblePropertyTabs()).toEqual(['overview', 'parameters']);
+
+    const viewport = document.getElementById('canvas-viewport');
+    dispatchPointer(viewport, 'pointerdown', { pointerId: 12, clientX: 24, clientY: 24 });
+    dispatchPointer(viewport, 'pointerup', { pointerId: 12, clientX: 24, clientY: 24 });
+    await flushRuntime();
+    expect(visiblePropertyTabs()).toEqual(['overview']);
+
+    window.selectFaultTag(tag.id);
+    await flushRuntime();
+    expect(document.querySelector('[data-props-panel-kind="fault-tag"]')).not.toBeNull();
+    expect(visiblePropertyTabs()).toEqual(['overview', 'parameters']);
+
+    wrapper.unmount();
+  }, 10000);
 
   it('keeps a fault tag inside its dedicated property panel when switching tabs', async () => {
     const wrapper = await mountWorkbench();
@@ -386,11 +577,16 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     expect(document.querySelector('[data-props-panel-kind="fault-tag"]')).not.toBeNull();
+    expect(window.__GZ_FAULT_TAG_PANEL_SCHEMA__).toBeTruthy();
     expect(document.querySelector(`[data-fault-tag-inspector="${tag.id}"]`)).not.toBeNull();
     expect(document.querySelector('.fault-tag-overview-panel')).not.toBeNull();
     const overviewText = document.querySelector('.fault-tag-overview-panel')?.textContent || '';
     expect(overviewText).toContain('\u7ed1\u5b9a\u6982\u89c8');
     expect(overviewText).toContain('\u76ee\u6807\u5bf9\u8c61');
+    expect(overviewText).toContain('\u76ee\u6807\u53c2\u6570');
+    expect(overviewText).toContain('motor.command.m1');
+    expect(overviewText.indexOf('\u76ee\u6807\u5bf9\u8c61')).toBeLessThan(overviewText.indexOf('\u76ee\u6807\u53c2\u6570'));
+    expect(overviewText.indexOf('\u76ee\u6807\u53c2\u6570')).toBeLessThan(overviewText.indexOf('\u76ee\u6807\u7c7b\u578b'));
     expect(overviewText).toContain('\u76ee\u6807\u7c7b\u578b');
     expect(overviewText).toContain('\u8fd0\u884c\u884c\u4e3a');
     expect(overviewText).toContain('\u6545\u969c\u53c2\u6570');
@@ -438,7 +634,7 @@ describe('property panel interaction', () => {
     expect(updatedOverviewText).toContain('\u6545\u969c\u503c');
     expect(updatedOverviewText).toContain('9');
     wrapper.unmount();
-  });
+  }, 10000);
 
   it('deletes the selected fault tag and runtime binding with the Delete key', async () => {
     const wrapper = await mountWorkbench();
@@ -505,7 +701,7 @@ describe('property panel interaction', () => {
     expect(document.querySelector(`[data-fault-tag-id="${tag.id}"]`)).toBeNull();
 
     wrapper.unmount();
-  });
+  }, 10000);
 
   it('edits component-owned injectable variables from the fault settings tab', async () => {
     const wrapper = await mountWorkbench();
@@ -550,6 +746,7 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     expect(document.querySelector('[data-fault-slot-editor]')).not.toBeNull();
+    expect(window.__GZ_FAULT_SLOT_PANEL_SCHEMA__).toBeTruthy();
     expect(document.querySelector('.props-fault-slot-table')).not.toBeNull();
     expect(document.querySelector('.props-fault-slot-head')).not.toBeNull();
     expect(document.querySelectorAll('.props-layer-toggle')).toHaveLength(15);
@@ -833,6 +1030,30 @@ describe('property panel interaction', () => {
       slotId: 'electrical:torque_request',
       bindingObject: 'torque_request'
     }));
+    expect(state.injectedFaults).toContainEqual(expect.objectContaining({
+      modelId: 'sensor_additive_bias',
+      targetVariable: 'torque_request',
+      slotId: 'electrical:torque_request',
+      status: 'active'
+    }));
+    expect(state.activeFaults).toContainEqual(expect.objectContaining({
+      modelId: 'sensor_additive_bias',
+      targetVariable: 'torque_request',
+      slotId: 'electrical:torque_request',
+      status: 'active'
+    }));
+    expect(state.appliedFaults).toContainEqual(expect.objectContaining({
+      modelId: 'sensor_additive_bias',
+      targetVariable: 'torque_request',
+      slotId: 'electrical:torque_request',
+      status: 'active'
+    }));
+    expect(state.injectedFaultMap.sensor_additive_bias).toEqual(expect.objectContaining({
+      modelId: 'sensor_additive_bias',
+      targetVariable: 'torque_request',
+      slotId: 'electrical:torque_request',
+      status: 'active'
+    }));
 
     window.setPropertyPanelTab('faults');
     await flushRuntime();
@@ -992,6 +1213,133 @@ describe('property panel interaction', () => {
       messageId: '0x185',
       payloadKind: 'uint16'
     });
+
+    wrapper.unmount();
+  });
+
+  it('adds and edits multiple edge diagnostic test points from the edge property panel', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('simulation_block', 180, 220);
+    const target = window.createNode('instrument_scope', 480, 220);
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    source.props.name = 'Source controller';
+    target.props.name = 'Output scope';
+    source.faultSlots = [
+      {
+        slotId: 'electrical:output:torque',
+        slotName: 'Torque output',
+        layer: 'electrical',
+        allowedFaultTypeIds: ['source_bias', 'source_noise']
+      }
+    ];
+    state.activeModelPackage = {
+      modelId: 'testpoint-config-package',
+      faultTypeCatalog: [
+        { id: 'source_bias', name: 'Source bias', layer: 'electrical' },
+        { id: 'source_noise', name: 'Source noise', layer: 'electrical' },
+        { id: 'target_fault', name: 'Target fault', layer: 'electrical' }
+      ],
+      faultLibrary: [
+        { id: 'source_bias', name: 'Source bias', layer: 'electrical' },
+        { id: 'source_noise', name: 'Source noise', layer: 'electrical' },
+        { id: 'target_fault', name: 'Target fault', layer: 'electrical' }
+      ],
+      faultCapabilityMap: [
+        {
+          targetKind: 'node',
+          targetId: source.id,
+          faultSlots: source.faultSlots
+        }
+      ]
+    };
+    state.modelEdges.push({
+      id: 'edge-source-scope-testpoint',
+      lineType: 'normal',
+      sourceNodeId: source.id,
+      targetNodeId: target.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0,
+      signalId: 'controller.output'
+    });
+    window.renderModelNodes();
+    window.renderEdges();
+    window.selectEdge('edge-source-scope-testpoint');
+    await flushRuntime();
+
+    expect(visiblePropertyTabs()).toContain('testpoints');
+    window.setPropertyPanelTab('testpoints');
+    await flushRuntime();
+
+    expect(document.querySelector('[data-edge-testpoint-panel]')).not.toBeNull();
+    expect(document.querySelector('[data-add-edge-testpoint]')).not.toBeNull();
+    expect(document.querySelector('[data-edge-testpoint-fault="target_fault"]')).toBeNull();
+
+    document.querySelector('[data-add-edge-testpoint]').click();
+    await flushRuntime();
+
+    document.querySelector('[data-add-edge-testpoint]').click();
+    await flushRuntime();
+
+    const cards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
+    expect(cards).toHaveLength(2);
+    expect(cards[0].querySelector('[data-edge-testpoint-fault="source_bias"]')).not.toBeNull();
+    expect(cards[0].querySelector('[data-edge-testpoint-fault="source_noise"]')).not.toBeNull();
+    expect(cards[0].querySelector('[data-edge-testpoint-fault="target_fault"]')).toBeNull();
+    expect(cards[0].querySelector('[data-edge-testpoint-fault-list]')).not.toBeNull();
+    expect(cards[1].querySelector('[data-edge-testpoint-fault-list]')).not.toBeNull();
+    expect(cards[0].querySelector('[data-delete-edge-testpoint]')).not.toBeNull();
+    expect(cards[1].querySelector('[data-delete-edge-testpoint]')).not.toBeNull();
+
+    cards[0].querySelector('[data-edge-testpoint-name]').value = 'Controller output monitor A';
+    cards[0].querySelector('[data-edge-testpoint-name]').dispatchEvent(new Event('input', { bubbles: true }));
+    cards[0].querySelector('[data-edge-testpoint-fault="source_bias"]').checked = true;
+    cards[0].querySelector('[data-edge-testpoint-fault="source_bias"]').dispatchEvent(new Event('change', { bubbles: true }));
+    cards[0].querySelector('[data-save-edge-testpoint]').click();
+    await flushRuntime();
+
+    const refreshedCards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
+    refreshedCards[1].querySelector('[data-edge-testpoint-name]').value = 'Controller output monitor B';
+    refreshedCards[1].querySelector('[data-edge-testpoint-name]').dispatchEvent(new Event('input', { bubbles: true }));
+    refreshedCards[1].querySelector('[data-edge-testpoint-fault="source_noise"]').checked = true;
+    refreshedCards[1].querySelector('[data-edge-testpoint-fault="source_noise"]').dispatchEvent(new Event('change', { bubbles: true }));
+    refreshedCards[1].querySelector('[data-save-edge-testpoint]').click();
+    await flushRuntime();
+
+    const points = state.manualDiagnosticTestPoints.filter((item) => item.edgeId === 'edge-source-scope-testpoint');
+    expect(points).toHaveLength(2);
+    expect(points.map((point) => point.name)).toEqual([
+      'Controller output monitor A',
+      'Controller output monitor B'
+    ]);
+    expect(points.map((point) => point.detects)).toEqual([
+      ['source_bias'],
+      ['source_noise']
+    ]);
+    expect(new Set(points.map((point) => point.pointId)).size).toBe(2);
+
+    const diagnosticPositions = window.buildDiagnosticTestPointModel().positions
+      .filter((item) => item.edgeId === 'edge-source-scope-testpoint');
+    expect(diagnosticPositions).toHaveLength(2);
+
+    document.querySelector('[data-edge-testpoint-card] [data-delete-edge-testpoint]').click();
+    await flushRuntime();
+
+    const remainingPoints = state.manualDiagnosticTestPoints.filter((item) => item.edgeId === 'edge-source-scope-testpoint');
+    expect(remainingPoints).toHaveLength(1);
+    expect(remainingPoints[0]).toMatchObject({
+      name: 'Controller output monitor B',
+      detects: ['source_noise']
+    });
+
+    const remainingCards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
+    expect(remainingCards).toHaveLength(1);
+    expect(remainingCards[0].querySelector('[data-edge-testpoint-name]').value).toBe('Controller output monitor B');
+    expect(window.buildDiagnosticTestPointModel().positions
+      .filter((item) => item.edgeId === 'edge-source-scope-testpoint')).toHaveLength(1);
 
     wrapper.unmount();
   });

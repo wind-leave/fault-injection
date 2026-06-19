@@ -118,3 +118,24 @@ npm run audit:ui
 ```text
 https://blank1cheng.github.io/uav-fault-platform/?v=latest
 ```
+## Backend Simulation API
+
+The first backend simulation service runs a restricted executable model package exported from the frontend canvas. Python execution is limited to modules registered in `backend/builtin_modules/manifest.json`; Python source embedded in a frontend model package is not executed.
+
+Run backend tests:
+
+```powershell
+uv run python -m unittest discover backend.tests -v
+```
+
+Start the local backend:
+
+```powershell
+uv run python -m backend.server
+```
+
+Endpoint:
+
+```text
+POST http://127.0.0.1:8766/api/simulations/run
+```

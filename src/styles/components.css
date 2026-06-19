@@ -5386,29 +5386,29 @@ button:focus-visible,
   border-bottom: 1px solid #e5edf8;
   background: #f7f9fc;
 }
-.tp-manual-point-add select,
+.tp-manual-point-add input,
 .tp-manual-point-add button{
+  width: 100%;
   min-width: 0;
   min-height: 32px;
   border: 1px solid #cbd8e7;
+  border-radius: 4px;
   background: #fff;
   color: #10233f;
   font-size: 12px;
   font-weight: 700;
-}
-.tp-manual-point-add select{
   padding: 0 9px;
 }
 .tp-manual-point-add button{
-  padding: 0 12px;
+  width: auto;
+  padding: 0 14px;
   border-color: #0f62fe;
   color: #0f62fe;
   cursor: pointer;
 }
-.tp-manual-point-add button:disabled,
-.tp-manual-point-add select:disabled{
-  opacity: .52;
-  cursor: not-allowed;
+.tp-manual-point-add input::placeholder{
+  color: #6f7f95;
+  font-weight: 600;
 }
 .tp-point-grid{
   display: grid;

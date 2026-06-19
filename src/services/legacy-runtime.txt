@@ -5836,6 +5836,98 @@ function getSimulationResultSafeName(name){
   return safe||'simulation-result';
 }
 
+function isRenderDataDeviceNode(node){
+  if(!node?.id||typeof node.type!=='string') return false;
+  if(node.type.startsWith('fault_')) return false;
+  if(node.type==='fault_tag'||node.type==='edge_fault_tag') return false;
+  if(node.type==='middle_var_assign') return false;
+  return true;
+}
+
+function normalizeRenderDataSampleValue(sample){
+  if(sample&&typeof sample==='object'){
+    if(Number.isFinite(sample.value)) return sample.value;
+    if(Number.isFinite(sample.actual)) return sample.actual;
+    if(Number.isFinite(sample.v)) return sample.v;
+  }
+  return Number.isFinite(sample)?sample:null;
+}
+
+function normalizeRenderDataSeries(series=[]){
+  return (Array.isArray(series)?series:[])
+    .map((sample,index)=>{
+      const value=normalizeRenderDataSampleValue(sample);
+      if(value==null) return null;
+      const time=Number.isFinite(sample?.t)?sample.t:index*(SIM.stepSize||0);
+      return {t:time,value};
+    })
+    .filter(Boolean);
+}
+
+function buildRenderDataChannelsForNode(node,actualScopeSamples,actualInstrumentSamples){
+  if(node.type==='instrument_scope'){
+    const bucket=actualScopeSamples[node.id]||{};
+    return Object.fromEntries(
+      Object.entries(bucket)
+        .map(([channelId,series])=>[
+          channelId,
+          {
+            label:channelId.toUpperCase(),
+            unit:'',
+            dataType:'number',
+            series:normalizeRenderDataSeries(series)
+          }
+        ])
+        .filter(([,channel])=>channel.series.length)
+    );
+  }
+  if(node.type==='instrument_logger'||node.type==='instrument_spectrum'){
+    const series=normalizeRenderDataSeries(actualInstrumentSamples[node.id]||[]);
+    if(!series.length) return {};
+    return {
+      value:{
+        label:node.props?.signal||node.props?.instrumentType||node.props?.name||'测量值',
+        unit:'',
+        dataType:'number',
+        series
+      }
+    };
+  }
+  return {};
+}
+
+function getRenderDataPortLabel(node,direction,index){
+  const ports=getNodePorts(node)?.[direction==='source'?'outputs':'inputs']||[];
+  const port=ports[index||0];
+  return port?.label||port?.name||port?.key||`${direction==='source'?'output':'input'}${(index||0)+1}`;
+}
+
+function buildSimulationRenderDataSnapshot(actualScopeSamples,actualInstrumentSamples){
+  const deviceNodes=(S.modelNodes||[]).filter(isRenderDataDeviceNode);
+  const deviceIds=new Set(deviceNodes.map(node=>node.id));
+  const devices=deviceNodes.map(node=>({
+    id:node.id,
+    displayName:node.props?.name||node.name||node.id,
+    type:node.type,
+    channels:buildRenderDataChannelsForNode(node,actualScopeSamples,actualInstrumentSamples)
+  }));
+  const connections=(S.modelEdges||[])
+    .filter(edge=>deviceIds.has(edge.sourceNodeId)&&deviceIds.has(edge.targetNodeId))
+    .map(edge=>{
+      const source=getNode(edge.sourceNodeId);
+      const target=getNode(edge.targetNodeId);
+      return {
+        id:edge.id,
+        sourceDeviceId:edge.sourceNodeId,
+        targetDeviceId:edge.targetNodeId,
+        sourcePort:getRenderDataPortLabel(source,'source',edge.sourcePortIndex||0),
+        targetPort:getRenderDataPortLabel(target,'target',edge.targetPortIndex||0),
+        label:edge.label||edge.signalName||edge.signalId||`${source?.props?.name||edge.sourceNodeId} -> ${target?.props?.name||edge.targetNodeId}`
+      };
+    });
+  return {devices,connections};
+}
+
 function buildSimulationResultSnapshot(){
   const exportedAt=new Date().toISOString();
   const actualScopeSamples=cloneDefaults(SIM.actual?.scopeSamples||{});
@@ -5882,6 +5974,7 @@ function buildSimulationResultSnapshot(){
         instrumentSamples:referenceInstrumentSamples
       }
     },
+    renderData:buildSimulationRenderDataSnapshot(actualScopeSamples,actualInstrumentSamples),
     summary:{
       nodeCount:(S.modelNodes||[]).length,
       edgeCount:(S.modelEdges||[]).length,

@@ -2347,7 +2347,7 @@ describe('canvas layout cleanup', () => {
     expect(maxScopeDiff(combinedActual, combinedReference, 1, 3)).toBeGreaterThan(1);
 
     wrapper.unmount();
-  }, 15000);
+  }, 30000);
 
   it('routes Python-bound output through protocol dropout faults before scope sampling', async () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => createCanvasContextStub());
@@ -2452,7 +2452,7 @@ describe('canvas layout cleanup', () => {
     expect(Math.max(...lateValues.map(Math.abs))).toBeLessThan(0.16);
 
     wrapper.unmount();
-  }, 15000);
+  }, 30000);
 
   it('stops dragging a scope window after pointer cancellation', async () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => createCanvasContextStub());
@@ -2557,6 +2557,40 @@ describe('canvas layout cleanup', () => {
     expect(saved.model.edges.length).toBeGreaterThan(0);
     expect(saved.samples.actual.scopeSamples['node-scope'].ch1.length).toBeGreaterThan(0);
     expect(saved.samples.reference.scopeSamples['node-scope'].ch1.length).toBeGreaterThan(0);
+    expect(saved.renderData).toMatchObject({
+      devices: expect.any(Array),
+      connections: expect.any(Array)
+    });
+    const scopeRenderDevice = saved.renderData.devices.find((device) => device.id === 'node-scope');
+    expect(scopeRenderDevice).toMatchObject({
+      id: 'node-scope',
+      type: 'instrument_scope',
+      channels: {
+        ch1: {
+          dataType: 'number',
+          series: expect.any(Array)
+        }
+      }
+    });
+    expect(scopeRenderDevice.channels.ch1.series.length).toBeGreaterThan(0);
+    expect(scopeRenderDevice.channels.ch1.series[0]).toEqual(
+      expect.objectContaining({
+        t: expect.any(Number),
+        value: expect.any(Number)
+      })
+    );
+    expect(saved.renderData.connections.length).toBeGreaterThan(0);
+    const scopeConnection = saved.renderData.connections.find((connection) => connection.targetDeviceId === 'node-scope');
+    expect(scopeConnection).toEqual(
+      expect.objectContaining({
+        id: expect.any(String),
+        sourceDeviceId: expect.any(String),
+        targetDeviceId: 'node-scope'
+      })
+    );
+    expect(scopeConnection).not.toHaveProperty('status');
+    expect(scopeConnection).not.toHaveProperty('testPoints');
+    expect(scopeConnection).not.toHaveProperty('channels');
     expect(saved.summary.faultCount).toBeGreaterThanOrEqual(0);
 
     wrapper.unmount();

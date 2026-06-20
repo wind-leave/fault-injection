@@ -12,7 +12,7 @@ SUPPORTED_NODE_TYPES = {
 }
 
 LIMITS = {
-    "max_duration": 60.0,
+    "max_duration": 1000.0,
     "min_step_size": 0.001,
     "max_step_size": 1.0,
     "max_nodes": 200,

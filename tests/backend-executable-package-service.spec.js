@@ -62,4 +62,32 @@ describe('backendExecutablePackageService', () => {
 
     expect(pkg.simulationConfig).toEqual({ duration: 10, stepSize: 0.1 });
   });
+
+  it('drops edges and measurement points that reference unsupported nodes', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [
+        { id: 'source-1', type: 'signal_source', props: { value: 1 } },
+        {
+          id: 'sim-1',
+          type: 'simulation_block',
+          pythonBinding: { moduleId: 'passthrough' },
+          props: {}
+        },
+        { id: 'logger-1', type: 'instrument_logger', props: {} },
+        { id: 'scope-1', type: 'instrument_scope', props: {} }
+      ],
+      modelEdges: [
+        { id: 'edge-kept', sourceNodeId: 'source-1', targetNodeId: 'sim-1' },
+        { id: 'edge-dropped', sourceNodeId: 'sim-1', targetNodeId: 'logger-1' }
+      ],
+      measurementPoints: [
+        { id: 'scope-1.ch1', scopeNodeId: 'scope-1', channel: 'ch1' },
+        { id: 'logger-1.value', scopeNodeId: 'logger-1', channel: 'value' }
+      ]
+    });
+
+    expect(pkg.nodes.map((node) => node.id)).toEqual(['source-1', 'sim-1', 'scope-1']);
+    expect(pkg.edges.map((edge) => edge.id)).toEqual(['edge-kept']);
+    expect(pkg.measurementPoints.map((point) => point.id)).toEqual(['scope-1.ch1']);
+  });
 });

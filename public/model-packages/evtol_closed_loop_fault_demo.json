@@ -51,6 +51,273 @@
           }
         ]
       }
+    },
+    {
+      "moduleId": "attitude_controller",
+      "fileName": "attitude_controller.py",
+      "moduleName": "attitude_controller",
+      "entryFunction": "process",
+      "category": "closed-loop-runtime",
+      "sourcePackageId": "evtol-closed-loop-fault-demo",
+      "sourcePackageName": "四旋翼姿态闭环飞控故障诊断 Demo",
+      "source": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(attitude_error=0.0, dt=0.1, state=None):\n    state = state or {}\n    error = _clamp(attitude_error, -0.3, 0.3)\n    integrator = _clamp(float(state.get(\"integrator\", 0.0)) + error * float(dt), -0.22, 0.22)\n    torque = _clamp(1.18 * error + 0.16 * integrator, -0.26, 0.26)\n    controller_output = _first_order(state.get(\"controller_output\", 0.0), torque, 0.12, dt)\n    return {\n        \"outputs\": {\"torque_command\": controller_output},\n        \"state\": {\"integrator\": integrator, \"controller_output\": controller_output},\n        \"middleVars\": {\"integrator_state\": integrator},\n    }\n",
+      "parsedInterface": {
+        "fileName": "attitude_controller.py",
+        "moduleName": "attitude_controller",
+        "description": "Stateful attitude controller block for closed-loop attitude demo",
+        "entryFunction": "process",
+        "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(attitude_error=0.0, dt=0.1, state=None):\n    state = state or {}\n    error = _clamp(attitude_error, -0.3, 0.3)\n    integrator = _clamp(float(state.get(\"integrator\", 0.0)) + error * float(dt), -0.22, 0.22)\n    torque = _clamp(1.18 * error + 0.16 * integrator, -0.26, 0.26)\n    controller_output = _first_order(state.get(\"controller_output\", 0.0), torque, 0.12, dt)\n    return {\n        \"outputs\": {\"torque_command\": controller_output},\n        \"state\": {\"integrator\": integrator, \"controller_output\": controller_output},\n        \"middleVars\": {\"integrator_state\": integrator},\n    }\n",
+        "inputs": [
+          {
+            "name": "attitude_error",
+            "type": "float",
+            "comment": "姿态误差",
+            "default": 0
+          }
+        ],
+        "outputs": [
+          {
+            "name": "torque_command",
+            "type": "float",
+            "comment": "力矩需求"
+          }
+        ],
+        "middleVars": [
+          {
+            "name": "integrator_state",
+            "type": "float",
+            "comment": "积分状态"
+          }
+        ]
+      }
+    },
+    {
+      "moduleId": "control_allocator",
+      "fileName": "control_allocator.py",
+      "moduleName": "control_allocator",
+      "entryFunction": "process",
+      "category": "closed-loop-runtime",
+      "sourcePackageId": "evtol-closed-loop-fault-demo",
+      "sourcePackageName": "四旋翼姿态闭环飞控故障诊断 Demo",
+      "source": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(torque_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    allocated = _clamp(torque_command, -0.24, 0.24)\n    allocation_output = _first_order(state.get(\"allocation_output\", 0.0), allocated, 0.14, dt)\n    return {\n        \"outputs\": {\"motor_total_command\": allocation_output},\n        \"state\": {\"allocation_output\": allocation_output},\n        \"middleVars\": {\"allocation_state\": allocation_output},\n    }\n",
+      "parsedInterface": {
+        "fileName": "control_allocator.py",
+        "moduleName": "control_allocator",
+        "description": "Control allocation block for closed-loop attitude demo",
+        "entryFunction": "process",
+        "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(torque_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    allocated = _clamp(torque_command, -0.24, 0.24)\n    allocation_output = _first_order(state.get(\"allocation_output\", 0.0), allocated, 0.14, dt)\n    return {\n        \"outputs\": {\"motor_total_command\": allocation_output},\n        \"state\": {\"allocation_output\": allocation_output},\n        \"middleVars\": {\"allocation_state\": allocation_output},\n    }\n",
+        "inputs": [
+          {
+            "name": "torque_command",
+            "type": "float",
+            "comment": "力矩需求",
+            "default": 0
+          }
+        ],
+        "outputs": [
+          {
+            "name": "motor_total_command",
+            "type": "float",
+            "comment": "电机总指令"
+          }
+        ],
+        "middleVars": [
+          {
+            "name": "allocation_state",
+            "type": "float",
+            "comment": "分配状态"
+          }
+        ]
+      }
+    },
+    {
+      "moduleId": "motor_mixer",
+      "fileName": "motor_mixer.py",
+      "moduleName": "motor_mixer",
+      "entryFunction": "process",
+      "category": "closed-loop-runtime",
+      "sourcePackageId": "evtol-closed-loop-fault-demo",
+      "sourcePackageName": "四旋翼姿态闭环飞控故障诊断 Demo",
+      "source": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_total_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_total_command, -0.22, 0.22)\n    mix_output = _first_order(state.get(\"mix_output\", 0.0), command, 0.1, dt)\n    return {\n        \"outputs\": {\n            \"motor_1_command\": mix_output,\n            \"motor_2_command\": mix_output,\n            \"motor_3_command\": mix_output,\n            \"motor_4_command\": mix_output,\n        },\n        \"state\": {\"mix_output\": mix_output},\n        \"middleVars\": {\"mixer_state\": mix_output},\n    }\n",
+      "parsedInterface": {
+        "fileName": "motor_mixer.py",
+        "moduleName": "motor_mixer",
+        "description": "Motor mixing block for closed-loop attitude demo",
+        "entryFunction": "process",
+        "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_total_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_total_command, -0.22, 0.22)\n    mix_output = _first_order(state.get(\"mix_output\", 0.0), command, 0.1, dt)\n    return {\n        \"outputs\": {\n            \"motor_1_command\": mix_output,\n            \"motor_2_command\": mix_output,\n            \"motor_3_command\": mix_output,\n            \"motor_4_command\": mix_output,\n        },\n        \"state\": {\"mix_output\": mix_output},\n        \"middleVars\": {\"mixer_state\": mix_output},\n    }\n",
+        "inputs": [
+          {
+            "name": "motor_total_command",
+            "type": "float",
+            "comment": "电机总指令",
+            "default": 0
+          }
+        ],
+        "outputs": [
+          {
+            "name": "motor_1_command",
+            "type": "float",
+            "comment": "M1 指令"
+          },
+          {
+            "name": "motor_2_command",
+            "type": "float",
+            "comment": "M2 指令"
+          },
+          {
+            "name": "motor_3_command",
+            "type": "float",
+            "comment": "M3 指令"
+          },
+          {
+            "name": "motor_4_command",
+            "type": "float",
+            "comment": "M4 指令"
+          }
+        ],
+        "middleVars": [
+          {
+            "name": "mixer_state",
+            "type": "float",
+            "comment": "混控状态"
+          }
+        ]
+      }
+    },
+    {
+      "moduleId": "motor_model",
+      "fileName": "motor_model.py",
+      "moduleName": "motor_model",
+      "entryFunction": "process",
+      "category": "closed-loop-runtime",
+      "sourcePackageId": "evtol-closed-loop-fault-demo",
+      "sourcePackageName": "四旋翼姿态闭环飞控故障诊断 Demo",
+      "source": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_command, -0.22, 0.22)\n    motor_response = _first_order(state.get(\"motor_response\", 0.0), command, 0.28, dt)\n    return {\n        \"outputs\": {\"thrust\": motor_response},\n        \"state\": {\"motor_response\": motor_response},\n        \"middleVars\": {\"motor_state\": motor_response},\n    }\n",
+      "parsedInterface": {
+        "fileName": "motor_model.py",
+        "moduleName": "motor_model",
+        "description": "Stateful motor response block for closed-loop attitude demo",
+        "entryFunction": "process",
+        "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_command, -0.22, 0.22)\n    motor_response = _first_order(state.get(\"motor_response\", 0.0), command, 0.28, dt)\n    return {\n        \"outputs\": {\"thrust\": motor_response},\n        \"state\": {\"motor_response\": motor_response},\n        \"middleVars\": {\"motor_state\": motor_response},\n    }\n",
+        "inputs": [
+          {
+            "name": "motor_command",
+            "type": "float",
+            "comment": "电机指令",
+            "default": 0
+          }
+        ],
+        "outputs": [
+          {
+            "name": "thrust",
+            "type": "float",
+            "comment": "电机推力"
+          }
+        ],
+        "middleVars": [
+          {
+            "name": "motor_state",
+            "type": "float",
+            "comment": "电机状态"
+          }
+        ]
+      }
+    },
+    {
+      "moduleId": "vehicle_dynamics",
+      "fileName": "vehicle_dynamics.py",
+      "moduleName": "vehicle_dynamics",
+      "entryFunction": "process",
+      "category": "closed-loop-runtime",
+      "sourcePackageId": "evtol-closed-loop-fault-demo",
+      "sourcePackageName": "四旋翼姿态闭环飞控故障诊断 Demo",
+      "source": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef process(thrust_1=0.0, thrust_2=0.0, thrust_3=0.0, thrust_4=0.0, dt=0.1, state=None):\n    state = state or {}\n    torque = _clamp((float(thrust_1) + float(thrust_2) + float(thrust_3) + float(thrust_4)) / 4.0, -0.22, 0.22)\n    previous = float(state.get(\"pitch_rate\", 0.0))\n    pitch_rate = _clamp(previous + float(dt) * (1.04 * torque - 1.65 * previous), -0.18, 0.18)\n    return {\n        \"outputs\": {\"pitch_rate\": pitch_rate},\n        \"state\": {\"pitch_rate\": pitch_rate},\n        \"middleVars\": {\"pitch_state\": pitch_rate},\n    }\n",
+      "parsedInterface": {
+        "fileName": "vehicle_dynamics.py",
+        "moduleName": "vehicle_dynamics",
+        "description": "Vehicle pitch dynamics block for closed-loop attitude demo",
+        "entryFunction": "process",
+        "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef process(thrust_1=0.0, thrust_2=0.0, thrust_3=0.0, thrust_4=0.0, dt=0.1, state=None):\n    state = state or {}\n    torque = _clamp((float(thrust_1) + float(thrust_2) + float(thrust_3) + float(thrust_4)) / 4.0, -0.22, 0.22)\n    previous = float(state.get(\"pitch_rate\", 0.0))\n    pitch_rate = _clamp(previous + float(dt) * (1.04 * torque - 1.65 * previous), -0.18, 0.18)\n    return {\n        \"outputs\": {\"pitch_rate\": pitch_rate},\n        \"state\": {\"pitch_rate\": pitch_rate},\n        \"middleVars\": {\"pitch_state\": pitch_rate},\n    }\n",
+        "inputs": [
+          {
+            "name": "thrust_1",
+            "type": "float",
+            "comment": "M1 推力",
+            "default": 0
+          },
+          {
+            "name": "thrust_2",
+            "type": "float",
+            "comment": "M2 推力",
+            "default": 0
+          },
+          {
+            "name": "thrust_3",
+            "type": "float",
+            "comment": "M3 推力",
+            "default": 0
+          },
+          {
+            "name": "thrust_4",
+            "type": "float",
+            "comment": "M4 推力",
+            "default": 0
+          }
+        ],
+        "outputs": [
+          {
+            "name": "pitch_rate",
+            "type": "float",
+            "comment": "俯仰角速度"
+          }
+        ],
+        "middleVars": [
+          {
+            "name": "pitch_state",
+            "type": "float",
+            "comment": "俯仰状态"
+          }
+        ]
+      }
+    },
+    {
+      "moduleId": "imu_gyro",
+      "fileName": "imu_gyro.py",
+      "moduleName": "imu_gyro",
+      "entryFunction": "process",
+      "category": "closed-loop-runtime",
+      "sourcePackageId": "evtol-closed-loop-fault-demo",
+      "sourcePackageName": "四旋翼姿态闭环飞控故障诊断 Demo",
+      "source": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(body_rate=0.0, dt=0.1, state=None):\n    state = state or {}\n    input_rate = _clamp(body_rate, -0.2, 0.2)\n    measured_rate = _first_order(state.get(\"measured_rate\", 0.0), input_rate, 0.08, dt)\n    return {\n        \"outputs\": {\"measured_rate\": measured_rate},\n        \"state\": {\"measured_rate\": measured_rate},\n        \"middleVars\": {\"gyro_bias_state\": measured_rate - input_rate},\n    }\n",
+      "parsedInterface": {
+        "fileName": "imu_gyro.py",
+        "moduleName": "imu_gyro",
+        "description": "IMU gyro measurement block for closed-loop attitude demo",
+        "entryFunction": "process",
+        "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(body_rate=0.0, dt=0.1, state=None):\n    state = state or {}\n    input_rate = _clamp(body_rate, -0.2, 0.2)\n    measured_rate = _first_order(state.get(\"measured_rate\", 0.0), input_rate, 0.08, dt)\n    return {\n        \"outputs\": {\"measured_rate\": measured_rate},\n        \"state\": {\"measured_rate\": measured_rate},\n        \"middleVars\": {\"gyro_bias_state\": measured_rate - input_rate},\n    }\n",
+        "inputs": [
+          {
+            "name": "body_rate",
+            "type": "float",
+            "comment": "机体角速度",
+            "default": 0
+          }
+        ],
+        "outputs": [
+          {
+            "name": "measured_rate",
+            "type": "float",
+            "comment": "测量角速度"
+          }
+        ],
+        "middleVars": [
+          {
+            "name": "gyro_bias_state",
+            "type": "float",
+            "comment": "陀螺仪零偏状态"
+          }
+        ]
+      }
     }
   ],
   "faultLibrary": [
@@ -2697,7 +2964,43 @@
             "protocol": []
           }
         },
-        "pythonBinding": null,
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "attitude_controller",
+          "moduleName": "attitude_controller",
+          "fileName": "attitude_controller.py",
+          "entryFunction": "process",
+          "executionMode": "backend",
+          "parsedInterface": {
+            "fileName": "attitude_controller.py",
+            "moduleName": "attitude_controller",
+            "description": "Stateful attitude controller block for closed-loop attitude demo",
+            "entryFunction": "process",
+            "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(attitude_error=0.0, dt=0.1, state=None):\n    state = state or {}\n    error = _clamp(attitude_error, -0.3, 0.3)\n    integrator = _clamp(float(state.get(\"integrator\", 0.0)) + error * float(dt), -0.22, 0.22)\n    torque = _clamp(1.18 * error + 0.16 * integrator, -0.26, 0.26)\n    controller_output = _first_order(state.get(\"controller_output\", 0.0), torque, 0.12, dt)\n    return {\n        \"outputs\": {\"torque_command\": controller_output},\n        \"state\": {\"integrator\": integrator, \"controller_output\": controller_output},\n        \"middleVars\": {\"integrator_state\": integrator},\n    }\n",
+            "inputs": [
+              {
+                "name": "attitude_error",
+                "type": "float",
+                "comment": "姿态误差",
+                "default": 0
+              }
+            ],
+            "outputs": [
+              {
+                "name": "torque_command",
+                "type": "float",
+                "comment": "力矩需求"
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "integrator_state",
+                "type": "float",
+                "comment": "积分状态"
+              }
+            ]
+          }
+        },
         "faultSlots": [
           {
             "slotId": "physical:controller_gain",
@@ -2866,7 +3169,43 @@
             "protocol": []
           }
         },
-        "pythonBinding": null,
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "control_allocator",
+          "moduleName": "control_allocator",
+          "fileName": "control_allocator.py",
+          "entryFunction": "process",
+          "executionMode": "backend",
+          "parsedInterface": {
+            "fileName": "control_allocator.py",
+            "moduleName": "control_allocator",
+            "description": "Control allocation block for closed-loop attitude demo",
+            "entryFunction": "process",
+            "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(torque_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    allocated = _clamp(torque_command, -0.24, 0.24)\n    allocation_output = _first_order(state.get(\"allocation_output\", 0.0), allocated, 0.14, dt)\n    return {\n        \"outputs\": {\"motor_total_command\": allocation_output},\n        \"state\": {\"allocation_output\": allocation_output},\n        \"middleVars\": {\"allocation_state\": allocation_output},\n    }\n",
+            "inputs": [
+              {
+                "name": "torque_command",
+                "type": "float",
+                "comment": "力矩需求",
+                "default": 0
+              }
+            ],
+            "outputs": [
+              {
+                "name": "motor_total_command",
+                "type": "float",
+                "comment": "电机总指令"
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "allocation_state",
+                "type": "float",
+                "comment": "分配状态"
+              }
+            ]
+          }
+        },
         "faultSlots": [
           {
             "slotId": "physical:allocation_matrix",
@@ -3073,7 +3412,58 @@
             }
           ]
         },
-        "pythonBinding": null,
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "motor_mixer",
+          "moduleName": "motor_mixer",
+          "fileName": "motor_mixer.py",
+          "entryFunction": "process",
+          "executionMode": "backend",
+          "parsedInterface": {
+            "fileName": "motor_mixer.py",
+            "moduleName": "motor_mixer",
+            "description": "Motor mixing block for closed-loop attitude demo",
+            "entryFunction": "process",
+            "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_total_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_total_command, -0.22, 0.22)\n    mix_output = _first_order(state.get(\"mix_output\", 0.0), command, 0.1, dt)\n    return {\n        \"outputs\": {\n            \"motor_1_command\": mix_output,\n            \"motor_2_command\": mix_output,\n            \"motor_3_command\": mix_output,\n            \"motor_4_command\": mix_output,\n        },\n        \"state\": {\"mix_output\": mix_output},\n        \"middleVars\": {\"mixer_state\": mix_output},\n    }\n",
+            "inputs": [
+              {
+                "name": "motor_total_command",
+                "type": "float",
+                "comment": "电机总指令",
+                "default": 0
+              }
+            ],
+            "outputs": [
+              {
+                "name": "motor_1_command",
+                "type": "float",
+                "comment": "M1 指令"
+              },
+              {
+                "name": "motor_2_command",
+                "type": "float",
+                "comment": "M2 指令"
+              },
+              {
+                "name": "motor_3_command",
+                "type": "float",
+                "comment": "M3 指令"
+              },
+              {
+                "name": "motor_4_command",
+                "type": "float",
+                "comment": "M4 指令"
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "mixer_state",
+                "type": "float",
+                "comment": "混控状态"
+              }
+            ]
+          }
+        },
         "faultSlots": [
           {
             "slotId": "physical:motor_mix_gain",
@@ -3329,7 +3719,43 @@
             "protocol": []
           }
         },
-        "pythonBinding": null,
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "motor_model",
+          "moduleName": "motor_model",
+          "fileName": "motor_model.py",
+          "entryFunction": "process",
+          "executionMode": "backend",
+          "parsedInterface": {
+            "fileName": "motor_model.py",
+            "moduleName": "motor_model",
+            "description": "Stateful motor response block for closed-loop attitude demo",
+            "entryFunction": "process",
+            "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_command, -0.22, 0.22)\n    motor_response = _first_order(state.get(\"motor_response\", 0.0), command, 0.28, dt)\n    return {\n        \"outputs\": {\"thrust\": motor_response},\n        \"state\": {\"motor_response\": motor_response},\n        \"middleVars\": {\"motor_state\": motor_response},\n    }\n",
+            "inputs": [
+              {
+                "name": "motor_command",
+                "type": "float",
+                "comment": "电机指令",
+                "default": 0
+              }
+            ],
+            "outputs": [
+              {
+                "name": "thrust",
+                "type": "float",
+                "comment": "电机推力"
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "motor_state",
+                "type": "float",
+                "comment": "电机状态"
+              }
+            ]
+          }
+        },
         "faultSlots": [
           {
             "slotId": "physical:motor_thrust_coefficient",
@@ -3519,7 +3945,43 @@
             "protocol": []
           }
         },
-        "pythonBinding": null,
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "motor_model",
+          "moduleName": "motor_model",
+          "fileName": "motor_model.py",
+          "entryFunction": "process",
+          "executionMode": "backend",
+          "parsedInterface": {
+            "fileName": "motor_model.py",
+            "moduleName": "motor_model",
+            "description": "Stateful motor response block for closed-loop attitude demo",
+            "entryFunction": "process",
+            "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_command, -0.22, 0.22)\n    motor_response = _first_order(state.get(\"motor_response\", 0.0), command, 0.28, dt)\n    return {\n        \"outputs\": {\"thrust\": motor_response},\n        \"state\": {\"motor_response\": motor_response},\n        \"middleVars\": {\"motor_state\": motor_response},\n    }\n",
+            "inputs": [
+              {
+                "name": "motor_command",
+                "type": "float",
+                "comment": "电机指令",
+                "default": 0
+              }
+            ],
+            "outputs": [
+              {
+                "name": "thrust",
+                "type": "float",
+                "comment": "电机推力"
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "motor_state",
+                "type": "float",
+                "comment": "电机状态"
+              }
+            ]
+          }
+        },
         "faultSlots": [
           {
             "slotId": "physical:motor_thrust_coefficient",
@@ -3709,7 +4171,43 @@
             "protocol": []
           }
         },
-        "pythonBinding": null,
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "motor_model",
+          "moduleName": "motor_model",
+          "fileName": "motor_model.py",
+          "entryFunction": "process",
+          "executionMode": "backend",
+          "parsedInterface": {
+            "fileName": "motor_model.py",
+            "moduleName": "motor_model",
+            "description": "Stateful motor response block for closed-loop attitude demo",
+            "entryFunction": "process",
+            "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_command, -0.22, 0.22)\n    motor_response = _first_order(state.get(\"motor_response\", 0.0), command, 0.28, dt)\n    return {\n        \"outputs\": {\"thrust\": motor_response},\n        \"state\": {\"motor_response\": motor_response},\n        \"middleVars\": {\"motor_state\": motor_response},\n    }\n",
+            "inputs": [
+              {
+                "name": "motor_command",
+                "type": "float",
+                "comment": "电机指令",
+                "default": 0
+              }
+            ],
+            "outputs": [
+              {
+                "name": "thrust",
+                "type": "float",
+                "comment": "电机推力"
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "motor_state",
+                "type": "float",
+                "comment": "电机状态"
+              }
+            ]
+          }
+        },
         "faultSlots": [
           {
             "slotId": "physical:motor_thrust_coefficient",
@@ -3899,7 +4397,43 @@
             "protocol": []
           }
         },
-        "pythonBinding": null,
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "motor_model",
+          "moduleName": "motor_model",
+          "fileName": "motor_model.py",
+          "entryFunction": "process",
+          "executionMode": "backend",
+          "parsedInterface": {
+            "fileName": "motor_model.py",
+            "moduleName": "motor_model",
+            "description": "Stateful motor response block for closed-loop attitude demo",
+            "entryFunction": "process",
+            "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_command, -0.22, 0.22)\n    motor_response = _first_order(state.get(\"motor_response\", 0.0), command, 0.28, dt)\n    return {\n        \"outputs\": {\"thrust\": motor_response},\n        \"state\": {\"motor_response\": motor_response},\n        \"middleVars\": {\"motor_state\": motor_response},\n    }\n",
+            "inputs": [
+              {
+                "name": "motor_command",
+                "type": "float",
+                "comment": "电机指令",
+                "default": 0
+              }
+            ],
+            "outputs": [
+              {
+                "name": "thrust",
+                "type": "float",
+                "comment": "电机推力"
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "motor_state",
+                "type": "float",
+                "comment": "电机状态"
+              }
+            ]
+          }
+        },
         "faultSlots": [
           {
             "slotId": "physical:motor_thrust_coefficient",
@@ -4104,7 +4638,61 @@
             "protocol": []
           }
         },
-        "pythonBinding": null,
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "vehicle_dynamics",
+          "moduleName": "vehicle_dynamics",
+          "fileName": "vehicle_dynamics.py",
+          "entryFunction": "process",
+          "executionMode": "backend",
+          "parsedInterface": {
+            "fileName": "vehicle_dynamics.py",
+            "moduleName": "vehicle_dynamics",
+            "description": "Vehicle pitch dynamics block for closed-loop attitude demo",
+            "entryFunction": "process",
+            "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef process(thrust_1=0.0, thrust_2=0.0, thrust_3=0.0, thrust_4=0.0, dt=0.1, state=None):\n    state = state or {}\n    torque = _clamp((float(thrust_1) + float(thrust_2) + float(thrust_3) + float(thrust_4)) / 4.0, -0.22, 0.22)\n    previous = float(state.get(\"pitch_rate\", 0.0))\n    pitch_rate = _clamp(previous + float(dt) * (1.04 * torque - 1.65 * previous), -0.18, 0.18)\n    return {\n        \"outputs\": {\"pitch_rate\": pitch_rate},\n        \"state\": {\"pitch_rate\": pitch_rate},\n        \"middleVars\": {\"pitch_state\": pitch_rate},\n    }\n",
+            "inputs": [
+              {
+                "name": "thrust_1",
+                "type": "float",
+                "comment": "M1 推力",
+                "default": 0
+              },
+              {
+                "name": "thrust_2",
+                "type": "float",
+                "comment": "M2 推力",
+                "default": 0
+              },
+              {
+                "name": "thrust_3",
+                "type": "float",
+                "comment": "M3 推力",
+                "default": 0
+              },
+              {
+                "name": "thrust_4",
+                "type": "float",
+                "comment": "M4 推力",
+                "default": 0
+              }
+            ],
+            "outputs": [
+              {
+                "name": "pitch_rate",
+                "type": "float",
+                "comment": "俯仰角速度"
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "pitch_state",
+                "type": "float",
+                "comment": "俯仰状态"
+              }
+            ]
+          }
+        },
         "faultSlots": [
           {
             "slotId": "physical:airframe_mass",
@@ -4360,7 +4948,43 @@
             }
           ]
         },
-        "pythonBinding": null,
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "imu_gyro",
+          "moduleName": "imu_gyro",
+          "fileName": "imu_gyro.py",
+          "entryFunction": "process",
+          "executionMode": "backend",
+          "parsedInterface": {
+            "fileName": "imu_gyro.py",
+            "moduleName": "imu_gyro",
+            "description": "IMU gyro measurement block for closed-loop attitude demo",
+            "entryFunction": "process",
+            "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(body_rate=0.0, dt=0.1, state=None):\n    state = state or {}\n    input_rate = _clamp(body_rate, -0.2, 0.2)\n    measured_rate = _first_order(state.get(\"measured_rate\", 0.0), input_rate, 0.08, dt)\n    return {\n        \"outputs\": {\"measured_rate\": measured_rate},\n        \"state\": {\"measured_rate\": measured_rate},\n        \"middleVars\": {\"gyro_bias_state\": measured_rate - input_rate},\n    }\n",
+            "inputs": [
+              {
+                "name": "body_rate",
+                "type": "float",
+                "comment": "机体角速度",
+                "default": 0
+              }
+            ],
+            "outputs": [
+              {
+                "name": "measured_rate",
+                "type": "float",
+                "comment": "测量角速度"
+              }
+            ],
+            "middleVars": [
+              {
+                "name": "gyro_bias_state",
+                "type": "float",
+                "comment": "陀螺仪零偏状态"
+              }
+            ]
+          }
+        },
         "faultSlots": [
           {
             "slotId": "physical:imu_zero_bias",

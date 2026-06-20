@@ -327,6 +327,12 @@ export function __resetLegacyRuntimeForTests() {
     if (runtimeListeners.diagnosticPointSearchClick) {
       document.removeEventListener('click', runtimeListeners.diagnosticPointSearchClick);
     }
+    if (runtimeListeners.simulationConfigInput) {
+      document.getElementById('sim-dur')?.removeEventListener('input', runtimeListeners.simulationConfigInput);
+      document.getElementById('sim-step')?.removeEventListener('input', runtimeListeners.simulationConfigInput);
+      document.getElementById('sim-dur')?.removeEventListener('change', runtimeListeners.simulationConfigInput);
+      document.getElementById('sim-step')?.removeEventListener('change', runtimeListeners.simulationConfigInput);
+    }
   }
 
   mounted = false;

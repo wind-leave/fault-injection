@@ -4455,6 +4455,31 @@ function drawScope(){
 }
 
 // ─── 仿真控制栏 ───
+function syncSimulationConfigFromInputs(){
+  const durationInput=document.getElementById('sim-dur');
+  const stepInput=document.getElementById('sim-step');
+  const duration=Math.max(parseScalar(durationInput?.value,S.simulationConfig?.duration??10),0.1);
+  const stepSize=Math.max(parseScalar(stepInput?.value,S.simulationConfig?.stepSize??0.1),0.001);
+  S.simulationConfig={duration,stepSize};
+  return S.simulationConfig;
+}
+
+function bindSimulationConfigInputs(){
+  const runtimeListeners=getRuntimeListenerStore();
+  if(runtimeListeners.simulationConfigInput){
+    document.getElementById('sim-dur')?.removeEventListener('input',runtimeListeners.simulationConfigInput);
+    document.getElementById('sim-step')?.removeEventListener('input',runtimeListeners.simulationConfigInput);
+    document.getElementById('sim-dur')?.removeEventListener('change',runtimeListeners.simulationConfigInput);
+    document.getElementById('sim-step')?.removeEventListener('change',runtimeListeners.simulationConfigInput);
+  }
+  runtimeListeners.simulationConfigInput=()=>syncSimulationConfigFromInputs();
+  document.getElementById('sim-dur')?.addEventListener('input',runtimeListeners.simulationConfigInput);
+  document.getElementById('sim-step')?.addEventListener('input',runtimeListeners.simulationConfigInput);
+  document.getElementById('sim-dur')?.addEventListener('change',runtimeListeners.simulationConfigInput);
+  document.getElementById('sim-step')?.addEventListener('change',runtimeListeners.simulationConfigInput);
+  syncSimulationConfigFromInputs();
+}
+
 function simInit(silent=false){
   if(!validateSimulationTopology()){return;}
   const autoSaved=!S.systemSaved;
@@ -4463,8 +4488,9 @@ function simInit(silent=false){
     if(S.step<2){S.step=2;}
   }
   SIM.datasetName=document.getElementById('sim-name').value.trim()||'test';
-  SIM.duration=Math.max(parseScalar(document.getElementById('sim-dur').value,10),0.1);
-  SIM.stepSize=Math.max(parseScalar(document.getElementById('sim-step').value,0.1),0.001);
+  const simulationConfig=syncSimulationConfigFromInputs();
+  SIM.duration=simulationConfig.duration;
+  SIM.stepSize=simulationConfig.stepSize;
   SIM.realtime=document.getElementById('sim-rt').checked;
   SIM.inited=true;
   SIM.running=false;
@@ -4829,6 +4855,7 @@ Object.assign(window,{
   simStop
 });
 
+bindSimulationConfigInputs();
 
 updateUI();
 

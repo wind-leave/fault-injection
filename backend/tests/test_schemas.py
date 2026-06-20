@@ -12,6 +12,14 @@ class SchemaValidationTests(unittest.TestCase):
 
         self.assertIs(result, package)
 
+    def test_accepts_frontend_default_duration_limit(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 1000
+
+        result = validate_executable_package(package)
+
+        self.assertIs(result, package)
+
     def test_rejects_unsupported_node_type(self):
         package = valid_package()
         package["nodes"].append({"id": "bad-1", "type": "ui_panel"})
@@ -24,7 +32,7 @@ class SchemaValidationTests(unittest.TestCase):
 
     def test_rejects_invalid_duration_limit(self):
         package = valid_package()
-        package["simulationConfig"]["duration"] = 120
+        package["simulationConfig"]["duration"] = 1000.1
 
         with self.assertRaises(SimulationBackendError) as context:
             validate_executable_package(package)

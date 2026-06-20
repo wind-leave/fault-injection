@@ -58,6 +58,10 @@ function normalizeEdge(edge) {
 
 export function buildBackendExecutablePackage(state = {}) {
   const simulationConfig = state.simulationConfig ?? {};
+  const nodes = (state.modelNodes ?? state.nodes ?? [])
+    .filter((node) => node?.id && SUPPORTED_NODE_TYPES.has(node.type))
+    .map(normalizeNode);
+  const nodeIds = new Set(nodes.map((node) => node.id));
   return {
     schemaVersion: 1,
     packageId: String(state.packageId ?? state.modelPackageId ?? 'frontend-package'),
@@ -65,11 +69,15 @@ export function buildBackendExecutablePackage(state = {}) {
       duration: sanitizeNumber(simulationConfig.duration, 10),
       stepSize: sanitizeNumber(simulationConfig.stepSize, 0.1)
     },
-    nodes: (state.modelNodes ?? state.nodes ?? [])
-      .filter((node) => node?.id && SUPPORTED_NODE_TYPES.has(node.type))
-      .map(normalizeNode),
-    edges: (state.modelEdges ?? state.edges ?? []).map(normalizeEdge),
+    nodes,
+    edges: (state.modelEdges ?? state.edges ?? [])
+      .filter((edge) => nodeIds.has(String(edge?.sourceNodeId)) && nodeIds.has(String(edge?.targetNodeId)))
+      .map(normalizeEdge),
     faultInstances: Array.isArray(state.faultInstances) ? state.faultInstances.map((fault) => ({ ...fault })) : [],
-    measurementPoints: Array.isArray(state.measurementPoints) ? state.measurementPoints.map((point) => ({ ...point })) : []
+    measurementPoints: Array.isArray(state.measurementPoints)
+      ? state.measurementPoints
+        .filter((point) => nodeIds.has(String(point?.scopeNodeId)))
+        .map((point) => ({ ...point }))
+      : []
   };
 }

@@ -212,6 +212,26 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('syncs simulation duration inputs into backend simulation config', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const durationInput = document.getElementById('sim-dur');
+    const stepInput = document.getElementById('sim-step');
+    durationInput.value = '4';
+    stepInput.value = '0.2';
+
+    durationInput.dispatchEvent(new Event('input', { bubbles: true }));
+    stepInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    expect(window.__GZ_STATE__.simulationConfig).toEqual({ duration: 4, stepSize: 0.2 });
+
+    const pkg = window.__GZ_BACKEND_SIMULATION__.buildExecutablePackage(window.__GZ_STATE__);
+    expect(pkg.simulationConfig).toEqual({ duration: 4, stepSize: 0.2 });
+
+    wrapper.unmount();
+  });
+
   it('exposes extracted canvas selection helpers to the legacy runtime', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();

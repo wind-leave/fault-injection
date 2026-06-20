@@ -40,6 +40,35 @@ class ModuleRegistryTests(unittest.TestCase):
 
         self.assertEqual(result["outputs"]["output"], 6.0)
 
+    def test_command_shaper_module_clamps_pitch_command(self):
+        registry = ModuleRegistry.from_builtin_manifest()
+        module = registry.require("command_shaper")
+
+        high_result = module.call({"pitch_command": 1.8}, {})
+        low_result = module.call({"pitch_command": -1.4}, {})
+        nominal_result = module.call({"pitch_command": 0.25}, {})
+
+        self.assertEqual(high_result["outputs"]["shaped_command"], 1.0)
+        self.assertEqual(low_result["outputs"]["shaped_command"], -1.0)
+        self.assertEqual(nominal_result["outputs"]["shaped_command"], 0.25)
+
+    def test_closed_loop_backend_modules_execute_sample_inputs(self):
+        registry = ModuleRegistry.from_builtin_manifest()
+        cases = [
+            ("attitude_controller", {"attitude_error": 0.2}, "torque_command"),
+            ("control_allocator", {"torque_command": 0.2}, "motor_total_command"),
+            ("motor_mixer", {"motor_total_command": 0.2}, "motor_1_command"),
+            ("motor_model", {"motor_command": 0.2}, "thrust"),
+            ("vehicle_dynamics", {"thrust_1": 0.1, "thrust_2": 0.1, "thrust_3": 0.1, "thrust_4": 0.1}, "pitch_rate"),
+            ("imu_gyro", {"body_rate": 0.1}, "measured_rate"),
+        ]
+
+        for module_id, inputs, output_name in cases:
+            with self.subTest(module_id=module_id):
+                result = registry.require(module_id).call(inputs, {}, dt=0.1, state={})
+                self.assertIn(output_name, result["outputs"])
+                self.assertIsInstance(result["state"], dict)
+
 
 if __name__ == "__main__":
     unittest.main()

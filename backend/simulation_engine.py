@@ -13,7 +13,7 @@ def _source_value(node, time):
     return amplitude
 
 
-def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime):
+def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_states, dt):
     key = (mode, node_id)
     if key in cache:
         return cache[key]
@@ -22,7 +22,7 @@ def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime):
     incoming_edges = graph.incoming.get(node_id, [])
     inputs = []
     for edge in incoming_edges:
-        upstream = _evaluate_node(graph, edge.source_node_id, mode, time, cache, fault_runtime)
+        upstream = _evaluate_node(graph, edge.source_node_id, mode, time, cache, fault_runtime, module_states, dt)
         if mode == "actual":
             upstream = fault_runtime.apply_edge_value(edge.id, upstream, time)
         inputs.append(upstream)
@@ -33,7 +33,16 @@ def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime):
         module_inputs = {}
         for index, input_name in enumerate(node.module.inputs):
             module_inputs[input_name] = inputs[index] if index < len(inputs) else 0.0
-        output_map = node.module.call(module_inputs, node.parameters)["outputs"]
+        mode_states = module_states.setdefault(mode, {})
+        module_result = node.module.call(
+            module_inputs,
+            node.parameters,
+            time=time,
+            dt=dt,
+            state=mode_states.get(node_id, {}),
+        )
+        mode_states[node_id] = dict(module_result.get("state") or {})
+        output_map = module_result["outputs"]
         value = float(output_map.get(node.module.outputs[0], 0.0)) if node.module.outputs else 0.0
     elif node.type == "gain_block":
         value = (inputs[0] if inputs else 0.0) * float(node.parameters.get("gain", 1.0))
@@ -71,12 +80,13 @@ def run_simulation(graph, run_id=""):
         channels[f"{measurement.id}.reference"] = []
 
     events = []
+    module_states = {"actual": {}, "reference": {}}
     for time in times:
         cache = {}
         events.extend(fault_runtime.collect_events(time))
         for measurement in graph.measurements:
-            actual = _evaluate_node(graph, measurement.scope_node_id, "actual", time, cache, fault_runtime)
-            reference = _evaluate_node(graph, measurement.scope_node_id, "reference", time, cache, fault_runtime)
+            actual = _evaluate_node(graph, measurement.scope_node_id, "actual", time, cache, fault_runtime, module_states, graph.step_size)
+            reference = _evaluate_node(graph, measurement.scope_node_id, "reference", time, cache, fault_runtime, module_states, graph.step_size)
             channels[f"{measurement.id}.actual"].append(actual)
             channels[f"{measurement.id}.reference"].append(reference)
 

@@ -17,6 +17,62 @@
       "parameters": {
         "gain": {"type": "number", "min": -20, "max": 20, "default": 1}
       }
+    },
+    {
+      "moduleId": "command_shaper",
+      "importPath": "backend.builtin_modules.command_shaper",
+      "entryFunction": "process",
+      "inputs": ["pitch_command"],
+      "outputs": ["shaped_command"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "attitude_controller",
+      "importPath": "backend.builtin_modules.attitude_controller",
+      "entryFunction": "process",
+      "inputs": ["attitude_error"],
+      "outputs": ["torque_command"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "control_allocator",
+      "importPath": "backend.builtin_modules.control_allocator",
+      "entryFunction": "process",
+      "inputs": ["torque_command"],
+      "outputs": ["motor_total_command"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "motor_mixer",
+      "importPath": "backend.builtin_modules.motor_mixer",
+      "entryFunction": "process",
+      "inputs": ["motor_total_command"],
+      "outputs": ["motor_1_command", "motor_2_command", "motor_3_command", "motor_4_command"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "motor_model",
+      "importPath": "backend.builtin_modules.motor_model",
+      "entryFunction": "process",
+      "inputs": ["motor_command"],
+      "outputs": ["thrust"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "vehicle_dynamics",
+      "importPath": "backend.builtin_modules.vehicle_dynamics",
+      "entryFunction": "process",
+      "inputs": ["thrust_1", "thrust_2", "thrust_3", "thrust_4"],
+      "outputs": ["pitch_rate"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "imu_gyro",
+      "importPath": "backend.builtin_modules.imu_gyro",
+      "entryFunction": "process",
+      "inputs": ["body_rate"],
+      "outputs": ["measured_rate"],
+      "parameters": {}
     }
   ]
 }

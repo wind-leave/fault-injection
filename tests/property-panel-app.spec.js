@@ -1397,6 +1397,14 @@ describe('property panel interaction', () => {
     globallyInjectedCards[0].querySelector('[data-save-edge-testpoint]').click();
     await flushRuntime();
 
+    expect(document.querySelector('.props-panel-shell--edge[data-props-panel-shell="true"]')).not.toBeNull();
+    const afterFirstSaveCards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
+    const afterFirstSaveSelections = Array.from(afterFirstSaveCards[0].querySelectorAll('[data-edge-testpoint-fault]'))
+      .filter((input) => input.checked)
+      .map((input) => input.getAttribute('data-edge-testpoint-fault'));
+    expect(afterFirstSaveSelections).toEqual(['source_bias']);
+    expect(afterFirstSaveCards[0].querySelector('[data-save-edge-testpoint]')?.closest('.props-panel-shell--edge')).not.toBeNull();
+
     const refreshedCards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
     refreshedCards[1].querySelector('[data-edge-testpoint-name]').value = 'Controller output monitor B';
     refreshedCards[1].querySelector('[data-edge-testpoint-name]').dispatchEvent(new Event('input', { bubbles: true }));

@@ -970,18 +970,49 @@ describe('canvas layout cleanup', () => {
     const automaticTestPointModel = window.buildDiagnosticTestPointModel();
     expect(automaticTestPointModel.positions).toEqual([]);
 
-    const addResult = window.addDiagnosticTestPointFromEdge('edge-manual-output', {
-      name: 'Manual output measurement',
-      detects: ['manual-output-bias']
-    });
-    expect(addResult).toMatchObject({ ok: true });
+    state.manualDiagnosticTestPoints = [
+      {
+        pointId: 'tp-manual-output-detects',
+        shortName: 'M1',
+        name: 'Manual output measurement',
+        edgeId: 'edge-manual-output',
+        detects: ['manual-output-bias']
+      },
+      {
+        pointId: 'tp-manual-output-observer',
+        shortName: 'M2',
+        name: 'Manual output observer',
+        edgeId: 'edge-manual-output',
+        detects: []
+      }
+    ];
+    state.diagnosticModel = {
+      dMatrix: {
+        rows: [
+          {
+            faultId: 'manual-output-bias',
+            points: {
+              'tp-manual-output-observer': true
+            }
+          }
+        ]
+      }
+    };
 
     const testPointModel = window.buildDiagnosticTestPointModel();
-    const outputPoint = testPointModel.positions.find((point) => point.edgeId === 'edge-manual-output');
+    const outputPoints = testPointModel.positions.filter((point) => point.edgeId === 'edge-manual-output');
+    const outputPoint = outputPoints.find((point) => point.name === 'Manual output measurement');
+    const observerOnlyPoint = outputPoints.find((point) => point.name === 'Manual output observer');
     expect(outputPoint).toBeTruthy();
+    expect(observerOnlyPoint).toBeTruthy();
     expect(outputPoint.detects).toEqual(['manual-output-bias']);
+    expect(observerOnlyPoint.detects).toEqual([]);
     expect(window.installDiagnosticTestPoint(outputPoint.pointId)).toBe(true);
-    expect(window.buildDiagnosticTestPointModel().installed.map((point) => point.edgeId)).toEqual(['edge-manual-output']);
+    expect(window.installDiagnosticTestPoint(observerOnlyPoint.pointId)).toBe(true);
+    expect(window.buildDiagnosticTestPointModel().installed.map((point) => point.edgeId)).toEqual([
+      'edge-manual-output',
+      'edge-manual-output'
+    ]);
 
     window.setCanvasView('dataflow');
     await flushRuntime();
@@ -989,12 +1020,16 @@ describe('canvas layout cleanup', () => {
     expect(dataflowPanel?.querySelector(`[data-installed-testpoint="${outputPoint.pointId}"]`)).not.toBeNull();
 
     const matrix = window.buildDetectionMatrixModel();
-    expect(matrix.points.map((point) => point.edgeId)).toEqual(['edge-manual-output']);
+    expect(matrix.points.map((point) => point.edgeId)).toEqual([
+      'edge-manual-output',
+      'edge-manual-output'
+    ]);
     expect(matrix.rows.some((row) => row.faultId === 'manual-output-bias')).toBe(true);
     expect(matrix.rows.some((row) => row.faultId === 'sensor_bias_imu_pitch')).toBe(false);
 
     const manualRow = matrix.rows.find((row) => row.faultId === 'manual-output-bias');
-    expect(manualRow.cells.find((cell) => cell.edgeId === 'edge-manual-output')?.detectable).toBe(true);
+    expect(manualRow.cells.find((cell) => cell.pointId === outputPoint.pointId)?.detectable).toBe(true);
+    expect(manualRow.cells.find((cell) => cell.pointId === observerOnlyPoint.pointId)?.detectable).toBe(false);
     expect(manualRow.cells.some((cell) => cell.edgeId === 'edge-manual-command')).toBe(false);
 
     window.setCanvasView('dmatrix');

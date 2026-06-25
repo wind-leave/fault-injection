@@ -12612,7 +12612,7 @@ Object.assign(window,{
     if(shouldMarkTopology) markTopologyDirty('fault');
     if(shouldRenderNodes) renderModelNodes();
     if(shouldRenderEdges) renderEdges();
-    if(shouldRenderPanel&&target) renderTypedPropertyPanel(target);
+    if(shouldRenderPanel&&target) renderPropertyPanel(target);
     if(options.syncConfigTargetId) syncConfigTargets(options.syncConfigTargetId);
     if(shouldUpdateUi) updateUI();
     if(document.getElementById('cw')?.dataset.view==='dmatrix'&&typeof window.renderDetectionMatrixPanel==='function'){
@@ -13282,7 +13282,7 @@ Object.assign(window,{
     S.lastDiagnosticTestPointResult=null;
     S.testPointDiagnosis=null;
     markTopologyDirty('diagnostic');
-    renderTypedPropertyPanel(edge);
+    renderPropertyPanel(edge);
     if(typeof refreshDiagnosisViews==='function') refreshDiagnosisViews();
     toast('测点已保存','s');
     return true;
@@ -13305,7 +13305,7 @@ Object.assign(window,{
     S.lastDiagnosticTestPointResult=null;
     S.testPointDiagnosis=null;
     markTopologyDirty('diagnostic');
-    renderTypedPropertyPanel(edge);
+    renderPropertyPanel(edge);
     if(typeof refreshDiagnosisViews==='function') refreshDiagnosisViews();
     toast('测点已删除','s');
     return true;
@@ -13315,7 +13315,7 @@ Object.assign(window,{
     host?.querySelector?.('[data-add-edge-testpoint]')?.addEventListener('click',event=>{
       event.preventDefault();
       addEdgeManualTestPoint(edge);
-      renderTypedPropertyPanel(edge);
+      renderPropertyPanel(edge);
     });
     host?.querySelectorAll?.('[data-save-edge-testpoint]')?.forEach(button=>button.addEventListener('click',event=>{
       event.preventDefault();
@@ -13693,7 +13693,7 @@ Object.assign(window,{
     edge.signalChannels=[nextPrimary,...previousChannels.slice(1)];
     markTopologyDirty(getMutationScopeForEdge(edge));
     renderEdges();
-    renderTypedPropertyPanel(edge);
+    renderPropertyPanel(edge);
     updateUI();
     toast('连线信号元数据已保存','s');
   }
@@ -23193,12 +23193,10 @@ function decorateDataflowEdges(){
     return null;
   }
 
-  function getDetectionCellReason(point,fault,affectedEdges,explicitCell=null){
-    if(explicitCell) return explicitCell.reason;
+  function getDetectionCellReason(point,fault){
     const id=getFaultKey(fault);
     if(arr(point.detects).includes(id)) return '测点直接配置为可观测';
-    if(affectedEdges.has(point.edgeId)) return '故障传播路径覆盖该测点';
-    return '不覆盖该测点';
+    return '测点未配置为可观测';
   }
 
   function getFaultLayerText(fault){
@@ -23279,11 +23277,9 @@ function decorateDataflowEdges(){
     const points=arr(pointModel.installed);
     const faults=getRuntimeInjectedFaultLibrary();
     const rows=faults.map(fault=>{
-      const affectedEdges=getFaultAffectedEdges(fault);
       const display=getDMatrixFaultDisplay(fault);
       const cells=points.map(point=>{
-        const explicitCell=getExplicitDetectionMatrixCell(point,fault);
-        const detectable=explicitCell?explicitCell.detectable:(arr(point.detects).includes(getFaultKey(fault))||affectedEdges.has(point.edgeId));
+        const detectable=arr(point.detects).includes(getFaultKey(fault));
         return {
           pointId:point.pointId,
           pointCode:point.shortName,
@@ -23291,7 +23287,7 @@ function decorateDataflowEdges(){
           edgeId:point.edgeId,
           detectable,
           value:detectable?1:0,
-          reason:getDetectionCellReason(point,fault,affectedEdges,explicitCell)
+          reason:getDetectionCellReason(point,fault)
         };
       });
       return {

@@ -13072,6 +13072,49 @@ Object.assign(window,{
     });
   }
 
+  function getEdgeTestPointFaultComponentId(model){
+    const targetKind=model?.targetKind||model?.target?.kind||'';
+    const targetId=model?.targetId||model?.target?.id||'';
+    return targetId||model?.targetNodeId||model?.targetEdgeId||model?.hostNodeId||model?.edgeId||`${targetKind||'target'}:unbound`;
+  }
+
+  function getEdgeTestPointFaultComponentLabel(model){
+    const componentId=getEdgeTestPointFaultComponentId(model);
+    const targetKind=model?.targetKind||model?.target?.kind||'';
+    if((targetKind==='edge'||model?.targetEdgeId===componentId)&&componentId){
+      const edge=list(S.modelEdges).concat(list(S.edges)).find(item=>item?.id===componentId);
+      return edge?.label||edge?.signalLabel||edge?.name||edge?.signalId||componentId;
+    }
+    const node=list(S.modelNodes).concat(list(S.nodes)).find(item=>item?.id===componentId);
+    return node?.props?.name||node?.name||node?.label||componentId||'未绑定组件';
+  }
+
+  function getEdgeTestPointFaultGroups(edge){
+    const groups=new Map();
+    getInjectedFaultModelsForEdgeTestPoint(edge).forEach(model=>{
+      const id=model?.id||model?.faultTypeId||'';
+      if(!id) return;
+      const componentId=getEdgeTestPointFaultComponentId(model);
+      if(!groups.has(componentId)){
+        groups.set(componentId,{
+          componentId,
+          componentName:getEdgeTestPointFaultComponentLabel(model),
+          faults:[],
+          faultIds:new Set()
+        });
+      }
+      const group=groups.get(componentId);
+      if(group.faultIds.has(id)) return;
+      group.faultIds.add(id);
+      group.faults.push(model);
+    });
+    return Array.from(groups.values()).map(group=>({
+      componentId:group.componentId,
+      componentName:group.componentName,
+      faults:group.faults
+    }));
+  }
+
   function getEdgeTestPointDefaultName(edge){
     const source=getNode(edge?.sourceNodeId);
     const target=getNode(edge?.targetNodeId);
@@ -13133,18 +13176,27 @@ Object.assign(window,{
 
   function renderEdgeTestPointFaultOptions(edge,point){
     const selected=new Set(list(point?.detects));
-    const options=getEdgeTestPointSourceFaultOptions(edge);
-    if(!options.length){
+    const groups=getEdgeTestPointFaultGroups(edge);
+    if(!groups.length){
       return '<div class="props-empty-state">源节点暂无可注入故障类型</div>';
     }
-    return options.map(model=>{
-      const id=model.id||model.faultTypeId;
-      const checked=selected.has(id)?'checked':'';
+    return groups.map((group,index)=>{
+      const open=group.faults.some(model=>selected.has(model.id||model.faultTypeId))||index===0?'open':'';
       return `
-        <label class="props-layer-toggle edge-testpoint-fault-option">
-          <input type="checkbox" data-edge-testpoint-fault="${text(id)}" ${checked}>
-          <span>${text(model.displayName||model.name||id)}</span>
-        </label>`;
+        <details class="edge-testpoint-fault-component" data-edge-testpoint-component="${text(group.componentId)}" ${open}>
+          <summary>${text(group.componentName)}</summary>
+          <div class="edge-testpoint-fault-component__list">
+            ${group.faults.map(model=>{
+        const id=model.id||model.faultTypeId;
+        const checked=selected.has(id)?'checked':'';
+        return `
+              <label class="props-layer-toggle edge-testpoint-fault-option">
+                <input type="checkbox" data-edge-testpoint-fault="${text(id)}" ${checked}>
+                <span>${text(model.displayName||model.name||id)}</span>
+              </label>`;
+      }).join('')}
+          </div>
+        </details>`;
     }).join('');
   }
 

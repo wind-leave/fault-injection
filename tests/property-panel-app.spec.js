@@ -1327,8 +1327,10 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     const injectedCards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
-    expect(injectedCards[0].querySelector('[data-edge-testpoint-fault="source_bias"]')).not.toBeNull();
-    expect(injectedCards[0].querySelector('[data-edge-testpoint-fault="source_noise"]')).not.toBeNull();
+    expect(injectedCards[0].querySelector('[data-edge-testpoint-component]')).not.toBeNull();
+    expect(injectedCards[0].querySelector('[data-edge-testpoint-component]')?.textContent).toContain('Source controller');
+    expect(injectedCards[0].querySelector('[data-edge-testpoint-component] [data-edge-testpoint-fault="source_bias"]')).not.toBeNull();
+    expect(injectedCards[0].querySelector('[data-edge-testpoint-component] [data-edge-testpoint-fault="source_noise"]')).not.toBeNull();
     expect(injectedCards[0].querySelector('[data-edge-testpoint-fault="target_fault"]')).toBeNull();
 
     const unrelated = window.createNode('simulation_block', 700, 360);
@@ -1347,7 +1349,14 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     const globallyInjectedCards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
-    expect(globallyInjectedCards[0].querySelector('[data-edge-testpoint-fault="target_fault"]')).not.toBeNull();
+    const componentGroups = Array.from(globallyInjectedCards[0].querySelectorAll('[data-edge-testpoint-component]'));
+    expect(componentGroups.map((group) => group.getAttribute('data-edge-testpoint-component'))).toEqual([
+      source.id,
+      unrelated.id
+    ]);
+    expect(componentGroups[0].querySelector('[data-edge-testpoint-fault="source_bias"]')).not.toBeNull();
+    expect(componentGroups[0].querySelector('[data-edge-testpoint-fault="source_noise"]')).not.toBeNull();
+    expect(componentGroups[1].querySelector('[data-edge-testpoint-fault="target_fault"]')).not.toBeNull();
 
     globallyInjectedCards[0].querySelector('[data-edge-testpoint-name]').value = 'Controller output monitor A';
     globallyInjectedCards[0].querySelector('[data-edge-testpoint-name]').dispatchEvent(new Event('input', { bubbles: true }));

@@ -25,6 +25,7 @@ class MeasurementBinding:
     id: str
     scope_node_id: str
     channel: str
+    target_port_index: int
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,20 @@ def _edge_port(edge, key):
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return 0
     return value
+
+
+def _measurement_port(point):
+    value = point.get("targetPortIndex")
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    channel = str(point.get("channel", "ch1")).strip().lower()
+    if channel.startswith("ch"):
+        try:
+            index = int(channel[2:])
+        except ValueError:
+            return 0
+        return max(index - 1, 0)
+    return 0
 
 
 def compile_graph(package, registry):
@@ -96,6 +111,7 @@ def compile_graph(package, registry):
             id=point.get("id", f"{scope_node_id}.ch1"),
             scope_node_id=scope_node_id,
             channel=point.get("channel", "ch1"),
+            target_port_index=_measurement_port(point),
         ))
 
     config = package["simulationConfig"]

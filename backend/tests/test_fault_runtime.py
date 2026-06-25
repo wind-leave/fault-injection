@@ -69,6 +69,21 @@ class FaultRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.collect_events(0.1)[0]["type"], "fault_started")
         self.assertEqual(runtime.collect_events(0.2), [])
 
+    def test_disabled_fault_does_not_emit_late_ended_event(self):
+        runtime = FaultRuntime([
+            {
+                "faultId": "cleared-fault",
+                "faultType": "sensor_bias",
+                "targetId": "sim-1",
+                "enabled": False,
+                "startTime": 0.1,
+                "duration": 0.2,
+                "parameters": {"bias": 0.5},
+            }
+        ])
+
+        self.assertEqual(runtime.collect_events(0.4), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,7 @@ import * as propertyPanelSchema from './propertyPanelSchema.js';
 import * as simulationPropertyPanelSchema from './simulationPropertyPanelSchema.js';
 import * as signalComponentRuntime from './signalComponentRuntime.js';
 import * as subsystemPropertyPanelSchema from './subsystemPropertyPanelSchema.js';
+import { installBackendStepSimulationRuntime } from './backendStepSimulationRuntime.js';
 import {
   COMPONENT_GROUPS,
   COMPONENT_REGISTRY,
@@ -244,6 +245,12 @@ export function mountLegacyRuntime() {
   };
   window.__GZ_LOAD_DEFAULT_FLIGHT_MODEL__ = loadDefaultFlightModelPackage;
   window.eval(`${runtimeSource}\n//# sourceURL=gz-legacy-runtime.js`);
+  installBackendStepSimulationRuntime(window, {
+    enabled: import.meta.env.MODE !== 'test',
+    onError(error) {
+      console.warn('[backend-step-simulation] falling back to legacy runtime', error);
+    }
+  });
 
   queueMicrotask(() => {
     const options = getDefaultFlightModelLoadOptions();
@@ -337,6 +344,7 @@ export function __resetLegacyRuntimeForTests() {
 
   mounted = false;
   delete window.__GZ_LEGACY_RUNTIME_BOOTED__;
+  delete window.__GZ_BACKEND_STEP_RUNTIME_INSTALLED__;
   delete window.__GZ_WORKBENCH_SNAPSHOT__;
   delete window.__GZ_CANVAS_GRAPH__;
   delete window.__GZ_CANVAS_RENDER__;

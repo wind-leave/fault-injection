@@ -1588,6 +1588,48 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('lists component-injected fault instances as detectable fault candidates for test points', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
+    await flushRuntime();
+
+    expect(importResult).toMatchObject({ ok: true });
+
+    const model = window.buildDiagnosticTestPointModel();
+    const imuPoint = model.positions.find((point) => point.edgeId === 'edge-imu-error');
+    expect(imuPoint).toBeTruthy();
+    window.installDiagnosticTestPoint(imuPoint.pointId);
+
+    window.__GZ_STATE__.faultInstances = [
+      {
+        instanceId: 'component-only-fault',
+        faultTypeId: 'component_only_fault',
+        displayName: 'component-only injected fault',
+        name: 'component-only injected fault',
+        targetKind: 'edge',
+        targetId: 'edge-imu-error',
+        targetEdgeId: 'edge-imu-error',
+        layer: 'electrical',
+        affectedEdges: ['edge-imu-error'],
+        active: true
+      }
+    ];
+    imuPoint.detects = [...(imuPoint.detects || []), 'component_only_fault'];
+
+    const diagnosis = window.runDiagnosticTestPointDetection(imuPoint.pointId);
+
+    expect(diagnosis.status).toBe('abnormal');
+    expect(diagnosis.candidates).toContainEqual(expect.objectContaining({
+      faultTypeId: 'component_only_fault',
+      active: true
+    }));
+
+    wrapper.unmount();
+  });
+
   it('keeps dataflow controls mounted while simulation steps update values', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();

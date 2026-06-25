@@ -602,6 +602,31 @@ describe('property panel interaction', () => {
     expect(document.querySelector('[data-props-tab="outputs"]')?.hidden).toBe(true);
     expect(document.querySelectorAll('.props-target-card')).toHaveLength(0);
 
+    const nameInput = document.querySelector('[data-fault-tag-name]');
+    const nameApply = document.querySelector('[data-fault-tag-name-apply]');
+    const customName = 'Custom motor command fault';
+    expect(nameInput).not.toBeNull();
+    expect(nameApply).not.toBeNull();
+    expect(nameApply.disabled).toBe(true);
+
+    nameInput.value = customName;
+    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushRuntime();
+    expect(nameApply.disabled).toBe(false);
+    nameApply.click();
+    await flushRuntime();
+
+    const renamedTag = window.__GZ_STATE__.faultTags.find((item) => item.id === tag.id);
+    const renamedEdge = window.__GZ_STATE__.modelEdges.find((item) => item.id === edge.id);
+    const renamedBinding = renamedEdge.faultBindings.find((binding) => binding.faultModelId === tag.faultModelId);
+    expect(renamedTag.name).toBe(customName);
+    expect(renamedTag.faultModelName).toBe(customName);
+    expect(renamedTag.injectedFault.name).toBe(customName);
+    expect(renamedEdge.injectedFault.name).toBe(customName);
+    expect(renamedBinding.name).toBe(customName);
+    expect(renamedBinding.injectedFault.name).toBe(customName);
+    expect(document.querySelector('.fault-tag-overview-panel')?.textContent).toContain(customName);
+
     expect(document.querySelector('[data-fault-tag-edit-params]')).not.toBeNull();
     document.querySelector('[data-fault-tag-edit-params]').click();
     await flushRuntime();
@@ -1286,19 +1311,49 @@ describe('property panel interaction', () => {
 
     const cards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
     expect(cards).toHaveLength(2);
-    expect(cards[0].querySelector('[data-edge-testpoint-fault="source_bias"]')).not.toBeNull();
-    expect(cards[0].querySelector('[data-edge-testpoint-fault="source_noise"]')).not.toBeNull();
+    expect(cards[0].querySelector('[data-edge-testpoint-fault="source_bias"]')).toBeNull();
+    expect(cards[0].querySelector('[data-edge-testpoint-fault="source_noise"]')).toBeNull();
     expect(cards[0].querySelector('[data-edge-testpoint-fault="target_fault"]')).toBeNull();
     expect(cards[0].querySelector('[data-edge-testpoint-fault-list]')).not.toBeNull();
     expect(cards[1].querySelector('[data-edge-testpoint-fault-list]')).not.toBeNull();
     expect(cards[0].querySelector('[data-delete-edge-testpoint]')).not.toBeNull();
     expect(cards[1].querySelector('[data-delete-edge-testpoint]')).not.toBeNull();
 
-    cards[0].querySelector('[data-edge-testpoint-name]').value = 'Controller output monitor A';
-    cards[0].querySelector('[data-edge-testpoint-name]').dispatchEvent(new Event('input', { bubbles: true }));
-    cards[0].querySelector('[data-edge-testpoint-fault="source_bias"]').checked = true;
-    cards[0].querySelector('[data-edge-testpoint-fault="source_bias"]').dispatchEvent(new Event('change', { bubbles: true }));
-    cards[0].querySelector('[data-save-edge-testpoint]').click();
+    expect(window.activateFaultForTarget(source, 'source_bias').ok).toBe(true);
+    expect(window.activateFaultForTarget(source, 'source_noise').ok).toBe(true);
+    window.selectEdge('edge-source-scope-testpoint');
+    await flushRuntime();
+    window.setPropertyPanelTab('testpoints');
+    await flushRuntime();
+
+    const injectedCards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
+    expect(injectedCards[0].querySelector('[data-edge-testpoint-fault="source_bias"]')).not.toBeNull();
+    expect(injectedCards[0].querySelector('[data-edge-testpoint-fault="source_noise"]')).not.toBeNull();
+    expect(injectedCards[0].querySelector('[data-edge-testpoint-fault="target_fault"]')).toBeNull();
+
+    const unrelated = window.createNode('simulation_block', 700, 360);
+    unrelated.props.name = 'Unrelated injected module';
+    state.faultInstances.push({
+      instanceId: 'target-fault-instance',
+      faultTypeId: 'target_fault',
+      targetKind: 'node',
+      targetId: unrelated.id,
+      displayName: 'Target fault',
+      active: true
+    });
+    window.selectEdge('edge-source-scope-testpoint');
+    await flushRuntime();
+    window.setPropertyPanelTab('testpoints');
+    await flushRuntime();
+
+    const globallyInjectedCards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
+    expect(globallyInjectedCards[0].querySelector('[data-edge-testpoint-fault="target_fault"]')).not.toBeNull();
+
+    globallyInjectedCards[0].querySelector('[data-edge-testpoint-name]').value = 'Controller output monitor A';
+    globallyInjectedCards[0].querySelector('[data-edge-testpoint-name]').dispatchEvent(new Event('input', { bubbles: true }));
+    globallyInjectedCards[0].querySelector('[data-edge-testpoint-fault="source_bias"]').checked = true;
+    globallyInjectedCards[0].querySelector('[data-edge-testpoint-fault="source_bias"]').dispatchEvent(new Event('change', { bubbles: true }));
+    globallyInjectedCards[0].querySelector('[data-save-edge-testpoint]').click();
     await flushRuntime();
 
     const refreshedCards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));

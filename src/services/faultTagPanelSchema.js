@@ -34,6 +34,10 @@ const PARAMETER_LABELS = {
 };
 
 const COPY = {
+  faultName: '\u6545\u969c\u540d\u79f0',
+  applyName: '\u5e94\u7528\u540d\u79f0',
+  cleanNameStatus: '\u540d\u79f0\u672a\u4fee\u6539',
+  dirtyNameStatus: '\u6709\u672a\u5e94\u7528\u7684\u540d\u79f0\u4fee\u6539',
   overviewTitle: '绑定概览',
   parametersTitle: '故障参数',
   targetObject: '目标对象',
@@ -139,6 +143,19 @@ export function renderFaultTagOverviewPanel(options = {}) {
   return `
         <div class="pgroup fault-tag-inspector fault-tag-overview-panel" data-fault-tag-inspector="${escapeHtml(tag.id)}">
           <div class="pglbl">${escapeHtml(COPY.overviewTitle)}</div>
+          <div class="fault-tag-name-editor" data-fault-tag-name-editor="${escapeHtml(tag.id)}">
+            <label class="fault-tag-param-row">
+              <span>${escapeHtml(COPY.faultName)}</span>
+              <input value="${escapeHtml(tag.name || COPY.fallbackFaultName)}" data-fault-tag-name>
+            </label>
+            <div class="fault-tag-param-actions">
+              <span data-fault-tag-name-status>${escapeHtml(COPY.cleanNameStatus)}</span>
+              <div>
+                <button type="button" class="props-secondary fault-tag-name-reset" data-fault-tag-name-reset disabled>${escapeHtml(COPY.reset)}</button>
+                <button type="button" class="props-save fault-tag-name-apply" data-fault-tag-name-apply disabled>${escapeHtml(COPY.applyName)}</button>
+              </div>
+            </div>
+          </div>
           <div class="props-fault-card">
             <div class="props-fault-card__top">
               <div>

@@ -1372,12 +1372,12 @@ describe('flightModelPackageService', () => {
 
     expect(closedLoopPackage.schemaVersion).toBe('2.0');
     expect(closedLoopPackage.faultInstances).toEqual([]);
-    expect(closedLoopPackage.faultTypeCatalog).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'gyro_zero_bias_offset', displayName: 'Gyro 陀螺仪零偏 - 固定偏差' }),
-      expect.objectContaining({ id: 'gyro_zero_bias_drift', displayName: 'Gyro 陀螺仪零偏 - 缓慢漂移' }),
-      expect.objectContaining({ id: 'gyro_zero_bias_intermittent', displayName: 'Gyro 陀螺仪零偏 - 间歇故障' }),
-      expect.objectContaining({ id: 'motor_1_stuck_position', displayName: '单电机卡死 - 1号电机卡位' }),
-      expect.objectContaining({ id: 'control_command_tamper', displayName: '控制指令篡改 - 1号电机 CAN 指令' })
+    expect([...faultIds]).not.toEqual(expect.arrayContaining([
+      'gyro_zero_bias_offset',
+      'gyro_zero_bias_drift',
+      'gyro_zero_bias_intermittent',
+      'motor_1_stuck_position',
+      'control_command_tamper'
     ]));
 
     closedLoopPackage.faultCapabilityMap.forEach((entry) => {
@@ -1393,21 +1393,19 @@ describe('flightModelPackageService', () => {
       });
     });
 
-    const imu = closedLoopPackage.faultCapabilityMap.find((entry) => entry.targetId === 'node-imu');
-    expect(imu.faultSlots[0].allowedFaultIds).toEqual([
+    const allowedFaultIds = closedLoopPackage.faultCapabilityMap
+      .flatMap((entry) => entry.faultSlots)
+      .flatMap((slot) => slot.allowedFaultIds);
+    expect(allowedFaultIds).not.toEqual(expect.arrayContaining([
       'gyro_zero_bias_offset',
       'gyro_zero_bias_drift',
-      'gyro_zero_bias_intermittent'
-    ]);
-
-    const motor = closedLoopPackage.faultCapabilityMap.find((entry) => entry.targetId === 'node-motor-1');
-    expect(motor.faultSlots[0].allowedFaultIds).toEqual(['motor_1_stuck_position']);
-
-    const can = closedLoopPackage.faultCapabilityMap.find((entry) => entry.targetId === 'edge-motor-motor1');
-    expect(can.faultSlots[0].allowedFaultIds).toEqual(['control_command_tamper']);
+      'gyro_zero_bias_intermittent',
+      'motor_1_stuck_position',
+      'control_command_tamper'
+    ]));
   });
 
-  it('publishes the full global fault catalog through the closed-loop demo package', () => {
+  it('keeps the closed-loop demo fault type catalog as metadata without importing it as a fault library', () => {
     const closedLoopPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
     const globalFaultIds = globalFaultCatalog.faultTypes.map((fault) => fault.id);
     const packageFaultIds = closedLoopPackage.faultTypeCatalog.map((fault) => fault.id);
@@ -1416,7 +1414,7 @@ describe('flightModelPackageService', () => {
       .join('\n');
 
     expect(packageFaultIds).toEqual(expect.arrayContaining(globalFaultIds));
-    expect(closedLoopPackage.faultLibrary.map((fault) => fault.id)).toEqual(expect.arrayContaining(globalFaultIds));
+    expect(closedLoopPackage.faultLibrary).toEqual([]);
     expect(closedLoopPackage.faultTypeCatalog.length).toBeGreaterThanOrEqual(20);
 
     ['偏差', '卡位', '渐变', '突变'].forEach((label) => {
@@ -1464,7 +1462,7 @@ describe('flightModelPackageService', () => {
     const closedLoopPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
     const diagnosticModel = closedLoopPackage.diagnosticModel;
     const nodes = closedLoopPackage.workbenchSnapshot.modelNodes;
-    const faults = closedLoopPackage.faultLibrary;
+    const faults = closedLoopPackage.faultTypeCatalog;
     const points = diagnosticModel?.testPoints ?? [];
     const cases = diagnosticModel?.faultCases ?? [];
     const caseIds = cases.map((faultCase) => faultCase.id);
@@ -1504,74 +1502,40 @@ describe('flightModelPackageService', () => {
     expect(points.map((point) => point.shortName)).toEqual([
       'M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10', 'M11', 'M12'
     ]);
-    expect(caseIds).toEqual(expect.arrayContaining([
+    expect(caseIds).toEqual([]);
+    expect(diagnosticModel?.dMatrix?.rows).toEqual([]);
+    expect(diagnosticModel?.dMatrix?.faultCaseIds).toEqual([]);
+    expect(points.flatMap((point) => point.detects || [])).not.toEqual(expect.arrayContaining([
       'gyro_zero_bias_offset',
       'gyro_zero_bias_drift',
       'gyro_zero_bias_intermittent',
       'motor_1_stuck_position',
       'control_command_tamper'
     ]));
-    const visualImplementations = Object.fromEntries(faults.map((fault) => [
-      fault.id,
-      {
-        recommendedModule: fault.platformImplementation?.recommendedModule,
-        strategy: fault.visualInjection?.strategy,
-        tagType: fault.visualInjection?.tagType
-      }
-    ]));
-    expect(visualImplementations).toMatchObject({
-      gyro_zero_bias_offset: { recommendedModule: 'fault_tag', strategy: 'fault_tag', tagType: 'fault_tag' },
-      gyro_zero_bias_drift: { recommendedModule: 'fault_tag', strategy: 'fault_tag', tagType: 'fault_tag' },
-      gyro_zero_bias_intermittent: { recommendedModule: 'fault_tag', strategy: 'fault_tag', tagType: 'fault_tag' },
-      motor_1_stuck_position: { recommendedModule: 'fault_tag', strategy: 'fault_tag', tagType: 'fault_tag' },
-      control_command_tamper: { recommendedModule: 'fault_tag', strategy: 'fault_tag', tagType: 'fault_tag' }
-    });
-    caseIds.forEach((faultId) => {
-      const fault = faults.find((item) => item.id === faultId);
-      expect(fault.platformImplementation.moduleLabel).toBe('故障组件');
-      expect(fault.platformImplementation.moduleLabel).not.toContain('?');
-    });
-    const redBoxVisualImplementations = Object.fromEntries(
-      Object.entries(visualImplementations).filter(([faultId]) => caseIds.includes(faultId))
-    );
-    expect(JSON.stringify(redBoxVisualImplementations)).not.toMatch(/fault_bias|fault_noise|middle_var_assign|gain_block|sum_block|fault_intermittent|fault_tamper|fault_stuck/);
-    cases.forEach((faultCase) => {
-      expect(faults.some((fault) => fault.id === faultCase.id)).toBe(true);
-      expect(points.some((point) => point.detects.includes(faultCase.id))).toBe(true);
-      expect(faultCase.name).toMatch(/[一-龥]/);
-      expect(faultCase.catalogTypeId).toBeTruthy();
-    });
-
-    const motorCommandPoint = points.find((point) => point.shortName === 'M6');
-    const motorResponsePoint = points.find((point) => point.shortName === 'M7');
-    expect(motorCommandPoint?.detects).toContain('control_command_tamper');
-    expect(motorCommandPoint?.detects).not.toContain('motor_1_stuck_position');
-    expect(motorResponsePoint?.detects).toContain('motor_1_stuck_position');
   });
 
-  it('maps every closed-loop demo fault-library entry to a compatible runtime target', () => {
+  it('maps closed-loop demo fault type metadata to declared visual runtime targets', () => {
     const closedLoopPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const nodes = closedLoopPackage.workbenchSnapshot.modelNodes;
-    const edges = closedLoopPackage.workbenchSnapshot.modelEdges;
     const targetsByFaultId = Object.fromEntries(
-      closedLoopPackage.faultLibrary.map((faultModel) => [
+      closedLoopPackage.faultTypeCatalog.map((faultModel) => [
         faultModel.id,
-        findCompatibleFaultTarget(faultModel, { nodes, edges })
+        faultModel.visualInjection
+          ? { kind: faultModel.visualInjection.targetKind, id: faultModel.visualInjection.targetId }
+          : null
       ])
     );
 
+    expect(Object.keys(targetsByFaultId)).not.toEqual(expect.arrayContaining([
+      'gyro_zero_bias_offset',
+      'gyro_zero_bias_drift',
+      'gyro_zero_bias_intermittent',
+      'motor_1_stuck_position',
+      'control_command_tamper'
+    ]));
     expect(targetsByFaultId).toMatchObject({
-      gyro_zero_bias_offset: { kind: 'node', id: 'node-imu' },
-      gyro_zero_bias_drift: { kind: 'node', id: 'node-imu' },
-      gyro_zero_bias_intermittent: { kind: 'node', id: 'node-imu' },
-      motor_1_stuck_position: { kind: 'node', id: 'node-motor-1' },
-      control_command_tamper: { kind: 'edge', id: 'edge-shaper-error' },
-      motor_efficiency_loss: { kind: 'node', id: 'node-motor' },
-      airframe_inertia_shift: { kind: 'node', id: 'node-dynamics' },
-      can_bus_delay: { kind: 'edge', id: 'edge-imu-error' }
-    });
-    Object.entries(targetsByFaultId).forEach(([faultId, target]) => {
-      expect(target, faultId).toBeTruthy();
+      can_bus_delay: { kind: 'edge', id: 'edge-imu-error' },
+      sensor_additive_bias: { kind: 'node', id: 'node-imu' },
+      fixed_delay: { kind: 'edge', id: 'edge-imu-error' }
     });
   });
 });

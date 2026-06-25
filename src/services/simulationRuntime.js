@@ -28,7 +28,12 @@ import {
   isFaultLibraryCompatibleWithModel
 } from './modelFaultCompatibilityService.js';
 import { buildBackendExecutablePackage } from './backendExecutablePackageService.js';
-import { runBackendSimulation } from './backendSimulationClient.js';
+import {
+  createBackendSimulationSession,
+  deleteBackendSimulationSession,
+  runBackendSimulation,
+  stepBackendSimulationSession
+} from './backendSimulationClient.js';
 
 export function createSimulationRuntimeFacade() {
   return {
@@ -54,7 +59,10 @@ export function createSimulationRuntimeFacade() {
     getPythonBindingDefaultValue,
     backend: {
       buildExecutablePackage: buildBackendExecutablePackage,
-      runSimulation: runBackendSimulation
+      runSimulation: runBackendSimulation,
+      createSession: createBackendSimulationSession,
+      stepSession: stepBackendSimulationSession,
+      deleteSession: deleteBackendSimulationSession
     },
     faultInjection: {
       applyScalarFault,
@@ -115,6 +123,9 @@ if (typeof window !== 'undefined') {
   };
   window.__GZ_BACKEND_SIMULATION__ = {
     buildExecutablePackage: buildBackendExecutablePackage,
-    runSimulation: runBackendSimulation
+    runSimulation: runBackendSimulation,
+    createSession: createBackendSimulationSession,
+    stepSession: stepBackendSimulationSession,
+    deleteSession: deleteBackendSimulationSession
   };
 }

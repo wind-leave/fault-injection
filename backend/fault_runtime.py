@@ -60,7 +60,12 @@ class FaultRuntime:
                 events.append({"time": time, "type": "fault_started", "relatedFaultId": fault_id})
             start = float(fault.get("startTime", 0.0))
             duration = float(fault.get("duration", 0.0))
-            if duration > 0 and time > start + duration and fault_id not in self.ended_fault_ids:
+            if (
+                duration > 0
+                and fault_id in self.started_fault_ids
+                and time > start + duration
+                and fault_id not in self.ended_fault_ids
+            ):
                 self.ended_fault_ids.add(fault_id)
                 events.append({"time": time, "type": "fault_ended", "relatedFaultId": fault_id})
         return events

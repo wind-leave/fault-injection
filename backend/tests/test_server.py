@@ -10,6 +10,7 @@ from backend.tests.fixtures import valid_package
 
 class SimulationBackendServerTests(unittest.TestCase):
     def setUp(self):
+        SimulationBackendHandler.sessions = {}
         self.server = HTTPServer(("127.0.0.1", 0), SimulationBackendHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -23,6 +24,14 @@ class SimulationBackendServerTests(unittest.TestCase):
         body = json.dumps(payload)
         connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
         connection.request("POST", path, body=body, headers={"Content-Type": "application/json"})
+        response = connection.getresponse()
+        response_body = response.read().decode("utf-8")
+        connection.close()
+        return response.status, json.loads(response_body)
+
+    def _delete(self, path):
+        connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
+        connection.request("DELETE", path)
         response = connection.getresponse()
         response_body = response.read().decode("utf-8")
         connection.close()
@@ -50,6 +59,42 @@ class SimulationBackendServerTests(unittest.TestCase):
 
         self.assertEqual(status, 404)
         self.assertEqual(body["errorCode"], "NOT_FOUND")
+
+    def test_steps_simulation_session(self):
+        status, created = self._post("/api/simulations/session", valid_package())
+
+        self.assertEqual(status, 200)
+        self.assertEqual(created["status"], "success")
+        session_id = created["sessionId"]
+
+        status, first = self._post(f"/api/simulations/session/{session_id}/step", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(first["sessionId"], session_id)
+        self.assertEqual(first["curves"]["time"], [0.0])
+        self.assertFalse(first["metrics"]["done"])
+
+        status, second = self._post(f"/api/simulations/session/{session_id}/step", {"steps": 2})
+        self.assertEqual(status, 200)
+        self.assertEqual(second["curves"]["time"], [0.1, 0.2])
+        self.assertTrue(second["metrics"]["done"])
+
+    def test_returns_404_for_unknown_session(self):
+        status, body = self._post("/api/simulations/session/missing/step", {})
+
+        self.assertEqual(status, 404)
+        self.assertEqual(body["errorCode"], "SESSION_NOT_FOUND")
+
+    def test_deletes_simulation_session(self):
+        _, created = self._post("/api/simulations/session", valid_package())
+        session_id = created["sessionId"]
+
+        status, body = self._delete(f"/api/simulations/session/{session_id}")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["status"], "success")
+        status, missing = self._post(f"/api/simulations/session/{session_id}/step", {})
+        self.assertEqual(status, 404)
+        self.assertEqual(missing["errorCode"], "SESSION_NOT_FOUND")
 
 
 if __name__ == "__main__":

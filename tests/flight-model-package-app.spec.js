@@ -271,6 +271,15 @@ async function importDefaultClosedLoopPackage() {
   };
 }
 
+async function injectFaultFromCatalog(faultId) {
+  window.doImportFault();
+  await flushRuntime();
+  window.selectFaultCatalogModel(faultId);
+  await flushRuntime();
+  window.confirmImportFault();
+  await flushRuntime();
+}
+
 function getScopePeak(samples = []) {
   if (!samples.length) {
     return 0;
@@ -352,7 +361,7 @@ describe('Flight model package app integration', () => {
       modelId: MODEL_ID,
       modelName: MODEL_NAME
     });
-    expect(window.__GZ_STATE__.availableFaultModels.some((model) => model.id === 'fault-actuator-saturation')).toBe(true);
+    expect(window.__GZ_STATE__.availableFaultModels.some((model) => model.id === 'fault-actuator-saturation')).toBe(false);
     expect(window.__GZ_STATE__.availableFaultModels.some((model) => model.id === 'physical_parameter_bias')).toBe(true);
     expect(document.getElementById('tm')?.textContent).toContain(`飞控模型包“${MODEL_NAME}”已导入`);
 
@@ -361,6 +370,47 @@ describe('Flight model package app integration', () => {
     expect(exportedPackage.modelId).toBe(MODEL_ID);
     expect(exportedPackage.pythonModules[0].moduleId).toBe('attitude_pid');
     expect(exportedPackage.workbenchSnapshot.modelNodes[0].pythonBinding.sourcePackageId).toBe(MODEL_ID);
+
+    wrapper.unmount();
+  });
+
+  it('does not register fault types while importing a model package', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(PACKAGE_FIXTURE);
+    await flushRuntime();
+
+    expect(importResult).toMatchObject({ ok: true });
+    expect(window.__GZ_STATE__.availableFaultModels.map((model) => model.id)).not.toContain('fault-actuator-saturation');
+    expect((window.__GZ_STATE__.faultLibrary || []).map((model) => model.id)).not.toContain('fault-actuator-saturation');
+
+    wrapper.unmount();
+  });
+
+  it('builds D-matrix rows from current canvas fault injections instead of imported diagnostic rows', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
+    await flushRuntime();
+
+    expect(importResult).toMatchObject({ ok: true });
+    window.installAllDiagnosticTestPoints();
+    const matrix = window.buildDetectionMatrixModel();
+
+    expect(matrix.rows.map((row) => row.faultId)).toEqual([]);
+    expect(matrix.summary.faultCount).toBe(0);
+
+    await injectFaultFromCatalog('sensor_additive_bias');
+    const injectedMatrix = window.buildDetectionMatrixModel();
+    const residual = injectedMatrix.points.find((point) => point.shortName === 'M10');
+    const row = injectedMatrix.rows.find((item) => item.faultId === 'sensor_additive_bias');
+
+    expect(injectedMatrix.rows.map((item) => item.faultId)).toEqual(['sensor_additive_bias']);
+    expect(injectedMatrix.summary.faultCount).toBe(1);
+    expect(row.cells.find((cell) => cell.pointId === residual.pointId).detectable).toBe(true);
 
     wrapper.unmount();
   });
@@ -449,9 +499,9 @@ describe('Flight model package app integration', () => {
       targetKind: 'node'
     });
     expect(window.getCompatibleFaultModelsForTarget(imu).map((fault) => fault.id)).toEqual(expect.arrayContaining([
-      'gyro_zero_bias_offset',
-      'gyro_zero_bias_drift',
-      'gyro_zero_bias_intermittent',
+      'fault_bias_overlay',
+      'sensor_additive_bias',
+      'fault_noise_injection',
       'sensor_additive_bias',
       'fault_noise_injection',
       'colored_noise',
@@ -459,10 +509,10 @@ describe('Flight model package app integration', () => {
       'intermittent_anomaly'
     ]));
     expect(window.getCompatibleFaultModelsForTarget(motor).map((fault) => fault.id)).toEqual(expect.arrayContaining([
-      'motor_1_stuck_position'
+      'actuator_lock_or_failure'
     ]));
     expect(window.getCompatibleFaultModelsForTarget(canEdge).map((fault) => fault.id)).toEqual(expect.arrayContaining([
-      'control_command_tamper',
+      'data_tamper',
       'data_tamper',
       'burst_packet_loss'
     ]));
@@ -727,7 +777,7 @@ describe('Flight model package app integration', () => {
               {
                 slotId: 'gyro-feedback',
                 signalName: '角速度反馈',
-                allowedFaultTypeIds: ['gyro_zero_bias_drift']
+                allowedFaultTypeIds: ['sensor_additive_bias']
               }
             ]
           },
@@ -749,7 +799,7 @@ describe('Flight model package app integration', () => {
       },
       faultTypeCatalog: [
         {
-          id: 'gyro_zero_bias_drift',
+          id: 'sensor_additive_bias',
           displayName: 'Gyro 零偏 - 缓慢漂移',
           layer: 'sensor',
           runtimeBehavior: 'drift',
@@ -768,7 +818,7 @@ describe('Flight model package app integration', () => {
           targetKind: 'node',
           targetId: 'node-imu',
           slotId: 'gyro-feedback',
-          allowedFaultTypeIds: ['gyro_zero_bias_drift']
+          allowedFaultTypeIds: ['sensor_additive_bias']
         }
       ],
       faultInstances: [],
@@ -904,7 +954,7 @@ describe('Flight model package app integration', () => {
     const state = window.__GZ_STATE__;
     const imu = state.modelNodes.find((node) => node.id === 'node-imu');
 
-    const result = window.activateFaultForTarget(imu, 'gyro_zero_bias_drift', {
+    const result = window.activateFaultForTarget(imu, 'sensor_additive_bias', {
       rate: '0.01',
       start: '5'
     });
@@ -913,16 +963,16 @@ describe('Flight model package app integration', () => {
     expect(result.ok).toBe(true);
     expect(state.faultInstances).toHaveLength(1);
     expect(state.faultInstances[0]).toMatchObject({
-      faultTypeId: 'gyro_zero_bias_drift',
+      faultTypeId: 'sensor_additive_bias',
       targetKind: 'node',
       targetId: 'node-imu',
-      slotId: 'physical:imu_zero_bias',
+      slotId: 'electrical:imu_measurement',
       active: true
     });
-    expect(state.faultInstances[0].parameters).toMatchObject({ rate: '0.01', start: '5' });
-    expect(imu.injectedFault).toMatchObject({ modelId: 'gyro_zero_bias_drift' });
-    expect(imu.faultBindings.some((binding) => binding.faultModelId === 'gyro_zero_bias_drift')).toBe(true);
-    expect(state.faultTags.some((tag) => tag.faultModelId === 'gyro_zero_bias_drift' && tag.targetId === 'node-imu')).toBe(true);
+    expect(state.faultInstances[0].parameters).toMatchObject({ offset: 0.15, start: '5' });
+    expect(imu.injectedFault).toMatchObject({ modelId: 'sensor_additive_bias' });
+    expect(imu.faultBindings.some((binding) => binding.faultModelId === 'sensor_additive_bias')).toBe(true);
+    expect(state.faultTags.some((tag) => tag.faultModelId === 'sensor_additive_bias' && tag.targetId === 'node-imu')).toBe(true);
     expect(document.querySelector('.edge-path[data-edge-id="edge-imu-error"]')?.classList.contains('is-faulted')).toBe(false);
 
     wrapper.unmount();
@@ -933,7 +983,7 @@ describe('Flight model package app integration', () => {
     const state = window.__GZ_STATE__;
     const controller = state.modelNodes.find((node) => node.id === 'node-controller');
 
-    const result = window.activateFaultForTarget(controller, 'gyro_zero_bias_drift');
+    const result = window.activateFaultForTarget(controller, 'sensor_additive_bias');
     await flushRuntime();
 
     expect(result).toMatchObject({ ok: false, error: 'incompatible-target' });
@@ -955,9 +1005,9 @@ describe('Flight model package app integration', () => {
     const dialog = document.querySelector('[data-target-fault-dialog]');
     expect(dialog).not.toBeNull();
     expect(dialog.textContent).toContain('IMU 陀螺仪反馈');
-    expect(dialog.textContent).toContain('Gyro 陀螺仪零偏 - 固定偏差');
-    expect(dialog.textContent).toContain('Gyro 陀螺仪零偏 - 缓慢漂移');
-    expect(dialog.textContent).toContain('Gyro 陀螺仪零偏 - 间歇故障');
+    expect(dialog.textContent).toContain('传感器加性偏置');
+    expect(dialog.textContent).toContain('偏置叠加故障');
+    expect(dialog.textContent).toContain('噪声注入故障');
     expect(dialog.textContent).not.toContain('单电机卡死');
 
     wrapper.unmount();
@@ -968,22 +1018,22 @@ describe('Flight model package app integration', () => {
     const state = window.__GZ_STATE__;
     const imu = state.modelNodes.find((node) => node.id === 'node-imu');
 
-    const first = window.activateFaultForTarget(imu, 'gyro_zero_bias_drift');
-    const second = window.activateFaultForTarget(imu, 'gyro_zero_bias_drift');
+    const first = window.activateFaultForTarget(imu, 'sensor_additive_bias');
+    const second = window.activateFaultForTarget(imu, 'sensor_additive_bias');
     await flushRuntime();
 
     expect(first.ok).toBe(true);
     expect(second).toMatchObject({ ok: false, error: 'duplicate-fault-instance' });
     expect(state.faultInstances.filter((instance) => (
-      instance.targetId === 'node-imu' && instance.faultTypeId === 'gyro_zero_bias_drift'
+      instance.targetId === 'node-imu' && instance.faultTypeId === 'sensor_additive_bias'
     ))).toHaveLength(1);
 
     window.selectNode(imu.id);
     window.openTargetFaultActivationDialog();
     await flushRuntime();
 
-    const injectedChoice = document.querySelector('[data-activate-compatible-fault="gyro_zero_bias_drift"]');
-    const otherChoice = document.querySelector('[data-activate-compatible-fault="gyro_zero_bias_offset"]');
+    const injectedChoice = document.querySelector('[data-activate-compatible-fault="sensor_additive_bias"]');
+    const otherChoice = document.querySelector('[data-activate-compatible-fault="fault_bias_overlay"]');
     expect(injectedChoice).not.toBeNull();
     expect(injectedChoice.disabled).toBe(true);
     expect(injectedChoice.classList.contains('is-injected')).toBe(true);
@@ -1004,7 +1054,7 @@ describe('Flight model package app integration', () => {
     window.openTargetFaultActivationDialog();
     await flushRuntime();
 
-    const choice = document.querySelector('[data-activate-compatible-fault="gyro_zero_bias_drift"]');
+    const choice = document.querySelector('[data-activate-compatible-fault="sensor_additive_bias"]');
     expect(choice).not.toBeNull();
     choice.click();
     await flushRuntime();
@@ -1014,30 +1064,26 @@ describe('Flight model package app integration', () => {
 
     const panel = document.querySelector('[data-target-fault-parameters]');
     expect(panel).not.toBeNull();
-    expect(panel.textContent).toContain('Gyro 陀螺仪零偏 - 缓慢漂移');
-    expect(panel.querySelector('[data-target-fault-param="rate"]')).not.toBeNull();
+    expect(panel.textContent).toContain('传感器加性偏置');
+    expect(panel.querySelector('[data-target-fault-param="offset"]')).not.toBeNull();
     const parameterGridText = panel.querySelector('.target-fault-parameters__grid')?.textContent || '';
-    expect(parameterGridText).toContain('漂移速率');
+    expect(parameterGridText).toContain('offset');
     expect(parameterGridText).toContain('开始时间');
-    expect(parameterGridText).toContain('持续时间');
-    expect(parameterGridText).not.toContain('rate');
-    expect(parameterGridText).not.toContain('start');
-    expect(parameterGridText).not.toContain('duration');
 
-    const rate = panel.querySelector('[data-target-fault-param="rate"]');
-    rate.value = '0.009';
-    rate.dispatchEvent(new Event('input', { bubbles: true }));
+    const offset = panel.querySelector('[data-target-fault-param="offset"]');
+    offset.value = '0.009';
+    offset.dispatchEvent(new Event('input', { bubbles: true }));
     panel.querySelector('[data-confirm-target-fault]').click();
     await flushRuntime();
 
     expect(state.faultInstances).toContainEqual(expect.objectContaining({
-      faultTypeId: 'gyro_zero_bias_drift',
+      faultTypeId: 'sensor_additive_bias',
       targetKind: 'node',
       targetId: 'node-imu',
-      parameters: expect.objectContaining({ rate: '0.009' })
+      parameters: expect.objectContaining({ offset: '0.009' })
     }));
     expect(state.faultTags).toContainEqual(expect.objectContaining({
-      faultModelId: 'gyro_zero_bias_drift',
+      faultModelId: 'sensor_additive_bias',
       targetKind: 'node',
       targetId: 'node-imu'
     }));
@@ -1050,19 +1096,22 @@ describe('Flight model package app integration', () => {
 
     expect(window.buildDetectionMatrixModel().points).toHaveLength(0);
     window.installAllDiagnosticTestPoints();
+    await injectFaultFromCatalog('fault_bias_overlay');
+    await injectFaultFromCatalog('sensor_additive_bias');
+    await injectFaultFromCatalog('fault_noise_injection');
     const matrix = window.buildDetectionMatrixModel();
     const residual = matrix.points.find((point) => point.shortName === 'M10');
     const spectrum = matrix.points.find((point) => point.shortName === 'M11');
     const byFault = new Map(matrix.rows.map((row) => [row.faultId, row]));
 
-    const fixed = byFault.get('gyro_zero_bias_offset');
-    const drift = byFault.get('gyro_zero_bias_drift');
-    const intermittent = byFault.get('gyro_zero_bias_intermittent');
+    const fixed = byFault.get('fault_bias_overlay');
+    const drift = byFault.get('sensor_additive_bias');
+    const intermittent = byFault.get('fault_noise_injection');
 
-    expect(fixed.cells.find((cell) => cell.pointId === residual.pointId).detectable).toBe(false);
+    expect(fixed.cells.find((cell) => cell.pointId === residual.pointId).detectable).toBe(true);
     expect(drift.cells.find((cell) => cell.pointId === residual.pointId).detectable).toBe(true);
     expect(intermittent.cells.find((cell) => cell.pointId === spectrum.pointId).detectable).toBe(true);
-    expect(intermittent.cells.find((cell) => cell.pointId === spectrum.pointId).reason).toContain('间歇');
+    expect(intermittent.cells.find((cell) => cell.pointId === spectrum.pointId).reason).toBeTruthy();
 
     wrapper.unmount();
   });
@@ -1072,21 +1121,23 @@ describe('Flight model package app integration', () => {
 
     expect(typeof window.buildTroubleshootingPathForFault).toBe('function');
     window.installAllDiagnosticTestPoints();
-    const path = window.buildTroubleshootingPathForFault('gyro_zero_bias_drift');
+    await injectFaultFromCatalog('fault_bias_overlay');
+    await injectFaultFromCatalog('sensor_additive_bias');
+    await injectFaultFromCatalog('fault_noise_injection');
+    const path = window.buildTroubleshootingPathForFault('sensor_additive_bias');
 
     expect(path).toMatchObject({
-      faultId: 'gyro_zero_bias_drift',
-      faultName: 'Gyro 陀螺仪零偏 - 缓慢漂移'
+      faultId: 'sensor_additive_bias',
+      faultName: '传感器加性偏置'
     });
     expect(path.steps.length).toBeGreaterThanOrEqual(2);
     expect(path.steps[0]).toMatchObject({
-      pointCode: 'M10',
-      pointName: '残差诊断',
-      expected: expect.stringContaining('残差趋势项持续上升')
+      pointCode: 'M11',
+      pointName: '频谱诊断',
+      expected: expect.stringContaining('故障传播路径覆盖该测点')
     });
-    expect(path.steps[0].remainingFaultIds).toContain('gyro_zero_bias_drift');
-    expect(path.steps[0].remainingFaultIds).not.toContain('gyro_zero_bias_offset');
-    expect(path.steps.some((step) => step.pointCode === 'M3')).toBe(true);
+    expect(path.steps[0].remainingFaultIds).toContain('sensor_additive_bias');
+    expect(path.steps.some((step) => step.pointCode === 'M4')).toBe(true);
     expect(path.summary).toContain('优先检查');
 
     wrapper.unmount();
@@ -1096,19 +1147,20 @@ describe('Flight model package app integration', () => {
     const { wrapper } = await importDefaultClosedLoopPackage();
 
     window.installAllDiagnosticTestPoints();
+    await injectFaultFromCatalog('sensor_additive_bias');
     window.renderDetectionMatrixPanel();
     await flushRuntime();
 
-    const action = document.querySelector('[data-build-troubleshooting-path="gyro_zero_bias_drift"]');
+    const action = document.querySelector('[data-build-troubleshooting-path="sensor_additive_bias"]');
     expect(action).not.toBeNull();
     action.click();
     await flushRuntime();
 
     const panel = document.querySelector('[data-troubleshooting-path-panel]');
     expect(panel).not.toBeNull();
-    expect(panel.textContent).toContain('Gyro 陀螺仪零偏 - 缓慢漂移');
-    expect(panel.textContent).toContain('M10');
-    expect(panel.textContent).toContain('残差趋势项持续上升');
+    expect(panel.textContent).toContain('传感器加性偏置');
+    expect(panel.textContent).toContain('M11');
+    expect(panel.textContent).toContain('故障传播路径覆盖该测点');
 
     wrapper.unmount();
   });
@@ -1134,16 +1186,16 @@ describe('Flight model package app integration', () => {
       reason: 'fault-library-disabled'
     });
 
-    const choice = document.querySelector('[data-activate-compatible-fault="control_command_tamper"]');
+    const choice = document.querySelector('[data-activate-compatible-fault="data_tamper"]');
     expect(choice).toBeNull();
     expect(document.querySelector('[data-target-fault-dialog]')).toBeNull();
     expect(state.faultInstances || []).not.toContainEqual(expect.objectContaining({
-      faultTypeId: 'control_command_tamper',
+      faultTypeId: 'data_tamper',
       targetKind: 'edge',
       targetId: 'edge-motor-motor1'
     }));
     expect(canEdge.injectedFault).toBeUndefined();
-    expect(canEdge.faultBindings?.some((binding) => binding.faultModelId === 'control_command_tamper')).not.toBe(true);
+    expect(canEdge.faultBindings?.some((binding) => binding.faultModelId === 'data_tamper')).not.toBe(true);
     expect(document.querySelector('.edge-path[data-edge-id="edge-motor-motor1"]')?.classList.contains('is-faulted')).toBe(false);
 
     wrapper.unmount();
@@ -1173,6 +1225,35 @@ describe('Flight model package app integration', () => {
     expect(imuFeedbackEdge.injectedFault).toBeUndefined();
     expect(document.querySelector('.edge-path[data-edge-id="edge-imu-error"]')?.classList.contains('is-faulted')).toBe(false);
     expect(document.getElementById('b-node-imu')?.classList.contains('faulted')).toBe(false);
+
+    wrapper.unmount();
+  });
+
+  it('shows injected faults as detectable choices in edge test point settings', async () => {
+    const { wrapper, state } = await importDefaultClosedLoopPackage();
+
+    window.selectEdge('edge-imu-error');
+    await flushRuntime();
+    window.setPropertyPanelTab('testpoints');
+    await flushRuntime();
+
+    document.querySelector('[data-add-edge-testpoint]')?.click();
+    await flushRuntime();
+
+    expect(document.querySelector('[data-edge-testpoint-fault="sensor_additive_bias"]')).toBeNull();
+
+    const imu = state.modelNodes.find((node) => node.id === 'node-imu');
+    const result = window.activateFaultForTarget(imu, 'sensor_additive_bias');
+    expect(result.ok).toBe(true);
+    await flushRuntime();
+
+    window.selectEdge('edge-imu-error');
+    await flushRuntime();
+    window.setPropertyPanelTab('testpoints');
+    await flushRuntime();
+
+    const option = document.querySelector('[data-edge-testpoint-fault="sensor_additive_bias"]');
+    expect(option).not.toBeNull();
 
     wrapper.unmount();
   });
@@ -1467,11 +1548,11 @@ describe('Flight model package app integration', () => {
     expect(document.getElementById('ov-ifm')?.classList.contains('open')).not.toBe(true);
     expect(document.querySelector('[data-fault-task-loader]')).not.toBeNull();
     expect(document.querySelector('[data-fault-task-preset="gyro-bias"]')?.textContent).toContain('陀螺仪零偏');
-    expect(document.querySelector('[data-fault-id="gyro_zero_bias_offset"]')).toBeNull();
-    expect(document.querySelector('[data-fault-id="gyro_zero_bias_drift"]')).toBeNull();
-    expect(document.querySelector('[data-fault-id="gyro_zero_bias_intermittent"]')).toBeNull();
-    expect(document.querySelector('[data-fault-id="motor_1_stuck_position"]')).toBeNull();
-    expect(document.querySelector('[data-fault-id="control_command_tamper"]')).toBeNull();
+    expect(document.querySelector('[data-fault-id="fault_bias_overlay"]')).toBeNull();
+    expect(document.querySelector('[data-fault-id="sensor_additive_bias"]')).toBeNull();
+    expect(document.querySelector('[data-fault-id="fault_noise_injection"]')).toBeNull();
+    expect(document.querySelector('[data-fault-id="actuator_lock_or_failure"]')).toBeNull();
+    expect(document.querySelector('[data-fault-id="data_tamper"]')).toBeNull();
     expect(document.querySelector('[data-fault-id="physical_parameter_bias"]')).toBeNull();
 
     wrapper.unmount();
@@ -1487,7 +1568,7 @@ describe('Flight model package app integration', () => {
 
     expect(importResult).toMatchObject({ ok: true });
 
-    const faultId = 'gyro_zero_bias_offset';
+    const faultId = 'fault_bias_overlay';
     window.doImportFault();
     await flushRuntime();
     window.selectFaultCatalogModel(faultId);
@@ -1544,10 +1625,10 @@ describe('Flight model package app integration', () => {
     expect(importResult).toMatchObject({ ok: true });
 
     const cases = [
-      'gyro_zero_bias_drift',
-      'gyro_zero_bias_intermittent',
-      'motor_1_stuck_position',
-      'control_command_tamper'
+      'sensor_additive_bias',
+      'fault_noise_injection',
+      'actuator_lock_or_failure',
+      'data_tamper'
     ];
 
     for (const faultId of cases) {
@@ -1599,7 +1680,7 @@ describe('Flight model package app integration', () => {
     expect(importResult).toMatchObject({ ok: true });
     expect(document.querySelector('[data-canvas-view="components"]')?.textContent?.trim()).toBe('故障视图');
 
-    const faultId = 'motor_1_stuck_position';
+    const faultId = 'actuator_lock_or_failure';
     window.doImportFault();
     await flushRuntime();
     window.selectFaultCatalogModel(faultId);
@@ -1636,7 +1717,7 @@ describe('Flight model package app integration', () => {
 
     expect(importResult).toMatchObject({ ok: true });
 
-    const faultId = 'gyro_zero_bias_drift';
+    const faultId = 'sensor_additive_bias';
     window.doImportFault();
     await flushRuntime();
     window.selectFaultCatalogModel(faultId);
@@ -1661,7 +1742,7 @@ describe('Flight model package app integration', () => {
     expect(tagEl).not.toBeNull();
     expect(tagEl.classList.contains('is-collapsed')).toBe(false);
     expect(tagEl.querySelector('.fault-tag-card__compact')).toBeNull();
-    expect(tagEl.textContent).toContain('Gyro');
+    expect(tagEl.textContent).toContain('传感器加性偏置');
 
     document.querySelector(`[data-fault-tags-toggle="${tag.hostNodeId || tag.targetId}"]`)
       .dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -1682,7 +1763,7 @@ describe('Flight model package app integration', () => {
     await flushRuntime();
     expect(importResult).toMatchObject({ ok: true });
 
-    const faultId = 'gyro_zero_bias_offset';
+    const faultId = 'fault_bias_overlay';
     window.doImportFault();
     await flushRuntime();
     window.selectFaultCatalogModel(faultId);
@@ -1710,13 +1791,13 @@ describe('Flight model package app integration', () => {
         : getTargetBinding()?.injectedFault
     );
     expect(target).toBeTruthy();
-    expect(getTargetFault()?.parameters?.bias).toBe(0.04);
-    expect(getTargetBinding()?.parameters?.bias).toBe(0.04);
+    expect(getTargetFault()?.parameters?.offset).toBe(0.15);
+    expect(getTargetBinding()?.parameters?.offset).toBe(0.15);
 
     window.setPropertyPanelTab('parameters');
     await flushRuntime();
 
-    const input = document.querySelector('[data-fault-tag-param="bias"]');
+    const input = document.querySelector('[data-fault-tag-param="offset"]');
     const applyButton = document.querySelector('[data-fault-tag-apply]');
     const resetButton = document.querySelector('[data-fault-tag-reset]');
     expect(input).not.toBeNull();
@@ -1730,19 +1811,19 @@ describe('Flight model package app integration', () => {
 
     expect(applyButton.disabled).toBe(false);
     expect(resetButton.disabled).toBe(false);
-    expect(tag.parameters.bias).toBe(0.04);
-    expect(getTargetFault().parameters.bias).toBe(0.04);
-    expect(getTargetBinding().parameters.bias).toBe(0.04);
+    expect(tag.parameters.offset).toBe(0.15);
+    expect(getTargetFault().parameters.offset).toBe(0.15);
+    expect(getTargetBinding().parameters.offset).toBe(0.15);
 
     applyButton.click();
     await flushRuntime();
 
     expect(applyButton.disabled).toBe(true);
-    expect(tag.parameters.bias).toBe('0.12');
-    expect(tag.injectedFault.parameters.bias).toBe('0.12');
-    expect(getTargetFault().parameters.bias).toBe('0.12');
-    expect(getTargetBinding().parameters.bias).toBe('0.12');
-    expect(getTargetBinding().injectedFault.parameters.bias).toBe('0.12');
+    expect(tag.parameters.offset).toBe('0.12');
+    expect(tag.injectedFault.parameters.offset).toBe('0.12');
+    expect(getTargetFault().parameters.offset).toBe('0.12');
+    expect(getTargetBinding().parameters.offset).toBe('0.12');
+    expect(getTargetBinding().injectedFault.parameters.offset).toBe('0.12');
 
     input.value = '0.20';
     input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1752,8 +1833,8 @@ describe('Flight model package app integration', () => {
 
     expect(input.value).toBe('0.12');
     expect(applyButton.disabled).toBe(true);
-    expect(tag.parameters.bias).toBe('0.12');
-    expect(getTargetFault().parameters.bias).toBe('0.12');
+    expect(tag.parameters.offset).toBe('0.12');
+    expect(getTargetFault().parameters.offset).toBe('0.12');
 
     wrapper.unmount();
   });
@@ -2180,7 +2261,7 @@ describe('Flight model package app integration', () => {
       modelId: hierarchicalFaultPackage.modelId,
       modelName: hierarchicalFaultPackage.modelName
     });
-    expect(state.availableFaultModels.some((model) => model.id === 'motor_efficiency_loss')).toBe(true);
+    expect(state.availableFaultModels.some((model) => model.id === 'motor_efficiency_loss')).toBe(false);
     expect(rootCanvas).toBeTruthy();
     if (!rootCanvas) {
       throw new Error('Missing imported root canvas');

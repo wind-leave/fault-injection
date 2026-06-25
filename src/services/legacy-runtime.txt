@@ -1187,8 +1187,48 @@ function buildFaultCatalogMeta(model){
   return `${model.tags?.[0]||'Fault'} · ${getLayerLabel(model.layer)} · ${model.createdAt||'未记录'}`;
 }
 
+function getActiveModelPackageFaultModel(id){
+  if(!id) return null;
+  const pkg=S.activeModelPackage||{};
+  const diagnosticModel=pkg.diagnosticModel||S.diagnosticModel||{};
+  const candidates=[
+    ...(pkg.faultTypeCatalog||[]),
+    ...(pkg.faultLibrary||[]),
+    ...(diagnosticModel.faultCases||[])
+  ];
+  const found=candidates.find(model=>(
+    model?.id===id
+    ||model?.faultId===id
+    ||model?.faultTypeId===id
+    ||model?.modelId===id
+    ||model?.faultModelId===id
+  ));
+  if(found){
+    const modelId=found.id||found.faultId||found.faultTypeId||found.modelId||found.faultModelId;
+    return {
+      ...found,
+      id:modelId,
+      name:found.name||found.displayName||found.nameZh||found.labelZh||modelId,
+      layer:found.layer||found.layerKey||found.category||'fault'
+    };
+  }
+  const matrixRow=(diagnosticModel.dMatrix?.rows||[]).find(row=>(
+    row?.faultId===id
+    ||row?.faultTypeId===id
+    ||row?.caseId===id
+    ||row?.id===id
+  ));
+  if(!matrixRow) return null;
+  return {
+    ...matrixRow,
+    id,
+    name:matrixRow.faultName||matrixRow.name||matrixRow.displayName||id,
+    layer:matrixRow.layer||'fault'
+  };
+}
+
 function getFaultCatalogModel(id){
-  return S.availableFaultModels.find(model=>model.id===id);
+  return S.availableFaultModels.find(model=>model.id===id)||getActiveModelPackageFaultModel(id);
 }
 
 function getImportedFaultModel(id){
@@ -5665,8 +5705,8 @@ window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__ = function(pkg,prepared){
   S.activeLineType=restored.activeLineType||'normal';
   S.faultedBlks=restored.faultedBlks||[];
   S.importedFaultModels=restored.importedFaultModels||[];
-  S.availableFaultModels=cloneDefaults(prepared?.faultLibrary||pkg?.faultLibrary||[]);
-  S.selectedFaultCatalogId=S.availableFaultModels[0]?.id||'';
+  S.availableFaultModels=[];
+  S.selectedFaultCatalogId='';
   S.activeModelPackage={
     modelId:pkg?.modelId??prepared?.descriptor?.modelId??null,
     modelName:pkg?.modelName??prepared?.descriptor?.modelName??null,
@@ -6063,8 +6103,8 @@ window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__ = function(pkg,prepared){
   S.activeLineType=restored.activeLineType||'normal';
   S.faultedBlks=restored.faultedBlks||[];
   S.importedFaultModels=restored.importedFaultModels||[];
-  S.availableFaultModels=cloneDefaults(prepared?.faultLibrary||pkg?.faultLibrary||[]);
-  S.selectedFaultCatalogId=S.availableFaultModels[0]?.id||'';
+  S.availableFaultModels=[];
+  S.selectedFaultCatalogId='';
   S.activeModelPackage={
     modelId:pkg?.modelId??prepared?.descriptor?.modelId??null,
     modelName:pkg?.modelName??prepared?.descriptor?.modelName??null,
@@ -7794,8 +7834,8 @@ const __task5ApplyFlightModelPackage = window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__;
 window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__ = function(pkg,prepared){
   const restored=prepared?.snapshot||pkg?.workbenchSnapshot||{};
   restoreSystemModelSnapshot(restored);
-  S.availableFaultModels=cloneDefaults(prepared?.faultLibrary||pkg?.faultLibrary||[]);
-  S.selectedFaultCatalogId=S.availableFaultModels[0]?.id||'';
+  S.availableFaultModels=[];
+  S.selectedFaultCatalogId='';
   S.activeModelPackage={
     modelId:pkg?.modelId??prepared?.descriptor?.modelId??null,
     modelName:pkg?.modelName??prepared?.descriptor?.modelName??null,
@@ -11315,7 +11355,7 @@ Object.assign(window,{
     const visibleCompatible=getVisibleCompatibleFaultModels(compatibleModels);
     const compatibleIds=new Set(compatibleModels.map((model)=>model.id));
 
-    if(!compatibleIds.has(S.selectedFaultCatalogId)){
+    if(!compatibleIds.has(S.selectedFaultCatalogId)&&!getFaultCatalogModel(S.selectedFaultCatalogId)){
       S.selectedFaultCatalogId=visibleCompatible[0]?.id||compatibleModels[0]?.id||'';
     }
 
@@ -11351,7 +11391,7 @@ Object.assign(window,{
       }
     }
 
-    const selected=compatibleModels.find((model)=>model.id===S.selectedFaultCatalogId);
+    const selected=compatibleModels.find((model)=>model.id===S.selectedFaultCatalogId)||getFaultCatalogModel(S.selectedFaultCatalogId);
     if(!selected){
       const detail=document.getElementById('fault-type-detail');
       if(detail){
@@ -11386,7 +11426,7 @@ Object.assign(window,{
   const __compatConfirmImportFault=confirmImportFault;
   confirmImportFault=function(){
     const compatibleModels=getCompatibleFaultCatalogModels();
-    const selected=compatibleModels.find((model)=>model.id===S.selectedFaultCatalogId);
+    const selected=compatibleModels.find((model)=>model.id===S.selectedFaultCatalogId)||getFaultCatalogModel(S.selectedFaultCatalogId);
     if(!selected){
       toast('请先选择与当前系统匹配的故障','w');
       return;
@@ -12940,11 +12980,91 @@ Object.assign(window,{
     ];
   }
 
+  function getDiagnosticRowsForEdgeTestPointOptions(){
+    const diagnosticModel=S.activeModelPackage?.diagnosticModel||S.diagnosticModel||{};
+    return list(diagnosticModel.dMatrix?.rows);
+  }
+
+  function getDiagnosticRowFaultId(row){
+    return row?.faultId||row?.faultTypeId||row?.caseId||row?.id||'';
+  }
+
+  function getEdgeDiagnosticPointCodes(edge){
+    const edgeId=edge?.id||'';
+    const codes=[];
+    const append=point=>{
+      if((point?.edgeId||point?.edgeID||point?.targetEdgeId||'')!==edgeId) return;
+      [point.shortName,point.code,point.pointCode,point.pointId,point.id]
+        .filter(Boolean)
+        .forEach(code=>codes.push(String(code)));
+    };
+    list(S.manualDiagnosticTestPoints).forEach(append);
+    list(S.diagnosticTestPoints).forEach(append);
+    list(S.testPoints).forEach(append);
+    return Array.from(new Set(codes));
+  }
+
+  function isDiagnosticMatrixValueDetectable(value){
+    if(value&&typeof value==='object'){
+      return Boolean(value.detectable??value.detect??value.d??value.value);
+    }
+    if(typeof value==='string'){
+      return ['1','true','yes','detectable','可检测'].includes(value.trim().toLowerCase());
+    }
+    return Boolean(value);
+  }
+
+  function diagnosticRowDetectsEdge(row,edge){
+    const codes=getEdgeDiagnosticPointCodes(edge);
+    return codes.some(code=>{
+      const value=row?.points?.[code]??row?.cells?.[code]??row?.[code];
+      return isDiagnosticMatrixValueDetectable(value);
+    });
+  }
+
+  function getInjectedFaultModelsForEdgeTestPoint(edge){
+    const rows=getDiagnosticRowsForEdgeTestPointOptions();
+    const rowByFaultId=new Map(rows.map(row=>[getDiagnosticRowFaultId(row),row]).filter(([id])=>id));
+    const models=new Map();
+    const append=(model,idOverride='',options={})=>{
+      const id=idOverride||model?.id||model?.faultModelId||model?.faultTypeId||model?.modelId||model?.faultId;
+      if(!id) return;
+      const catalog=typeof getFaultCatalogModel==='function'?getFaultCatalogModel(id):null;
+      const row=rowByFaultId.get(id)||{};
+      const merged={...catalog,...row,...model,id};
+      const targetKind=merged.targetKind||merged.target?.kind||merged.visualInjection?.targetKind||'';
+      const targetId=merged.targetId||merged.target?.id||merged.visualInjection?.targetId||'';
+      const targetNodeId=merged.targetNodeId||(targetKind==='node'?targetId:'')||merged.hostNodeId||merged.visualInjection?.targetNodeId;
+      const targetEdgeId=merged.targetEdgeId||(targetKind==='edge'?targetId:'')||merged.edgeId||merged.visualInjection?.targetEdgeId;
+      const affectedEdges=new Set([
+        ...list(merged.affectedEdges),
+        ...list(merged.injectedFault?.affectedEdges),
+        ...list(merged.visualInjection?.affectedEdges),
+        targetEdgeId
+      ].filter(Boolean));
+      const applies=options.force===true
+        ||targetEdgeId===edge?.id
+        ||affectedEdges.has(edge?.id)
+        ||targetNodeId===edge?.sourceNodeId
+        ||targetNodeId===edge?.targetNodeId
+        ||diagnosticRowDetectsEdge(row,edge);
+      if(!applies) return;
+      const existing=models.get(id);
+      models.set(id,existing?{...existing,...merged,id}:{...merged,id});
+    };
+    list(S.faultTags).filter(tag=>tag?.active!==false&&tag?.enabled!==false).forEach(tag=>{
+      append(tag,tag.faultModelId||tag.faultTypeId||tag.modelId||tag.faultId||tag.id,{force:true});
+    });
+    list(S.faultInstances).forEach(instance=>{
+      append(instance,instance.faultTypeId||instance.faultModelId||instance.modelId||instance.id,{force:true});
+    });
+    return Array.from(models.values());
+  }
+
   function getEdgeTestPointSourceFaultOptions(edge){
-    const source=getNode(edge?.sourceNodeId);
-    const options=source?getPropertyPanelFaultOptions(source):[];
+    const options=getInjectedFaultModelsForEdgeTestPoint(edge);
     const seen=new Set();
-    return options.map(option=>option.model).filter(model=>{
+    return options.filter(model=>{
       const id=model?.id||model?.faultTypeId||'';
       if(!id||seen.has(id)) return false;
       seen.add(id);
@@ -19292,6 +19412,72 @@ function decorateDataflowEdges(){
     markTopologyDirty('fault');
   }
 
+  function syncFaultTagNameToRuntimeTarget(tag,nextName){
+    if(!tag){return;}
+    const fallback=tag.name||tag.faultModelName||tag.faultModelId||tag.id||'Fault';
+    const name=String(nextName||'').trim()||fallback;
+    tag.name=name;
+    tag.faultModelName=name;
+    if(tag.injectedFault){
+      tag.injectedFault={...tag.injectedFault,name,displayName:name,faultModelName:name};
+    }
+    const runtimeTarget=getFaultTagTarget(tag);
+    if(runtimeTarget?.injectedFault&&faultTagRefMatches(runtimeTarget.injectedFault,tag.faultModelId)){
+      runtimeTarget.injectedFault={
+        ...runtimeTarget.injectedFault,
+        name,
+        displayName:name,
+        faultModelName:name
+      };
+      if(runtimeTarget.status==='faulted'){
+        runtimeTarget.faultSource=name;
+      }
+    }
+    if(Array.isArray(runtimeTarget?.faultBindings)){
+      runtimeTarget.faultBindings=runtimeTarget.faultBindings.map(binding=>{
+        if(!faultTagRefMatches(binding,tag.faultModelId)){return binding;}
+        const nextBinding={...binding,name,displayName:name,faultModelName:name};
+        if(binding.injectedFault){
+          nextBinding.injectedFault={
+            ...binding.injectedFault,
+            name,
+            displayName:name,
+            faultModelName:name
+          };
+        }
+        return nextBinding;
+      });
+    }
+    ['injectedFaults','activeFaults','faultInstances','selectedFaults','appliedFaults'].forEach(key=>{
+      if(!Array.isArray(S[key])){return;}
+      S[key]=S[key].map(item=>{
+        if(!faultTagRefMatches(item,tag.faultModelId)){return item;}
+        const nextItem={...item,name,displayName:name,faultModelName:name};
+        if(item.injectedFault){
+          nextItem.injectedFault={
+            ...item.injectedFault,
+            name,
+            displayName:name,
+            faultModelName:name
+          };
+        }
+        return nextItem;
+      });
+    });
+    if(S.injectedFaultMap&&typeof S.injectedFaultMap==='object'&&S.injectedFaultMap[tag.faultModelId]){
+      S.injectedFaultMap[tag.faultModelId]={
+        ...S.injectedFaultMap[tag.faultModelId],
+        name,
+        displayName:name,
+        faultModelName:name
+      };
+    }
+    if(S.activeModelPackage&&Array.isArray(S.faultInstances)){
+      S.activeModelPackage.faultInstances=cloneBridgeValue(S.faultInstances);
+    }
+    markTopologyDirty('fault');
+  }
+
   function renderFaultTagPropertyPanel(tag){
     const pe=document.getElementById('pe');
     const pd=document.getElementById('pd');
@@ -19430,6 +19616,36 @@ function decorateDataflowEdges(){
       }
       S.propertyPanelTab='parameters';
       renderFaultTagPropertyPanel(tag);
+    });
+    const nameInput=pd.querySelector('[data-fault-tag-name]');
+    const nameApplyButton=pd.querySelector('[data-fault-tag-name-apply]');
+    const nameResetButton=pd.querySelector('[data-fault-tag-name-reset]');
+    const nameStatusText=pd.querySelector('[data-fault-tag-name-status]');
+    let committedName=tag.name||tag.faultModelName||tag.faultModelId||tag.id||'Fault';
+    const isNameDirty=()=>nameInput&&String(committedName)!==String(nameInput.value||'').trim();
+    const setNameDirtyState=()=>{
+      const dirty=Boolean(isNameDirty());
+      if(nameApplyButton){nameApplyButton.disabled=!dirty;}
+      if(nameResetButton){nameResetButton.disabled=!dirty;}
+      if(nameStatusText){nameStatusText.textContent=dirty?'\u6709\u672a\u5e94\u7528\u7684\u540d\u79f0\u4fee\u6539':'\u540d\u79f0\u672a\u4fee\u6539';}
+    };
+    nameInput?.addEventListener('input',setNameDirtyState);
+    nameApplyButton?.addEventListener('click',()=>{
+      if(nameApplyButton.disabled||!nameInput){return;}
+      syncFaultTagNameToRuntimeTarget(tag,nameInput.value);
+      committedName=tag.name||committedName;
+      nameInput.value=committedName;
+      setNameDirtyState();
+      renderModelNodes();
+      renderEdges();
+      updateUI();
+      renderFaultTagPropertyPanel(tag);
+      toast('\u6545\u969c\u540d\u79f0\u4fee\u6539\u5df2\u5e94\u7528','s');
+    });
+    nameResetButton?.addEventListener('click',()=>{
+      if(!nameInput){return;}
+      nameInput.value=committedName;
+      setNameDirtyState();
     });
     const inputs=Array.from(pd.querySelectorAll('[data-fault-tag-param]'));
     const applyButton=pd.querySelector('[data-fault-tag-apply]');
@@ -20344,7 +20560,7 @@ function decorateDataflowEdges(){
     const visibleCompatible=getVisibleCompatibleFaultModels(compatibleModels);
     const compatibleIds=new Set(compatibleModels.map((model)=>model.id));
 
-    if(!compatibleIds.has(S.selectedFaultCatalogId)){
+    if(!compatibleIds.has(S.selectedFaultCatalogId)&&!getFaultCatalogModel(S.selectedFaultCatalogId)){
       S.selectedFaultCatalogId=visibleCompatible[0]?.id||compatibleModels[0]?.id||'';
     }
 
@@ -20380,7 +20596,7 @@ function decorateDataflowEdges(){
       }
     }
 
-    const selected=compatibleModels.find((model)=>model.id===S.selectedFaultCatalogId);
+    const selected=compatibleModels.find((model)=>model.id===S.selectedFaultCatalogId)||getFaultCatalogModel(S.selectedFaultCatalogId);
     if(!selected){
       const detail=document.getElementById('fault-type-detail');
       if(detail){
@@ -20415,7 +20631,7 @@ function decorateDataflowEdges(){
   const __finalScopedConfirmImportFault=confirmImportFault;
   confirmImportFault=function(){
     const compatibleModels=getCompatibleFaultCatalogModels();
-    const selected=compatibleModels.find((model)=>model.id===S.selectedFaultCatalogId);
+    const selected=compatibleModels.find((model)=>model.id===S.selectedFaultCatalogId)||getFaultCatalogModel(S.selectedFaultCatalogId);
     if(!selected){
       toast('请先选择与当前系统匹配的故障','w');
       return;
@@ -20535,18 +20751,11 @@ function decorateDataflowEdges(){
       const diagnosticModel=pkg?.diagnosticModel||prepared?.diagnosticModel||null;
       if(!state||!diagnosticModel) return result;
       const points=arr(diagnosticModel.testPoints).map(normalizeDiagnosticPoint);
-      const cases=arr(diagnosticModel.faultCases).map(normalizeFaultCase).filter(Boolean);
-      const packageFaults=arr(pkg?.faultLibrary).map(normalizeFaultCase).filter(Boolean);
-      const merged=new Map();
-      [...packageFaults,...cases].forEach(fault=>{
-        if(fault?.id) merged.set(fault.id,{...(merged.get(fault.id)||{}),...fault});
-      });
       state.diagnosticModel=clone(diagnosticModel);
       state.diagnosticTestPoints=clone(points);
       state.testPoints=clone(points);
-      state.faultLibrary=Array.from(merged.values()).map(clone);
+      state.faultLibrary=[];
       state.faults=state.faultLibrary;
-      applyDiagnosticFaultCatalog(state);
       if(state.activeModelPackage){
         state.activeModelPackage.diagnosticModel=clone(diagnosticModel);
       }
@@ -22135,6 +22344,31 @@ function decorateDataflowEdges(){
     })).filter(model=>model.id);
   }
 
+  function getRuntimeInjectedFaultLibrary(){
+    const state=getState();
+    const library=[
+      ...arr(state.importedFaultModels),
+      ...getActiveRuntimeFaultModels()
+    ];
+    const merged=new Map();
+    library.forEach(model=>{
+      const id=model.id||model.modelId||model.faultModelId||model.faultId||model.name;
+      if(!id) return;
+      const existing=merged.get(id);
+      merged.set(id,existing?{...model,...existing,id}:{...model,id});
+    });
+    return Array.from(merged.values()).map(model=>({
+      ...model,
+      id:model.id||model.modelId||model.faultModelId||model.faultId||model.name,
+      name:model.name||model.label||model.title||model.id||'fault',
+      category:model.category||model.layer||model.domain||model.faultLayer||'fault',
+      targetNodeId:model.targetNodeId||(model.targetKind==='node'?model.targetId:'')||model.recommendedModuleId||model.injectionDesign?.targetNodeId||model.injectionDesign?.targetId||model.injectionTarget?.nodeId,
+      targetEdgeId:model.targetEdgeId||(model.targetKind==='edge'?model.targetId:'')||model.injectionDesign?.targetEdgeId||model.injectionTarget?.edgeId,
+      affectedEdges:arr(model.affectedEdges).concat(model.targetEdgeId||(model.targetKind==='edge'?model.targetId:'')||[]),
+      detects:arr(model.detects)
+    })).filter(model=>model.id);
+  }
+
   function edgeEndpointName(edge,key){
     const nodes=getRuntimeNodes();
     const id=edge[key]||edge[`${key}Id`]||edge[key==='source'?'from':'to']||edge[key==='source'?'sourceNodeId':'targetNodeId'];
@@ -22419,7 +22653,7 @@ function decorateDataflowEdges(){
     ['injectedFaults','activeFaults','faultInstances','selectedFaults','appliedFaults'].forEach(key=>{
       arr(state[key]).forEach(item=>{
         if(item?.active===false||item?.enabled===false) return;
-        const id=getFaultKey(item);
+        const id=key==='faultInstances'?(item?.faultTypeId||getFaultKey(item)):getFaultKey(item);
         if(id&&!map.has(id)) map.set(id,item);
       });
     });
@@ -22864,10 +23098,26 @@ function decorateDataflowEdges(){
     return {title:fault?.name||getFaultKey(fault),detail:getFaultKey(fault)};
   }
 
+  function mapDiagnosticMatrixRowToFault(row){
+    const id=row?.faultId||row?.faultTypeId||row?.caseId||row?.id;
+    if(!id) return null;
+    const model=getActiveModelPackageFaultModel(id)||{};
+    return {
+      ...model,
+      ...row,
+      id,
+      name:row?.faultName||row?.name||row?.displayName||model.name||id,
+      category:row?.category||row?.modelClass||row?.layer||model.category||model.modelClass||model.layer||'D 矩阵',
+      targetNodeId:row?.targetNodeId||(row?.targetKind==='node'?row?.targetId:''),
+      targetEdgeId:row?.targetEdgeId||(row?.targetKind==='edge'?row?.targetId:''),
+      affectedEdges:arr(row?.affectedEdges).length?arr(row?.affectedEdges):arr(model.affectedEdges)
+    };
+  }
+
   window.buildDetectionMatrixModel=function(){
     const pointModel=window.buildDiagnosticTestPointModel();
     const points=arr(pointModel.installed);
-    const faults=getRuntimeFaultLibrary();
+    const faults=getRuntimeInjectedFaultLibrary();
     const rows=faults.map(fault=>{
       const affectedEdges=getFaultAffectedEdges(fault);
       const display=getDMatrixFaultDisplay(fault);
@@ -23490,7 +23740,12 @@ function decorateDataflowEdges(){
       return;
     }
     state.faultCatalogSelectionCleared=false;
+    const explicitModel=typeof getFaultCatalogModel==='function'?getFaultCatalogModel(id):null;
     const result=previousSelectFaultCatalog?previousSelectFaultCatalog(id):undefined;
+    if(explicitModel){
+      state.selectedFaultCatalogId=id;
+      state.faultCatalogSelectionCleared=false;
+    }
     normalizeFaultSelectionButton();
     return result;
   };
@@ -23507,7 +23762,12 @@ function decorateDataflowEdges(){
       return;
     }
     state.faultCatalogSelectionCleared=false;
+    const explicitModel=typeof getFaultCatalogModel==='function'?getFaultCatalogModel(id):null;
     const result=previousSelectFaultCatalogModel?previousSelectFaultCatalogModel(id):window.selectFaultCatalog(id);
+    if(explicitModel){
+      state.selectedFaultCatalogId=id;
+      state.faultCatalogSelectionCleared=false;
+    }
     normalizeFaultSelectionButton();
     return result;
   };

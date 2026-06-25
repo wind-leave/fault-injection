@@ -1983,10 +1983,13 @@ header{
 
 .edge-testpoint-fault-list{
   display:grid;
+  grid-template-columns:minmax(0,1fr);
   gap:6px;
 }
 
 .edge-testpoint-fault-component{
+  width:100%;
+  min-width:0;
   border:1px solid var(--border);
   border-radius:6px;
   background:#f8fbff;
@@ -2004,12 +2007,13 @@ header{
 
 .edge-testpoint-fault-component__list{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(136px,1fr));
+  grid-template-columns:minmax(0,1fr);
   gap:6px;
   padding:0 8px 8px;
 }
 
 .edge-testpoint-fault-option{
+  width:100%;
   min-width:0;
   justify-content:flex-start;
   padding:8px;

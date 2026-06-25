@@ -19423,6 +19423,55 @@ function decorateDataflowEdges(){
       || value.injectedFault?.faultModelId===faultId;
   }
 
+  function normalizeFaultNameForUniqueness(name){
+    return String(name||'').trim().replace(/\s+/g,' ').toLowerCase();
+  }
+
+  function getFaultRecordName(value){
+    return value?.name||value?.displayName||value?.faultModelName||value?.injectedFault?.name||value?.injectedFault?.displayName||'';
+  }
+
+  function faultRecordMatchesIdentity(value,identity={}){
+    if(!value||!identity){return false;}
+    return [
+      value.id,
+      value.instanceId,
+      value.faultModelId,
+      value.faultTypeId,
+      value.modelId,
+      value.faultId,
+      value.injectedFault?.modelId,
+      value.injectedFault?.faultModelId,
+      value.injectedFault?.faultTypeId
+    ].filter(Boolean).some(id=>[
+      identity.id,
+      identity.instanceId,
+      identity.faultModelId,
+      identity.faultTypeId,
+      identity.modelId,
+      identity.faultId
+    ].filter(Boolean).includes(id));
+  }
+
+  function isFaultNameDuplicate(name,identity={}){
+    const normalized=normalizeFaultNameForUniqueness(name);
+    if(!normalized){return false;}
+    const asArray=value=>Array.isArray(value)?value:[];
+    const records=[
+      ...asArray(S.faultTags),
+      ...asArray(S.faultInstances),
+      ...asArray(S.injectedFaults),
+      ...asArray(S.activeFaults),
+      ...asArray(S.selectedFaults),
+      ...asArray(S.appliedFaults)
+    ];
+    return records.some(record=>{
+      if(record?.active===false||record?.enabled===false){return false;}
+      if(faultRecordMatchesIdentity(record,identity)){return false;}
+      return normalizeFaultNameForUniqueness(getFaultRecordName(record))===normalized;
+    });
+  }
+
   function syncFaultTagParametersToRuntimeTarget(tag,nextParameters){
     if(!tag){return;}
     const parameters=cloneBridgeValue(nextParameters||{});
@@ -19684,6 +19733,11 @@ function decorateDataflowEdges(){
     nameInput?.addEventListener('input',setNameDirtyState);
     nameApplyButton?.addEventListener('click',()=>{
       if(nameApplyButton.disabled||!nameInput){return;}
+      const nextName=String(nameInput.value||'').trim();
+      if(isFaultNameDuplicate(nextName,tag)){
+        if(nameStatusText){nameStatusText.textContent='名称已存在，请使用唯一故障名称';}
+        return;
+      }
       syncFaultTagNameToRuntimeTarget(tag,nameInput.value);
       committedName=tag.name||committedName;
       nameInput.value=committedName;
@@ -21304,6 +21358,56 @@ function decorateDataflowEdges(){
     return state.faultInstances;
   }
 
+  function normalizeFaultNameForUniqueness(name){
+    return String(name||'').trim().replace(/\s+/g,' ').toLowerCase();
+  }
+
+  function getFaultRecordName(value){
+    return value?.name||value?.displayName||value?.faultModelName||value?.injectedFault?.name||value?.injectedFault?.displayName||'';
+  }
+
+  function faultRecordMatchesIdentity(value,identity={}){
+    if(!value||!identity){return false;}
+    return [
+      value.id,
+      value.instanceId,
+      value.faultModelId,
+      value.faultTypeId,
+      value.modelId,
+      value.faultId,
+      value.injectedFault?.modelId,
+      value.injectedFault?.faultModelId,
+      value.injectedFault?.faultTypeId
+    ].filter(Boolean).some(id=>[
+      identity.id,
+      identity.instanceId,
+      identity.faultModelId,
+      identity.faultTypeId,
+      identity.modelId,
+      identity.faultId
+    ].filter(Boolean).includes(id));
+  }
+
+  function isFaultNameDuplicate(name,identity={}){
+    const normalized=normalizeFaultNameForUniqueness(name);
+    if(!normalized){return false;}
+    const asArray=value=>Array.isArray(value)?value:[];
+    const state=getState();
+    const records=[
+      ...asArray(state.faultTags),
+      ...asArray(state.faultInstances),
+      ...asArray(state.injectedFaults),
+      ...asArray(state.activeFaults),
+      ...asArray(state.selectedFaults),
+      ...asArray(state.appliedFaults)
+    ];
+    return records.some(record=>{
+      if(record?.active===false||record?.enabled===false){return false;}
+      if(faultRecordMatchesIdentity(record,identity)){return false;}
+      return normalizeFaultNameForUniqueness(getFaultRecordName(record))===normalized;
+    });
+  }
+
   function getCompatibleSlotForFault(target,faultTypeId,slotId='',filters={}){
     const options=getCompatibleFaultOptionsForTarget(target,filters)
       .filter(option=>option.model?.id===faultTypeId);
@@ -21353,6 +21457,10 @@ function decorateDataflowEdges(){
     const bindingObject=getFaultSlotBindingObject(slot);
     const injectionForm=getFaultInjectionForm(target,model.layer||slot.layer||optionFilters.layer);
     const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    const displayName=model.displayName||model.name||model.id;
+    if(isFaultNameDuplicate(displayName,{faultTypeId:model.id,targetId:target.id,slotId})){
+      return {ok:false,error:'duplicate-fault-name',name:displayName,model,slot};
+    }
     if(runtimeService?.createFaultInstancePlan){
       const plan=runtimeService.createFaultInstancePlan({
         target,

@@ -627,6 +627,38 @@ describe('property panel interaction', () => {
     expect(renamedBinding.injectedFault.name).toBe(customName);
     expect(document.querySelector('.fault-tag-overview-panel')?.textContent).toContain(customName);
 
+    const duplicateTag = {
+      ...tag,
+      id: 'fault-tag-duplicate-name-check',
+      faultModelId: 'duplicate-name-check-model',
+      name: 'Other active fault',
+      faultModelName: 'Other active fault',
+      injectedFault: {
+        ...tag.injectedFault,
+        modelId: 'duplicate-name-check-model',
+        faultModelId: 'duplicate-name-check-model',
+        name: 'Other active fault'
+      }
+    };
+    window.__GZ_STATE__.faultTags.push(duplicateTag);
+    window.selectFaultTag(duplicateTag.id);
+    await flushRuntime();
+
+    const duplicateNameInput = document.querySelector('[data-fault-tag-name]');
+    const duplicateNameApply = document.querySelector('[data-fault-tag-name-apply]');
+    duplicateNameInput.value = customName;
+    duplicateNameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushRuntime();
+    duplicateNameApply.click();
+    await flushRuntime();
+
+    const unchangedDuplicateTag = window.__GZ_STATE__.faultTags.find((item) => item.id === duplicateTag.id);
+    expect(unchangedDuplicateTag.name).toBe('Other active fault');
+    expect(document.querySelector('[data-fault-tag-name-status]')?.textContent).toContain('名称已存在');
+
+    window.selectFaultTag(tag.id);
+    await flushRuntime();
+
     expect(document.querySelector('[data-fault-tag-edit-params]')).not.toBeNull();
     document.querySelector('[data-fault-tag-edit-params]').click();
     await flushRuntime();
@@ -1404,6 +1436,45 @@ describe('property panel interaction', () => {
     expect(remainingCards[0].querySelector('[data-edge-testpoint-name]').value).toBe('Controller output monitor B');
     expect(window.buildDiagnosticTestPointModel().positions
       .filter((item) => item.edgeId === 'edge-source-scope-testpoint')).toHaveLength(1);
+
+    wrapper.unmount();
+  });
+
+  it('rejects component fault injection when the fault name already exists', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const first = window.createNode('simulation_block', 180, 220);
+    const second = window.createNode('simulation_block', 480, 220);
+    await flushRuntime();
+
+    first.faultSlots = [
+      { slotId: 'electrical:first', layer: 'electrical', allowedFaultTypeIds: ['first_fault'] }
+    ];
+    second.faultSlots = [
+      { slotId: 'electrical:second', layer: 'electrical', allowedFaultTypeIds: ['second_fault'] }
+    ];
+    window.__GZ_STATE__.activeModelPackage = {
+      modelId: 'duplicate-fault-name-package',
+      faultTypeCatalog: [
+        { id: 'first_fault', name: 'Repeated display fault', displayName: 'Repeated display fault', layer: 'electrical' },
+        { id: 'second_fault', name: 'Repeated display fault', displayName: 'Repeated display fault', layer: 'electrical' }
+      ],
+      faultCapabilityMap: [
+        { targetKind: 'node', targetId: first.id, faultSlots: first.faultSlots },
+        { targetKind: 'node', targetId: second.id, faultSlots: second.faultSlots }
+      ]
+    };
+
+    const firstResult = window.activateFaultForTarget(first, 'first_fault');
+    const secondResult = window.activateFaultForTarget(second, 'second_fault');
+
+    expect(firstResult).toMatchObject({ ok: true });
+    expect(secondResult).toMatchObject({
+      ok: false,
+      error: 'duplicate-fault-name'
+    });
+    expect(window.__GZ_STATE__.faultInstances).toHaveLength(1);
 
     wrapper.unmount();
   });

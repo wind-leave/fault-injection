@@ -13200,6 +13200,14 @@ Object.assign(window,{
     }).join('');
   }
 
+  function normalizeDiagnosticTestPointType(value){
+    return value === 'virtual' ? 'virtual' : 'physical';
+  }
+
+  function diagnosticPointTypeLabel(value){
+    return normalizeDiagnosticTestPointType(value)==='virtual'?'虚拟测点':'物理测点';
+  }
+
   function renderEdgeTestPointCard(edge,point,index){
     const pointId=point.pointId||point.id||`tp-${edge.id}-${index+1}`;
     return `
@@ -13210,6 +13218,13 @@ Object.assign(window,{
         <div class="props-field">
           <label>测点名称</label>
           <input data-edge-testpoint-name value="${text(point.name||getEdgeTestPointDefaultName(edge))}">
+        </div>
+        <div class="props-field">
+          <label>测点类型</label>
+          <select data-edge-testpoint-type>
+            <option value="physical" ${normalizeDiagnosticTestPointType(point.pointType)==='physical'?'selected':''}>物理测点</option>
+            <option value="virtual" ${normalizeDiagnosticTestPointType(point.pointType)==='virtual'?'selected':''}>虚拟测点</option>
+          </select>
         </div>
         <div class="pgroup edge-testpoint-fault-group">
           <div class="pglbl">可检测故障</div>
@@ -13267,6 +13282,8 @@ Object.assign(window,{
     if(!card) return false;
     const nameInput=card.querySelector('[data-edge-testpoint-name]');
     point.name=nameInput?.value?.trim()||point.name||getEdgeTestPointDefaultName(edge);
+    const typeInput=card.querySelector('[data-edge-testpoint-type]');
+    point.pointType=normalizeDiagnosticTestPointType(typeInput?.value||point.pointType);
     point.detects=Array.from(card.querySelectorAll('[data-edge-testpoint-fault]:checked'))
       .map(input=>input.dataset.edgeTestpointFault)
       .filter(Boolean);
@@ -22726,6 +22743,7 @@ function decorateDataflowEdges(){
         shortName:point.shortName||point.code||`M${index+1}`,
         name:point.nameZh||point.labelZh||EDGE_NAME_ZH[point.edgeId||point.edgeID||point.targetEdgeId]||point.name||point.label||point.position||`测点 ${index+1}`,
         edgeId:point.edgeId||point.edgeID||point.targetEdgeId||'',
+        pointType:normalizeDiagnosticTestPointType(point.pointType),
         detects:arr(point.detects)
       }));
       const usedKeys=new Set(points.map(point=>point.pointId||point.id).filter(Boolean));
@@ -22741,6 +22759,7 @@ function decorateDataflowEdges(){
           shortName:point.shortName||point.code||`M${points.length+1}`,
           name:point.nameZh||point.labelZh||EDGE_NAME_ZH[edgeId]||point.name||point.label||point.position||`M${points.length+1}`,
           edgeId,
+          pointType:normalizeDiagnosticTestPointType(point.pointType),
           detects:arr(point.detects),
           manuallyAdded:true
         });
@@ -22752,6 +22771,7 @@ function decorateDataflowEdges(){
         shortName:point.shortName||point.code||`M${index+1}`,
         name:point.nameZh||point.labelZh||EDGE_NAME_ZH[point.edgeId||point.edgeID||point.targetEdgeId]||point.name||point.label||point.position||`M${index+1}`,
         edgeId:point.edgeId||point.edgeID||point.targetEdgeId||'',
+        pointType:normalizeDiagnosticTestPointType(point.pointType),
         detects:arr(point.detects),
         manuallyAdded:true
       }));
@@ -22771,6 +22791,7 @@ function decorateDataflowEdges(){
         sourceName,
         targetName,
         name:point.nameZh||point.labelZh||EDGE_NAME_ZH[point.edgeId]||point.name||point.label||`${sourceName} -> ${targetName}`,
+        pointType:normalizeDiagnosticTestPointType(point.pointType),
         detects:Array.from(new Set(arr(point.detects)))
       };
     });
@@ -22865,7 +22886,7 @@ function decorateDataflowEdges(){
           <span class="tp-console-point__code">${html(point.shortName)}</span>
           <span class="tp-console-point__main">
             <strong>${html(point.name)}</strong>
-            <small>${html(point.sourceName||point.signalId||point.edgeId)}${point.targetName?` -> ${html(point.targetName)}`:''}</small>
+            <small>${html(point.sourceName||point.signalId||point.edgeId)}${point.targetName?` -> ${html(point.targetName)}`:''} · ${html(diagnosticPointTypeLabel(point.pointType))}</small>
           </span>
           <span class="tp-console-point__state">${abnormal?'异常':(installed?'已启用':'未启用')}</span>
         </button>
@@ -22881,7 +22902,7 @@ function decorateDataflowEdges(){
         <button class="tp-installed-row__main" type="button" data-detect-testpoint="${html(point.pointId)}">
           <span>${html(point.shortName)}</span>
           <strong>${html(point.name)}</strong>
-          <small>${scanResult?`${abnormal?'疑似异常':'正常'} · ${checked} 个候选`:'待检测'}</small>
+          <small>${scanResult?`${abnormal?'疑似异常':'正常'} · ${checked} 个候选`:'待检测'} · ${html(diagnosticPointTypeLabel(point.pointType))}</small>
         </button>
         <button class="tp-installed-row__remove" type="button" data-remove-testpoint="${html(point.pointId)}">移除</button>
       </div>

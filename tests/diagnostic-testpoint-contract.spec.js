@@ -76,6 +76,21 @@ describe('diagnostic testpoint workbench contract', () => {
     expect(css).toContain('.compact-clear-fault-selection');
   });
 
+  it('renders and saves physical or virtual diagnostic test point type metadata', () => {
+    const runtime = readWorkspaceFile('src/services/legacy-runtime.txt');
+
+    expect(runtime).toContain('function normalizeDiagnosticTestPointType');
+    expect(runtime).toContain("return value === 'virtual' ? 'virtual' : 'physical';");
+    expect(runtime).toContain('data-edge-testpoint-type');
+    expect(runtime).toContain('<label>测点类型</label>');
+    expect(runtime).toContain('<option value="physical"');
+    expect(runtime).toContain('物理测点');
+    expect(runtime).toContain('<option value="virtual"');
+    expect(runtime).toContain('虚拟测点');
+    expect(runtime).toContain('point.pointType=normalizeDiagnosticTestPointType');
+    expect(runtime).toContain('diagnosticPointTypeLabel');
+  });
+
   it('distinguishes multiple Gyro fault forms at the diagnostic matrix level', () => {
     const demo = JSON.parse(readWorkspaceFile('public/model-packages/evtol_closed_loop_fault_demo.json'));
     const rows = demo.diagnosticModel.dMatrix.rows;

@@ -2903,6 +2903,59 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('shows friendly slot names in the layered binding dialog while keeping internal binding keys', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
+    await flushRuntime();
+
+    expect(importResult).toMatchObject({ ok: true });
+
+    const state = window.__GZ_STATE__;
+    const target = state.modelNodes.find((node) => node.id === 'node-controller');
+    expect(target).toBeTruthy();
+
+    const injector = window.createNode('physical_fault_injector', 420, 260);
+    await flushRuntime();
+
+    document.querySelector(`[data-layered-fault-bind="${injector.id}"]`)?.dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true
+    }));
+    await flushRuntime();
+
+    document.getElementById(`b-${target.id}`)?.dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true
+    }));
+    await flushRuntime();
+
+    const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    expect(dialog).not.toBeNull();
+
+    const slotOptions = Array.from(dialog?.querySelectorAll('[data-layered-fault-option="slot"]') || [])
+      .map((option) => option.textContent?.trim());
+    expect(slotOptions).toContain('姿态控制增益');
+    expect(slotOptions).not.toContain('controller_gain');
+
+    document.querySelector('[data-layered-fault-confirm]')?.dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true
+    }));
+    await flushRuntime();
+
+    expect(state.faultInstances).toContainEqual(expect.objectContaining({
+      targetId: target.id,
+      layer: 'physical',
+      bindingObject: 'controller_gain',
+      targetVariable: 'controller_gain'
+    }));
+
+    wrapper.unmount();
+  });
+
   it('opens the layered binding dialog from a real pointer selection on a compatible block', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();

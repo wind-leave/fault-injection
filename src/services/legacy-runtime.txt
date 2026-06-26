@@ -25919,6 +25919,14 @@ function decorateDataflowEdges(){
     return arr(options).find(option=>String(option.value)===String(value))?.label||String(value||'');
   }
 
+  function getLayeredFaultSlotOptionLabel(slot){
+    return plainText(slot?.slotName||slot?.displayName||slot?.name||slot?.label,'')
+      ||getFaultSlotBindingObject(slot)
+      ||slot?.id
+      ||slot?.slotId
+      ||'';
+  }
+
   function renderLayeredDropdown(kind,value,options){
     const safeKind=escapeHtml(kind);
     const selected=arr(options).some(option=>String(option.value)===String(value))
@@ -26055,7 +26063,7 @@ function decorateDataflowEdges(){
         <label class="layered-fault-dialog__field">
           <span>${escapeHtml(slotFieldLabel)}</span>
           <div data-layered-fault-slot-host>
-            ${renderLayeredDropdown('slot',initialSlot.id,slots.map(slot=>({value:slot.id,label:getFaultSlotBindingObject(slot)||slot.name||slot.id})))}
+            ${renderLayeredDropdown('slot',initialSlot.id,slots.map(slot=>({value:slot.id,label:getLayeredFaultSlotOptionLabel(slot)})))}
           </div>
         </label>
         <label class="layered-fault-dialog__field">
@@ -26075,7 +26083,7 @@ function decorateDataflowEdges(){
     dialog.__layeredFaultDialogState={
       config,
       slots,
-      slotOptions:slots.map(slot=>({value:slot.id,label:getFaultSlotBindingObject(slot)||slot.name||slot.id})),
+      slotOptions:slots.map(slot=>({value:slot.id,label:getLayeredFaultSlotOptionLabel(slot)})),
       modelOptions:models
     };
     renderDialogParameterFields(paramsHost,config.layer,getLayeredDropdownValue(dialog,'model')||models[0]?.value||config.defaultModel);

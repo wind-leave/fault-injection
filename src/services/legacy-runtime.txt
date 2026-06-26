@@ -12521,9 +12521,13 @@ Object.assign(window,{
         declaration[layer].push(key);
       });
     }
+    const variables=getFaultConfigVariables(node);
+    const filteredDeclaration=faultSlotSchema?.filterFaultSlotDeclarationByVariableRoles
+      ?faultSlotSchema.filterFaultSlotDeclarationByVariableRoles(declaration,variables,FAULT_SLOT_CONFIG_LAYERS)
+      :declaration;
     node.props=node.props||{};
-    const nextFaultSlots=buildFaultSlotsFromPanelDeclaration(node,declaration);
-    node.props.faultInjection=declaration;
+    const nextFaultSlots=buildFaultSlotsFromPanelDeclaration(node,filteredDeclaration);
+    node.props.faultInjection=filteredDeclaration;
     node.faultSlots=nextFaultSlots;
     pruneFaultBindingsForSlots(node);
     syncFaultSlotPackageState(node);

@@ -784,8 +784,8 @@ describe('property panel interaction', () => {
       { varName: 'C', name: 'Integrator state', targetField: 'state.integrator' }
     ];
     block.props.faultInjection = {
-      physical: ['A'],
-      electrical: [],
+      physical: ['A', 'B', 'E'],
+      electrical: ['A'],
       protocol: []
     };
     block.faultSlots = [];
@@ -806,7 +806,7 @@ describe('property panel interaction', () => {
     expect(window.__GZ_FAULT_SLOT_PANEL_SCHEMA__).toBeTruthy();
     expect(document.querySelector('.props-fault-slot-table')).not.toBeNull();
     expect(document.querySelector('.props-fault-slot-head')).not.toBeNull();
-    expect(document.querySelectorAll('.props-layer-toggle')).toHaveLength(15);
+    expect(document.querySelectorAll('.props-layer-toggle')).toHaveLength(9);
     expect(document.querySelector('.props-fault-actions .props-save')).not.toBeNull();
     expect(document.querySelector('[data-fault-slot-variable="A"]')?.textContent).toContain('Gain A');
     expect(document.querySelector('[data-fault-slot-variable="D"]')?.textContent).toContain('Limit D');
@@ -814,36 +814,42 @@ describe('property panel interaction', () => {
     expect(document.querySelector('[data-fault-slot-variable="E"]')?.textContent).toContain('Torque demand');
     expect(document.querySelector('[data-fault-slot-variable="C"]')?.textContent).toContain('Integrator state');
     expect(document.querySelector('[data-fault-slot-layer="physical"][data-fault-slot-var="A"]').checked).toBe(true);
-    expect(document.querySelector('[data-fault-slot-layer="electrical"][data-fault-slot-var="D"]').checked).toBe(false);
+    expect(document.querySelector('[data-fault-slot-layer="physical"][data-fault-slot-var="D"]').checked).toBe(false);
+    expect(document.querySelector('[data-fault-slot-layer="electrical"][data-fault-slot-var="A"]')).toBeNull();
+    expect(document.querySelector('[data-fault-slot-layer="protocol"][data-fault-slot-var="D"]')).toBeNull();
+    expect(document.querySelector('[data-fault-slot-layer="physical"][data-fault-slot-var="B"]')).toBeNull();
+    expect(document.querySelector('[data-fault-slot-layer="physical"][data-fault-slot-var="E"]')).toBeNull();
 
     setCheckboxValue('[data-fault-slot-layer="physical"][data-fault-slot-var="D"]', true);
-    setCheckboxValue('[data-fault-slot-layer="electrical"][data-fault-slot-var="D"]', true);
     setCheckboxValue('[data-fault-slot-layer="electrical"][data-fault-slot-var="B"]', true);
     setCheckboxValue('[data-fault-slot-layer="electrical"][data-fault-slot-var="E"]', true);
     setCheckboxValue('[data-fault-slot-layer="electrical"][data-fault-slot-var="C"]', true);
-    setCheckboxValue('[data-fault-slot-layer="protocol"][data-fault-slot-var="D"]', true);
+    document.querySelector('[data-fault-slot-editor]').insertAdjacentHTML('beforeend', `
+      <input type="checkbox" data-fault-slot-layer="physical" data-fault-slot-var="B" checked>
+      <input type="checkbox" data-fault-slot-layer="physical" data-fault-slot-var="E" checked>
+      <input type="checkbox" data-fault-slot-layer="electrical" data-fault-slot-var="A" checked>
+      <input type="checkbox" data-fault-slot-layer="protocol" data-fault-slot-var="D" checked>
+    `);
     document.querySelector('[data-save-fault-slots]').click();
     await flushRuntime();
 
     expect(block.props.faultInjection).toEqual({
       physical: ['A', 'D'],
-      electrical: ['D', 'B', 'E', 'C'],
-      protocol: ['D']
+      electrical: ['B', 'E', 'C'],
+      protocol: []
     });
     expect(block.faultSlots.map((slot) => slot.slotId)).toEqual([
       'physical:A',
       'physical:D',
-      'electrical:D',
       'electrical:B',
       'electrical:E',
-      'electrical:C',
-      'protocol:D'
+      'electrical:C'
     ]);
     expect(block.faultSlots.find((slot) => slot.slotId === 'physical:A')).toMatchObject({
       slotName: 'Gain A',
       targetField: 'params.A'
     });
-    expect(block.faultSlots.find((slot) => slot.slotId === 'electrical:D')).toMatchObject({
+    expect(block.faultSlots.find((slot) => slot.slotId === 'physical:D')).toMatchObject({
       slotName: 'Limit D',
       targetField: 'params.D',
       bindingObject: 'D',
@@ -874,7 +880,7 @@ describe('property panel interaction', () => {
       targetKind: 'node',
       targetId: block.id,
       faultSlots: expect.arrayContaining([
-        expect.objectContaining({ slotId: 'protocol:D', slotName: 'Limit D' })
+        expect.objectContaining({ slotId: 'physical:D', slotName: 'Limit D' })
       ])
     });
 

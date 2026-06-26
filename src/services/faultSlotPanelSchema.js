@@ -1,5 +1,11 @@
 export const DEFAULT_FAULT_SLOT_LAYERS = ['physical', 'electrical', 'protocol'];
 
+export const DEFAULT_FAULT_SLOT_ROLE_LAYER_RULES = {
+  parameter: ['physical'],
+  input: ['electrical', 'protocol'],
+  output: ['electrical', 'protocol']
+};
+
 export const DEFAULT_FAULT_SLOT_LABELS = {
   physical: '物理层',
   electrical: '电气层',
@@ -41,6 +47,15 @@ function normalizeLayers(layers = DEFAULT_FAULT_SLOT_LAYERS) {
   return normalized.length ? normalized : DEFAULT_FAULT_SLOT_LAYERS;
 }
 
+function getAllowedLayersForVariable(variable = {}, layers = DEFAULT_FAULT_SLOT_LAYERS, roleLayerRules = DEFAULT_FAULT_SLOT_ROLE_LAYER_RULES) {
+  const normalizedLayers = normalizeLayers(layers);
+  const role = String(variable?.role || '');
+  const allowed = Array.isArray(roleLayerRules?.[role]) ? roleLayerRules[role] : normalizedLayers;
+  const allowedSet = new Set(allowed);
+  const filtered = normalizedLayers.filter((layer) => allowedSet.has(layer));
+  return filtered.length ? filtered : normalizedLayers;
+}
+
 function normalizeDeclaration(declaration = {}, layers = DEFAULT_FAULT_SLOT_LAYERS) {
   return normalizeLayers(layers).reduce((draft, layer) => {
     draft[layer] = list(declaration?.[layer]).map((key) => String(key)).filter(Boolean);
@@ -56,14 +71,23 @@ export function renderFaultSlotEditorFromSchema(options = {}) {
   const layers = normalizeLayers(options.layers);
   const layerLabels = options.layerLabels || DEFAULT_FAULT_SLOT_LABELS;
   const roleLabels = options.roleLabels || DEFAULT_FAULT_SLOT_ROLE_LABELS;
+  const roleLayerRules = options.roleLayerRules || DEFAULT_FAULT_SLOT_ROLE_LAYER_RULES;
   const copy = { ...DEFAULT_COPY, ...(options.copy || {}) };
   const variables = list(options.variables);
   const declaration = normalizeDeclaration(options.declaration, layers);
-  const selectedCount = layers.reduce((count, layer) => count + list(declaration[layer]).length, 0);
+  const variableLayerEntries = variables.map((variable) => ({
+    variable,
+    allowedLayers: getAllowedLayersForVariable(variable, layers, roleLayerRules)
+  }));
+  const selectedCount = variableLayerEntries.reduce((count, entry) => {
+    const key = String(entry.variable?.key || '');
+    return count + entry.allowedLayers.filter((layer) => declaration[layer].includes(key)).length;
+  }, 0);
+  const visibleChoiceCount = variableLayerEntries.reduce((count, entry) => count + entry.allowedLayers.length, 0);
 
-  const rows = variables.map((variable) => {
+  const rows = variableLayerEntries.map(({ variable, allowedLayers }) => {
     const key = String(variable?.key || '');
-    const layerChecks = layers.map((layer) => {
+    const layerChecks = allowedLayers.map((layer) => {
       const checked = declaration[layer].includes(key) ? 'checked' : '';
       return `
           <label class="props-layer-toggle">
@@ -89,7 +113,7 @@ export function renderFaultSlotEditorFromSchema(options = {}) {
             <div class="pglbl">${escapeHtml(copy.title)}</div>
             <p>${escapeHtml(copy.description)}</p>
           </div>
-          <span class="props-section-count">${escapeHtml(selectedCount)} / ${escapeHtml(variables.length * layers.length)}</span>
+          <span class="props-section-count">${escapeHtml(selectedCount)} / ${escapeHtml(visibleChoiceCount)}</span>
         </div>
         <div class="props-fault-slot-table">
           <div class="props-fault-slot-head">
@@ -100,6 +124,28 @@ export function renderFaultSlotEditorFromSchema(options = {}) {
         </div>
         <div class="props-help">${escapeHtml(copy.help)}</div>
       </div>`;
+}
+
+export function filterFaultSlotDeclarationByVariableRoles(
+  declaration = {},
+  variables = [],
+  layers = DEFAULT_FAULT_SLOT_LAYERS,
+  roleLayerRules = DEFAULT_FAULT_SLOT_ROLE_LAYER_RULES
+) {
+  const normalizedLayers = normalizeLayers(layers);
+  const variablesByKey = new Map(list(variables).map((variable) => [String(variable?.key || ''), variable]));
+  return normalizedLayers.reduce((draft, layer) => {
+    draft[layer] = list(declaration?.[layer])
+      .map((key) => String(key))
+      .filter((key) => {
+        const variable = variablesByKey.get(key);
+        if (!variable) {
+          return true;
+        }
+        return getAllowedLayersForVariable(variable, normalizedLayers, roleLayerRules).includes(layer);
+      });
+    return draft;
+  }, {});
 }
 
 export function readFaultSlotDeclarationFromPanel(host, layers = DEFAULT_FAULT_SLOT_LAYERS) {

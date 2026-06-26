@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  filterFaultSlotDeclarationByVariableRoles,
   readFaultSlotDeclarationFromPanel,
   renderFaultSlotEditorFromSchema
 } from '../src/services/faultSlotPanelSchema.js';
@@ -38,7 +39,42 @@ describe('fault slot panel schema service', () => {
     expect(html).toContain('data-fault-slot-layer="protocol" data-fault-slot-var="input_1" checked');
     expect(html).toContain('Gain &lt;K&gt;');
     expect(html).toContain('Parameter');
-    expect(html).toContain('2 / 6');
+    expect(html).toContain('2 / 3');
+  });
+
+  it('filters visible fault layers by variable role and counts only visible choices', () => {
+    const html = renderFaultSlotEditorFromSchema({
+      variables: [
+        { key: 'gain', name: 'Gain', role: 'parameter' },
+        { key: 'command', name: 'Command input', role: 'input' },
+        { key: 'torque', name: 'Torque output', role: 'output' },
+        { key: 'integral', name: 'Integrator', role: 'middle' }
+      ],
+      declaration: {
+        physical: ['gain', 'command', 'integral'],
+        electrical: ['gain', 'command', 'torque'],
+        protocol: ['torque', 'integral']
+      },
+      layers,
+      layerLabels,
+      roleLabels: {
+        ...roleLabels,
+        output: 'Output',
+        middle: 'Middle'
+      }
+    });
+
+    expect(html).toContain('data-fault-slot-layer="physical" data-fault-slot-var="gain" checked');
+    expect(html).not.toContain('data-fault-slot-layer="electrical" data-fault-slot-var="gain"');
+    expect(html).not.toContain('data-fault-slot-layer="protocol" data-fault-slot-var="gain"');
+    expect(html).not.toContain('data-fault-slot-layer="physical" data-fault-slot-var="command"');
+    expect(html).toContain('data-fault-slot-layer="electrical" data-fault-slot-var="command" checked');
+    expect(html).toContain('data-fault-slot-layer="protocol" data-fault-slot-var="command"');
+    expect(html).not.toContain('data-fault-slot-layer="physical" data-fault-slot-var="torque"');
+    expect(html).toContain('data-fault-slot-layer="electrical" data-fault-slot-var="torque" checked');
+    expect(html).toContain('data-fault-slot-layer="protocol" data-fault-slot-var="torque" checked');
+    expect(html).toContain('data-fault-slot-layer="physical" data-fault-slot-var="integral" checked');
+    expect(html).toContain('6 / 8');
   });
 
   it('renders an empty state when no fault variables are available', () => {
@@ -70,6 +106,23 @@ describe('fault slot panel schema service', () => {
       physical: ['gain'],
       electrical: [],
       protocol: ['input_1']
+    });
+  });
+
+  it('filters saved declarations by parameter input and output role rules while leaving middle variables unchanged', () => {
+    expect(filterFaultSlotDeclarationByVariableRoles({
+      physical: ['gain', 'command', 'torque', 'integral'],
+      electrical: ['gain', 'command', 'torque', 'integral'],
+      protocol: ['gain', 'command', 'torque', 'integral']
+    }, [
+      { key: 'gain', role: 'parameter' },
+      { key: 'command', role: 'input' },
+      { key: 'torque', role: 'output' },
+      { key: 'integral', role: 'middle' }
+    ], layers)).toEqual({
+      physical: ['gain', 'integral'],
+      electrical: ['command', 'torque', 'integral'],
+      protocol: ['command', 'torque', 'integral']
     });
   });
 });

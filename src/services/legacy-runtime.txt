@@ -19600,6 +19600,95 @@ function decorateDataflowEdges(){
     markTopologyDirty('fault');
   }
 
+  function displayText(value){
+    return String(value??'').trim();
+  }
+
+  function displayList(value){
+    return Array.isArray(value)?value:[];
+  }
+
+  function faultTagTargetParameterKeys(tag){
+    return [
+      tag?.slotId,
+      tag?.parameterKey,
+      tag?.variableKey,
+      tag?.bindingObject,
+      tag?.targetVariable,
+      tag?.targetField,
+      tag?.injectedFault?.slotId,
+      tag?.injectedFault?.parameterKey,
+      tag?.injectedFault?.variableKey,
+      tag?.injectedFault?.bindingObject,
+      tag?.injectedFault?.targetVariable,
+      tag?.injectedFault?.targetField
+    ].map(displayText).filter(Boolean);
+  }
+
+  function directFaultTagTargetDisplayName(tag){
+    return displayText(tag?.slotName)
+      ||displayText(tag?.displayName)
+      ||displayText(tag?.injectedFault?.slotName)
+      ||displayText(tag?.injectedFault?.displayName);
+  }
+
+  function keyMatchesFaultTagParameter(key,candidates){
+    const normalized=displayText(key);
+    if(!normalized) return false;
+    return candidates.some(candidate=>candidate===normalized||candidate.endsWith(`:${normalized}`)||normalized.endsWith(`:${candidate}`));
+  }
+
+  function findFaultTagSlotDisplayName(tag,target){
+    const candidates=faultTagTargetParameterKeys(tag);
+    const slots=[
+      ...displayList(target?.faultSlots),
+      ...displayList(target?.props?.faultSlots)
+    ];
+    const slot=slots.find(item=>{
+      const keys=[
+        item?.slotId,
+        item?.id,
+        item?.parameterKey,
+        item?.variableKey,
+        item?.bindingObject,
+        item?.targetVariable,
+        item?.targetField
+      ];
+      return keys.some(key=>keyMatchesFaultTagParameter(key,candidates));
+    });
+    return displayText(slot?.slotName)||displayText(slot?.displayName)||displayText(slot?.name)||displayText(slot?.label);
+  }
+
+  function findFaultTagParameterDisplayName(tag,target){
+    const candidates=faultTagTargetParameterKeys(tag);
+    const params=[
+      ...displayList(target?.props?.modelParameters),
+      ...displayList(target?.props?.physicalParameters),
+      ...displayList(target?.parameters),
+      ...displayList(target?.physicalParameters)
+    ];
+    const param=params.find(item=>{
+      const keys=[item?.key,item?.id,item?.varName,item?.name,item?.targetField];
+      return keys.some(key=>keyMatchesFaultTagParameter(key,candidates));
+    });
+    return displayText(param?.displayName)||displayText(param?.name)||displayText(param?.label);
+  }
+
+  function resolveFaultTagTargetParameter(tag,target){
+    return directFaultTagTargetDisplayName(tag)
+      ||findFaultTagSlotDisplayName(tag,target)
+      ||findFaultTagParameterDisplayName(tag,target)
+      ||displayText(tag?.bindingObject)
+      ||displayText(tag?.targetVariable)
+      ||displayText(tag?.targetField)
+      ||displayText(tag?.injectedFault?.bindingObject)
+      ||displayText(tag?.injectedFault?.targetVariable)
+      ||displayText(tag?.injectedFault?.targetField)
+      ||displayText(tag?.slotName)
+      ||displayText(tag?.slotId)
+      ||'\u672a\u5173\u8054';
+  }
+
   function renderFaultTagPropertyPanel(tag){
     const pe=document.getElementById('pe');
     const pd=document.getElementById('pd');
@@ -19613,15 +19702,7 @@ function decorateDataflowEdges(){
     const params=Object.entries(tag.parameters||{});
     const target=getFaultTagTarget(tag);
     const targetName=tag.targetName||target?.props?.name||tag.targetId||'\u76ee\u6807\u5bf9\u8c61';
-    const targetParameter=tag.bindingObject
-      ||tag.targetVariable
-      ||tag.targetField
-      ||tag.injectedFault?.bindingObject
-      ||tag.injectedFault?.targetVariable
-      ||tag.injectedFault?.targetField
-      ||tag.slotName
-      ||tag.slotId
-      ||'\u672a\u5173\u8054';
+    const targetParameter=resolveFaultTagTargetParameter(tag,target);
     const targetKindLabel=tag.targetKind==='edge'?'\u8fde\u63a5\u7ebf':'\u6a21\u5757';
     const layerLabelMap={
       physical:'\u7269\u7406\u5c42',

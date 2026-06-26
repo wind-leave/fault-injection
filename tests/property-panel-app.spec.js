@@ -1939,6 +1939,57 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
+  it('shows target parameter display name for an injected fault tag instead of the internal variable key', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    window.createNode('simulation_block', 300, 240);
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    const block = state.modelNodes.find((node) => node.type === 'simulation_block');
+    block.props.name = '姿态控制器';
+    block.props.modelParameters = [
+      { key: 'controller_gain', name: '姿态控制增益', targetField: 'params.controller_gain' }
+    ];
+    block.faultSlots = [
+      {
+        slotId: 'physical:controller_gain',
+        slotName: '姿态控制增益',
+        layer: 'physical',
+        variableKey: 'controller_gain',
+        parameterKey: 'controller_gain',
+        bindingObject: 'controller_gain',
+        targetVariable: 'controller_gain',
+        targetField: 'params.controller_gain'
+      }
+    ];
+    state.faultTags = [
+      {
+        id: 'fault-tag-controller-gain',
+        name: '增益偏移故障',
+        layer: 'physical',
+        targetKind: 'node',
+        targetId: block.id,
+        targetName: block.props.name,
+        slotId: 'physical:controller_gain',
+        bindingObject: 'controller_gain',
+        targetVariable: 'controller_gain',
+        targetField: 'params.controller_gain',
+        parameters: { bias: 0.1 }
+      }
+    ];
+    state.selFaultTag = 'fault-tag-controller-gain';
+
+    window.__GZ_RENDER_FAULT_TAG_PANEL__(state.faultTags[0]);
+    await flushRuntime();
+
+    expect(document.querySelector('.fault-tag-binding-card')?.textContent).toContain('姿态控制增益');
+    expect(document.querySelector('.fault-tag-binding-card')?.textContent).not.toContain('controller_gain');
+
+    wrapper.unmount();
+  });
+
   it('opens authoring dialogs from visible palette actions', async () => {
     const wrapper = await mountWorkbench();
 

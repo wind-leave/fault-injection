@@ -91,6 +91,17 @@ describe('diagnostic testpoint workbench contract', () => {
     expect(runtime).toContain('diagnosticPointTypeLabel');
   });
 
+  it('defines diagnostic point type helpers inside the compact diagnosis console scope before use', () => {
+    const runtime = readWorkspaceFile('src/services/legacy-runtime.txt');
+    const consoleStart = runtime.indexOf('function installCompactFaultDiagnosisConsole()');
+    const helperIndex = runtime.indexOf('function normalizeDiagnosticTestPointType', consoleStart);
+    const firstUseIndex = runtime.indexOf('pointType:normalizeDiagnosticTestPointType(point.pointType)', consoleStart);
+
+    expect(consoleStart).toBeGreaterThanOrEqual(0);
+    expect(helperIndex).toBeGreaterThan(consoleStart);
+    expect(firstUseIndex).toBeGreaterThan(helperIndex);
+  });
+
   it('distinguishes multiple Gyro fault forms at the diagnostic matrix level', () => {
     const demo = JSON.parse(readWorkspaceFile('public/model-packages/evtol_closed_loop_fault_demo.json'));
     const rows = demo.diagnosticModel.dMatrix.rows;

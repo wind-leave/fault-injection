@@ -22553,6 +22553,14 @@ function decorateDataflowEdges(){
     return node?.props?.name||node?.name||node?.label||NODE_NAME_ZH[id]||id||'未连接';
   }
 
+  function normalizeDiagnosticTestPointType(value){
+    return value === 'virtual' ? 'virtual' : 'physical';
+  }
+
+  function diagnosticPointTypeLabel(value){
+    return normalizeDiagnosticTestPointType(value)==='virtual'?'虚拟测点':'物理测点';
+  }
+
   function pointForEdge(edge,index){
     const label=EDGE_NAME_ZH[edge.id]||edge.label||edge.signalLabel||edge.name||`${edgeEndpointName(edge,'source')} -> ${edgeEndpointName(edge,'target')}`;
     return {

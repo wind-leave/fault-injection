@@ -4,6 +4,13 @@ class FaultRuntime:
         self.edge_state = {}
         self.started_fault_ids = set()
         self.ended_fault_ids = set()
+        self.disconnected_edge_ids = set()
+
+    def disconnect_edge(self, edge_id):
+        self.disconnected_edge_ids.add(edge_id)
+
+    def reconnect_edge(self, edge_id):
+        self.disconnected_edge_ids.discard(edge_id)
 
     def _is_active(self, fault, time):
         if not fault.get("enabled", True):
@@ -42,6 +49,9 @@ class FaultRuntime:
     def apply_edge_value(self, edge_id, value, time):
         result = float(value)
         state = self.edge_state.setdefault(edge_id, {"last": result})
+        if edge_id in self.disconnected_edge_ids:
+            state["last"] = 0.0
+            return 0.0
         for fault in self.fault_instances:
             if fault.get("targetId") != edge_id or not self._is_active(fault, time):
                 continue

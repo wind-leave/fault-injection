@@ -197,9 +197,12 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
             session = self.practice_sessions.get(session_id)
             if session is not None:
                 result = session.submit(payload)
+                self.practice_sessions.pop(session_id, None)
         if session is None:
             self._send_session_not_found(run_id, session_id)
             return
+        with self.sessions_lock:
+            self.sessions.pop(session.simulation_session_id, None)
         result["runId"] = run_id
         result["metrics"] = {"elapsedMs": round((time.monotonic() - started) * 1000, 3)}
         self._send_json(200, result)

@@ -1,5 +1,6 @@
 import time
 
+from backend.practice_actions import PracticeActionRuntime
 from backend.schemas import SimulationBackendError
 from backend.troubleshooting import TroubleshootingSession
 
@@ -24,6 +25,7 @@ class PracticeSession:
         self.practice_session_id = practice_session_id
         self.simulation_session_id = simulation_session_id
         self.simulation_session = simulation_session
+        self.action_runtime = PracticeActionRuntime(simulation_session)
         self.troubleshooting = TroubleshootingSession(d_matrix, target_fault_id)
         self.target_fault_id = _text(target_fault_id)
         self.scoring_rules = scoring_rules if isinstance(scoring_rules, dict) else {}
@@ -31,6 +33,7 @@ class PracticeSession:
         self.submitted_at = None
         self.student_actions = []
         self.simulation_results = []
+        self.simulation_action_history = []
         self.recommended_path_history = []
         self.initial_best_path = self.troubleshooting.initial_response()["currentPath"]
 
@@ -47,7 +50,15 @@ class PracticeSession:
             raise SimulationBackendError("INVALID_SCHEMA", "action", "action must be an object")
         action_record = _clone(action)
         action_record.setdefault("recordedAt", time.time())
+        action_application = self.action_runtime.apply(action_record)
+        action_record["simulationActionResult"] = _clone(action_application)
         self.student_actions.append(action_record)
+        self.simulation_action_history.append({
+            "index": len(self.simulation_action_history) + 1,
+            "operationId": action_record.get("operationId") or f"operation-{len(self.simulation_action_history) + 1}",
+            "recordedAt": action_record["recordedAt"],
+            "result": _clone(action_application),
+        })
         recommendation_record = self._build_recommendation_record(action_record)
         troubleshooting_result = self.troubleshooting.record_operation(action_record)
         recommendation_record["nextRecommendedStepAfterAction"] = _clone(troubleshooting_result.get("nextRecommendedStep"))
@@ -62,6 +73,7 @@ class PracticeSession:
             "sessionId": self.practice_session_id,
             "practiceSessionId": self.practice_session_id,
             "simulationSessionId": self.simulation_session_id,
+            "appliedAction": action_application,
             "simulationResult": simulation_result,
         }
 
@@ -113,6 +125,7 @@ class PracticeSession:
                 "submittedAt": payload.get("submittedAt") or self.submitted_at,
                 "durationSeconds": elapsed_seconds,
                 "studentActions": _clone(self.student_actions),
+                "simulationActionHistory": _clone(self.simulation_action_history),
                 "actualTroubleshootingPath": self.troubleshooting._current_path(),
                 "recommendedPathHistory": _clone(self.recommended_path_history),
             },

@@ -156,6 +156,79 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertTrue(submitted["record"]["recommendedPathHistory"][0]["matchedRecommendedStep"])
         self.assertNotIn("simulationResults", submitted["record"])
 
+    def test_practice_actions_persist_simulation_state_across_steps(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 0.4
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        status, adjusted = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-adjust",
+                "actionType": "adjustParameter",
+                "targetId": "source-1",
+                "parameter": "value",
+                "value": 2.0,
+                "observed": "unknown",
+                "steps": 1,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(adjusted["simulationResult"]["curves"]["channels"]["scope-1.ch1.actual"], [2.0])
+
+        status, measured = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-measure",
+                "actionType": "measure",
+                "pointCode": "M1",
+                "observed": "abnormal",
+                "steps": 1,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(measured["simulationResult"]["curves"]["channels"]["scope-1.ch1.actual"], [2.0])
+
+    def test_submit_ends_practice_and_bound_simulation_session(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        practice_session_id = created["sessionId"]
+        simulation_session_id = created["simulationSessionId"]
+
+        status, submitted = self._post(
+            f"/api/practice/session/{practice_session_id}/submit",
+            {"finalFaultId": "target-fault"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(submitted["status"], "success")
+
+        status, missing_practice = self._post(
+            f"/api/practice/session/{practice_session_id}/action",
+            {"actionType": "measure", "pointCode": "M1", "observed": "abnormal"},
+        )
+        self.assertEqual(status, 404)
+        self.assertEqual(missing_practice["errorCode"], "SESSION_NOT_FOUND")
+
+        status, missing_simulation = self._post(f"/api/simulations/session/{simulation_session_id}/step", {})
+        self.assertEqual(status, 404)
+        self.assertEqual(missing_simulation["errorCode"], "SESSION_NOT_FOUND")
+
 
 if __name__ == "__main__":
     unittest.main()

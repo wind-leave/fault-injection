@@ -22,6 +22,68 @@ class SimulationEngineTests(unittest.TestCase):
         self.assertEqual(result["curves"]["channels"]["scope-1.ch1.actual"], [1.0, 1.0, 1.0])
         self.assertEqual(result["curves"]["channels"]["scope-1.ch1.reference"], [1.0, 1.0, 1.0])
 
+    def test_records_each_component_output_for_every_step(self):
+        graph = compile_graph(valid_package(), ModuleRegistry.from_builtin_manifest())
+
+        result = run_simulation(graph)
+
+        self.assertEqual(result["componentOutputs"]["time"], [0.0, 0.1, 0.2])
+        self.assertEqual(len(result["componentOutputs"]["steps"]), 3)
+        first_step = result["componentOutputs"]["steps"][0]
+        self.assertEqual(first_step["time"], 0.0)
+        self.assertEqual(first_step["actual"]["source-1"]["out"], 1.0)
+        self.assertEqual(first_step["actual"]["sim-1"]["output"], 1.0)
+        self.assertEqual(first_step["reference"]["source-1"]["out"], 1.0)
+        self.assertEqual(first_step["reference"]["sim-1"]["output"], 1.0)
+
+    def test_component_output_trace_reflects_actual_faults_without_changing_reference(self):
+        package = valid_package()
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.1,
+            "duration": 0.1,
+            "parameters": {"bias": 0.5},
+        }]
+        graph = compile_graph(package, ModuleRegistry.from_builtin_manifest())
+
+        result = run_simulation(graph)
+
+        self.assertFloatSeriesEqual(
+            [step["actual"]["sim-1"]["output"] for step in result["componentOutputs"]["steps"]],
+            [1.0, 1.5, 1.5],
+        )
+        self.assertFloatSeriesEqual(
+            [step["reference"]["sim-1"]["output"] for step in result["componentOutputs"]["steps"]],
+            [1.0, 1.0, 1.0],
+        )
+
+    def test_component_output_trace_reflects_parameter_step_faults(self):
+        package = valid_package()
+        package["faultInstances"] = [{
+            "faultId": "fault-parameter-step",
+            "faultType": "parameter_step",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.1,
+            "duration": 0.2,
+            "parameters": {"stepValue": -0.35},
+        }]
+        graph = compile_graph(package, ModuleRegistry.from_builtin_manifest())
+
+        result = run_simulation(graph)
+
+        self.assertFloatSeriesEqual(
+            [step["actual"]["sim-1"]["output"] for step in result["componentOutputs"]["steps"]],
+            [1.0, 0.65, 0.65],
+        )
+        self.assertFloatSeriesEqual(
+            [step["reference"]["sim-1"]["output"] for step in result["componentOutputs"]["steps"]],
+            [1.0, 1.0, 1.0],
+        )
+
     def test_actual_curve_reflects_node_fault_while_reference_stays_baseline(self):
         package = valid_package()
         package["faultInstances"] = [{

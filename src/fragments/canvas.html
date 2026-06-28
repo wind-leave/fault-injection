@@ -56,12 +56,9 @@
     </div>
     <div class="canvas-tabs">
       <button type="button" class="canvas-tab is-active" data-canvas-view="canvas">画布</button>
-      <button type="button" class="canvas-tab" data-canvas-view="components">&#25925;&#38556;&#35270;&#22270;</button>
+      <button type="button" class="canvas-tab" data-canvas-view="components">仿真视图</button>
       <button type="button" class="canvas-tab" data-canvas-view="dataflow">多信号流图</button>
       <button type="button" class="canvas-tab" data-canvas-view="dmatrix">D矩阵</button>
-    </div>
-    <div class="fault-view-tools" data-fault-view-tools>
-      <button type="button" data-toggle-fault-view-testpoints aria-pressed="false">显示测点</button>
     </div>
     <div class="canvas-tools">
       <button type="button" class="canvas-tool is-active" title="选择" data-canvas-command="select">⌖</button>
@@ -71,6 +68,7 @@
       <span class="canvas-tools__divider"></span>
       <button type="button" class="canvas-tool" title="自动整理" data-canvas-command="auto-arrange">⇄</button>
       <button type="button" class="canvas-tool" title="模型检查" data-canvas-command="model-check">✓</button>
+      <div class="canvas-testpoint-tools" data-canvas-testpoint-tools></div>
       <span class="canvas-tools__spacer"></span>
       <button type="button" class="canvas-tool" title="撤销" data-canvas-command="undo" disabled>↶</button>
       <button type="button" class="canvas-tool" title="重做" data-canvas-command="redo" disabled>↷</button>
@@ -84,6 +82,9 @@
   </div>
 
     <div class="canvas-breadcrumbs" id="canvas-breadcrumbs" data-testid="canvas-breadcrumbs"></div>
+    <div class="simulation-panel" id="simulation-panel" aria-live="polite">
+      <div class="simulation-panel__empty">切换到仿真视图后，将显示物理测点在仿真过程中的组件输出数据。</div>
+    </div>
     <div class="dataflow-panel" id="dataflow-panel" aria-live="polite">
       <div class="dataflow-panel__empty">切换到数据流视图后，将显示多信号流图、边状态和故障传播指标。</div>
     </div>

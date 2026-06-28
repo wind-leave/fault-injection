@@ -430,9 +430,18 @@ describe('canvas layout cleanup', () => {
     expect(ibmCss).toContain('grid-template-rows:104px minmax(0,1fr)');
     expect(ibmCss).toContain('grid-column:1 / 4;');
     expect(ibmCss).toContain('minmax(520px,max-content)');
-    expect(ibmCss).toContain('grid-template-rows:52px 48px');
-    expect(ibmCss).toContain('top:100px');
-    expect(ibmCss).toContain('top:112px');
+    expect(ibmCss).toContain('grid-template-rows:70px 48px');
+    expect(ibmCss).toContain('top:118px');
+    expect(ibmCss).toContain('top:130px');
+    const ibmSimTitleRule = findCssRule(ibmCss, '.simbar-title');
+    const ibmSimFieldRule = findCssRule(ibmCss, '.canvas-sim-dock .sim-field');
+    const ibmSimRtRule = findCssRule(ibmCss, '.canvas-sim-dock .simbar-rt');
+    expect(ibmSimTitleRule).toMatch(/min-width\s*:\s*112px/);
+    expect(ibmSimTitleRule).toMatch(/padding\s*:\s*0 12px/);
+    expect(ibmSimFieldRule).toMatch(/flex\s*:\s*0 0 auto/);
+    expect(ibmSimFieldRule).toMatch(/min-width\s*:\s*112px/);
+    expect(ibmSimFieldRule).toMatch(/padding\s*:\s*0 10px/);
+    expect(ibmSimRtRule).toMatch(/flex\s*:\s*0 0 112px/);
     const canvasStageRule = findCssRule(componentsCss, '.canvas-stage');
     expect(canvasStageRule).toMatch(/width\s*:\s*2400px/);
     expect(canvasStageRule).toMatch(/height\s*:\s*1500px/);
@@ -1338,7 +1347,7 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
-  it('toggles fixed diagnostic point markers from the fault view', async () => {
+  it('toggles fixed diagnostic point markers from the canvas toolbar', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
@@ -1353,10 +1362,14 @@ describe('canvas layout cleanup', () => {
 
     window.setCanvasView('components');
     await flushRuntime();
+    expect(document.querySelector('[data-toggle-canvas-testpoints]')).toBeNull();
+
+    window.setCanvasView('canvas');
+    await flushRuntime();
     window.renderCanvasDiagnosticTestPointMarkers();
     await flushRuntime();
 
-    const toggle = document.querySelector('[data-toggle-fault-view-testpoints]');
+    const toggle = document.querySelector('[data-toggle-canvas-testpoints]');
     const positionCount = window.buildDiagnosticTestPointModel().positions.length;
 
     expect(toggle).not.toBeNull();
@@ -2618,6 +2631,213 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('renders physical test point component outputs in the simulation view', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg)).toMatchObject({ ok: true });
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    const physicalPoint = state.diagnosticTestPoints.find((point) => point.edgeId === 'edge-controller-allocator');
+    const virtualPoint = state.diagnosticTestPoints.find((point) => point.edgeId === 'edge-allocator-motor');
+    expect(physicalPoint).toBeTruthy();
+    expect(virtualPoint).toBeTruthy();
+    physicalPoint.pointType = 'physical';
+    virtualPoint.pointType = 'virtual';
+
+    window.__GZ_SIM__.componentOutputs = {
+      time: [0, 0.5],
+      steps: [
+        {
+          time: 0,
+          actual: { 'node-controller': { torque_command: 0.2 } },
+          reference: { 'node-controller': { torque_command: 0.2 } }
+        },
+        {
+          time: 0.5,
+          actual: { 'node-controller': { torque_command: 1.25 } },
+          reference: { 'node-controller': { torque_command: 1 } }
+        },
+        {
+          time: 1,
+          actual: { 'node-controller': { torque_command: 0.75 } },
+          reference: { 'node-controller': { torque_command: 0.9 } }
+        }
+      ]
+    };
+
+    window.setCanvasView('components');
+    await flushRuntime();
+
+    const tab = document.querySelector('[data-canvas-view="components"]');
+    const panel = document.getElementById('simulation-panel');
+    expect(tab?.textContent?.trim()).toBe('仿真视图');
+    expect(panel?.textContent).toContain('物理测点仿真数据');
+    expect(panel?.querySelector('[data-simulation-testpoint="tp-controller-output"]')).not.toBeNull();
+    expect(panel?.querySelector('[data-simulation-testpoint="tp-allocation"]')).toBeNull();
+    const chart = panel?.querySelector('[data-simulation-chart="tp-controller-output"]');
+    expect(chart?.querySelector('svg')).not.toBeNull();
+    expect(chart?.querySelector('[data-simulation-axis="x"]')?.textContent).toContain('时间');
+    expect(chart?.querySelector('[data-simulation-axis="y"]')?.textContent).toContain('数据');
+    expect(chart?.querySelector('[data-simulation-series="actual"]')?.getAttribute('points')).toMatch(/\d+,\d+/);
+    expect(panel?.textContent).toContain('0.75');
+    expect(panel?.textContent).toContain('0.9');
+    expect(panel?.textContent).not.toContain('故障视图');
+    const componentsCss = readComponentsCss();
+    expect(findCssRule(componentsCss, '.canvas-wrap[data-view="components"] .diagram')).toMatch(/display\s*:\s*none/);
+    expect(findCssRule(componentsCss, '.canvas-wrap[data-view="components"] .simulation-panel')).toMatch(/left\s*:\s*0/);
+
+    wrapper.unmount();
+  });
+
+  it('renders empty charts for physical test points before running simulation', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg)).toMatchObject({ ok: true });
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    const physicalPoint = state.diagnosticTestPoints.find((point) => point.edgeId === 'edge-controller-allocator');
+    const virtualPoint = state.diagnosticTestPoints.find((point) => point.edgeId === 'edge-allocator-motor');
+    expect(physicalPoint).toBeTruthy();
+    expect(virtualPoint).toBeTruthy();
+    physicalPoint.pointType = 'physical';
+    virtualPoint.pointType = 'virtual';
+    window.__GZ_SIM__.componentOutputs = { time: [], steps: [] };
+
+    window.setCanvasView('components');
+    await flushRuntime();
+
+    const panel = document.getElementById('simulation-panel');
+    expect(panel?.querySelector('.simulation-panel__empty')).toBeNull();
+    expect(panel?.querySelector('[data-simulation-testpoint="tp-controller-output"]')).not.toBeNull();
+    expect(panel?.querySelector('[data-simulation-testpoint="tp-allocation"]')).toBeNull();
+    const chart = panel?.querySelector('[data-simulation-chart="tp-controller-output"]');
+    expect(chart?.querySelector('svg')).not.toBeNull();
+    expect(chart?.querySelector('[data-simulation-series="actual"]')).toBeNull();
+    expect(chart?.querySelector('[data-simulation-series="reference"]')).toBeNull();
+    expect(panel?.textContent).toContain('--');
+
+    wrapper.unmount();
+  });
+
+  it('removes a test point from the simulation view when it is changed to virtual', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg)).toMatchObject({ ok: true });
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    const controllerPoint = state.diagnosticTestPoints.find((point) => point.edgeId === 'edge-controller-allocator');
+    expect(controllerPoint).toBeTruthy();
+    controllerPoint.pointType = 'physical';
+    window.__GZ_SIM__.componentOutputs = { time: [], steps: [] };
+
+    window.setCanvasView('components');
+    await flushRuntime();
+    expect(document.querySelector('[data-simulation-testpoint="tp-controller-output"]')).not.toBeNull();
+
+    controllerPoint.pointType = 'virtual';
+    window.renderSimulationViewPanel();
+    await flushRuntime();
+
+    expect(document.querySelector('[data-simulation-testpoint="tp-controller-output"]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('removes a package test point from the simulation view when saved as virtual from the edge panel', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg)).toMatchObject({ ok: true });
+    await flushRuntime();
+
+    window.__GZ_SIM__.componentOutputs = { time: [], steps: [] };
+    window.setCanvasView('components');
+    await flushRuntime();
+    expect(document.querySelector('[data-simulation-testpoint="tp-controller-output"]')).not.toBeNull();
+
+    window.selectEdge('edge-controller-allocator');
+    await flushRuntime();
+    window.setPropertyPanelTab('testpoints');
+    await flushRuntime();
+
+    const card = document.querySelector('[data-edge-testpoint-card="tp-controller-output"]');
+    expect(card).not.toBeNull();
+    const typeSelect = card.querySelector('[data-edge-testpoint-type]');
+    typeSelect.value = 'virtual';
+    typeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    card.querySelector('[data-save-edge-testpoint]')?.click();
+    await flushRuntime();
+
+    expect(window.buildDiagnosticTestPointModel().positions.find((point) => point.pointId === 'tp-controller-output')?.pointType).toBe('virtual');
+    expect(document.querySelector('[data-simulation-testpoint="tp-controller-output"]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('records local simulation component outputs for controller parameter bias faults', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg)).toMatchObject({ ok: true });
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    const controller = state.modelNodes.find((node) => node.id === 'node-controller');
+    expect(controller).toBeTruthy();
+    const injector = window.createNode('physical_fault_injector', 420, 260);
+    const injected = window.bindLayeredFaultInjectorToTarget(injector.id, {
+      targetKind: 'node',
+      targetId: controller.id,
+      slotId: 'physical:controller_gain',
+      mathModel: 'bias',
+      parameters: { bias: 0.1, start: 0, duration: '' }
+    });
+    expect(injected).toMatchObject({ ok: true });
+
+    document.getElementById('sim-dur').value = '0.4';
+    document.getElementById('sim-step').value = '0.1';
+    window.simInit(true);
+    for (let step = 0; step < 4; step += 1) {
+      window.simStep();
+    }
+    await flushRuntime();
+
+    const steps = window.__GZ_SIM__.componentOutputs.steps;
+    expect(steps.length).toBeGreaterThan(0);
+    const controllerSamples = steps
+      .map((step) => ({
+        actual: step.actual?.['node-controller']?.torque_command ?? step.actual?.['node-controller']?.output,
+        reference: step.reference?.['node-controller']?.torque_command ?? step.reference?.['node-controller']?.output
+      }))
+      .filter((sample) => Number.isFinite(Number(sample.actual)) && Number.isFinite(Number(sample.reference)));
+
+    expect(controllerSamples.length).toBeGreaterThan(0);
+    const deltas = controllerSamples.map((sample) => Math.abs(Number(sample.actual) - Number(sample.reference)));
+    expect(deltas.some((delta) => delta > 0.001)).toBe(true);
+    expect(Math.max(...deltas)).toBeLessThan(0.2);
+
+    window.setCanvasView('components');
+    await flushRuntime();
+
+    const chart = document.querySelector('[data-simulation-chart="tp-controller-output"]');
+    expect(chart?.querySelector('[data-simulation-series="actual"]')?.getAttribute('points')).not.toBe(
+      chart?.querySelector('[data-simulation-series="reference"]')?.getAttribute('points')
+    );
+
+    wrapper.unmount();
+  });
+
   it('downloads a JSON snapshot when saving completed simulation results', async () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => createCanvasContextStub());
     const wrapper = mount(App, { attachTo: document.body });
@@ -2626,6 +2846,9 @@ describe('canvas layout cleanup', () => {
     const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
     expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg)).toMatchObject({ ok: true });
     await flushRuntime();
+    window.installAllDiagnosticTestPoints();
+    const expectedDMatrix = window.buildDetectionMatrixModel();
+    expect(expectedDMatrix.points.length).toBeGreaterThan(0);
 
     document.getElementById('sim-name').value = 'result-json-run';
     document.getElementById('sim-dur').value = '2';
@@ -2634,6 +2857,21 @@ describe('canvas layout cleanup', () => {
     for (let step = 0; step < 4; step += 1) {
       window.simStep();
     }
+    window.__GZ_SIM__.componentOutputs = {
+      time: [0, 0.5],
+      steps: [
+        {
+          time: 0,
+          actual: { 'node-source': { out: 1 }, 'node-controller': { output: 1 } },
+          reference: { 'node-source': { out: 1 }, 'node-controller': { output: 1 } }
+        },
+        {
+          time: 0.5,
+          actual: { 'node-source': { out: 1 }, 'node-controller': { output: 1.2 } },
+          reference: { 'node-source': { out: 1 }, 'node-controller': { output: 1 } }
+        }
+      ]
+    };
     await flushRuntime();
 
     window.doSaveRes();
@@ -2654,6 +2892,20 @@ describe('canvas layout cleanup', () => {
     expect(saved.model.edges.length).toBeGreaterThan(0);
     expect(saved.samples.actual.scopeSamples['node-scope'].ch1.length).toBeGreaterThan(0);
     expect(saved.samples.reference.scopeSamples['node-scope'].ch1.length).toBeGreaterThan(0);
+    expect(saved.componentOutputs.time).toEqual([0, 0.5]);
+    expect(saved.componentOutputs.steps[1].actual['node-controller'].output).toBe(1.2);
+    expect(saved.componentOutputs.steps[1].reference['node-controller'].output).toBe(1);
+    expect(saved.dMatrix).toMatchObject({
+      points: expect.any(Array),
+      rows: expect.any(Array),
+      summary: expect.objectContaining({
+        pointCount: expectedDMatrix.summary.pointCount,
+        faultCount: expectedDMatrix.summary.faultCount,
+        detectableCells: expectedDMatrix.summary.detectableCells
+      })
+    });
+    expect(saved.dMatrix.points.map((point) => point.pointId)).toEqual(expectedDMatrix.points.map((point) => point.pointId));
+    expect(saved.dMatrix.rows.map((row) => row.faultId)).toEqual(expectedDMatrix.rows.map((row) => row.faultId));
     expect(saved.renderData).toMatchObject({
       devices: expect.any(Array),
       connections: expect.any(Array)
@@ -2689,6 +2941,107 @@ describe('canvas layout cleanup', () => {
     expect(scopeConnection).not.toHaveProperty('testPoints');
     expect(scopeConnection).not.toHaveProperty('channels');
     expect(saved.summary.faultCount).toBeGreaterThanOrEqual(0);
+
+    wrapper.unmount();
+  });
+
+  it('saves troubleshooting paths for D matrix faults selected as practice targets', async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => createCanvasContextStub());
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg)).toMatchObject({ ok: true });
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    state.importedFaultModels = [
+      {
+        id: 'practice-target-fault',
+        name: '实践排查目标故障',
+        category: '物理层故障',
+        targetEdgeId: 'edge-controller-allocator',
+        affectedEdges: ['edge-controller-allocator'],
+        detects: ['practice-target-fault']
+      },
+      {
+        id: 'practice-alternate-fault',
+        name: '备选实践故障',
+        category: '物理层故障',
+        targetEdgeId: 'edge-allocator-motor',
+        affectedEdges: ['edge-allocator-motor'],
+        detects: ['practice-alternate-fault']
+      }
+    ];
+    state.diagnosticTestPoints = [
+      {
+        pointId: 'tp-practice-controller-output',
+        shortName: 'M1',
+        name: '控制器输出测点',
+        edgeId: 'edge-controller-allocator',
+        pointType: 'physical',
+        detects: ['practice-target-fault']
+      },
+      {
+        pointId: 'tp-practice-allocator-output',
+        shortName: 'M2',
+        name: '分配器输出测点',
+        edgeId: 'edge-allocator-motor',
+        pointType: 'physical',
+        detects: ['practice-alternate-fault']
+      }
+    ];
+    window.installAllDiagnosticTestPoints();
+    window.setCanvasView('dmatrix');
+    await flushRuntime();
+
+    const checkbox = document.querySelector('[data-d-matrix-practice-fault="practice-target-fault"]');
+    expect(checkbox).not.toBeNull();
+    expect(checkbox.type).toBe('radio');
+    expect(checkbox.checked).toBe(false);
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    expect(window.__GZ_STATE__.practiceFaultIds).toEqual(['practice-target-fault']);
+
+    const alternate = document.querySelector('[data-d-matrix-practice-fault="practice-alternate-fault"]');
+    expect(alternate).not.toBeNull();
+    expect(alternate.type).toBe('radio');
+    alternate.checked = true;
+    alternate.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    expect(window.__GZ_STATE__.practiceFaultIds).toEqual(['practice-alternate-fault']);
+
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    expect(window.__GZ_STATE__.practiceFaultIds).toEqual(['practice-target-fault']);
+
+    document.getElementById('sim-name').value = 'practice-path-run';
+    document.getElementById('sim-dur').value = '0.2';
+    document.getElementById('sim-step').value = '0.1';
+    window.simInit(true);
+    for (let step = 0; step < 2; step += 1) {
+      window.simStep();
+    }
+    await flushRuntime();
+
+    window.doSaveRes();
+    await flushRuntime();
+
+    const saved = JSON.parse(window.__GZ_LAST_SIMULATION_RESULT_EXPORT__.json);
+    expect(saved.practiceFaults).toHaveLength(1);
+    expect(saved.practiceFaults[0]).toMatchObject({
+      faultId: 'practice-target-fault',
+      faultName: '实践排查目标故障',
+      selected: true,
+      troubleshootingPath: expect.objectContaining({
+        ok: true,
+        faultId: 'practice-target-fault',
+        steps: expect.any(Array)
+      })
+    });
+    expect(saved.practiceFaults[0].troubleshootingPath.steps.length).toBeGreaterThan(0);
 
     wrapper.unmount();
   });

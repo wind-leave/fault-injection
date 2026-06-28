@@ -19,6 +19,27 @@ function pushLimitedSample(list, sample, limit = DEFAULT_SAMPLE_LIMIT) {
   }
 }
 
+function cloneComponentOutputStep(step) {
+  return {
+    time: Number(step?.time ?? 0),
+    actual: JSON.parse(JSON.stringify(step?.actual ?? {})),
+    reference: JSON.parse(JSON.stringify(step?.reference ?? {}))
+  };
+}
+
+function ensureComponentOutputTrace(sim) {
+  if (!sim.componentOutputs || typeof sim.componentOutputs !== 'object') {
+    sim.componentOutputs = { time: [], steps: [] };
+  }
+  if (!Array.isArray(sim.componentOutputs.time)) {
+    sim.componentOutputs.time = [];
+  }
+  if (!Array.isArray(sim.componentOutputs.steps)) {
+    sim.componentOutputs.steps = [];
+  }
+  return sim.componentOutputs;
+}
+
 function ensureScopeChannelBucket(runtimeBucket, scopeId) {
   if (!runtimeBucket.scopeSamples) {
     runtimeBucket.scopeSamples = {};
@@ -54,6 +75,7 @@ function parseChannelKey(key) {
 function refreshRuntimeViews(target, status = 'stepped') {
   syncSimulationControls(target);
   target.renderScopeWindows?.();
+  target.renderSimulationViewPanel?.();
   target.updateUI?.();
   target.publishSimulationRuntimeSummary?.(status);
 }
@@ -107,6 +129,10 @@ export function appendBackendSimulationChunk(target, chunk, { sampleLimit = DEFA
   }
   const times = Array.isArray(chunk?.curves?.time) ? chunk.curves.time : [];
   const channels = chunk?.curves?.channels ?? {};
+  const componentOutputTrace = ensureComponentOutputTrace(sim);
+  const componentOutputs = chunk?.componentOutputs ?? {};
+  const componentTimes = Array.isArray(componentOutputs.time) ? componentOutputs.time : [];
+  const componentSteps = Array.isArray(componentOutputs.steps) ? componentOutputs.steps : [];
 
   Object.entries(channels).forEach(([key, values]) => {
     const parsed = parseChannelKey(key);
@@ -118,6 +144,21 @@ export function appendBackendSimulationChunk(target, chunk, { sampleLimit = DEFA
     values.forEach((value, index) => {
       const time = Number.isFinite(Number(times[index])) ? Number(times[index]) : Number(sim.time || 0);
       pushLimitedSample(scopeBucket[parsed.channel], { t: time, actual: Number(value) }, sampleLimit);
+    });
+  });
+
+  componentSteps.forEach((step, index) => {
+    const time = Number.isFinite(Number(step?.time))
+      ? Number(step.time)
+      : Number.isFinite(Number(componentTimes[index]))
+        ? Number(componentTimes[index])
+        : Number.isFinite(Number(times[index]))
+          ? Number(times[index])
+          : Number(sim.time || 0);
+    componentOutputTrace.time.push(time);
+    componentOutputTrace.steps.push({
+      ...cloneComponentOutputStep(step),
+      time
     });
   });
 
@@ -235,6 +276,7 @@ export function installBackendStepSimulationRuntime(target = globalThis, options
     if (sim) {
       sim.backendSessionId = '';
       sim.backendRunId = '';
+      sim.componentOutputs = { time: [], steps: [] };
     }
     return result;
   };

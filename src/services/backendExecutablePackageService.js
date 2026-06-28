@@ -85,6 +85,15 @@ function normalizeFaultType(fault = {}) {
   if (/efficiency/.test(key)) {
     return 'motor_efficiency_loss';
   }
+  if (/physical_parameter_step|parameter_step/.test(key)) {
+    return 'parameter_step';
+  }
+  if (/physical_parameter_drift|parameter_drift/.test(key)) {
+    return 'parameter_drift';
+  }
+  if (/physical_parameter_bias|parameter_bias|parameter_scale/.test(key)) {
+    return 'parameter_bias';
+  }
   if (/bias|offset|drift|step|sensor_additive/.test(key)) {
     return 'sensor_bias';
   }
@@ -97,6 +106,14 @@ function normalizeFaultParameters(fault = {}) {
   const bias = firstPresent(parameters.bias, parameters.offset, parameters.delta_p, fault.bias, fault.offset);
   if (bias !== '') {
     parameters.bias = sanitizeNumber(bias, 0);
+  }
+  const stepValue = firstPresent(parameters.stepValue, parameters.step_value, parameters.delta_p);
+  if (stepValue !== '') {
+    parameters.stepValue = sanitizeNumber(stepValue, 0);
+  }
+  const driftRate = firstPresent(parameters.rate, parameters.driftRate);
+  if (driftRate !== '') {
+    parameters.rate = sanitizeNumber(driftRate, 0);
   }
   const amplitude = firstPresent(parameters.amplitude, parameters.std);
   if (amplitude !== '') {

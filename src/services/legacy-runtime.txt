@@ -42,7 +42,8 @@ const S={
   installedDiagnosticTestPointIds:[],
   selectedDiagnosticTestPointId:'',
   testPointDiagnosis:null,
-  confirmedDiagnosticFaults:{}
+  confirmedDiagnosticFaults:{},
+  practiceFaultIds:[]
 };
 
 S.rootCanvasId='canvas-root';
@@ -3676,7 +3677,8 @@ const SIM = {
   scopeWindows:{},
   scopeWindowZ:10,
   actual:createRuntimeBucket(),
-  reference:createRuntimeBucket()
+  reference:createRuntimeBucket(),
+  componentOutputs:{time:[],steps:[]}
 };
 
 function clearSimLoop(){
@@ -3879,6 +3881,7 @@ function resetSimulationRuntime(){
   SIM.hasSamples=false;
   SIM.actual=createRuntimeBucket();
   SIM.reference=createRuntimeBucket();
+  SIM.componentOutputs={time:[],steps:[]};
   getScopeNodes().forEach(node=>{
     SIM.actual.scopeSamples[node.id]=[];
     SIM.reference.scopeSamples[node.id]=[];
@@ -5995,12 +5998,38 @@ function buildSimulationRenderDataSnapshot(actualScopeSamples,actualInstrumentSa
   return {devices,connections};
 }
 
+function buildPracticeFaultSnapshots(dMatrix){
+  const selectedIds=Array.isArray(S.practiceFaultIds)?S.practiceFaultIds:[];
+  if(!selectedIds.length) return [];
+  const rows=Array.isArray(dMatrix?.rows)?dMatrix.rows:[];
+  return selectedIds.map(faultId=>{
+    const row=rows.find(item=>item.faultId===faultId)||{};
+    const troubleshootingPath=typeof window.buildTroubleshootingPathForFault==='function'
+      ?cloneDefaults(window.buildTroubleshootingPathForFault(faultId))
+      :null;
+    return {
+      faultId,
+      faultName:row.faultName||row.faultDisplayName||faultId,
+      faultDisplayName:row.faultDisplayName||row.faultName||faultId,
+      targetLabel:row.targetLabel||'',
+      layer:row.layer||'',
+      selected:true,
+      troubleshootingPath
+    };
+  });
+}
+
 function buildSimulationResultSnapshot(){
   const exportedAt=new Date().toISOString();
   const actualScopeSamples=cloneDefaults(SIM.actual?.scopeSamples||{});
   const referenceScopeSamples=cloneDefaults(SIM.reference?.scopeSamples||{});
   const actualInstrumentSamples=cloneDefaults(SIM.actual?.instrumentSamples||{});
   const referenceInstrumentSamples=cloneDefaults(SIM.reference?.instrumentSamples||{});
+  const componentOutputs=cloneDefaults(SIM.componentOutputs||{time:[],steps:[]});
+  const dMatrix=typeof window.buildDetectionMatrixModel==='function'
+    ?cloneDefaults(window.buildDetectionMatrixModel())
+    :null;
+  const practiceFaults=buildPracticeFaultSnapshots(dMatrix);
   const modelSnapshot=typeof createSystemModelSnapshot==='function'?createSystemModelSnapshot():null;
   const status=getSimulationResultStatus();
 
@@ -6041,6 +6070,9 @@ function buildSimulationResultSnapshot(){
         instrumentSamples:referenceInstrumentSamples
       }
     },
+    componentOutputs,
+    dMatrix,
+    practiceFaults,
     renderData:buildSimulationRenderDataSnapshot(actualScopeSamples,actualInstrumentSamples),
     summary:{
       nodeCount:(S.modelNodes||[]).length,
@@ -12890,28 +12922,6 @@ Object.assign(window,{
     const metrics=(typeof window.collectDataflowEdges==='function'
       ?window.collectDataflowEdges().find((item)=>item.edge?.id===edge.id)?.metrics
       :null)||((typeof getDataflowEdgeMetrics==='function')?getDataflowEdgeMetrics(edge):{})||{};
-    const activeFault=activeFaultBindingsForPanel(edge)[0]||edge.injectedFault||{};
-    const faultName=metrics.faultName||activeFault.name||'';
-    const runtimeBehavior=metrics.runtimeBehavior||activeFault.runtimeBehavior||'';
-    const faultParams=activeFault.parameters||{};
-    const formatEdgeOutputNumber=(value,digits=3)=>{
-      if(value===null||value===undefined||value===''){return '--';}
-      const numeric=Number(value);
-      if(!Number.isFinite(numeric)){return String(value);}
-      if(Math.abs(numeric)>=100){return numeric.toFixed(1);}
-      if(Math.abs(numeric)>=10){return numeric.toFixed(2);}
-      return numeric.toFixed(digits);
-    };
-    const diagnosticRows=[
-      ['当前值 currentValue',formatEdgeOutputNumber(metrics.currentValue)],
-      ['残差 residual',formatEdgeOutputNumber(metrics.residualValue)],
-      ['延迟 latency',metrics.latency||faultParams.latency||faultParams.base_delay||faultParams.delay_seconds||'--'],
-      ['丢包率 dropRate',metrics.dropRate||faultParams.dropRate||faultParams.drop_rate||faultParams.loss_rate||'--'],
-      ['突发长度 burstLength',metrics.burstLength||faultParams.burstLength||faultParams.burst_length||'--'],
-      ['状态 status',metrics.status||'normal'],
-      faultName?['故障名称 faultName',faultName]:null,
-      runtimeBehavior?['运行行为 runtimeBehavior',runtimeBehavior]:null
-    ].filter(Boolean);
     const signalCards=signals.map((item,index)=>`
       <div class="props-channel-card" data-edge-output-channel="${text(item.signalRole||index)}">
         ${renderRows([
@@ -12951,10 +12961,6 @@ Object.assign(window,{
       <div class="pgroup" data-edge-output-channels>
         <div class="pglbl">通道载荷</div>
         ${signalCards||'<div class="props-empty-state">暂无信号通道</div>'}
-      </div>
-      <div class="pgroup" data-edge-diagnostics>
-        <div class="pglbl">诊断指标</div>
-        ${renderRows(diagnosticRows)}
       </div>`;
   }
 
@@ -13178,6 +13184,31 @@ Object.assign(window,{
     )||null;
   }
 
+  function findConfiguredEdgeTestPoints(edge,pointId){
+    return [
+      ...list(S.diagnosticTestPoints),
+      ...list(S.testPoints)
+    ].filter(point=>
+      (point?.pointId||point?.id)===pointId
+      && (point?.edgeId||point?.edgeID||point?.targetEdgeId||'')===edge?.id
+    );
+  }
+
+  function refreshEdgeTestPointViews(){
+    if(typeof refreshDiagnosisViews==='function'){
+      refreshDiagnosisViews();
+    }
+    if(document.getElementById('cw')?.dataset.view==='components'&&typeof window.renderSimulationViewPanel==='function'){
+      try{window.renderSimulationViewPanel();}catch(err){console.warn('[edge-testpoint] renderSimulationViewPanel failed',err);}
+    }
+    if(document.getElementById('cw')?.dataset.view==='dmatrix'&&typeof window.renderDetectionMatrixPanel==='function'){
+      try{window.renderDetectionMatrixPanel();}catch(err){console.warn('[edge-testpoint] renderDetectionMatrixPanel failed',err);}
+    }
+    if(typeof window.renderCanvasDiagnosticTestPointMarkers==='function'){
+      try{window.renderCanvasDiagnosticTestPointMarkers();}catch(err){console.warn('[edge-testpoint] marker render failed',err);}
+    }
+  }
+
   function renderEdgeTestPointFaultOptions(edge,point){
     const selected=new Set(list(point?.detects));
     const groups=getEdgeTestPointFaultGroups(edge);
@@ -13266,7 +13297,10 @@ Object.assign(window,{
   function saveEdgeTestPointFromPanel(edge,pointId){
     if(!edge?.id||!pointId) return false;
     if(!Array.isArray(S.manualDiagnosticTestPoints)) S.manualDiagnosticTestPoints=[];
-    let point=findManualEdgeTestPoint(edge,pointId);
+    const configuredMatches=findConfiguredEdgeTestPoints(edge,pointId);
+    let point=findManualEdgeTestPoint(edge,pointId)||configuredMatches[0]||null;
+    let syncTargets=[point,...configuredMatches].filter(Boolean);
+    syncTargets=Array.from(new Set(syncTargets));
     if(!point){
       const configured=getEdgeConfiguredTestPoints(edge).find(item=>(item.pointId||item.id)===pointId);
       if(!configured) return false;
@@ -13279,22 +13313,35 @@ Object.assign(window,{
         detects:list(configured.detects)
       };
       S.manualDiagnosticTestPoints.push(point);
+      syncTargets=[point];
     }
     if(!point) return false;
     const card=Array.from(document.querySelectorAll('[data-edge-testpoint-card]'))
       .find(item=>item.dataset.edgeTestpointCard===pointId);
     if(!card) return false;
     const nameInput=card.querySelector('[data-edge-testpoint-name]');
-    point.name=nameInput?.value?.trim()||point.name||getEdgeTestPointDefaultName(edge);
     const typeInput=card.querySelector('[data-edge-testpoint-type]');
-    point.pointType=normalizeDiagnosticTestPointType(typeInput?.value||point.pointType);
-    point.detects=Array.from(card.querySelectorAll('[data-edge-testpoint-fault]:checked'))
+    const nextName=nameInput?.value?.trim()||point.name||getEdgeTestPointDefaultName(edge);
+    const nextPointType=normalizeDiagnosticTestPointType(typeInput?.value||point.pointType);
+    const nextDetects=Array.from(card.querySelectorAll('[data-edge-testpoint-fault]:checked'))
       .map(input=>input.dataset.edgeTestpointFault)
       .filter(Boolean);
-    point.signalId=edge.signalId||point.signalId||'';
-    point.channelId=edge.channelId||point.channelId||'';
-    point.sourceName=getNode(edge.sourceNodeId)?.props?.name||point.sourceName||edge.sourceNodeId||'';
-    point.targetName=getNode(edge.targetNodeId)?.props?.name||point.targetName||edge.targetNodeId||'';
+    const nextSignalId=edge.signalId||point.signalId||'';
+    const nextChannelId=edge.channelId||point.channelId||'';
+    const nextSourceName=getNode(edge.sourceNodeId)?.props?.name||point.sourceName||edge.sourceNodeId||'';
+    const nextTargetName=getNode(edge.targetNodeId)?.props?.name||point.targetName||edge.targetNodeId||'';
+    syncTargets.forEach(target=>{
+      target.pointId=target.pointId||pointId;
+      target.id=target.id||pointId;
+      target.edgeId=edge.id;
+      target.name=nextName;
+      target.pointType=nextPointType;
+      target.detects=[...nextDetects];
+      target.signalId=nextSignalId;
+      target.channelId=nextChannelId;
+      target.sourceName=nextSourceName;
+      target.targetName=nextTargetName;
+    });
     S.selectedDiagnosticTestPointId=point.pointId;
     delete S.compactDiagnosticFixedPoints;
     delete S.compactDiagnosticFixedPointSignature;
@@ -13304,7 +13351,7 @@ Object.assign(window,{
     S.testPointDiagnosis=null;
     markTopologyDirty('diagnostic');
     renderPropertyPanel(edge);
-    if(typeof refreshDiagnosisViews==='function') refreshDiagnosisViews();
+    refreshEdgeTestPointViews();
     toast('测点已保存','s');
     return true;
   }
@@ -13327,7 +13374,7 @@ Object.assign(window,{
     S.testPointDiagnosis=null;
     markTopologyDirty('diagnostic');
     renderPropertyPanel(edge);
-    if(typeof refreshDiagnosisViews==='function') refreshDiagnosisViews();
+    refreshEdgeTestPointViews();
     toast('测点已删除','s');
     return true;
   }
@@ -17202,25 +17249,6 @@ function decorateDataflowEdges(){
     });
   }
 
-  function renderEdgeDataflowInspector(edge){
-    const metrics=getDataflowEdgeMetrics(edge);
-    const pd=document.getElementById('pd');
-    if(!pd){return;}
-    pd.insertAdjacentHTML('beforeend',`
-      <div class="pgroup" data-edge-diagnostics>
-        <div class="pglbl">信号诊断</div>
-        <div class="dataflow-metrics-grid">
-          <div class="dataflow-metric"><span>当前值 currentValue</span><strong>${escapeHtml(formatDataflowNumber(metrics.currentValue))}</strong></div>
-          <div class="dataflow-metric"><span>残差 residual</span><strong>${escapeHtml(formatDataflowNumber(metrics.residualValue))}</strong></div>
-          <div class="dataflow-metric"><span>延迟 latency</span><strong>${escapeHtml(metrics.latency)}</strong></div>
-          <div class="dataflow-metric"><span>丢包率 dropRate</span><strong>${escapeHtml(metrics.dropRate)}</strong></div>
-          <div class="dataflow-metric"><span>突发长度 burstLength</span><strong>${escapeHtml(metrics.burstLength)}</strong></div>
-          <div class="dataflow-metric"><span>状态 status</span><strong>${escapeHtml(metrics.status)}</strong></div>
-        </div>
-        <div class="props-help">该诊断块来自多信号流图。运行仿真后，当前值和残差会随采样状态更新；协议指标来自 CAN 边或故障类型默认参数。</div>
-      </div>`);
-  }
-
   function renderSignalFlowInstrumentInspector(node){
     const pe=document.getElementById('pe');
     const pd=document.getElementById('pd');
@@ -17244,7 +17272,7 @@ function decorateDataflowEdges(){
       </div>
       <div class="pgroup">
         <div class="pglbl">嵌入方式</div>
-        <div class="props-help">多信号流图读取当前画布的节点、端口、连线和故障配置，不复制模型。切换到“数据流视图”即可查看边级指标；选中任意连线可在属性栏查看信号诊断。</div>
+        <div class="props-help">多信号流图读取当前画布的节点、端口、连线和故障配置，不复制模型。切换到“数据流视图”即可查看边级指标。</div>
       </div>
       <div class="props-actions">
         <button class="props-secondary" onclick="setCanvasView('dataflow')">打开数据流视图</button>
@@ -17275,9 +17303,6 @@ function decorateDataflowEdges(){
       return;
     }
     const result=__dataflowRenderPropertyPanel(node);
-    if(node?.sourceNodeId&&node?.targetNodeId&&!node?.type){
-      renderEdgeDataflowInspector(node);
-    }
     return result;
   };
 
@@ -17996,7 +18021,10 @@ function decorateDataflowEdges(){
       tab.classList.toggle('is-active',active);
       tab.setAttribute('aria-pressed',active?'true':'false');
     });
-    const labels={canvas:'画布视图',components:'故障视图',dataflow:'多信号流图',dmatrix:'D矩阵视图'};
+    const labels={canvas:'画布视图',components:'仿真视图',dataflow:'多信号流图',dmatrix:'D矩阵视图'};
+    if(nextView==='components'){
+      window.renderSimulationViewPanel?.();
+    }
     if(nextView==='dataflow'){
       window.renderDataflowPanel?.();
       window.decorateDataflowEdges?.();
@@ -18004,7 +18032,7 @@ function decorateDataflowEdges(){
     if(nextView==='dmatrix'){
       window.renderDetectionMatrixPanel?.();
     }
-    window.renderFaultViewTestpointToggle?.();
+    window.renderCanvasTestpointToggle?.();
     if(typeof window.renderCanvasDiagnosticTestPointMarkers==='function'){
       window.renderCanvasDiagnosticTestPointMarkers();
     }
@@ -20484,13 +20512,27 @@ function decorateDataflowEdges(){
     });
   }
 
+  function isParameterFaultBinding(binding){
+    const targetField=String(binding?.targetField||binding?.injectedFault?.targetField||'').trim();
+    const mode=String(binding?.propagationMode||binding?.injectedFault?.propagationMode||'').trim();
+    const slotId=String(binding?.slotId||binding?.targetSlotId||binding?.injectedFault?.slotId||'').trim();
+    return targetField.startsWith('params.')
+      || mode==='parameterInfluence'
+      || mode==='localParameter'
+      || slotId.startsWith('physical:');
+  }
+
   const __bridgeApplyElectricalFault=applyElectricalFault;
   applyElectricalFault=function(node,inputValue,outputValue,time){
     const api=getFaultRuntimeApi();
     if(!api||(!node?.injectedFault&&!api.hasActiveFaultBinding?.(node))){
       return __bridgeApplyElectricalFault(node,inputValue,outputValue,time);
     }
-    const executableBindings=getExecutableFaultBindings(node,api);
+    const allExecutableBindings=getExecutableFaultBindings(node,api);
+    const executableBindings=allExecutableBindings.filter(binding=>!isParameterFaultBinding(binding));
+    if(allExecutableBindings.length&&!executableBindings.length){
+      return outputValue;
+    }
     if(api.applyScalarFaultBindings&&executableBindings.length){
       const state=SIM.actual.nodeStates[node.id]||(SIM.actual.nodeStates[node.id]={});
       return api.applyScalarFaultBindings(outputValue,{
@@ -22822,8 +22864,16 @@ function decorateDataflowEdges(){
     const activeCanvasId=getActiveDiagnosticCanvasId();
     const configured=arr(state.diagnosticTestPoints).length?arr(state.diagnosticTestPoints):arr(state.testPoints);
     const manualConfigured=getManualDiagnosticPoints();
-    const explicitSignature=configured.map(point=>`${point.pointId||point.id||''}:${point.edgeId||point.edgeID||point.targetEdgeId||''}`).join('|');
-    const manualSignature=manualConfigured.map(point=>`${point.pointId||point.id||''}:${point.edgeId||point.edgeID||point.targetEdgeId||''}`).join('|');
+    const explicitSignature=configured.map(point=>[
+      point.pointId||point.id||'',
+      point.edgeId||point.edgeID||point.targetEdgeId||'',
+      normalizeDiagnosticTestPointType(point.pointType)
+    ].join(':')).join('|');
+    const manualSignature=manualConfigured.map(point=>[
+      point.pointId||point.id||'',
+      point.edgeId||point.edgeID||point.targetEdgeId||'',
+      normalizeDiagnosticTestPointType(point.pointType)
+    ].join(':')).join('|');
     const edgeSignature=[activeCanvasId,runtimeEdges.map(edge=>edge.id).join('|'),runtimeNodes.map(node=>node.id).join('|'),explicitSignature,manualSignature].join('::');
     if(Array.isArray(state.compactDiagnosticFixedPoints)&&state.compactDiagnosticFixedPointSignature===edgeSignature){
       return state.compactDiagnosticFixedPoints;
@@ -23183,6 +23233,9 @@ function decorateDataflowEdges(){
     }
     if(document.getElementById('cw')?.dataset.view==='dmatrix'&&typeof window.renderDetectionMatrixPanel==='function'){
       try{window.renderDetectionMatrixPanel();}catch(err){console.warn('[diagnosis-console] renderDetectionMatrixPanel failed',err);}
+    }
+    if(document.getElementById('cw')?.dataset.view==='components'&&typeof window.renderSimulationViewPanel==='function'){
+      try{window.renderSimulationViewPanel();}catch(err){console.warn('[diagnosis-console] renderSimulationViewPanel failed',err);}
     }
   }
 
@@ -23549,9 +23602,23 @@ function decorateDataflowEdges(){
     return panel;
   };
 
+  function getPracticeFaultIdSet(){
+    const state=getState();
+    if(!Array.isArray(state.practiceFaultIds)) state.practiceFaultIds=[];
+    return new Set(state.practiceFaultIds);
+  }
+
+  window.setDMatrixPracticeFault=function(faultId,selected){
+    const state=getState();
+    if(!Array.isArray(state.practiceFaultIds)) state.practiceFaultIds=[];
+    state.practiceFaultIds=selected&&faultId?[faultId]:[];
+    return state.practiceFaultIds;
+  };
+
   function renderDetectionMatrixTable(model){
     const points=arr(model?.points);
     const rows=arr(model?.rows);
+    const practiceFaultIds=getPracticeFaultIdSet();
     return `
       <div class="d-matrix-table-wrap">
         <table class="d-matrix-table">
@@ -23561,6 +23628,7 @@ function decorateDataflowEdges(){
               <th>目标模块/连线</th>
               <th>层级</th>
               <th>可测点</th>
+              <th>实践排查</th>
               <th>排故路径</th>
               ${points.map(point=>`<th title="${html(point.name)}">${html(point.shortName)}</th>`).join('')}
             </tr>
@@ -23575,6 +23643,12 @@ function decorateDataflowEdges(){
                 <td>${html(row.targetLabel)}</td>
                 <td>${html(row.layer)}</td>
                 <td>${row.detectableCount}/${points.length}</td>
+                <td>
+                  <label class="d-matrix-practice">
+                    <input type="radio" name="d-matrix-practice-fault" data-d-matrix-practice-fault="${html(row.faultId)}" ${practiceFaultIds.has(row.faultId)?'checked':''}>
+                    <span>排查</span>
+                  </label>
+                </td>
                 <td><button type="button" class="d-matrix-path-action" data-build-troubleshooting-path="${html(row.faultId)}">生成</button></td>
                 ${row.cells.map(cell=>`
                   <td class="d-matrix-cell${cell.detectable?' is-detectable':' is-empty'}" title="${html(cell.pointCode)} · ${html(cell.pointName)} · ${html(cell.reason)}">${cell.detectable?'1':'0'}</td>
@@ -24099,30 +24173,47 @@ function decorateDataflowEdges(){
     return visibility[kind]!==false;
   }
 
-  function isFaultViewTestpointsVisible(){
-    return getAnnotationVisibility().faultViewTestpoints===true;
+  function isCanvasTestpointsVisible(){
+    const visibility=getAnnotationVisibility();
+    return visibility.canvasTestpoints===true||(
+      visibility.canvasTestpoints==null&&visibility.faultViewTestpoints===true
+    );
   }
 
-  function renderFaultViewTestpointToggle(){
+  function renderCanvasTestpointToggle(){
     if(typeof document==='undefined') return;
-    const button=document.querySelector('[data-toggle-fault-view-testpoints]');
-    if(!button) return;
-    const visible=isFaultViewTestpointsVisible();
+    const host=document.querySelector('[data-canvas-testpoint-tools]');
+    if(!host) return;
+    const canvasView=document.getElementById('cw')?.dataset.view||'canvas';
+    if(canvasView!=='canvas'){
+      host.innerHTML='';
+      return;
+    }
+    let button=host.querySelector('[data-toggle-canvas-testpoints]');
+    if(!button){
+      host.innerHTML='<button type="button" class="canvas-testpoint-toggle" data-toggle-canvas-testpoints aria-pressed="false">显示测点</button>';
+      button=host.querySelector('[data-toggle-canvas-testpoints]');
+    }
+    const visible=isCanvasTestpointsVisible();
     button.textContent=visible?'隐藏测点':'显示测点';
     button.setAttribute('aria-pressed',visible?'true':'false');
     button.classList.toggle('is-active',visible);
   }
-  window.renderFaultViewTestpointToggle=renderFaultViewTestpointToggle;
+  window.renderCanvasTestpointToggle=renderCanvasTestpointToggle;
+  window.renderFaultViewTestpointToggle=renderCanvasTestpointToggle;
+  renderCanvasTestpointToggle();
 
-  window.toggleFaultViewTestpoints=function(next){
+  window.toggleCanvasTestpoints=function(next){
     const visibility=getAnnotationVisibility();
-    visibility.faultViewTestpoints=typeof next==='boolean'?next:!isFaultViewTestpointsVisible();
-    renderFaultViewTestpointToggle();
+    visibility.canvasTestpoints=typeof next==='boolean'?next:!isCanvasTestpointsVisible();
+    delete visibility.faultViewTestpoints;
+    renderCanvasTestpointToggle();
     if(typeof window.renderCanvasDiagnosticTestPointMarkers==='function'){
       window.renderCanvasDiagnosticTestPointMarkers();
     }
-    return visibility.faultViewTestpoints;
+    return visibility.canvasTestpoints;
   };
+  window.toggleFaultViewTestpoints=window.toggleCanvasTestpoints;
 
   function findCanvasPathForEdge(edgeId){
     if(!edgeId||typeof document==='undefined') return null;
@@ -24399,7 +24490,7 @@ function decorateDataflowEdges(){
     const selectedPointId=canvasView!=='dataflow'?(getState().selectedDiagnosticTestPointId||''):'';
     model.positions
       .filter(point=>{
-        if(canvasView==='components') return isFaultViewTestpointsVisible();
+        if(canvasView==='canvas'&&isCanvasTestpointsVisible()) return true;
         return installedIds.has(point.pointId)||point.pointId===selectedPointId;
       })
       .forEach((point,index)=>{
@@ -24497,6 +24588,12 @@ function decorateDataflowEdges(){
 
   if(typeof document!=='undefined'&&!window.__compactDiagnosisConsoleEvents){
     window.__compactDiagnosisConsoleEvents=true;
+    document.addEventListener('change',event=>{
+      const practiceFaultToggle=event.target.closest?.('[data-d-matrix-practice-fault]');
+      if(!practiceFaultToggle) return;
+      const faultId=practiceFaultToggle.getAttribute('data-d-matrix-practice-fault')||'';
+      window.setDMatrixPracticeFault?.(faultId,Boolean(practiceFaultToggle.checked));
+    });
     document.addEventListener('click',event=>{
       const locateFault=event.target.closest?.('[data-locate-fault-injection]');
       if(locateFault){
@@ -24561,10 +24658,10 @@ function decorateDataflowEdges(){
         window.runAllDiagnosticTestPointDetections();
         return;
       }
-      const toggleFaultViewPoints=event.target.closest?.('[data-toggle-fault-view-testpoints]');
-      if(toggleFaultViewPoints){
+      const toggleCanvasPoints=event.target.closest?.('[data-toggle-canvas-testpoints],[data-toggle-fault-view-testpoints]');
+      if(toggleCanvasPoints){
         event.preventDefault();
-        window.toggleFaultViewTestpoints?.();
+        window.toggleCanvasTestpoints?.();
         return;
       }
       if(event.target.closest?.('[data-clear-diagnostic-result]')){
@@ -24576,6 +24673,12 @@ function decorateDataflowEdges(){
       if(event.target.closest?.('[data-d-matrix-export]')){
         event.preventDefault();
         window.exportDetectionMatrixCsv?.();
+        return;
+      }
+      const practiceFaultToggle=event.target.closest?.('[data-d-matrix-practice-fault]');
+      if(practiceFaultToggle){
+        const faultId=practiceFaultToggle.getAttribute('data-d-matrix-practice-fault')||'';
+        window.setDMatrixPracticeFault?.(faultId,Boolean(practiceFaultToggle.checked));
         return;
       }
       const pathTrigger=event.target.closest?.('[data-build-troubleshooting-path]');
@@ -26732,6 +26835,406 @@ function decorateDataflowEdges(){
   setTimeout(clearLegacyFaultLibraryPanel,20);
 })();
 
+// --- Local simulation component output trace ---
+(function installLocalComponentOutputTrace(){
+  if(typeof window==='undefined') return;
+
+  function arr(value){
+    return Array.isArray(value)?value:[];
+  }
+
+  function addCandidate(candidates,value){
+    const text=value===undefined||value===null?'':String(value).trim();
+    if(text&&!candidates.includes(text)) candidates.push(text);
+  }
+
+  function getOutputAliases(node,index){
+    const aliases=[];
+    let port=null;
+    try{
+      port=(typeof getNodePorts==='function'?getNodePorts(node)?.outputs?.[index]:null)||null;
+    }catch(error){
+      port=null;
+    }
+    [port,arr(node?.props?.outputs)[index],arr(node?.outputs)[index]].forEach(meta=>{
+      addCandidate(aliases,meta?.varName);
+      addCandidate(aliases,meta?.name);
+      addCandidate(aliases,meta?.key);
+      addCandidate(aliases,meta?.id);
+      addCandidate(aliases,meta?.displayName);
+      addCandidate(aliases,meta?.label);
+      addCandidate(aliases,meta?.pythonVariable);
+    });
+    addCandidate(aliases,index===0?'output':`output-${index+1}`);
+    addCandidate(aliases,`output-${index}`);
+    return aliases;
+  }
+
+  function collectRuntimeOutputs(runtimeBucket){
+    const result={};
+    const nodeStates=runtimeBucket?.nodeStates||{};
+    const nodes=arr(S.modelNodes).concat(Object.values(S.canvases||{}).flatMap(canvas=>arr(canvas?.nodes)));
+    const seen=new Set();
+    nodes.forEach(node=>{
+      if(!node?.id||seen.has(node.id)) return;
+      seen.add(node.id);
+      const state=nodeStates[node.id];
+      const outputs=arr(state?.lastOutputs);
+      if(!outputs.length) return;
+      result[node.id]={};
+      outputs.forEach((value,index)=>{
+        getOutputAliases(node,index).forEach(alias=>{
+          result[node.id][alias]=sanitizeSignalValue(value);
+        });
+      });
+    });
+    return result;
+  }
+
+  function ensureComponentOutputTrace(){
+    if(!SIM.componentOutputs||typeof SIM.componentOutputs!=='object'){
+      SIM.componentOutputs={time:[],steps:[]};
+    }
+    if(!Array.isArray(SIM.componentOutputs.time)) SIM.componentOutputs.time=[];
+    if(!Array.isArray(SIM.componentOutputs.steps)) SIM.componentOutputs.steps=[];
+    return SIM.componentOutputs;
+  }
+
+  function recordLocalComponentOutputs(time){
+    const trace=ensureComponentOutputTrace();
+    const step={
+      time,
+      actual:collectRuntimeOutputs(SIM.actual),
+      reference:collectRuntimeOutputs(SIM.reference)
+    };
+    trace.time.push(time);
+    trace.steps.push(step);
+    if(document.getElementById('cw')?.dataset.view==='components'){
+      window.renderSimulationViewPanel?.();
+    }
+  }
+
+  const previousRecordScopeSamples=recordScopeSamples;
+  recordScopeSamples=function(time,dt){
+    const result=previousRecordScopeSamples(time,dt);
+    recordLocalComponentOutputs(time);
+    return result;
+  };
+})();
+
+// --- Simulation view for physical diagnostic test point outputs ---
+(function installSimulationViewPanel(){
+  if(typeof window==='undefined') return;
+
+  function getState(){
+    return window.__GZ_STATE__||(typeof S!=='undefined'?S:{});
+  }
+
+  function getSimulationState(){
+    return window.__GZ_SIM__||(typeof SIM!=='undefined'?SIM:null);
+  }
+
+  function arr(value){
+    return Array.isArray(value)?value:[];
+  }
+
+  function text(value,fallback=''){
+    return value===undefined||value===null?fallback:String(value);
+  }
+
+  function html(value){
+    const raw=text(value);
+    if(typeof escapeHtml==='function') return escapeHtml(raw);
+    return raw.replace(/[&<>"']/g,match=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[match]));
+  }
+
+  function formatValue(value){
+    if(value===undefined||value===null||value==='') return '--';
+    const numeric=Number(value);
+    if(Number.isFinite(numeric)){
+      if(Math.abs(numeric)>=1000||Math.abs(numeric)<0.001&&numeric!==0){
+        return numeric.toExponential(3);
+      }
+      return String(Number(numeric.toFixed(6)));
+    }
+    return text(value);
+  }
+
+  function collectNodes(state){
+    const nodes=new Map();
+    arr(state.modelNodes).concat(arr(state.nodes)).forEach(node=>{
+      if(node?.id&&!nodes.has(node.id)) nodes.set(node.id,node);
+    });
+    Object.values(state.canvases||{}).forEach(canvas=>{
+      arr(canvas?.nodes).forEach(node=>{
+        if(node?.id&&!nodes.has(node.id)) nodes.set(node.id,node);
+      });
+    });
+    return nodes;
+  }
+
+  function collectEdges(state){
+    const edges=new Map();
+    arr(state.modelEdges).concat(arr(state.edges)).forEach(edge=>{
+      if(edge?.id&&!edges.has(edge.id)) edges.set(edge.id,edge);
+    });
+    Object.values(state.canvases||{}).forEach(canvas=>{
+      arr(canvas?.edges).forEach(edge=>{
+        if(edge?.id&&!edges.has(edge.id)) edges.set(edge.id,edge);
+      });
+    });
+    return edges;
+  }
+
+  function normalizePointType(value){
+    if(typeof window.normalizeDiagnosticTestPointType==='function'){
+      return window.normalizeDiagnosticTestPointType(value);
+    }
+    return value==='virtual'?'virtual':'physical';
+  }
+
+  function getOutputPorts(node){
+    const getter=window.getNodePorts||(typeof getNodePorts==='function'?getNodePorts:null);
+    if(typeof getter!=='function') return [];
+    try{
+      return arr(getter(node)?.outputs);
+    }catch(err){
+      return [];
+    }
+  }
+
+  function addCandidate(candidates,value){
+    const item=text(value).trim();
+    if(item&&!candidates.includes(item)) candidates.push(item);
+  }
+
+  function getPortCandidates(edge,node){
+    const index=Number.isFinite(Number(edge?.sourcePortIndex))?Number(edge.sourcePortIndex):0;
+    const port=getOutputPorts(node)[index]||{};
+    const candidates=[];
+    [edge?.sourcePortMeta,edge?.sourcePort,port].forEach(meta=>{
+      addCandidate(candidates,meta?.varName);
+      addCandidate(candidates,meta?.name);
+      addCandidate(candidates,meta?.key);
+      addCandidate(candidates,meta?.id);
+      addCandidate(candidates,meta?.displayName);
+      addCandidate(candidates,meta?.label);
+      addCandidate(candidates,meta?.pythonVariable);
+    });
+    addCandidate(candidates,index===0?'output':`output-${index+1}`);
+    addCandidate(candidates,`output-${index}`);
+    return candidates;
+  }
+
+  function readOutputValue(bucket,nodeId,candidates){
+    const outputs=bucket?.[nodeId];
+    if(!outputs||typeof outputs!=='object') return undefined;
+    for(const key of candidates){
+      if(Object.prototype.hasOwnProperty.call(outputs,key)){
+        return outputs[key];
+      }
+    }
+    const first=Object.values(outputs).find(value=>value!==undefined&&value!==null);
+    return first;
+  }
+
+  function getStepTime(trace,step,index){
+    if(Number.isFinite(Number(step?.time))) return Number(step.time);
+    const traceTime=arr(trace?.time)[index];
+    if(Number.isFinite(Number(traceTime))) return Number(traceTime);
+    return index;
+  }
+
+  function collectSeries(trace,sourceNodeId,portCandidates){
+    const actualSeries=[];
+    const referenceSeries=[];
+    arr(trace?.steps).forEach((step,index)=>{
+      const time=getStepTime(trace,step,index);
+      const actual=readOutputValue(step?.actual,sourceNodeId,portCandidates);
+      const reference=readOutputValue(step?.reference,sourceNodeId,portCandidates);
+      const actualNumber=Number(actual);
+      const referenceNumber=Number(reference);
+      if(Number.isFinite(actualNumber)){
+        actualSeries.push({time,value:actualNumber});
+      }
+      if(Number.isFinite(referenceNumber)){
+        referenceSeries.push({time,value:referenceNumber});
+      }
+    });
+    return {actualSeries,referenceSeries};
+  }
+
+  function lastSeriesValue(series){
+    return series.length?series[series.length-1].value:undefined;
+  }
+
+  function lastSeriesTime(series){
+    return series.length?series[series.length-1].time:null;
+  }
+
+  function getPointRows(){
+    const state=getState();
+    const sim=getSimulationState();
+    const trace=sim?.componentOutputs||{};
+    const nodes=collectNodes(state);
+    const edges=collectEdges(state);
+    const model=typeof window.buildDiagnosticTestPointModel==='function'
+      ?window.buildDiagnosticTestPointModel()
+      :{positions:[]};
+    return arr(model.positions)
+      .filter(point=>normalizePointType(point.pointType)==='physical')
+      .map((point,index)=>{
+        const edgeId=point.edgeId||point.edgeID||point.targetEdgeId||'';
+        const edge=edges.get(edgeId)||null;
+        const sourceNodeId=edge?.sourceNodeId||edge?.source||edge?.from||point.sourceNodeId||point.nodeId||'';
+        const targetNodeId=edge?.targetNodeId||edge?.target||edge?.to||point.targetNodeId||'';
+        const sourceNode=nodes.get(sourceNodeId)||null;
+        const targetNode=nodes.get(targetNodeId)||null;
+        const portCandidates=getPortCandidates(edge,sourceNode);
+        const {actualSeries,referenceSeries}=collectSeries(trace,sourceNodeId,portCandidates);
+        const actual=lastSeriesValue(actualSeries);
+        const reference=lastSeriesValue(referenceSeries);
+        const actualNumber=Number(actual);
+        const referenceNumber=Number(reference);
+        const delta=Number.isFinite(actualNumber)&&Number.isFinite(referenceNumber)
+          ?actualNumber-referenceNumber
+          :undefined;
+        return {
+          ...point,
+          pointId:point.pointId||point.id||`tp-sim-${index}`,
+          shortName:point.shortName||point.code||`M${index+1}`,
+          name:point.name||point.nameZh||point.label||point.labelZh||edge?.label||edgeId||`测点 ${index+1}`,
+          sourceName:point.sourceName||sourceNode?.props?.name||sourceNode?.name||sourceNodeId||'上游组件',
+          targetName:point.targetName||targetNode?.props?.name||targetNode?.name||targetNodeId||'',
+          portName:portCandidates[0]||'output',
+          time:lastSeriesTime(actualSeries.length?actualSeries:referenceSeries),
+          actual,
+          reference,
+          delta,
+          actualSeries,
+          referenceSeries,
+          sampleCount:Math.max(actualSeries.length,referenceSeries.length)
+        };
+      });
+  }
+
+  function getSeriesBounds(row){
+    const series=arr(row.actualSeries).concat(arr(row.referenceSeries));
+    const values=series.map(point=>point.value).filter(value=>Number.isFinite(value));
+    const times=series.map(point=>point.time).filter(value=>Number.isFinite(value));
+    let minValue=values.length?Math.min(...values):0;
+    let maxValue=values.length?Math.max(...values):1;
+    if(minValue===maxValue){
+      minValue-=1;
+      maxValue+=1;
+    }
+    const padding=(maxValue-minValue)*0.12;
+    return {
+      minTime:times.length?Math.min(...times):0,
+      maxTime:times.length?Math.max(...times):1,
+      minValue:minValue-padding,
+      maxValue:maxValue+padding
+    };
+  }
+
+  function buildPolylinePoints(series,bounds,width,height,pad){
+    const timeRange=bounds.maxTime-bounds.minTime||1;
+    const valueRange=bounds.maxValue-bounds.minValue||1;
+    return arr(series).map(point=>{
+      const x=pad.left+((point.time-bounds.minTime)/timeRange)*(width-pad.left-pad.right);
+      const y=pad.top+(1-((point.value-bounds.minValue)/valueRange))*(height-pad.top-pad.bottom);
+      return `${Math.round(x*10)/10},${Math.round(y*10)/10}`;
+    }).join(' ');
+  }
+
+  function renderSimulationChart(row){
+    const width=420;
+    const height=180;
+    const pad={left:46,right:18,top:18,bottom:34};
+    const bounds=getSeriesBounds(row);
+    const actualPoints=buildPolylinePoints(row.actualSeries,bounds,width,height,pad);
+    const referencePoints=buildPolylinePoints(row.referenceSeries,bounds,width,height,pad);
+    const x0=pad.left;
+    const y0=height-pad.bottom;
+    const x1=width-pad.right;
+    const y1=pad.top;
+    return `
+      <div class="simulation-chart" data-simulation-chart="${html(row.pointId)}">
+        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${html(row.name)} 时间序列曲线">
+          <line class="simulation-chart__axis" x1="${x0}" y1="${y0}" x2="${x1}" y2="${y0}"></line>
+          <line class="simulation-chart__axis" x1="${x0}" y1="${y0}" x2="${x0}" y2="${y1}"></line>
+          <line class="simulation-chart__grid" x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}"></line>
+          <line class="simulation-chart__grid" x1="${x0}" y1="${(y0+y1)/2}" x2="${x1}" y2="${(y0+y1)/2}"></line>
+          <text class="simulation-chart__label" data-simulation-axis="x" x="${(x0+x1)/2}" y="${height-8}">时间</text>
+          <text class="simulation-chart__label" data-simulation-axis="y" x="14" y="${(y0+y1)/2}" transform="rotate(-90 14 ${(y0+y1)/2})">数据</text>
+          <text class="simulation-chart__tick" x="${x0}" y="${height-18}">${html(formatValue(bounds.minTime))}</text>
+          <text class="simulation-chart__tick simulation-chart__tick--end" x="${x1}" y="${height-18}">${html(formatValue(bounds.maxTime))}</text>
+          <text class="simulation-chart__tick" x="4" y="${y1+4}">${html(formatValue(bounds.maxValue))}</text>
+          <text class="simulation-chart__tick" x="4" y="${y0}">${html(formatValue(bounds.minValue))}</text>
+          ${referencePoints?`<polyline class="simulation-chart__line simulation-chart__line--reference" data-simulation-series="reference" points="${html(referencePoints)}"></polyline>`:''}
+          ${actualPoints?`<polyline class="simulation-chart__line simulation-chart__line--actual" data-simulation-series="actual" points="${html(actualPoints)}"></polyline>`:''}
+        </svg>
+        <div class="simulation-chart__legend">
+          <span><i class="is-actual"></i>实际值</span>
+          ${referencePoints?'<span><i class="is-reference"></i>参考值</span>':''}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderSimulationPointCard(row){
+    const route=[row.sourceName,row.portName].filter(Boolean).join(' / ');
+    const target=row.targetName?` -> ${row.targetName}`:'';
+    return `
+      <div class="simulation-point-card" data-simulation-testpoint="${html(row.pointId)}">
+        <div class="simulation-point-card__top">
+          <span class="simulation-point-card__code">${html(row.shortName)}</span>
+          <span class="simulation-point-card__main">
+            <strong>${html(row.name)}</strong>
+            <small>${html(route)}${html(target)}</small>
+          </span>
+          <span class="simulation-point-card__time">${row.time===null?'--':`${formatValue(row.time)}s`}</span>
+        </div>
+        <div class="simulation-point-card__values">
+          <span><em>实际值</em><b>${html(formatValue(row.actual))}</b></span>
+          <span><em>参考值</em><b>${html(formatValue(row.reference))}</b></span>
+          <span><em>偏差</em><b>${html(formatValue(row.delta))}</b></span>
+        </div>
+        ${renderSimulationChart(row)}
+      </div>
+    `;
+  }
+
+  window.renderSimulationViewPanel=function(){
+    const panel=document.getElementById('simulation-panel');
+    if(!panel) return false;
+    const rows=getPointRows();
+    const sampleCount=rows.reduce((max,row)=>Math.max(max,row.sampleCount||0),0);
+    if(!rows.length){
+      panel.innerHTML='<div class="simulation-panel__empty">当前未配置物理测点。</div>';
+      return true;
+    }
+    panel.innerHTML=`
+      <div class="simulation-view" data-simulation-view>
+        <div class="simulation-view__header">
+          <div>
+            <span>仿真视图</span>
+            <h2>物理测点仿真数据</h2>
+          </div>
+          <div class="simulation-view__stats">
+            <span><b>${rows.length}</b>测点</span>
+            <span><b>${sampleCount}</b>步</span>
+          </div>
+        </div>
+        <div class="simulation-point-list">
+          ${rows.map(renderSimulationPointCard).join('')}
+        </div>
+      </div>
+    `;
+    return true;
+  };
+})();
+
 // --- Stable closed-loop runtime for the UAV demo model ---
 (function(){
   const stableModuleTypes=new Set([
@@ -26776,6 +27279,68 @@ function decorateDataflowEdges(){
     return sanitizeSignalValue(applyElectricalFault(node,inputValue,outputValue,time));
   }
 
+  function stableParameterCandidates(key,aliases=[]){
+    const values=[key,...aliases];
+    return values.map(item=>String(item||'').trim()).filter(Boolean);
+  }
+
+  function stableBindingTargetsParameter(binding,candidates){
+    const targetField=String(binding?.targetField||binding?.injectedFault?.targetField||'').trim();
+    const fieldTail=targetField.includes('.')?targetField.split('.').pop():targetField;
+    const values=[
+      binding?.bindingObject,
+      binding?.targetVariable,
+      binding?.injectedFault?.bindingObject,
+      binding?.injectedFault?.targetVariable,
+      binding?.slotId,
+      binding?.injectedFault?.slotId,
+      fieldTail
+    ].map(item=>String(item||'').trim()).filter(Boolean);
+    return candidates.some(candidate=>values.some(value=>value===candidate||value.endsWith(`:${candidate}`)));
+  }
+
+  function getStableParameterBindings(node,candidates){
+    const api=window.__GZ_FAULT_INJECTION_RUNTIME__;
+    const bindings=api?.getFaultBindings?.(node,{activeOnly:true})||[];
+    return bindings.filter(binding=>{
+      const targetField=String(binding?.targetField||binding?.injectedFault?.targetField||'').trim();
+      const mode=String(binding?.propagationMode||binding?.injectedFault?.propagationMode||'').trim();
+      const slotId=String(binding?.slotId||binding?.injectedFault?.slotId||'').trim();
+      const parameterLike=targetField.startsWith('params.')||mode==='parameterInfluence'||mode==='localParameter'||slotId.startsWith('physical:');
+      return parameterLike&&stableBindingTargetsParameter(binding,candidates);
+    });
+  }
+
+  function applyStableParameterFault(node,nodeState,modeKey,key,nominal,time,dt,aliases=[]){
+    if(modeKey!=='actual') return nominal;
+    const api=window.__GZ_FAULT_INJECTION_RUNTIME__;
+    if(!api?.applyScalarFault) return nominal;
+    const candidates=stableParameterCandidates(key,aliases);
+    const bindings=getStableParameterBindings(node,candidates);
+    if(!bindings.length) return nominal;
+    nodeState.parameterFaultStates=nodeState.parameterFaultStates||{};
+    return bindings.reduce((current,binding,index)=>{
+      const model=getImportedFaultModel(binding.faultModelId||binding.injectedFault?.modelId||'')||binding.injectedFault||binding;
+      const behavior=binding.runtimeBehavior
+        || api.getFaultRuntimeBehavior?.(model)
+        || api.getFaultRuntimeBehavior?.(binding.injectedFault);
+      if(!behavior) return current;
+      const stateKey=binding.bindingId||binding.faultModelId||`${key}-${index}`;
+      nodeState.parameterFaultStates[stateKey]=nodeState.parameterFaultStates[stateKey]||{};
+      return api.applyScalarFault(current,{
+        faultModel:model,
+        injectedFault:binding.injectedFault||binding,
+        params:binding.parameters||binding.injectedFault?.parameters||{},
+        behavior,
+        state:nodeState.parameterFaultStates[stateKey],
+        time,
+        dt,
+        stepIndex:SIM.stepIndex,
+        seed:getNodeSeed(`${node.id}:${key}:${index}`)
+      });
+    },nominal);
+  }
+
   function expandStableOutputs(node,values){
     normalizeSimulationInterfaces(node.props);
     const requested=Math.max(node.props.outputs.length,1);
@@ -26809,8 +27374,10 @@ function decorateDataflowEdges(){
       rawMiddle=[filtered];
     }else if(moduleType==='control'){
       const error=stableClamp(primaryInput,-0.3,0.3);
-      nodeState.integrator=stableClamp((nodeState.integrator||0)+error*dt,-0.22,0.22);
-      const torque=stableClamp(1.18*error+0.16*nodeState.integrator,-0.26,0.26);
+      const controllerGain=applyStableParameterFault(node,nodeState,modeKey,'controller_gain',1.18,time,dt,['kp']);
+      const integratorLimit=Math.max(0.001,Math.abs(applyStableParameterFault(node,nodeState,modeKey,'controller_integrator_limit',0.22,time,dt,['integratorLimit'])));
+      nodeState.integrator=stableClamp((nodeState.integrator||0)+error*dt,-integratorLimit,integratorLimit);
+      const torque=stableClamp(controllerGain*error+0.16*nodeState.integrator,-0.26,0.26);
       rawOutputs=[stableFirstOrder(nodeState,'controllerOutput',torque,0.12,dt)];
       rawMiddle=[nodeState.integrator];
     }else if(moduleType==='control_allocation'){
@@ -26849,5 +27416,98 @@ function decorateDataflowEdges(){
     nodeState.prevInput=primaryInput;
     nodeState.prevAggregateInput=faultInput;
     return {outputs,middleValues};
+  };
+})();
+
+// --- Parameter faults for Python-bound simulation blocks ---
+(function installPythonBoundParameterFaultAdapter(){
+  if(typeof window==='undefined') return;
+
+  const previousExecuteBoundFlowBlock=executeBoundFlowBlock;
+
+  function text(value){return String(value||'').trim();}
+  function arr(value){return Array.isArray(value)?value:[];}
+
+  function bindingTargets(binding,candidates){
+    const targetField=text(binding?.targetField||binding?.injectedFault?.targetField);
+    const fieldTail=targetField.includes('.')?targetField.split('.').pop():targetField;
+    const values=[
+      binding?.bindingObject,
+      binding?.targetVariable,
+      binding?.injectedFault?.bindingObject,
+      binding?.injectedFault?.targetVariable,
+      binding?.slotId,
+      binding?.injectedFault?.slotId,
+      fieldTail
+    ].map(text).filter(Boolean);
+    return candidates.some(candidate=>values.some(value=>value===candidate||value.endsWith(`:${candidate}`)));
+  }
+
+  function getParameterBindings(node,candidates){
+    const api=window.__GZ_FAULT_INJECTION_RUNTIME__;
+    return arr(api?.getFaultBindings?.(node,{activeOnly:true})).filter(binding=>{
+      const targetField=text(binding?.targetField||binding?.injectedFault?.targetField);
+      const mode=text(binding?.propagationMode||binding?.injectedFault?.propagationMode);
+      const slotId=text(binding?.slotId||binding?.injectedFault?.slotId);
+      const parameterLike=targetField.startsWith('params.')||mode==='parameterInfluence'||mode==='localParameter'||slotId.startsWith('physical:');
+      return parameterLike&&bindingTargets(binding,candidates);
+    });
+  }
+
+  function applyParameterValueFault(node,nodeState,key,nominal,time,dt,candidates){
+    const api=window.__GZ_FAULT_INJECTION_RUNTIME__;
+    if(!api?.applyScalarFault) return nominal;
+    const bindings=getParameterBindings(node,candidates);
+    if(!bindings.length) return nominal;
+    nodeState.parameterFaultStates=nodeState.parameterFaultStates||{};
+    return bindings.reduce((current,binding,index)=>{
+      const model=getImportedFaultModel(binding.faultModelId||binding.injectedFault?.modelId||'')||binding.injectedFault||binding;
+      const behavior=binding.runtimeBehavior
+        || api.getFaultRuntimeBehavior?.(model)
+        || api.getFaultRuntimeBehavior?.(binding.injectedFault);
+      if(!behavior) return current;
+      const stateKey=binding.bindingId||binding.faultModelId||`${key}-${index}`;
+      nodeState.parameterFaultStates[stateKey]=nodeState.parameterFaultStates[stateKey]||{};
+      return api.applyScalarFault(current,{
+        faultModel:model,
+        injectedFault:binding.injectedFault||binding,
+        params:binding.parameters||binding.injectedFault?.parameters||{},
+        behavior,
+        state:nodeState.parameterFaultStates[stateKey],
+        time,
+        dt,
+        stepIndex:SIM.stepIndex,
+        seed:getNodeSeed(`${node.id}:${key}:${index}`)
+      });
+    },nominal);
+  }
+
+  function adaptControlBlock(node,nodeState,resolved,time,dt){
+    const nominalGain=1.18;
+    const faultedGain=applyParameterValueFault(node,nodeState,'controller_gain',nominalGain,time,dt,['controller_gain','kp']);
+    nodeState.faultedParameters={...(nodeState.faultedParameters||{}),controller_gain:faultedGain};
+    if(faultedGain===nominalGain||!Number.isFinite(faultedGain)||!Number.isFinite(nominalGain)||nominalGain===0){
+      return resolved;
+    }
+    const next={
+      outputs:arr(resolved.outputs).slice(),
+      middleValues:arr(resolved.middleValues).slice()
+    };
+    if(next.outputs.length){
+      next.outputs[0]=sanitizeSignalValue(next.outputs[0]*(faultedGain/nominalGain));
+    }
+    return next;
+  }
+
+  executeBoundFlowBlock=function(node,nodeState,inputValues,modeKey,time,dt){
+    const resolved=previousExecuteBoundFlowBlock(node,nodeState,inputValues,modeKey,time,dt);
+    if(modeKey!=='actual'||node?.type!=='simulation_block'){
+      return resolved;
+    }
+    const moduleType=text(node?.props?.moduleType).toLowerCase();
+    if(moduleType==='control'){
+      return adaptControlBlock(node,nodeState,resolved,time,dt);
+    }
+    return resolved;
   };
 })();

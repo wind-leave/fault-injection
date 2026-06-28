@@ -15,7 +15,8 @@ function createRuntimeTarget() {
     stepIndex: 0,
     stepSize: 0.1,
     actual: { scopeSamples: {} },
-    reference: { scopeSamples: {} }
+    reference: { scopeSamples: {} },
+    componentOutputs: { time: [], steps: [] }
   };
   const state = { step: 2, simDone: false };
   return {
@@ -47,6 +48,7 @@ function createRuntimeTarget() {
       sim.stepSize = 0.1;
       sim.actual = { scopeSamples: {} };
       sim.reference = { scopeSamples: {} };
+      sim.componentOutputs = { time: [], steps: [] };
     }),
     simStep: vi.fn(),
     simRun: vi.fn(),
@@ -91,6 +93,38 @@ describe('backend step simulation runtime', () => {
     expect(target.__GZ_SIM__.time).toBe(0.2);
     expect(target.__GZ_SIM__.stepIndex).toBe(2);
     expect(target.__GZ_SIM__.hasSamples).toBe(true);
+  });
+
+  it('appends backend component output traces for export', () => {
+    const target = createRuntimeTarget();
+
+    appendBackendSimulationChunk(target, {
+      curves: {
+        time: [0, 0.1],
+        channels: {}
+      },
+      componentOutputs: {
+        time: [0, 0.1],
+        steps: [
+          {
+            time: 0,
+            actual: { 'source-1': { out: 1 }, 'sim-1': { output: 1 } },
+            reference: { 'source-1': { out: 1 }, 'sim-1': { output: 1 } }
+          },
+          {
+            time: 0.1,
+            actual: { 'source-1': { out: 1 }, 'sim-1': { output: 1.5 } },
+            reference: { 'source-1': { out: 1 }, 'sim-1': { output: 1 } }
+          }
+        ]
+      },
+      metrics: { sampleCount: 2, stepIndex: 2, time: 0.2, done: false }
+    });
+
+    expect(target.__GZ_SIM__.componentOutputs.time).toEqual([0, 0.1]);
+    expect(target.__GZ_SIM__.componentOutputs.steps).toHaveLength(2);
+    expect(target.__GZ_SIM__.componentOutputs.steps[1].actual['sim-1'].output).toBe(1.5);
+    expect(target.__GZ_SIM__.componentOutputs.steps[1].reference['sim-1'].output).toBe(1);
   });
 
   it('overrides simStep to create a backend session and append one step', async () => {

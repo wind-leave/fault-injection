@@ -29,6 +29,14 @@ class FaultRuntime:
                 result = float(params.get("value", result))
             elif fault_type == "motor_efficiency_loss":
                 result *= float(params.get("efficiency", 0.5))
+            elif fault_type == "parameter_bias":
+                result += float(params.get("bias", params.get("delta_p", 0.1)))
+                result *= float(params.get("scale", 1.0))
+            elif fault_type == "parameter_step":
+                result += float(params.get("stepValue", params.get("step_value", 0.1)))
+            elif fault_type == "parameter_drift":
+                start = float(fault.get("startTime", params.get("start", 0.0)))
+                result += float(params.get("rate", 0.01)) * max(0.0, time - start)
         return result
 
     def apply_edge_value(self, edge_id, value, time):

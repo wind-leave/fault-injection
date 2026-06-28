@@ -192,6 +192,42 @@ describe('backendExecutablePackageService', () => {
     ]);
   });
 
+  it('exports physical parameter step faults with executable parameter fields', () => {
+    const pkg = buildBackendExecutablePackage({
+      simulationConfig: { duration: 4, stepSize: 0.1 },
+      modelNodes: [
+        {
+          id: 'node-controller',
+          type: 'simulation_block',
+          props: {},
+          pythonBinding: { moduleId: 'attitude_controller', entryFunction: 'process' }
+        }
+      ],
+      modelEdges: [],
+      faultInstances: [
+        {
+          instanceId: 'controller-gain-step',
+          faultTypeId: 'physical_parameter_step',
+          targetKind: 'node',
+          targetId: 'node-controller',
+          slotId: 'physical:controller_gain',
+          active: true,
+          parameters: { step_value: -0.35, start: 1 }
+        }
+      ]
+    });
+
+    expect(pkg.faultInstances).toEqual([
+      expect.objectContaining({
+        faultId: 'controller-gain-step',
+        faultType: 'parameter_step',
+        targetId: 'node-controller',
+        startTime: 1,
+        parameters: expect.objectContaining({ stepValue: -0.35 })
+      })
+    ]);
+  });
+
   it('omits inactive frontend fault instances from backend executable packages', () => {
     const pkg = buildBackendExecutablePackage({
       modelNodes: [

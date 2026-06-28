@@ -1493,7 +1493,7 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('renders CAN edge inspector sections for route, channels, faults, and diagnostics', async () => {
+  it('renders CAN edge inspector sections for route, channels, and faults', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
@@ -1626,13 +1626,12 @@ describe('property panel interaction', () => {
     window.setPropertyPanelTab('outputs');
     await flushRuntime();
 
-    expect(document.querySelector('[data-edge-diagnostics]')).not.toBeNull();
+    expect(document.querySelector('[data-edge-diagnostics]')).toBeNull();
     ['currentValue', 'residual', 'latency', 'dropRate', 'burstLength', 'status'].forEach((label) => {
-      expect(pd()?.textContent).toContain(label);
+      expect(pd()?.textContent).not.toContain(label);
     });
     expect(pd()?.textContent).toContain('CAN-FC-02');
     expect(pd()?.textContent).toContain('CAN-FC-IMU');
-    expect(pd()?.textContent).toContain('delay');
 
     wrapper.unmount();
   });

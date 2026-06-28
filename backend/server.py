@@ -9,6 +9,7 @@ from backend.graph_compiler import compile_graph
 from backend.module_registry import ModuleRegistry
 from backend.schemas import SimulationBackendError
 from backend.simulation_engine import SimulationSession, run_simulation
+from backend.troubleshooting import TroubleshootingSession
 
 
 MAX_REQUEST_BYTES = 1_000_000
@@ -22,9 +23,12 @@ def _json_bytes(payload):
 class SimulationBackendHandler(BaseHTTPRequestHandler):
     endpoint = "/api/simulations/run"
     session_endpoint = "/api/simulations/session"
+    practice_troubleshooting_endpoint = "/api/practice/troubleshooting/session"
     registry = ModuleRegistry.from_builtin_manifest()
     sessions = {}
     sessions_lock = threading.Lock()
+    practice_sessions = {}
+    practice_sessions_lock = threading.Lock()
 
     def log_message(self, format, *args):
         return
@@ -85,6 +89,14 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         session_id = path[len(prefix):]
         return session_id.strip("/")
 
+    def _practice_operation_path(self, path):
+        prefix = f"{self.practice_troubleshooting_endpoint}/"
+        suffix = "/operation"
+        if not path.startswith(prefix) or not path.endswith(suffix):
+            return ""
+        session_id = path[len(prefix):-len(suffix)]
+        return session_id.strip("/")
+
     def _validate_steps(self, payload):
         steps = payload.get("steps", 1)
         if isinstance(steps, bool) or not isinstance(steps, int):
@@ -131,16 +143,49 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         result["metrics"]["elapsedMs"] = round((time.monotonic() - started) * 1000, 3)
         self._send_json(200, result)
 
+    def _create_practice_troubleshooting_session(self, run_id, started):
+        payload = self._read_json()
+        session_id = f"practice-{uuid.uuid4().hex[:12]}"
+        session = TroubleshootingSession(payload.get("dMatrix"), payload.get("targetFaultId"))
+        with self.practice_sessions_lock:
+            self.practice_sessions[session_id] = session
+        result = session.initial_response()
+        result["runId"] = run_id
+        result["sessionId"] = session_id
+        result["metrics"] = {"elapsedMs": round((time.monotonic() - started) * 1000, 3)}
+        self._send_json(200, result)
+
+    def _record_practice_troubleshooting_operation(self, run_id, session_id, started):
+        payload = self._read_json()
+        with self.practice_sessions_lock:
+            session = self.practice_sessions.get(session_id)
+            if session is not None:
+                result = session.record_operation(payload)
+        if session is None:
+            self._send_session_not_found(run_id, session_id)
+            return
+        result["runId"] = run_id
+        result["sessionId"] = session_id
+        result["metrics"] = {"elapsedMs": round((time.monotonic() - started) * 1000, 3)}
+        self._send_json(200, result)
+
     def do_POST(self):
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         path = urlparse(self.path).path
         session_id = self._session_step_path(path)
-        if path != self.endpoint and path != self.session_endpoint and not session_id:
+        practice_session_id = self._practice_operation_path(path)
+        if path != self.endpoint and path != self.session_endpoint and path != self.practice_troubleshooting_endpoint and not session_id and not practice_session_id:
             self._send_not_found(run_id)
             return
 
         started = time.monotonic()
         try:
+            if path == self.practice_troubleshooting_endpoint:
+                self._create_practice_troubleshooting_session(run_id, started)
+                return
+            if practice_session_id:
+                self._record_practice_troubleshooting_operation(run_id, practice_session_id, started)
+                return
             if path == self.session_endpoint:
                 self._create_session(run_id, started)
                 return

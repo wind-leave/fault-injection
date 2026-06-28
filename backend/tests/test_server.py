@@ -6,11 +6,13 @@ from http.server import HTTPServer
 
 from backend.server import SimulationBackendHandler
 from backend.tests.fixtures import valid_package
+from backend.tests.test_troubleshooting import sample_d_matrix
 
 
 class SimulationBackendServerTests(unittest.TestCase):
     def setUp(self):
         SimulationBackendHandler.sessions = {}
+        SimulationBackendHandler.practice_sessions = {}
         self.server = HTTPServer(("127.0.0.1", 0), SimulationBackendHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -95,6 +97,34 @@ class SimulationBackendServerTests(unittest.TestCase):
         status, missing = self._post(f"/api/simulations/session/{session_id}/step", {})
         self.assertEqual(status, 404)
         self.assertEqual(missing["errorCode"], "SESSION_NOT_FOUND")
+
+    def test_updates_practice_troubleshooting_session_from_student_operation(self):
+        status, created = self._post(
+            "/api/practice/troubleshooting/session",
+            {"dMatrix": sample_d_matrix(), "targetFaultId": "target-fault"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(created["status"], "success")
+        self.assertEqual(created["currentPath"]["faultId"], "target-fault")
+        self.assertEqual(created["nextRecommendedStep"]["pointCode"], "M1")
+        session_id = created["sessionId"]
+
+        status, updated = self._post(
+            f"/api/practice/troubleshooting/session/{session_id}/operation",
+            {
+                "operationId": "op-1",
+                "actionType": "measure",
+                "pointCode": "M1",
+                "observed": "abnormal",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(updated["status"], "success")
+        self.assertEqual(updated["remainingFaultIds"], ["target-fault", "controller-fault"])
+        self.assertTrue(updated["routeQuality"]["matchedRecommendedStep"])
+        self.assertEqual(updated["nextRecommendedStep"]["pointCode"], "M2")
 
 
 if __name__ == "__main__":

@@ -561,7 +561,7 @@ header{
 .canvas-chrome{
   display:grid;
   grid-template-columns:minmax(220px,1fr) auto;
-  grid-template-rows:52px 48px;
+  grid-template-rows:70px 48px;
   background:#ffffff;
   border-bottom:1px solid var(--border);
   box-shadow:none;
@@ -593,8 +593,8 @@ header{
 }
 
 .simbar-title{
-  min-width:136px;
-  padding:0 16px;
+  min-width:112px;
+  padding:0 12px;
 }
 
 .simbar-title__kicker{
@@ -618,6 +618,12 @@ header{
   border-right:1px solid var(--border);
 }
 
+.canvas-sim-dock .simbar-params{
+  flex:0 1 auto;
+  min-width:max-content;
+  padding-right:4px;
+}
+
 .sim-field{
   min-height:52px;
   gap:8px;
@@ -626,14 +632,27 @@ header{
   border-right:1px solid var(--border);
 }
 
+.canvas-sim-dock .sim-field{
+  flex:0 0 auto;
+  min-width:112px;
+  padding:0 10px;
+  justify-content:flex-start;
+}
+
+.canvas-sim-dock .sim-field:first-child{
+  min-width:132px;
+}
+
 .sim-field-lbl,
 .simbar-rt-lbl{
+  flex:0 0 auto;
   color:var(--text2);
   font-size:12px;
   font-weight:400;
 }
 
 .sim-field-inp{
+  flex:0 0 auto;
   height:32px;
   border:0;
   border-bottom:1px solid var(--border-dark);
@@ -654,6 +673,12 @@ header{
   height:52px;
   padding:0 16px;
   border-right:1px solid var(--border);
+}
+
+.canvas-sim-dock .simbar-rt{
+  flex:0 0 112px;
+  gap:8px;
+  justify-content:center;
 }
 
 .toggle-wrap{
@@ -826,12 +851,12 @@ header{
 }
 
 .canvas-viewport{
-  top:100px;
+  top:118px;
   user-select:none;
 }
 
 .canvas-breadcrumbs{
-  top:112px;
+  top:130px;
   left:16px;
   min-height:36px;
   border:1px solid var(--border);
@@ -853,7 +878,7 @@ header{
 }
 
 .empty-state{
-  padding-top:100px;
+  padding-top:118px;
 }
 
 .empty-icon{

@@ -13,7 +13,11 @@ def _source_value(node, time):
     return amplitude
 
 
-def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_states, dt, visiting, previous_values, next_values):
+def _node_output_names(node):
+    return tuple(node.outputs or ("output",))
+
+
+def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_states, dt, visiting, previous_values, next_values, component_outputs):
     key = (mode, node_id)
     if key in cache:
         return cache[key]
@@ -37,13 +41,16 @@ def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_stat
             visiting,
             previous_values,
             next_values,
+            component_outputs,
         )
         if mode == "actual":
             upstream = fault_runtime.apply_edge_value(edge.id, upstream, time)
         inputs.append(upstream)
 
+    output_names = _node_output_names(node)
     if node.type == "signal_source":
         value = _source_value(node, time)
+        outputs = {output_names[0]: float(value)}
     elif node.type == "simulation_block":
         module_inputs = {}
         for index, input_name in enumerate(node.module.inputs):
@@ -58,23 +65,35 @@ def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_stat
         )
         mode_states[node_id] = dict(module_result.get("state") or {})
         output_map = module_result["outputs"]
-        value = float(output_map.get(node.module.outputs[0], 0.0)) if node.module.outputs else 0.0
+        module_output_names = tuple(node.module.outputs or ())
+        outputs = {}
+        for index, output_name in enumerate(output_names):
+            module_output_name = module_output_names[index] if index < len(module_output_names) else output_name
+            outputs[output_name] = float(output_map.get(module_output_name, 0.0))
+        value = float(outputs.get(output_names[0], 0.0))
     elif node.type == "gain_block":
         value = (inputs[0] if inputs else 0.0) * float(node.parameters.get("gain", 1.0))
+        outputs = {output_names[0]: float(value)}
     elif node.type == "sum_block":
         value = sum(inputs)
+        outputs = {output_names[0]: float(value)}
     elif node.type == "mux_block":
         value = inputs[0] if inputs else 0.0
+        outputs = {output_names[0]: float(value)}
     elif node.type == "instrument_scope":
         value = inputs[0] if inputs else 0.0
+        outputs = {output_names[0]: float(value)}
     else:
         value = inputs[0] if inputs else 0.0
+        outputs = {output_names[0]: float(value)}
 
     if mode == "actual":
         value = fault_runtime.apply_node_output(node_id, value, time)
+        outputs[output_names[0]] = float(value)
 
     cache[key] = float(value)
     next_values[key] = cache[key]
+    component_outputs.setdefault(mode, {})[node_id] = outputs
     visiting.remove(key)
     return cache[key]
 
@@ -88,7 +107,7 @@ def _time_values(duration, step_size):
     return values
 
 
-def _evaluate_measurement(graph, measurement, mode, time, cache, fault_runtime, module_states, dt, previous_values, next_values):
+def _evaluate_measurement(graph, measurement, mode, time, cache, fault_runtime, module_states, dt, previous_values, next_values, component_outputs):
     node = graph.nodes[measurement.scope_node_id]
     if node.type != "instrument_scope":
         return _evaluate_node(
@@ -103,6 +122,7 @@ def _evaluate_measurement(graph, measurement, mode, time, cache, fault_runtime, 
             set(),
             previous_values,
             next_values,
+            component_outputs,
         )
 
     edge = next(
@@ -128,6 +148,7 @@ def _evaluate_measurement(graph, measurement, mode, time, cache, fault_runtime, 
         set(),
         previous_values,
         next_values,
+        component_outputs,
     )
     if mode == "actual":
         value = fault_runtime.apply_edge_value(edge.id, value, time)
@@ -140,6 +161,24 @@ def _empty_channels(graph):
         channels[f"{measurement.id}.actual"] = []
         channels[f"{measurement.id}.reference"] = []
     return channels
+
+
+def _evaluate_all_component_outputs(graph, mode, time, cache, fault_runtime, module_states, dt, previous_values, next_values, component_outputs):
+    for node_id in graph.nodes:
+        _evaluate_node(
+            graph,
+            node_id,
+            mode,
+            time,
+            cache,
+            fault_runtime,
+            module_states,
+            dt,
+            set(),
+            previous_values,
+            next_values,
+            component_outputs,
+        )
 
 
 class SimulationSession:
@@ -168,6 +207,7 @@ class SimulationSession:
         sample_count = min(requested_steps, remaining_steps)
         times = []
         channels = _empty_channels(self.graph)
+        component_output_steps = []
         events = []
 
         for _ in range(sample_count):
@@ -175,6 +215,7 @@ class SimulationSession:
             times.append(time)
             cache = {}
             next_values = {}
+            component_outputs = {"actual": {}, "reference": {}}
             events.extend(self.fault_runtime.collect_events(time))
             for measurement in self.graph.measurements:
                 actual = _evaluate_measurement(
@@ -188,6 +229,7 @@ class SimulationSession:
                     self.graph.step_size,
                     self.previous_values,
                     next_values,
+                    component_outputs,
                 )
                 reference = _evaluate_measurement(
                     self.graph,
@@ -200,9 +242,39 @@ class SimulationSession:
                     self.graph.step_size,
                     self.previous_values,
                     next_values,
+                    component_outputs,
                 )
                 channels[f"{measurement.id}.actual"].append(actual)
                 channels[f"{measurement.id}.reference"].append(reference)
+            _evaluate_all_component_outputs(
+                self.graph,
+                "actual",
+                time,
+                cache,
+                self.fault_runtime,
+                self.module_states,
+                self.graph.step_size,
+                self.previous_values,
+                next_values,
+                component_outputs,
+            )
+            _evaluate_all_component_outputs(
+                self.graph,
+                "reference",
+                time,
+                cache,
+                self.fault_runtime,
+                self.module_states,
+                self.graph.step_size,
+                self.previous_values,
+                next_values,
+                component_outputs,
+            )
+            component_output_steps.append({
+                "time": time,
+                "actual": component_outputs["actual"],
+                "reference": component_outputs["reference"],
+            })
             self.previous_values.update(next_values)
             self.step_index += 1
 
@@ -210,6 +282,7 @@ class SimulationSession:
             "runId": self.run_id,
             "status": "success",
             "curves": {"time": times, "channels": channels},
+            "componentOutputs": {"time": times, "steps": component_output_steps},
             "events": events,
             "metrics": {
                 "sampleCount": sample_count,

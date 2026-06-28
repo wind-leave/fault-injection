@@ -1669,7 +1669,7 @@ describe('Flight model package app integration', () => {
     wrapper.unmount();
   }, 10000);
 
-  it('keeps the fault view label readable and leaves injected fault tags independently positioned', async () => {
+  it('keeps the simulation view label readable and leaves injected fault tags independently positioned', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
@@ -1678,7 +1678,7 @@ describe('Flight model package app integration', () => {
     await flushRuntime();
 
     expect(importResult).toMatchObject({ ok: true });
-    expect(document.querySelector('[data-canvas-view="components"]')?.textContent?.trim()).toBe('故障视图');
+    expect(document.querySelector('[data-canvas-view="components"]')?.textContent?.trim()).toBe('仿真视图');
 
     const faultId = 'actuator_lock_or_failure';
     window.doImportFault();

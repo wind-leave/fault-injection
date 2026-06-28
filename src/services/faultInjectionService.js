@@ -866,11 +866,32 @@ function slotLayerMatches(slot = {}, layer = 'electrical') {
 
 function slotAllowsFault(slot = {}, faultModel = {}) {
   const allowed = getSlotAllowedFaultIds(slot);
-  if (allowed.length === 0) {
+  if (allowed.length > 0) {
+    const identities = new Set(faultIdentityCandidates(faultModel));
+    if (allowed.some((id) => identities.has(id))) {
+      return true;
+    }
+  }
+
+  const allowedModels = ensureArray(slot.allowedModels).map(normalizeKey).filter(Boolean);
+  if (allowedModels.length === 0) {
     return false;
   }
-  const identities = new Set(faultIdentityCandidates(faultModel));
-  return allowed.some((id) => identities.has(id));
+
+  const behavior = getFaultRuntimeBehavior(faultModel);
+  const candidates = [
+    faultModel.id,
+    faultModel.faultTypeId,
+    faultModel.modelId,
+    faultModel.faultModelId,
+    behavior,
+    behavior.replace(/^parameter_/, ''),
+    behavior.replace(/^additive_/, ''),
+    String(faultModel.id ?? '').replace(/^physical_parameter_/, ''),
+    String(faultModel.faultTypeId ?? '').replace(/^physical_parameter_/, '')
+  ].map(normalizeKey).filter(Boolean);
+
+  return allowedModels.some((model) => candidates.includes(model));
 }
 
 function targetKindFor(target = {}) {

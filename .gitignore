@@ -3,3 +3,5 @@ dist/
 .npm-cache/
 *.log
 *.err.log
+__pycache__/
+*.pyc

@@ -251,6 +251,39 @@ describe('faultInjectionService', () => {
     });
   });
 
+  it('prefers the selected parameter slot when its allowed math model matches a catalog parameter fault', () => {
+    const physicalBias = faultCatalog.faultTypes.find((item) => item.id === 'physical_parameter_bias');
+    const nodes = [
+      {
+        id: 'node-controller',
+        type: 'simulation_block',
+        props: { name: 'Attitude Controller', moduleType: 'control' },
+        faultSlots: [
+          {
+            slotId: 'physical:controller_gain',
+            slotName: '姿态控制增益',
+            layer: 'physical',
+            targetField: 'params.kp',
+            allowedModels: ['bias', 'drift', 'step'],
+            variableKey: 'controller_gain'
+          }
+        ]
+      },
+      { id: 'node-dynamics', type: 'simulation_block', props: { name: 'Dynamics', moduleType: 'vehicle_dynamics' } }
+    ];
+
+    expect(findCompatibleFaultTarget(physicalBias, {
+      nodes,
+      edges: [],
+      selectedNodeId: 'node-controller'
+    })).toMatchObject({
+      kind: 'node',
+      id: 'node-controller',
+      reason: 'selected-node',
+      slotId: 'physical:controller_gain'
+    });
+  });
+
   it('creates multi-fault bindings with propagation semantics for signal-flow graph rendering', () => {
     const sensorBias = faultCatalog.faultTypes.find((item) => item.id === 'sensor_additive_bias');
     const physicalBias = faultCatalog.faultTypes.find((item) => item.id === 'physical_parameter_bias');

@@ -8,6 +8,7 @@ class ExecutableNode:
     id: str
     type: str
     parameters: dict
+    outputs: tuple
     module: object = None
 
 
@@ -74,6 +75,11 @@ def compile_graph(package, registry):
             id=node["id"],
             type=node["type"],
             parameters=dict(node.get("parameters") or {}),
+            outputs=tuple(
+                str(output.get("name") or output.get("id") or f"output-{output_index}")
+                for output_index, output in enumerate(node.get("outputs") or [])
+                if isinstance(output, dict)
+            ),
             module=module,
         )
 

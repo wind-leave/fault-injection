@@ -98,33 +98,63 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(status, 404)
         self.assertEqual(missing["errorCode"], "SESSION_NOT_FOUND")
 
-    def test_updates_practice_troubleshooting_session_from_student_operation(self):
+    def test_runs_practice_session_action_and_submit_flow(self):
         status, created = self._post(
-            "/api/practice/troubleshooting/session",
-            {"dMatrix": sample_d_matrix(), "targetFaultId": "target-fault"},
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+            },
         )
 
         self.assertEqual(status, 200)
         self.assertEqual(created["status"], "success")
-        self.assertEqual(created["currentPath"]["faultId"], "target-fault")
-        self.assertEqual(created["nextRecommendedStep"]["pointCode"], "M1")
+        self.assertEqual(created["practiceSessionId"], created["sessionId"])
+        self.assertTrue(created["simulationSessionId"].startswith("session-"))
+        self.assertNotIn("troubleshooting", created)
+        self.assertNotIn("currentPath", created)
+        self.assertNotIn("nextRecommendedStep", created)
         session_id = created["sessionId"]
 
         status, updated = self._post(
-            f"/api/practice/troubleshooting/session/{session_id}/operation",
+            f"/api/practice/session/{session_id}/action",
             {
                 "operationId": "op-1",
                 "actionType": "measure",
                 "pointCode": "M1",
                 "observed": "abnormal",
+                "steps": 1,
             },
         )
 
         self.assertEqual(status, 200)
         self.assertEqual(updated["status"], "success")
-        self.assertEqual(updated["remainingFaultIds"], ["target-fault", "controller-fault"])
-        self.assertTrue(updated["routeQuality"]["matchedRecommendedStep"])
-        self.assertEqual(updated["nextRecommendedStep"]["pointCode"], "M2")
+        self.assertIn("simulationResult", updated)
+        self.assertEqual(updated["simulationResult"]["curves"]["time"], [0.0])
+        self.assertNotIn("troubleshooting", updated)
+        self.assertNotIn("currentPath", updated)
+        self.assertNotIn("nextRecommendedStep", updated)
+        self.assertNotIn("remainingFaultIds", updated)
+
+        status, submitted = self._post(
+            f"/api/practice/session/{session_id}/submit",
+            {"finalFaultId": "target-fault", "submittedAt": "2026-06-28T00:01:00Z"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(submitted["status"], "success")
+        self.assertEqual(submitted["scoreBreakdown"]["faultDetection"], 40)
+        self.assertEqual(submitted["initialBestPath"]["faultId"], "target-fault")
+        self.assertEqual(submitted["initialBestPath"]["steps"][0]["pointCode"], "M1")
+        self.assertEqual(submitted["record"]["targetFaultId"], "target-fault")
+        self.assertEqual(submitted["record"]["finalFaultId"], "target-fault")
+        self.assertEqual(submitted["record"]["studentActions"][0]["pointCode"], "M1")
+        self.assertEqual(submitted["record"]["recommendedPathHistory"][0]["stepIndex"], 1)
+        self.assertEqual(submitted["record"]["recommendedPathHistory"][0]["recommendedStep"]["pointCode"], "M1")
+        self.assertEqual(submitted["record"]["recommendedPathHistory"][0]["actualPointCode"], "M1")
+        self.assertTrue(submitted["record"]["recommendedPathHistory"][0]["matchedRecommendedStep"])
+        self.assertNotIn("simulationResults", submitted["record"])
 
 
 if __name__ == "__main__":

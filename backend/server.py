@@ -7,9 +7,9 @@ from urllib.parse import urlparse
 
 from backend.graph_compiler import compile_graph
 from backend.module_registry import ModuleRegistry
+from backend.practice import PracticeSession
 from backend.schemas import SimulationBackendError
 from backend.simulation_engine import SimulationSession, run_simulation
-from backend.troubleshooting import TroubleshootingSession
 
 
 MAX_REQUEST_BYTES = 1_000_000
@@ -23,7 +23,7 @@ def _json_bytes(payload):
 class SimulationBackendHandler(BaseHTTPRequestHandler):
     endpoint = "/api/simulations/run"
     session_endpoint = "/api/simulations/session"
-    practice_troubleshooting_endpoint = "/api/practice/troubleshooting/session"
+    practice_endpoint = "/api/practice/session"
     registry = ModuleRegistry.from_builtin_manifest()
     sessions = {}
     sessions_lock = threading.Lock()
@@ -89,9 +89,17 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         session_id = path[len(prefix):]
         return session_id.strip("/")
 
-    def _practice_operation_path(self, path):
-        prefix = f"{self.practice_troubleshooting_endpoint}/"
-        suffix = "/operation"
+    def _practice_action_path(self, path):
+        prefix = f"{self.practice_endpoint}/"
+        suffix = "/action"
+        if not path.startswith(prefix) or not path.endswith(suffix):
+            return ""
+        session_id = path[len(prefix):-len(suffix)]
+        return session_id.strip("/")
+
+    def _practice_submit_path(self, path):
+        prefix = f"{self.practice_endpoint}/"
+        suffix = "/submit"
         if not path.startswith(prefix) or not path.endswith(suffix):
             return ""
         session_id = path[len(prefix):-len(suffix)]
@@ -143,29 +151,56 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         result["metrics"]["elapsedMs"] = round((time.monotonic() - started) * 1000, 3)
         self._send_json(200, result)
 
-    def _create_practice_troubleshooting_session(self, run_id, started):
+    def _create_practice_session(self, run_id, started):
         payload = self._read_json()
-        session_id = f"practice-{uuid.uuid4().hex[:12]}"
-        session = TroubleshootingSession(payload.get("dMatrix"), payload.get("targetFaultId"))
+        simulation_package = payload.get("simulationPackage")
+        if not isinstance(simulation_package, dict):
+            raise SimulationBackendError("INVALID_SCHEMA", "simulationPackage", "simulationPackage must be an object")
+        graph = compile_graph(simulation_package, self.registry)
+        practice_session_id = f"practice-{uuid.uuid4().hex[:12]}"
+        simulation_session_id = f"session-{uuid.uuid4().hex[:12]}"
+        simulation_session = SimulationSession(graph, run_id=run_id)
+        session = PracticeSession(
+            practice_session_id,
+            simulation_session_id,
+            simulation_session,
+            payload.get("dMatrix"),
+            payload.get("targetFaultId"),
+            scoring_rules=payload.get("scoringRules"),
+        )
+        with self.sessions_lock:
+            self.sessions[simulation_session_id] = simulation_session
         with self.practice_sessions_lock:
-            self.practice_sessions[session_id] = session
+            self.practice_sessions[practice_session_id] = session
         result = session.initial_response()
         result["runId"] = run_id
-        result["sessionId"] = session_id
         result["metrics"] = {"elapsedMs": round((time.monotonic() - started) * 1000, 3)}
         self._send_json(200, result)
 
-    def _record_practice_troubleshooting_operation(self, run_id, session_id, started):
+    def _record_practice_action(self, run_id, session_id, started):
         payload = self._read_json()
+        steps = self._validate_steps(payload)
         with self.practice_sessions_lock:
             session = self.practice_sessions.get(session_id)
             if session is not None:
-                result = session.record_operation(payload)
+                result = session.record_action(payload, steps=steps)
         if session is None:
             self._send_session_not_found(run_id, session_id)
             return
         result["runId"] = run_id
-        result["sessionId"] = session_id
+        result["metrics"] = {"elapsedMs": round((time.monotonic() - started) * 1000, 3)}
+        self._send_json(200, result)
+
+    def _submit_practice_session(self, run_id, session_id, started):
+        payload = self._read_json()
+        with self.practice_sessions_lock:
+            session = self.practice_sessions.get(session_id)
+            if session is not None:
+                result = session.submit(payload)
+        if session is None:
+            self._send_session_not_found(run_id, session_id)
+            return
+        result["runId"] = run_id
         result["metrics"] = {"elapsedMs": round((time.monotonic() - started) * 1000, 3)}
         self._send_json(200, result)
 
@@ -173,18 +208,22 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         path = urlparse(self.path).path
         session_id = self._session_step_path(path)
-        practice_session_id = self._practice_operation_path(path)
-        if path != self.endpoint and path != self.session_endpoint and path != self.practice_troubleshooting_endpoint and not session_id and not practice_session_id:
+        practice_action_session_id = self._practice_action_path(path)
+        practice_submit_session_id = self._practice_submit_path(path)
+        if path != self.endpoint and path != self.session_endpoint and path != self.practice_endpoint and not session_id and not practice_action_session_id and not practice_submit_session_id:
             self._send_not_found(run_id)
             return
 
         started = time.monotonic()
         try:
-            if path == self.practice_troubleshooting_endpoint:
-                self._create_practice_troubleshooting_session(run_id, started)
+            if path == self.practice_endpoint:
+                self._create_practice_session(run_id, started)
                 return
-            if practice_session_id:
-                self._record_practice_troubleshooting_operation(run_id, practice_session_id, started)
+            if practice_action_session_id:
+                self._record_practice_action(run_id, practice_action_session_id, started)
+                return
+            if practice_submit_session_id:
+                self._submit_practice_session(run_id, practice_submit_session_id, started)
                 return
             if path == self.session_endpoint:
                 self._create_session(run_id, started)

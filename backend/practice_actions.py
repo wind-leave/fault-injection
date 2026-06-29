@@ -26,6 +26,14 @@ class PracticeActionRuntime:
     def __init__(self, simulation_session):
         self.simulation_session = simulation_session
 
+    def skipped(self, action, warning="action skipped by business rules"):
+        return {
+            "status": "skipped",
+            "actionType": action.get("actionType") or "",
+            "changes": [],
+            "warnings": [warning],
+        }
+
     def apply(self, action):
         if not isinstance(action, dict):
             raise SimulationBackendError("INVALID_SCHEMA", "action", "action must be an object")

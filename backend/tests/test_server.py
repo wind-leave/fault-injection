@@ -143,6 +143,14 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(updated["normalizedAction"]["actionType"], "replaceComponent")
         self.assertEqual(updated["normalizedAction"]["target"], {"type": "component", "id": "sim-1"})
         self.assertEqual(updated["normalizedAction"]["faultId"], "fault-bias")
+        self.assertEqual(updated["ruleResult"], {
+            "allowed": True,
+            "ruleCode": "ACTION_ALLOWED",
+            "durationSeconds": 120,
+            "riskLevel": "medium",
+            "repeatAction": False,
+            "warnings": [],
+        })
         self.assertEqual(updated["appliedAction"]["changes"][0]["type"], "fault_disabled")
         self.assertIn("simulationResult", updated)
         self.assertEqual(updated["simulationResult"]["curves"]["time"], [0.0])
@@ -195,6 +203,93 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(body["status"], "error")
         self.assertEqual(body["errorCode"], "UNSUPPORTED_ACTION_TYPE")
+
+    def test_practice_action_repeated_repair_is_recorded_and_skipped(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 0.4
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.4,
+            "parameters": {"bias": 1.0},
+        }]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+        payload = {
+            "operationId": "op-repair",
+            "actionType": "replaceComponent",
+            "target": {"type": "component", "id": "sim-1"},
+            "faultId": "fault-bias",
+            "steps": 1,
+        }
+
+        first_status, first = self._post(f"/api/practice/session/{session_id}/action", payload)
+        self.assertEqual(first_status, 200)
+        self.assertEqual(first["ruleResult"]["ruleCode"], "ACTION_ALLOWED")
+
+        payload["operationId"] = "op-repeat"
+        second_status, second = self._post(f"/api/practice/session/{session_id}/action", payload)
+
+        self.assertEqual(second_status, 200)
+        self.assertEqual(second["ruleResult"], {
+            "allowed": False,
+            "ruleCode": "REPEAT_REPAIR",
+            "durationSeconds": 0,
+            "riskLevel": "none",
+            "repeatAction": True,
+            "warnings": ["fault is already repaired"],
+        })
+        self.assertEqual(second["appliedAction"]["status"], "skipped")
+        self.assertEqual(second["appliedAction"]["changes"], [])
+
+    def test_practice_action_target_mismatch_returns_error(self):
+        package = valid_package()
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.3,
+            "parameters": {"bias": 0.5},
+        }]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        status, body = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-mismatch",
+                "actionType": "replaceComponent",
+                "target": {"type": "component", "id": "source-1"},
+                "faultId": "fault-bias",
+                "steps": 1,
+            },
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(body["status"], "error")
+        self.assertEqual(body["errorCode"], "TARGET_MISMATCH")
+        self.assertEqual(body["field"], "target.id")
 
     def test_practice_repair_persists_simulation_state_across_steps(self):
         package = valid_package()

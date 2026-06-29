@@ -1,6 +1,7 @@
 import time
 
 from backend.practice_action_protocol import normalize_practice_action
+from backend.practice_action_rules import PracticeActionRuleEngine
 from backend.practice_actions import PracticeActionRuntime
 from backend.schemas import SimulationBackendError
 from backend.troubleshooting import TroubleshootingSession
@@ -27,6 +28,7 @@ class PracticeSession:
         self.simulation_session_id = simulation_session_id
         self.simulation_session = simulation_session
         self.action_runtime = PracticeActionRuntime(simulation_session)
+        self.rule_engine = PracticeActionRuleEngine(simulation_session)
         self.troubleshooting = TroubleshootingSession(d_matrix, target_fault_id)
         self.target_fault_id = _text(target_fault_id)
         self.scoring_rules = scoring_rules if isinstance(scoring_rules, dict) else {}
@@ -52,7 +54,12 @@ class PracticeSession:
         action_record = normalize_practice_action(action)
         normalized_action = _clone(action_record)
         action_record.setdefault("recordedAt", time.time())
-        action_application = self.action_runtime.apply(action_record)
+        rule_result = self.rule_engine.evaluate(action_record)
+        if rule_result.get("allowed"):
+            action_application = self.action_runtime.apply(action_record)
+        else:
+            action_application = self.action_runtime.skipped(action_record)
+        action_record["ruleResult"] = _clone(rule_result)
         action_record["simulationActionResult"] = _clone(action_application)
         self.student_actions.append(action_record)
         self.simulation_action_history.append({
@@ -76,6 +83,7 @@ class PracticeSession:
             "practiceSessionId": self.practice_session_id,
             "simulationSessionId": self.simulation_session_id,
             "normalizedAction": normalized_action,
+            "ruleResult": _clone(rule_result),
             "appliedAction": action_application,
             "simulationResult": simulation_result,
         }

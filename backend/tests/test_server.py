@@ -9,6 +9,17 @@ from backend.tests.fixtures import valid_package
 from backend.tests.test_troubleshooting import sample_d_matrix
 
 
+def d_matrix_with_observation_rule():
+    matrix = sample_d_matrix()
+    matrix["points"][0]["channel"] = "scope-1.ch1"
+    matrix["points"][0]["observationRule"] = {
+        "method": "absoluteDelta",
+        "normalThreshold": 0.1,
+        "abnormalThreshold": 0.3,
+    }
+    return matrix
+
+
 class SimulationBackendServerTests(unittest.TestCase):
     def setUp(self):
         SimulationBackendHandler.sessions = {}
@@ -154,6 +165,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(updated["appliedAction"]["changes"][0]["type"], "fault_disabled")
         self.assertIn("simulationResult", updated)
         self.assertEqual(updated["simulationResult"]["curves"]["time"], [0.0])
+        self.assertNotIn("observationResult", updated)
         self.assertNotIn("troubleshooting", updated)
         self.assertNotIn("currentPath", updated)
         self.assertNotIn("nextRecommendedStep", updated)
@@ -203,6 +215,49 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(body["status"], "error")
         self.assertEqual(body["errorCode"], "UNSUPPORTED_ACTION_TYPE")
+
+    def test_measure_point_generates_observation_and_updates_troubleshooting(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 0.3
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.3,
+            "parameters": {"bias": 0.5},
+        }]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": d_matrix_with_observation_rule(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        status, body = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-measure",
+                "actionType": "measurePoint",
+                "target": {"type": "testPoint", "id": "scope-1.ch1"},
+                "pointCode": "M1",
+                "steps": 1,
+                "observed": "normal",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["normalizedAction"]["actionType"], "measurePoint")
+        self.assertNotIn("ruleResult", body)
+        self.assertNotIn("appliedAction", body)
+        self.assertEqual(body["observationResult"]["observed"], "abnormal")
+        self.assertEqual(body["observationResult"]["source"], "backend")
+        self.assertEqual(body["troubleshootingResult"]["remainingFaultIds"], ["target-fault", "controller-fault"])
 
     def test_practice_action_repeated_repair_is_recorded_and_skipped(self):
         package = valid_package()

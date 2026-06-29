@@ -3,6 +3,7 @@ import time
 from backend.practice_action_protocol import normalize_practice_action
 from backend.practice_action_rules import PracticeActionRuleEngine
 from backend.practice_actions import PracticeActionRuntime
+from backend.practice_observation import evaluate_observation
 from backend.schemas import SimulationBackendError
 from backend.troubleshooting import TroubleshootingSession
 
@@ -54,6 +55,9 @@ class PracticeSession:
         action_record = normalize_practice_action(action)
         normalized_action = _clone(action_record)
         action_record.setdefault("recordedAt", time.time())
+        if action_record.get("actionType") == "measurePoint":
+            return self._record_measure_point_action(action_record, normalized_action, steps)
+
         rule_result = self.rule_engine.evaluate(action_record)
         if rule_result.get("allowed"):
             action_application = self.action_runtime.apply(action_record)
@@ -85,6 +89,37 @@ class PracticeSession:
             "normalizedAction": normalized_action,
             "ruleResult": _clone(rule_result),
             "appliedAction": action_application,
+            "simulationResult": simulation_result,
+        }
+
+    def _record_measure_point_action(self, action_record, normalized_action, steps):
+        simulation_result = self.simulation_session.step(steps)
+        simulation_result["sessionId"] = self.simulation_session_id
+        observation_result = evaluate_observation(self.troubleshooting.d_matrix, action_record, simulation_result)
+        action_record["observed"] = observation_result["observed"]
+        action_record["observationResult"] = _clone(observation_result)
+        self.student_actions.append(action_record)
+        self.simulation_action_history.append({
+            "index": len(self.simulation_action_history) + 1,
+            "operationId": action_record.get("operationId") or f"operation-{len(self.simulation_action_history) + 1}",
+            "recordedAt": action_record["recordedAt"],
+            "result": {"status": "observed", "observationResult": _clone(observation_result)},
+        })
+        recommendation_record = self._build_recommendation_record(action_record)
+        troubleshooting_result = self.troubleshooting.record_operation(action_record)
+        recommendation_record["nextRecommendedStepAfterAction"] = _clone(troubleshooting_result.get("nextRecommendedStep"))
+        recommendation_record["remainingFaultIdsAfterAction"] = _clone(troubleshooting_result.get("remainingFaultIds"))
+        recommendation_record["routeQuality"] = _clone(troubleshooting_result.get("routeQuality"))
+        self.recommended_path_history.append(recommendation_record)
+        self.simulation_results.append(_clone(simulation_result))
+        return {
+            "status": "success",
+            "sessionId": self.practice_session_id,
+            "practiceSessionId": self.practice_session_id,
+            "simulationSessionId": self.simulation_session_id,
+            "normalizedAction": normalized_action,
+            "observationResult": observation_result,
+            "troubleshootingResult": troubleshooting_result,
             "simulationResult": simulation_result,
         }
 

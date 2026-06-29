@@ -41,6 +41,49 @@ class PracticeActionProtocolTests(unittest.TestCase):
         self.assertEqual(normalized["faultId"], "fault-wire-open")
         self.assertEqual(normalized["steps"], 2)
 
+    def test_normalizes_measure_point_without_fault_id(self):
+        normalized = normalize_practice_action({
+            "protocolVersion": "1.0",
+            "operationId": "op-measure",
+            "actionType": "measurePoint",
+            "target": {"type": "testPoint", "id": "scope-1.ch1"},
+            "pointCode": "M1",
+            "steps": 2,
+            "observed": "normal",
+        })
+
+        self.assertEqual(normalized["actionType"], "measurePoint")
+        self.assertEqual(normalized["target"], {"type": "testPoint", "id": "scope-1.ch1"})
+        self.assertEqual(normalized["targetId"], "scope-1.ch1")
+        self.assertEqual(normalized["pointCode"], "M1")
+        self.assertNotIn("faultId", normalized)
+        self.assertNotIn("observed", normalized)
+
+    def test_rejects_measure_point_without_point_code(self):
+        with self.assertRaises(SimulationBackendError) as context:
+            normalize_practice_action({
+                "protocolVersion": "1.0",
+                "operationId": "op-measure",
+                "actionType": "measurePoint",
+                "target": {"type": "testPoint", "id": "scope-1.ch1"},
+            })
+
+        self.assertEqual(context.exception.error_code, "INVALID_ACTION_SCHEMA")
+        self.assertEqual(context.exception.field, "pointCode")
+
+    def test_rejects_measure_point_with_wrong_target_type(self):
+        with self.assertRaises(SimulationBackendError) as context:
+            normalize_practice_action({
+                "protocolVersion": "1.0",
+                "operationId": "op-measure",
+                "actionType": "measurePoint",
+                "target": {"type": "component", "id": "sim-1"},
+                "pointCode": "M1",
+            })
+
+        self.assertEqual(context.exception.error_code, "INVALID_ACTION_SCHEMA")
+        self.assertEqual(context.exception.field, "target.type")
+
     def test_rejects_missing_fault_id(self):
         with self.assertRaises(SimulationBackendError) as context:
             normalize_practice_action({

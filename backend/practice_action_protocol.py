@@ -4,6 +4,7 @@ from backend.schemas import SimulationBackendError
 SUPPORTED_ACTION_TARGETS = {
     "replaceComponent": "component",
     "replaceWire": "wire",
+    "measurePoint": "testPoint",
 }
 
 
@@ -51,18 +52,19 @@ def normalize_practice_action(action):
             f"target.type must be {expected_target_type} for {action_type}",
         )
     target_id = _require_text(target, "id")
-    fault_id = _require_text(action, "faultId")
-
     normalized = {
         "protocolVersion": _text(action.get("protocolVersion")) or "1.0",
         "operationId": _text(action.get("operationId")),
         "actionType": action_type,
         "target": {"type": target_type, "id": target_id},
         "targetId": target_id,
-        "faultId": fault_id,
         "steps": _validate_steps(action.get("steps")),
         "rawAction": action.get("rawAction") if isinstance(action.get("rawAction"), dict) else {},
     }
+    if action_type == "measurePoint":
+        normalized["pointCode"] = _require_text(action, "pointCode")
+    else:
+        normalized["faultId"] = _require_text(action, "faultId")
     client_time = _text(action.get("clientTime"))
     if client_time:
         normalized["clientTime"] = client_time

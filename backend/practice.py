@@ -1,5 +1,6 @@
 import time
 
+from backend.practice_action_protocol import normalize_practice_action
 from backend.practice_actions import PracticeActionRuntime
 from backend.schemas import SimulationBackendError
 from backend.troubleshooting import TroubleshootingSession
@@ -48,7 +49,8 @@ class PracticeSession:
     def record_action(self, action, steps=1):
         if not isinstance(action, dict):
             raise SimulationBackendError("INVALID_SCHEMA", "action", "action must be an object")
-        action_record = _clone(action)
+        action_record = normalize_practice_action(action)
+        normalized_action = _clone(action_record)
         action_record.setdefault("recordedAt", time.time())
         action_application = self.action_runtime.apply(action_record)
         action_record["simulationActionResult"] = _clone(action_application)
@@ -73,6 +75,7 @@ class PracticeSession:
             "sessionId": self.practice_session_id,
             "practiceSessionId": self.practice_session_id,
             "simulationSessionId": self.simulation_session_id,
+            "normalizedAction": normalized_action,
             "appliedAction": action_application,
             "simulationResult": simulation_result,
         }

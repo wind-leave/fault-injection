@@ -99,10 +99,20 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(missing["errorCode"], "SESSION_NOT_FOUND")
 
     def test_runs_practice_session_action_and_submit_flow(self):
+        package = valid_package()
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.3,
+            "parameters": {"bias": 0.5},
+        }]
         status, created = self._post(
             "/api/practice/session",
             {
-                "simulationPackage": valid_package(),
+                "simulationPackage": package,
                 "dMatrix": sample_d_matrix(),
                 "targetFaultId": "target-fault",
             },
@@ -121,15 +131,19 @@ class SimulationBackendServerTests(unittest.TestCase):
             f"/api/practice/session/{session_id}/action",
             {
                 "operationId": "op-1",
-                "actionType": "measure",
-                "pointCode": "M1",
-                "observed": "abnormal",
+                "actionType": "replaceComponent",
+                "target": {"type": "component", "id": "sim-1"},
+                "faultId": "fault-bias",
                 "steps": 1,
             },
         )
 
         self.assertEqual(status, 200)
         self.assertEqual(updated["status"], "success")
+        self.assertEqual(updated["normalizedAction"]["actionType"], "replaceComponent")
+        self.assertEqual(updated["normalizedAction"]["target"], {"type": "component", "id": "sim-1"})
+        self.assertEqual(updated["normalizedAction"]["faultId"], "fault-bias")
+        self.assertEqual(updated["appliedAction"]["changes"][0]["type"], "fault_disabled")
         self.assertIn("simulationResult", updated)
         self.assertEqual(updated["simulationResult"]["curves"]["time"], [0.0])
         self.assertNotIn("troubleshooting", updated)
@@ -149,16 +163,51 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(submitted["initialBestPath"]["steps"][0]["pointCode"], "M1")
         self.assertEqual(submitted["record"]["targetFaultId"], "target-fault")
         self.assertEqual(submitted["record"]["finalFaultId"], "target-fault")
-        self.assertEqual(submitted["record"]["studentActions"][0]["pointCode"], "M1")
+        self.assertEqual(submitted["record"]["studentActions"][0]["faultId"], "fault-bias")
         self.assertEqual(submitted["record"]["recommendedPathHistory"][0]["stepIndex"], 1)
         self.assertEqual(submitted["record"]["recommendedPathHistory"][0]["recommendedStep"]["pointCode"], "M1")
-        self.assertEqual(submitted["record"]["recommendedPathHistory"][0]["actualPointCode"], "M1")
-        self.assertTrue(submitted["record"]["recommendedPathHistory"][0]["matchedRecommendedStep"])
+        self.assertEqual(submitted["record"]["recommendedPathHistory"][0]["actualPointCode"], "")
+        self.assertFalse(submitted["record"]["recommendedPathHistory"][0]["matchedRecommendedStep"])
         self.assertNotIn("simulationResults", submitted["record"])
 
-    def test_practice_actions_persist_simulation_state_across_steps(self):
+    def test_practice_action_rejects_unsupported_action_type(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        status, body = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-measure",
+                "actionType": "measure",
+                "target": {"type": "testPoint", "id": "point-M1"},
+                "faultId": "fault-bias",
+            },
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(body["status"], "error")
+        self.assertEqual(body["errorCode"], "UNSUPPORTED_ACTION_TYPE")
+
+    def test_practice_repair_persists_simulation_state_across_steps(self):
         package = valid_package()
         package["simulationConfig"]["duration"] = 0.4
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.4,
+            "parameters": {"bias": 1.0},
+        }]
         status, created = self._post(
             "/api/practice/session",
             {
@@ -173,30 +222,28 @@ class SimulationBackendServerTests(unittest.TestCase):
         status, adjusted = self._post(
             f"/api/practice/session/{session_id}/action",
             {
-                "operationId": "op-adjust",
-                "actionType": "adjustParameter",
-                "targetId": "source-1",
-                "parameter": "value",
-                "value": 2.0,
-                "observed": "unknown",
+                "operationId": "op-repair",
+                "actionType": "replaceComponent",
+                "target": {"type": "component", "id": "sim-1"},
+                "faultId": "fault-bias",
                 "steps": 1,
             },
         )
         self.assertEqual(status, 200)
-        self.assertEqual(adjusted["simulationResult"]["curves"]["channels"]["scope-1.ch1.actual"], [2.0])
+        self.assertEqual(adjusted["simulationResult"]["curves"]["channels"]["scope-1.ch1.actual"], [1.0])
 
         status, measured = self._post(
             f"/api/practice/session/{session_id}/action",
             {
-                "operationId": "op-measure",
-                "actionType": "measure",
-                "pointCode": "M1",
-                "observed": "abnormal",
+                "operationId": "op-repair-again",
+                "actionType": "replaceComponent",
+                "target": {"type": "component", "id": "sim-1"},
+                "faultId": "fault-bias",
                 "steps": 1,
             },
         )
         self.assertEqual(status, 200)
-        self.assertEqual(measured["simulationResult"]["curves"]["channels"]["scope-1.ch1.actual"], [2.0])
+        self.assertEqual(measured["simulationResult"]["curves"]["channels"]["scope-1.ch1.actual"], [1.0])
 
     def test_submit_ends_practice_and_bound_simulation_session(self):
         status, created = self._post(

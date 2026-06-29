@@ -31,7 +31,7 @@ class PracticeActionRuntime:
             raise SimulationBackendError("INVALID_SCHEMA", "action", "action must be an object")
 
         action_type = _normalized_action_type(action)
-        if action_type in {"replacecomponent", "repaircomponent"}:
+        if action_type in {"replacecomponent", "repaircomponent", "replacewire"}:
             changes = self._disable_faults(action)
         elif action_type == "disconnectline":
             changes = self._disconnect_line(action)
@@ -81,9 +81,18 @@ class PracticeActionRuntime:
             raise SimulationBackendError("INVALID_SCHEMA", "targetId", "targetId or faultId is required")
 
         changes = []
+        found_fault_id = False
         for fault in self.simulation_session.fault_runtime.fault_instances:
             if fault_id and _text(fault.get("faultId")) != fault_id:
                 continue
+            if fault_id:
+                found_fault_id = True
+                if target_id and _text(fault.get("targetId")) != target_id:
+                    raise SimulationBackendError(
+                        "TARGET_MISMATCH",
+                        "target.id",
+                        f"faultId {fault_id} does not match target {target_id}",
+                    )
             if target_id and not fault_id and _text(fault.get("targetId")) != target_id:
                 continue
             old_enabled = bool(fault.get("enabled", True))
@@ -95,6 +104,8 @@ class PracticeActionRuntime:
                 "previousEnabled": old_enabled,
                 "newEnabled": False,
             })
+        if fault_id and not found_fault_id:
+            raise SimulationBackendError("TARGET_NOT_FOUND", "faultId", f"fault not found: {fault_id}")
         return changes
 
     def _disconnect_line(self, action):

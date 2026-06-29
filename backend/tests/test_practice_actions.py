@@ -48,6 +48,51 @@ class PracticeActionRuntimeTests(unittest.TestCase):
         self.assertFalse(session.fault_runtime.fault_instances[0]["enabled"])
         self.assertFloatSeriesEqual(step["curves"]["channels"]["scope-1.ch1.actual"], [1.0])
 
+    def test_replace_wire_disables_matching_runtime_fault(self):
+        package = valid_package()
+        package["faultInstances"] = [{
+            "faultId": "fault-wire-open",
+            "faultType": "wire_open",
+            "targetId": "edge-source-sim",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.3,
+            "parameters": {},
+        }]
+        session = self._session(package)
+        runtime = PracticeActionRuntime(session)
+
+        result = runtime.apply({
+            "actionType": "replaceWire",
+            "targetId": "edge-source-sim",
+            "faultId": "fault-wire-open",
+        })
+
+        self.assertEqual(result["status"], "applied")
+        self.assertEqual(result["changes"][0]["type"], "fault_disabled")
+        self.assertFalse(session.fault_runtime.fault_instances[0]["enabled"])
+
+    def test_repair_rejects_fault_target_mismatch(self):
+        package = valid_package()
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.3,
+            "parameters": {"bias": 0.5},
+        }]
+        session = self._session(package)
+        runtime = PracticeActionRuntime(session)
+
+        with self.assertRaisesRegex(Exception, "does not match target"):
+            runtime.apply({
+                "actionType": "replaceComponent",
+                "targetId": "source-1",
+                "faultId": "fault-bias",
+            })
+
     def test_disconnect_and_reconnect_line_persist_on_session(self):
         session = self._session()
         runtime = PracticeActionRuntime(session)

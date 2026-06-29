@@ -4,14 +4,15 @@
 
 ## 适用范围
 
-联调 v1 只支持两类学生动作：
+联调 v1 支持三类学生动作：
 
 ```text
 replaceWire
 replaceComponent
+measurePoint
 ```
 
-暂不开放测量、调参、断线、复位等动作。后端内部可能仍保留相关能力，但三维端联调时不得提交这些动作。
+暂不开放调参、断线、复位等动作。后端内部可能仍保留相关能力，但三维端联调时不得提交这些动作。
 
 ## 接口
 
@@ -35,11 +36,12 @@ Content-Type: application/json
 | --- | --- | --- | --- |
 | `protocolVersion` | string | 建议必填 | 固定为 `"1.0"`。后端缺省按 `"1.0"` 处理。 |
 | `operationId` | string | 建议必填 | 三维端生成的动作 ID，用于过程记录和联调排查。 |
-| `actionType` | string | 是 | 只允许 `replaceWire` 或 `replaceComponent`。 |
+| `actionType` | string | 是 | 只允许 `replaceWire`、`replaceComponent` 或 `measurePoint`。 |
 | `target` | object | 是 | 学生操作的三维对象在后端模型中的映射。 |
-| `target.type` | string | 是 | `replaceWire` 必须为 `wire`，`replaceComponent` 必须为 `component`。 |
-| `target.id` | string | 是 | 后端模型中的线缆 ID 或部件 ID。 |
-| `faultId` | string | 是 | 本次动作要修复的故障实例 ID。 |
+| `target.type` | string | 是 | `replaceWire` 必须为 `wire`，`replaceComponent` 必须为 `component`，`measurePoint` 必须为 `testPoint`。 |
+| `target.id` | string | 是 | 后端模型中的线缆 ID、部件 ID 或测点通道基名。 |
+| `faultId` | string | 更换动作必填 | 本次动作要修复的故障实例 ID。`measurePoint` 不需要该字段。 |
+| `pointCode` | string | 检测测点必填 | D 矩阵测点编号，例如 `M1`。 |
 | `steps` | integer | 否 | 动作后推进的仿真步数，默认 `1`，范围 `1..1000`。 |
 | `clientTime` | string | 否 | 三维端动作发生时间。 |
 | `rawAction` | object | 否 | 三维端原始交互信息，例如场景对象 ID、点击位置等。 |
@@ -98,6 +100,28 @@ Content-Type: application/json
 
 后端处理语义与更换部件一致：按 `faultId` 清除该电线上的故障实例。
 
+## 检测测点
+
+请求示例：
+
+```json
+{
+  "protocolVersion": "1.0",
+  "operationId": "op-measure-001",
+  "actionType": "measurePoint",
+  "target": {
+    "type": "testPoint",
+    "id": "scope-1.ch1"
+  },
+  "pointCode": "M1",
+  "steps": 1,
+  "clientTime": "2026-06-29T16:20:00+08:00",
+  "rawAction": {}
+}
+```
+
+三维端不需要提交 `observed`。后端会根据仿真曲线和测点规则生成 `observationResult.observed`，再用该结果更新排故路径。
+
 ## 成功返回
 
 ```json
@@ -147,6 +171,8 @@ Content-Type: application/json
 ```
 
 `simulationResult` 为当前后端已有仿真结果结构，包含曲线、事件、指标和警告。
+
+`measurePoint` 成功返回时包含 `observationResult` 和 `troubleshootingResult`，不包含 `ruleResult` 和 `appliedAction`。
 
 ## 业务规则结果
 

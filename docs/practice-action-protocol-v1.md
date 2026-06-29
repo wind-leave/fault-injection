@@ -120,6 +120,14 @@ Content-Type: application/json
       "sceneObjectId": "3d-wire-001"
     }
   },
+  "ruleResult": {
+    "allowed": true,
+    "ruleCode": "ACTION_ALLOWED",
+    "durationSeconds": 90,
+    "riskLevel": "low",
+    "repeatAction": false,
+    "warnings": []
+  },
   "appliedAction": {
     "status": "applied",
     "actionType": "replaceWire",
@@ -139,6 +147,15 @@ Content-Type: application/json
 ```
 
 `simulationResult` 为当前后端已有仿真结果结构，包含曲线、事件、指标和警告。
+
+## 业务规则结果
+
+`ruleResult` 表示后端对学生动作的业务判断。联调阶段支持：
+
+- `ACTION_ALLOWED`：允许执行，后端会修复故障。
+- `REPEAT_REPAIR`：重复更换，HTTP 200 返回，动作会被记录，但不会再次修改模型。
+
+`durationSeconds`、`riskLevel`、`repeatAction` 只记录业务语义，当前版本不参与评分。
 
 ## 错误返回
 

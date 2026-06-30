@@ -20,6 +20,25 @@ def d_matrix_with_observation_rule():
     return matrix
 
 
+def d_matrix_with_physical_and_virtual_points():
+    matrix = sample_d_matrix()
+    matrix["points"][0]["pointType"] = "physical"
+    matrix["points"][0]["channel"] = "scope-1.ch1"
+    matrix["points"][0]["observationRule"] = {
+        "method": "absoluteDelta",
+        "normalThreshold": 0.1,
+        "abnormalThreshold": 0.3,
+    }
+    matrix["points"].append({
+        "pointId": "tp-virtual",
+        "shortName": "V1",
+        "name": "virtual instrument point",
+        "pointType": "virtual",
+        "channel": "scope-2.ch1",
+    })
+    return matrix
+
+
 class SimulationBackendServerTests(unittest.TestCase):
     def setUp(self):
         SimulationBackendHandler.sessions = {}
@@ -164,7 +183,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         })
         self.assertEqual(updated["appliedAction"]["changes"][0]["type"], "fault_disabled")
         self.assertIn("simulationResult", updated)
-        self.assertEqual(updated["simulationResult"]["curves"]["time"], [0.0])
+        self.assertEqual(updated["simulationResult"]["curves"]["time"], [0.1])
         self.assertNotIn("observationResult", updated)
         self.assertNotIn("troubleshooting", updated)
         self.assertNotIn("currentPath", updated)
@@ -189,6 +208,37 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(submitted["record"]["recommendedPathHistory"][0]["actualPointCode"], "")
         self.assertFalse(submitted["record"]["recommendedPathHistory"][0]["matchedRecommendedStep"])
         self.assertNotIn("simulationResults", submitted["record"])
+
+    def test_practice_session_creation_returns_physical_measurement_snapshot(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 0.3
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.3,
+            "parameters": {"bias": 0.5},
+        }]
+
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        snapshot = created["physicalMeasurementSnapshot"]
+        self.assertEqual([point["pointCode"] for point in snapshot["points"]], ["M1", "M2", "M3"])
+        self.assertIn("M1", snapshot["abnormalPointCodes"])
+        self.assertNotIn("V1", [point["pointCode"] for point in snapshot["points"]])
+        self.assertEqual(created["troubleshootingState"]["physicalMeasurementSnapshot"], snapshot)
+        self.assertEqual(created["troubleshootingState"]["virtualMeasurements"], [])
+        self.assertEqual(created["troubleshootingState"]["repairAttempts"], [])
 
     def test_practice_action_rejects_unsupported_action_type(self):
         status, created = self._post(

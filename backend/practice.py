@@ -3,7 +3,11 @@ import time
 from backend.practice_action_protocol import normalize_practice_action
 from backend.practice_action_rules import PracticeActionRuleEngine
 from backend.practice_actions import PracticeActionRuntime
-from backend.practice_observation import evaluate_observation
+from backend.practice_observation import (
+    compare_physical_snapshots,
+    evaluate_observation,
+    evaluate_physical_measurement_snapshot,
+)
 from backend.schemas import SimulationBackendError
 from backend.troubleshooting import TroubleshootingSession
 
@@ -14,6 +18,10 @@ def _clone(value):
     if isinstance(value, list):
         return [_clone(item) for item in value]
     return value
+
+
+def _arr(value):
+    return value if isinstance(value, list) else []
 
 
 def _text(value, fallback=""):
@@ -40,13 +48,34 @@ class PracticeSession:
         self.simulation_action_history = []
         self.recommended_path_history = []
         self.initial_best_path = self.troubleshooting.initial_response()["currentPath"]
+        self.physical_measurement_snapshots = []
+        self.virtual_measurements = []
+        self.repair_attempts = []
+        self.latest_physical_measurement_snapshot = None
+
+    def _build_troubleshooting_state(self):
+        return {
+            "physicalMeasurementSnapshot": _clone(self.latest_physical_measurement_snapshot or {}),
+            "virtualMeasurements": _clone(self.virtual_measurements),
+            "repairAttempts": _clone(self.repair_attempts),
+            "faultCandidates": _clone(self.troubleshooting.remaining_fault_ids),
+            "status": "resolved" if not _arr((self.latest_physical_measurement_snapshot or {}).get("abnormalPointCodes")) else "inProgress",
+        }
 
     def initial_response(self):
+        simulation_result = self.simulation_session.step(1)
+        simulation_result["sessionId"] = self.simulation_session_id
+        self.simulation_results.append(_clone(simulation_result))
+        snapshot = evaluate_physical_measurement_snapshot(self.troubleshooting.d_matrix, simulation_result)
+        self.latest_physical_measurement_snapshot = _clone(snapshot)
+        self.physical_measurement_snapshots.append(_clone(snapshot))
         return {
             "status": "success",
             "sessionId": self.practice_session_id,
             "practiceSessionId": self.practice_session_id,
             "simulationSessionId": self.simulation_session_id,
+            "physicalMeasurementSnapshot": snapshot,
+            "troubleshootingState": self._build_troubleshooting_state(),
         }
 
     def record_action(self, action, steps=1):

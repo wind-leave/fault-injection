@@ -512,6 +512,145 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(initial_steps[-1]["actionType"], "replaceComponent")
         self.assertEqual(initial_steps[-1]["routeRole"], "repairAttempt")
 
+    def test_dynamic_reference_uses_tiered_scores_and_safety_prerequisites(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 0.5
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.5,
+            "parameters": {"bias": 0.5},
+        }]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": d_matrix_with_rankable_virtual_points(),
+                "targetFaultId": "target-fault",
+                "actionRules": {
+                    "replaceComponent": {"requiresPowerOff": True, "durationSeconds": 120, "riskLevel": "high"},
+                },
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        status, measured = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-v2",
+                "actionType": "measurePoint",
+                "target": {"type": "testPoint", "id": "scope-3.ch1"},
+                "pointCode": "V2",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertNotIn("recommendedActionSet", measured)
+
+        status, repaired = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-unsafe-component",
+                "actionType": "replaceComponent",
+                "target": {"type": "component", "id": "sim-1"},
+                "faultId": "fault-bias",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(repaired["ruleResult"]["ruleCode"], "POWER_NOT_OFF")
+
+        status, submitted = self._post(
+            f"/api/practice/session/{session_id}/submit",
+            {"finalFaultId": "target-fault"},
+        )
+
+        self.assertEqual(status, 200)
+        history = submitted["record"]["dynamicReferenceHistory"]
+        measurement_match = history[0]["matchResult"]
+        self.assertTrue(measurement_match["matched"])
+        self.assertEqual(measurement_match["matchQuality"], "acceptable")
+        self.assertGreater(measurement_match["score"], 0)
+        self.assertLess(measurement_match["score"], 1.0)
+        self.assertGreater(measurement_match["matchedAction"]["rank"], 1)
+
+        repair_reference = history[1]["referenceBeforeAction"]["recommendedActionSet"]
+        repair_candidate = next(
+            action
+            for action in repair_reference
+            if action.get("actionType") == "replaceComponent" and action.get("faultId") == "fault-bias"
+        )
+        self.assertEqual(repair_candidate["safetyPrerequisites"], [{"type": "powerOff", "required": True}])
+
+        repair_match = history[1]["matchResult"]
+        self.assertTrue(repair_match["matched"])
+        self.assertEqual(repair_match["matchQuality"], "unsafe")
+        self.assertEqual(repair_match["score"], 0.0)
+        self.assertFalse(repair_match["safetyPrerequisiteSatisfied"])
+
+        evaluation = submitted["record"]["pathEvaluation"]
+        self.assertEqual(evaluation["dynamicReferenceAcceptableCount"], 1)
+        self.assertEqual(evaluation["dynamicReferenceUnsafeCount"], 1)
+        self.assertIn("dynamicReferenceAverageScore", evaluation)
+        self.assertLess(evaluation["dynamicReferenceAverageScore"], 1.0)
+
+    def test_initial_repair_actions_are_sorted_by_weight_and_include_safety_prerequisites(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 0.5
+        package["faultInstances"] = [
+            {
+                "faultId": "fault-bias",
+                "faultType": "sensor_bias",
+                "targetId": "sim-1",
+                "enabled": True,
+                "startTime": 0.0,
+                "duration": 0.5,
+                "parameters": {"bias": 0.5},
+            },
+            {
+                "faultId": "fault-wire",
+                "faultType": "wire_open",
+                "targetId": "edge-sim-scope",
+                "enabled": True,
+                "startTime": 0.0,
+                "duration": 0.5,
+                "parameters": {"bias": 0.5},
+            },
+        ]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+                "actionRules": {
+                    "replaceComponent": {"requiresPowerOff": True, "durationSeconds": 120, "riskLevel": "high"},
+                    "replaceWire": {"durationSeconds": 30, "riskLevel": "low"},
+                },
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        status, submitted = self._post(
+            f"/api/practice/session/{session_id}/submit",
+            {"finalFaultId": "target-fault"},
+        )
+
+        self.assertEqual(status, 200)
+        repair_steps = [
+            step
+            for step in submitted["initialRecommendedPath"]["steps"]
+            if step.get("routeRole") == "repairAttempt"
+        ]
+        self.assertEqual([step["actionType"] for step in repair_steps], ["replaceWire", "replaceComponent"])
+        self.assertEqual(repair_steps[0]["riskCost"], 1)
+        self.assertEqual(repair_steps[0]["timeCostSeconds"], 30)
+        self.assertEqual(repair_steps[1]["riskCost"], 3)
+        self.assertEqual(repair_steps[1]["safetyPrerequisites"], [{"type": "powerOff", "required": True}])
+
     def test_practice_session_creation_returns_physical_measurement_snapshot(self):
         package = valid_package()
         package["simulationConfig"]["duration"] = 0.3

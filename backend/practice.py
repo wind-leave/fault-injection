@@ -244,7 +244,7 @@ class PracticeSession:
             }
             steps.append(enriched)
 
-        for repair_action in self._repair_reference_actions():
+        for repair_action in self._rank_repair_actions(self._repair_reference_actions()):
             steps.append({
                 "index": len(steps) + 1,
                 "rank": len(steps) + 1,
@@ -329,6 +329,33 @@ class PracticeSession:
             return "acceptable"
         return "lowValue"
 
+    def _safety_prerequisites(self, action_type):
+        rule = self.rule_engine.rules.get(action_type, {})
+        prerequisites = []
+        if rule.get("requiresPowerOff"):
+            prerequisites.append({"type": "powerOff", "required": True})
+        return prerequisites
+
+    def _safety_prerequisites_satisfied(self, action_record, candidate):
+        prerequisites = _arr(candidate.get("safetyPrerequisites"))
+        if not prerequisites:
+            return True
+        safety_state = action_record.get("safetyState") if isinstance(action_record.get("safetyState"), dict) else {}
+        for prerequisite in prerequisites:
+            if prerequisite.get("type") == "powerOff" and prerequisite.get("required") and safety_state.get("powerOff") is not True:
+                return False
+        return True
+
+    def _match_quality_score(self, candidate):
+        tier = candidate.get("recommendationTier")
+        if tier == "optimal" or int(candidate.get("rank") or 0) == 1:
+            return "optimal", 1.0
+        if tier == "acceptable":
+            return "acceptable", 0.7
+        if tier == "lowValue":
+            return "lowValue", 0.4
+        return "acceptable", 0.7
+
     def _measurement_reference_actions(self):
         measured_codes = {
             _text(measurement.get("pointCode"))
@@ -393,7 +420,7 @@ class PracticeSession:
             priority, confidence = self._repair_action_priority(candidate_count, best_measurement_gain, observed_count)
             if target_id in self.simulation_session.graph.nodes:
                 rule = self.rule_engine.rules.get("replaceComponent", {})
-                actions.append({
+                action = {
                     "actionType": "replaceComponent",
                     "target": {"type": "component", "id": target_id},
                     "faultId": fault_id,
@@ -404,10 +431,14 @@ class PracticeSession:
                     "timeCostSeconds": rule.get("durationSeconds", 0),
                     "riskCost": self._risk_cost(rule.get("riskLevel", "medium")),
                     "reason": "active fault target is repairable",
-                })
+                }
+                safety_prerequisites = self._safety_prerequisites("replaceComponent")
+                if safety_prerequisites:
+                    action["safetyPrerequisites"] = safety_prerequisites
+                actions.append(action)
             elif target_id in edge_ids:
                 rule = self.rule_engine.rules.get("replaceWire", {})
-                actions.append({
+                action = {
                     "actionType": "replaceWire",
                     "target": {"type": "wire", "id": target_id},
                     "faultId": fault_id,
@@ -418,8 +449,27 @@ class PracticeSession:
                     "timeCostSeconds": rule.get("durationSeconds", 0),
                     "riskCost": self._risk_cost(rule.get("riskLevel", "low")),
                     "reason": "active fault target is repairable",
-                })
+                }
+                safety_prerequisites = self._safety_prerequisites("replaceWire")
+                if safety_prerequisites:
+                    action["safetyPrerequisites"] = safety_prerequisites
+                actions.append(action)
         return actions
+
+    def _rank_repair_actions(self, actions):
+        sorted_actions = sorted(
+            (_clone(action) for action in actions),
+            key=lambda action: (
+                -int(action.get("priority") or 0),
+                -float(action.get("confidence") or 0),
+                int(action.get("riskCost") or 0),
+                int(action.get("timeCostSeconds") or 0),
+                _text(action.get("faultId") or (action.get("target") or {}).get("id")),
+            ),
+        )
+        for index, action in enumerate(sorted_actions, start=1):
+            action["rank"] = index
+        return sorted_actions
 
     def _rank_reference_actions(self, actions):
         role_order = {"evidenceCollection": 0, "repairAttempt": 1, "recoveryVerification": 2}
@@ -427,6 +477,9 @@ class PracticeSession:
             (_clone(action) for action in actions),
             key=lambda action: (
                 -int(action.get("priority") or 0),
+                -float(action.get("confidence") or 0),
+                int(action.get("riskCost") or 0),
+                int(action.get("timeCostSeconds") or 0),
                 role_order.get(action.get("routeRole"), 9),
                 _text(action.get("pointCode") or action.get("faultId") or (action.get("target") or {}).get("id")),
             ),
@@ -452,10 +505,13 @@ class PracticeSession:
             if candidate.get("actionType") != action_record.get("actionType"):
                 continue
             if candidate.get("actionType") == "measurePoint" and candidate.get("pointCode") == action_record.get("pointCode"):
+                match_quality, score = self._match_quality_score(candidate)
                 return {
                     "matched": True,
                     "matchType": "exactMeasurement",
-                    "score": 1.0,
+                    "matchQuality": match_quality,
+                    "score": score,
+                    "safetyPrerequisiteSatisfied": True,
                     "matchedAction": _clone(candidate),
                 }
             if candidate.get("actionType") in {"replaceComponent", "replaceWire"}:
@@ -463,16 +519,31 @@ class PracticeSession:
                     candidate.get("faultId") == action_record.get("faultId")
                     and (candidate.get("target") or {}).get("id") == (action_record.get("target") or {}).get("id")
                 ):
+                    safety_satisfied = self._safety_prerequisites_satisfied(action_record, candidate)
+                    if not safety_satisfied:
+                        return {
+                            "matched": True,
+                            "matchType": "unsafeRepair",
+                            "matchQuality": "unsafe",
+                            "score": 0.0,
+                            "safetyPrerequisiteSatisfied": False,
+                            "matchedAction": _clone(candidate),
+                        }
+                    match_quality, score = self._match_quality_score(candidate)
                     return {
                         "matched": True,
                         "matchType": "exactRepair",
-                        "score": 1.0,
+                        "matchQuality": match_quality,
+                        "score": score,
+                        "safetyPrerequisiteSatisfied": True,
                         "matchedAction": _clone(candidate),
                     }
         return {
             "matched": False,
             "matchType": "unmatched",
+            "matchQuality": "unmatched",
             "score": 0.0,
+            "safetyPrerequisiteSatisfied": None,
             "matchedAction": None,
         }
 
@@ -523,11 +594,29 @@ class PracticeSession:
         has_recovery_signal = bool({"recovered", "improved"} & repair_statuses)
         dynamic_matches = [entry for entry in self.dynamic_reference_history if (entry.get("matchResult") or {}).get("matched")]
         dynamic_unmatched = [entry for entry in self.dynamic_reference_history if not (entry.get("matchResult") or {}).get("matched")]
-        dynamic_match_score = (
-            len(dynamic_matches) / len(self.dynamic_reference_history)
+        dynamic_scores = [
+            float((entry.get("matchResult") or {}).get("score") or 0)
+            for entry in self.dynamic_reference_history
+        ]
+        dynamic_score_total = _round_score(sum(dynamic_scores))
+        dynamic_average_score = (
+            _round_score(dynamic_score_total / len(self.dynamic_reference_history))
             if self.dynamic_reference_history
             else 0
         )
+        dynamic_match_score = dynamic_average_score
+        dynamic_quality_counts = {
+            "optimal": 0,
+            "acceptable": 0,
+            "lowValue": 0,
+            "unsafe": 0,
+            "unmatched": 0,
+        }
+        for entry in self.dynamic_reference_history:
+            quality = (entry.get("matchResult") or {}).get("matchQuality") or "unmatched"
+            if quality not in dynamic_quality_counts:
+                quality = "unmatched"
+            dynamic_quality_counts[quality] += 1
         first_repair_dynamic_match = False
         if repairs:
             first_repair_operation_id = next(
@@ -539,7 +628,9 @@ class PracticeSession:
                 "",
             )
             first_repair_dynamic_match = any(
-                entry.get("operationId") == first_repair_operation_id and (entry.get("matchResult") or {}).get("matched")
+                entry.get("operationId") == first_repair_operation_id
+                and (entry.get("matchResult") or {}).get("matched")
+                and (entry.get("matchResult") or {}).get("matchQuality") != "unsafe"
                 for entry in self.dynamic_reference_history
             )
         physical_evidence_available = bool(
@@ -561,7 +652,14 @@ class PracticeSession:
                 "pathOrder": 8 if (not has_repair or evidence_before_first_repair or first_repair_dynamic_match) else 0,
                 "repairLocalization": 12 if has_effective_repair else (6 if has_repair and not ineffective_repairs else 0),
                 "recoveryVerification": 6 if has_recovery_signal else 0,
-                "operationControl": max(0, 4 - min(4, (len(ineffective_repairs) * 2) + (safety_violations * 2))),
+                "operationControl": max(
+                    0,
+                    4 - min(
+                        4,
+                        (len(ineffective_repairs) * 2)
+                        + (max(safety_violations, dynamic_quality_counts["unsafe"]) * 2),
+                    ),
+                ),
             }
         score = sum(breakdown.values())
         score = max(0, min(40, score))
@@ -578,6 +676,12 @@ class PracticeSession:
             "dynamicReferenceMatchedCount": len(dynamic_matches),
             "dynamicReferenceUnmatchedCount": len(dynamic_unmatched),
             "dynamicReferenceMatchScore": dynamic_match_score,
+            "dynamicReferenceScoreTotal": dynamic_score_total,
+            "dynamicReferenceAverageScore": dynamic_average_score,
+            "dynamicReferenceOptimalCount": dynamic_quality_counts["optimal"],
+            "dynamicReferenceAcceptableCount": dynamic_quality_counts["acceptable"],
+            "dynamicReferenceLowValueCount": dynamic_quality_counts["lowValue"],
+            "dynamicReferenceUnsafeCount": dynamic_quality_counts["unsafe"],
             "routeQualityBreakdown": breakdown,
             "routeQualityScore": score,
         }

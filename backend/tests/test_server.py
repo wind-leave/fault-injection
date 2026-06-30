@@ -266,23 +266,14 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(body["status"], "error")
         self.assertEqual(body["errorCode"], "UNSUPPORTED_ACTION_TYPE")
 
-    def test_measure_point_generates_observation_and_updates_troubleshooting(self):
+    def test_measure_point_returns_virtual_measurement_without_updating_repair_path(self):
         package = valid_package()
-        package["simulationConfig"]["duration"] = 0.3
-        package["faultInstances"] = [{
-            "faultId": "fault-bias",
-            "faultType": "sensor_bias",
-            "targetId": "sim-1",
-            "enabled": True,
-            "startTime": 0.0,
-            "duration": 0.3,
-            "parameters": {"bias": 0.5},
-        }]
+        package["simulationConfig"]["duration"] = 0.4
         status, created = self._post(
             "/api/practice/session",
             {
                 "simulationPackage": package,
-                "dMatrix": d_matrix_with_observation_rule(),
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
                 "targetFaultId": "target-fault",
             },
         )
@@ -292,10 +283,10 @@ class SimulationBackendServerTests(unittest.TestCase):
         status, body = self._post(
             f"/api/practice/session/{session_id}/action",
             {
-                "operationId": "op-measure",
+                "operationId": "op-measure-virtual",
                 "actionType": "measurePoint",
-                "target": {"type": "testPoint", "id": "scope-1.ch1"},
-                "pointCode": "M1",
+                "target": {"type": "testPoint", "id": "scope-2.ch1"},
+                "pointCode": "V1",
                 "steps": 1,
                 "observed": "normal",
             },
@@ -305,9 +296,38 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(body["normalizedAction"]["actionType"], "measurePoint")
         self.assertNotIn("ruleResult", body)
         self.assertNotIn("appliedAction", body)
-        self.assertEqual(body["observationResult"]["observed"], "abnormal")
-        self.assertEqual(body["observationResult"]["source"], "backend")
-        self.assertEqual(body["troubleshootingResult"]["remainingFaultIds"], ["target-fault", "controller-fault"])
+        self.assertEqual(body["virtualMeasurement"]["pointCode"], "V1")
+        self.assertEqual(body["virtualMeasurement"]["pointType"], "virtual")
+        self.assertEqual(body["virtualMeasurement"]["source"], "backend")
+        self.assertEqual(body["troubleshootingState"]["virtualMeasurements"][0]["pointCode"], "V1")
+        self.assertEqual(body["troubleshootingState"]["repairAttempts"], [])
+
+    def test_measure_point_rejects_physical_console_point(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        status, body = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-measure-physical",
+                "actionType": "measurePoint",
+                "target": {"type": "testPoint", "id": "scope-1.ch1"},
+                "pointCode": "M1",
+                "steps": 1,
+            },
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(body["errorCode"], "INVALID_ACTION_SCHEMA")
+        self.assertEqual(body["field"], "pointCode")
 
     def test_practice_action_repeated_repair_is_recorded_and_skipped(self):
         package = valid_package()

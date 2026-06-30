@@ -7,6 +7,7 @@ from backend.practice_observation import (
     compare_physical_snapshots,
     evaluate_observation,
     evaluate_physical_measurement_snapshot,
+    point_type,
 )
 from backend.schemas import SimulationBackendError
 from backend.troubleshooting import TroubleshootingSession
@@ -122,24 +123,26 @@ class PracticeSession:
         }
 
     def _record_measure_point_action(self, action_record, normalized_action, steps):
+        measured_point_type = point_type(self.troubleshooting.d_matrix, action_record.get("pointCode"))
+        if measured_point_type != "virtual":
+            raise SimulationBackendError(
+                "INVALID_ACTION_SCHEMA",
+                "pointCode",
+                "measurePoint can only be used for virtual measurement points",
+            )
         simulation_result = self.simulation_session.step(steps)
         simulation_result["sessionId"] = self.simulation_session_id
-        observation_result = evaluate_observation(self.troubleshooting.d_matrix, action_record, simulation_result)
-        action_record["observed"] = observation_result["observed"]
-        action_record["observationResult"] = _clone(observation_result)
+        virtual_measurement = evaluate_observation(self.troubleshooting.d_matrix, action_record, simulation_result)
+        action_record["observed"] = virtual_measurement["observed"]
+        action_record["virtualMeasurement"] = _clone(virtual_measurement)
         self.student_actions.append(action_record)
+        self.virtual_measurements.append(_clone(virtual_measurement))
         self.simulation_action_history.append({
             "index": len(self.simulation_action_history) + 1,
             "operationId": action_record.get("operationId") or f"operation-{len(self.simulation_action_history) + 1}",
             "recordedAt": action_record["recordedAt"],
-            "result": {"status": "observed", "observationResult": _clone(observation_result)},
+            "result": {"status": "measured", "virtualMeasurement": _clone(virtual_measurement)},
         })
-        recommendation_record = self._build_recommendation_record(action_record)
-        troubleshooting_result = self.troubleshooting.record_operation(action_record)
-        recommendation_record["nextRecommendedStepAfterAction"] = _clone(troubleshooting_result.get("nextRecommendedStep"))
-        recommendation_record["remainingFaultIdsAfterAction"] = _clone(troubleshooting_result.get("remainingFaultIds"))
-        recommendation_record["routeQuality"] = _clone(troubleshooting_result.get("routeQuality"))
-        self.recommended_path_history.append(recommendation_record)
         self.simulation_results.append(_clone(simulation_result))
         return {
             "status": "success",
@@ -147,8 +150,8 @@ class PracticeSession:
             "practiceSessionId": self.practice_session_id,
             "simulationSessionId": self.simulation_session_id,
             "normalizedAction": normalized_action,
-            "observationResult": observation_result,
-            "troubleshootingResult": troubleshooting_result,
+            "virtualMeasurement": virtual_measurement,
+            "troubleshootingState": self._build_troubleshooting_state(),
             "simulationResult": simulation_result,
         }
 

@@ -15,6 +15,7 @@ LIMITS = {
     "max_duration": 1000.0,
     "min_step_size": 0.001,
     "max_step_size": 1.0,
+    "max_samples": 100_000,
     "max_nodes": 200,
     "max_edges": 400,
     "max_faults": 50,
@@ -78,6 +79,9 @@ def validate_executable_package(package):
         raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "simulationConfig.duration", "duration is outside the allowed range")
     if step_size < LIMITS["min_step_size"] or step_size > LIMITS["max_step_size"]:
         raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "simulationConfig.stepSize", "stepSize is outside the allowed range")
+    sample_count = math.ceil(duration / step_size)
+    if sample_count > LIMITS["max_samples"]:
+        raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "simulationConfig.samples", "sample count is outside the allowed range")
 
     nodes = ensure_list(package.get("nodes"), "nodes")
     edges = ensure_list(package.get("edges"), "edges")

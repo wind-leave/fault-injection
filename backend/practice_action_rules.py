@@ -16,7 +16,15 @@ def _text(value):
 class PracticeActionRuleEngine:
     def __init__(self, simulation_session, rules=None):
         self.simulation_session = simulation_session
-        self.rules = rules if isinstance(rules, dict) else DEFAULT_RULES
+        self.rules = self._merge_rules(rules)
+
+    def _merge_rules(self, rules):
+        merged = {key: dict(value) for key, value in DEFAULT_RULES.items()}
+        if isinstance(rules, dict):
+            for action_type, rule in rules.items():
+                if isinstance(rule, dict):
+                    merged.setdefault(action_type, {}).update(rule)
+        return merged
 
     def evaluate(self, action):
         action_type = _text(action.get("actionType"))
@@ -45,6 +53,17 @@ class PracticeActionRuleEngine:
             }
 
         rule = self.rules.get(action_type, {})
+        safety_state = action.get("safetyState") if isinstance(action.get("safetyState"), dict) else {}
+        if rule.get("requiresPowerOff") and safety_state.get("powerOff") is not True:
+            return {
+                "allowed": False,
+                "ruleCode": "POWER_NOT_OFF",
+                "durationSeconds": 0,
+                "riskLevel": rule.get("riskLevel", "high"),
+                "repeatAction": False,
+                "safetyViolation": True,
+                "warnings": ["power must be off before this repair action"],
+            }
         return {
             "allowed": True,
             "ruleCode": "ACTION_ALLOWED",

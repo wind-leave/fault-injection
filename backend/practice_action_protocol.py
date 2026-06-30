@@ -59,6 +59,7 @@ def normalize_practice_action(action):
         "target": {"type": target_type, "id": target_id},
         "targetId": target_id,
         "steps": _validate_steps(action.get("steps")),
+        "safetyState": action.get("safetyState") if isinstance(action.get("safetyState"), dict) else {},
         "rawAction": action.get("rawAction") if isinstance(action.get("rawAction"), dict) else {},
     }
     if action_type == "measurePoint":

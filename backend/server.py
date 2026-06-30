@@ -29,6 +29,10 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
     sessions_lock = threading.Lock()
     practice_sessions = {}
     practice_sessions_lock = threading.Lock()
+    max_active_simulation_sessions = 100
+    max_active_practice_sessions = 100
+    max_response_samples = 1000
+    default_max_practice_actions = 200
 
     def log_message(self, format, *args):
         return
@@ -74,6 +78,30 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
             },
         )
 
+    def _send_practice_session_not_found(self, run_id="", session_id=""):
+        self._send_json(
+            404,
+            {
+                "runId": run_id,
+                "status": "error",
+                "errorCode": "SESSION_NOT_FOUND",
+                "field": "sessionId",
+                "message": f"practice session not found: {session_id}",
+            },
+        )
+
+    def _send_practice_session_expired(self, run_id="", session_id=""):
+        self._send_json(
+            410,
+            {
+                "runId": run_id,
+                "status": "error",
+                "errorCode": "SESSION_EXPIRED",
+                "field": "sessionId",
+                "message": f"practice session expired: {session_id}",
+            },
+        )
+
     def _session_step_path(self, path):
         prefix = f"{self.session_endpoint}/"
         suffix = "/step"
@@ -105,17 +133,47 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         session_id = path[len(prefix):-len(suffix)]
         return session_id.strip("/")
 
+    def _practice_status_path(self, path):
+        prefix = f"{self.practice_endpoint}/"
+        suffix = "/status"
+        if not path.startswith(prefix) or not path.endswith(suffix):
+            return ""
+        session_id = path[len(prefix):-len(suffix)]
+        return session_id.strip("/")
+
+    def _practice_delete_path(self, path):
+        prefix = f"{self.practice_endpoint}/"
+        if not path.startswith(prefix):
+            return ""
+        session_id = path[len(prefix):].strip("/")
+        if not session_id or "/" in session_id:
+            return ""
+        return session_id
+
     def _validate_steps(self, payload):
         steps = payload.get("steps", 1)
         if isinstance(steps, bool) or not isinstance(steps, int):
             raise SimulationBackendError("INVALID_SCHEMA", "steps", "steps must be an integer")
         if steps < 1 or steps > MAX_STEP_BATCH:
             raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "steps", "steps is outside the allowed range")
+        if steps > self.max_response_samples:
+            raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "steps", "steps exceeds the response sample limit")
         return steps
+
+    def _ensure_simulation_session_capacity(self):
+        with self.sessions_lock:
+            if len(self.sessions) >= self.max_active_simulation_sessions:
+                raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "sessions", "too many active simulation sessions")
+
+    def _ensure_practice_session_capacity(self):
+        with self.practice_sessions_lock:
+            if len(self.practice_sessions) >= self.max_active_practice_sessions:
+                raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "practiceSessions", "too many active practice sessions")
 
     def _create_session(self, run_id, started):
         payload = self._read_json()
         graph = compile_graph(payload, self.registry)
+        self._ensure_simulation_session_capacity()
         session_id = f"session-{uuid.uuid4().hex[:12]}"
         session = SimulationSession(graph, run_id=run_id)
         with self.sessions_lock:
@@ -157,6 +215,8 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         if not isinstance(simulation_package, dict):
             raise SimulationBackendError("INVALID_SCHEMA", "simulationPackage", "simulationPackage must be an object")
         graph = compile_graph(simulation_package, self.registry)
+        self._ensure_practice_session_capacity()
+        self._ensure_simulation_session_capacity()
         practice_session_id = f"practice-{uuid.uuid4().hex[:12]}"
         simulation_session_id = f"session-{uuid.uuid4().hex[:12]}"
         simulation_session = SimulationSession(graph, run_id=run_id)
@@ -167,6 +227,10 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
             payload.get("dMatrix"),
             payload.get("targetFaultId"),
             scoring_rules=payload.get("scoringRules"),
+            lifecycle=payload.get("lifecycle"),
+            action_rules=payload.get("actionRules"),
+            resource_limits=payload.get("resourceLimits"),
+            default_max_actions=self.default_max_practice_actions,
         )
         with self.sessions_lock:
             self.sessions[simulation_session_id] = simulation_session
@@ -182,10 +246,22 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         steps = self._validate_steps(payload)
         with self.practice_sessions_lock:
             session = self.practice_sessions.get(session_id)
+            if session is not None and session.is_expired():
+                session.close("expired")
+                self.practice_sessions.pop(session_id, None)
+                expired_session = session
+                session = None
+            else:
+                expired_session = None
             if session is not None:
                 result = session.record_action(payload, steps=steps)
+        if expired_session is not None:
+            with self.sessions_lock:
+                self.sessions.pop(expired_session.simulation_session_id, None)
+            self._send_practice_session_expired(run_id, session_id)
+            return
         if session is None:
-            self._send_session_not_found(run_id, session_id)
+            self._send_practice_session_not_found(run_id, session_id)
             return
         result["runId"] = run_id
         result["metrics"] = {"elapsedMs": round((time.monotonic() - started) * 1000, 3)}
@@ -195,17 +271,76 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         payload = self._read_json()
         with self.practice_sessions_lock:
             session = self.practice_sessions.get(session_id)
+            if session is not None and session.is_expired():
+                session.close("expired")
+                self.practice_sessions.pop(session_id, None)
+                expired_session = session
+                session = None
+            else:
+                expired_session = None
             if session is not None:
                 result = session.submit(payload)
                 self.practice_sessions.pop(session_id, None)
+        if expired_session is not None:
+            with self.sessions_lock:
+                self.sessions.pop(expired_session.simulation_session_id, None)
+            self._send_practice_session_expired(run_id, session_id)
+            return
         if session is None:
-            self._send_session_not_found(run_id, session_id)
+            self._send_practice_session_not_found(run_id, session_id)
             return
         with self.sessions_lock:
             self.sessions.pop(session.simulation_session_id, None)
         result["runId"] = run_id
         result["metrics"] = {"elapsedMs": round((time.monotonic() - started) * 1000, 3)}
         self._send_json(200, result)
+
+    def _practice_status(self, run_id, session_id, started):
+        with self.practice_sessions_lock:
+            session = self.practice_sessions.get(session_id)
+            if session is not None and session.is_expired():
+                session.close("expired")
+                self.practice_sessions.pop(session_id, None)
+                expired_session = session
+                session = None
+            else:
+                expired_session = None
+            if session is not None:
+                result = session.status_response()
+        if expired_session is not None:
+            with self.sessions_lock:
+                self.sessions.pop(expired_session.simulation_session_id, None)
+            self._send_practice_session_expired(run_id, session_id)
+            return
+        if session is None:
+            self._send_practice_session_not_found(run_id, session_id)
+            return
+        result["runId"] = run_id
+        result["metrics"] = {"elapsedMs": round((time.monotonic() - started) * 1000, 3)}
+        self._send_json(200, result)
+
+    def _delete_practice_session(self, run_id, session_id, started):
+        with self.practice_sessions_lock:
+            session = self.practice_sessions.pop(session_id, None)
+            if session is not None:
+                lifecycle = session.close("abandoned")
+        if session is None:
+            self._send_practice_session_not_found(run_id, session_id)
+            return
+        with self.sessions_lock:
+            self.sessions.pop(session.simulation_session_id, None)
+        self._send_json(
+            200,
+            {
+                "runId": run_id,
+                "status": "success",
+                "sessionId": session.practice_session_id,
+                "practiceSessionId": session.practice_session_id,
+                "simulationSessionId": session.simulation_session_id,
+                "lifecycle": lifecycle,
+                "metrics": {"elapsedMs": round((time.monotonic() - started) * 1000, 3)},
+            },
+        )
 
     def do_POST(self):
         run_id = f"run-{uuid.uuid4().hex[:12]}"
@@ -244,9 +379,29 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._send_json(500, {"runId": run_id, "status": "error", "errorCode": "INTERNAL_ERROR", "field": "server", "message": str(exc)})
 
+    def do_GET(self):
+        run_id = f"run-{uuid.uuid4().hex[:12]}"
+        path = urlparse(self.path).path
+        practice_status_session_id = self._practice_status_path(path)
+        if not practice_status_session_id:
+            self._send_not_found(run_id)
+            return
+        started = time.monotonic()
+        try:
+            self._practice_status(run_id, practice_status_session_id, started)
+        except SimulationBackendError as exc:
+            self._send_json(400, exc.to_response(run_id))
+        except Exception as exc:
+            self._send_json(500, {"runId": run_id, "status": "error", "errorCode": "INTERNAL_ERROR", "field": "server", "message": str(exc)})
+
     def do_DELETE(self):
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         path = urlparse(self.path).path
+        practice_session_id = self._practice_delete_path(path)
+        if practice_session_id:
+            started = time.monotonic()
+            self._delete_practice_session(run_id, practice_session_id, started)
+            return
         session_id = self._session_delete_path(path)
         if not session_id or session_id.endswith("/step"):
             self._send_not_found(run_id)

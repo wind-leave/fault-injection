@@ -40,6 +40,17 @@ class SchemaValidationTests(unittest.TestCase):
         self.assertEqual(context.exception.error_code, "SIMULATION_LIMIT_EXCEEDED")
         self.assertEqual(context.exception.field, "simulationConfig.duration")
 
+    def test_rejects_excessive_total_sample_count(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 1000.0
+        package["simulationConfig"]["stepSize"] = 0.001
+
+        with self.assertRaises(SimulationBackendError) as context:
+            validate_executable_package(package)
+
+        self.assertEqual(context.exception.error_code, "SIMULATION_LIMIT_EXCEEDED")
+        self.assertEqual(context.exception.field, "simulationConfig.samples")
+
     def test_rejects_non_numeric_parameter(self):
         package = valid_package()
         package["nodes"][0]["parameters"]["value"] = "fast"

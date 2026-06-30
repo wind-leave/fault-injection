@@ -39,10 +39,38 @@ def d_matrix_with_physical_and_virtual_points():
     return matrix
 
 
+def d_matrix_with_rankable_virtual_points():
+    matrix = d_matrix_with_physical_and_virtual_points()
+    matrix["points"].append({
+        "pointId": "tp-virtual-low",
+        "shortName": "V2",
+        "name": "low value virtual point",
+        "pointType": "virtual",
+        "channel": "scope-3.ch1",
+    })
+    matrix["rows"][0]["cells"].extend([
+        {"pointId": "tp-virtual", "pointCode": "V1", "pointName": "virtual instrument point", "detectable": True, "value": 1},
+        {"pointId": "tp-virtual-low", "pointCode": "V2", "pointName": "low value virtual point", "detectable": True, "value": 1},
+    ])
+    matrix["rows"][1]["cells"].extend([
+        {"pointId": "tp-virtual", "pointCode": "V1", "pointName": "virtual instrument point", "detectable": False, "value": 0},
+        {"pointId": "tp-virtual-low", "pointCode": "V2", "pointName": "low value virtual point", "detectable": True, "value": 1},
+    ])
+    matrix["rows"][2]["cells"].extend([
+        {"pointId": "tp-virtual", "pointCode": "V1", "pointName": "virtual instrument point", "detectable": False, "value": 0},
+        {"pointId": "tp-virtual-low", "pointCode": "V2", "pointName": "low value virtual point", "detectable": False, "value": 0},
+    ])
+    return matrix
+
+
 class SimulationBackendServerTests(unittest.TestCase):
     def setUp(self):
         SimulationBackendHandler.sessions = {}
         SimulationBackendHandler.practice_sessions = {}
+        SimulationBackendHandler.max_active_simulation_sessions = 100
+        SimulationBackendHandler.max_active_practice_sessions = 100
+        SimulationBackendHandler.max_response_samples = 1000
+        SimulationBackendHandler.default_max_practice_actions = 200
         self.server = HTTPServer(("127.0.0.1", 0), SimulationBackendHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -64,6 +92,14 @@ class SimulationBackendServerTests(unittest.TestCase):
     def _delete(self, path):
         connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
         connection.request("DELETE", path)
+        response = connection.getresponse()
+        response_body = response.read().decode("utf-8")
+        connection.close()
+        return response.status, json.loads(response_body)
+
+    def _get(self, path):
+        connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
+        connection.request("GET", path)
         response = connection.getresponse()
         response_body = response.read().decode("utf-8")
         connection.close()
@@ -127,6 +163,30 @@ class SimulationBackendServerTests(unittest.TestCase):
         status, missing = self._post(f"/api/simulations/session/{session_id}/step", {})
         self.assertEqual(status, 404)
         self.assertEqual(missing["errorCode"], "SESSION_NOT_FOUND")
+
+    def test_rejects_new_simulation_session_when_active_session_limit_is_reached(self):
+        SimulationBackendHandler.max_active_simulation_sessions = 1
+        status, created = self._post("/api/simulations/session", valid_package())
+        self.assertEqual(status, 200)
+
+        status, rejected = self._post("/api/simulations/session", valid_package())
+
+        self.assertEqual(status, 400)
+        self.assertEqual(rejected["status"], "error")
+        self.assertEqual(rejected["errorCode"], "SIMULATION_LIMIT_EXCEEDED")
+        self.assertEqual(rejected["field"], "sessions")
+        self.assertEqual(len(SimulationBackendHandler.sessions), 1)
+
+    def test_rejects_step_batch_that_would_exceed_response_sample_limit(self):
+        SimulationBackendHandler.max_response_samples = 1
+        status, created = self._post("/api/simulations/session", valid_package())
+        self.assertEqual(status, 200)
+
+        status, rejected = self._post(f"/api/simulations/session/{created['sessionId']}/step", {"steps": 2})
+
+        self.assertEqual(status, 400)
+        self.assertEqual(rejected["errorCode"], "SIMULATION_LIMIT_EXCEEDED")
+        self.assertEqual(rejected["field"], "steps")
 
     def test_runs_practice_session_action_and_submit_flow(self):
         package = valid_package()
@@ -211,8 +271,11 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(submitted["status"], "success")
         self.assertEqual(submitted["scoreBreakdown"]["faultDetection"], 40)
-        self.assertEqual(submitted["initialBestPath"]["faultId"], "target-fault")
-        self.assertEqual(submitted["initialBestPath"]["steps"][0]["pointCode"], "M1")
+        self.assertNotIn("initialBestPath", submitted)
+        self.assertEqual(submitted["initialRecommendedPath"]["faultId"], "target-fault")
+        self.assertEqual(submitted["initialRecommendedPath"]["steps"][0]["actionType"], "measurePoint")
+        self.assertEqual(submitted["initialRecommendedPath"]["steps"][0]["pointCode"], "M1")
+        self.assertIn("replaceComponent", [step["actionType"] for step in submitted["initialRecommendedPath"]["steps"]])
         self.assertEqual(submitted["record"]["targetFaultId"], "target-fault")
         self.assertEqual(submitted["record"]["finalFaultId"], "target-fault")
         self.assertEqual(submitted["record"]["studentActions"][0]["faultId"], "fault-bias")
@@ -226,6 +289,228 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertIn("repairEffect", submitted["record"]["repairAttempts"][0])
         self.assertEqual(submitted["record"]["troubleshootingState"]["repairAttempts"], submitted["record"]["repairAttempts"])
         self.assertNotIn("simulationResults", submitted["record"])
+
+    def test_submit_returns_internal_action_path_for_measurement_and_wire_repair(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 0.5
+        package["faultInstances"] = [{
+            "faultId": "fault-wire",
+            "faultType": "wire_open",
+            "targetId": "edge-sim-scope",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.5,
+            "parameters": {"bias": 0.5},
+        }]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertNotIn("initialRecommendedPath", created)
+        self.assertNotIn("actualTroubleshootingPath", created)
+        session_id = created["sessionId"]
+
+        status, measured = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-measure",
+                "actionType": "measurePoint",
+                "target": {"type": "testPoint", "id": "scope-2.ch1"},
+                "pointCode": "V1",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertNotIn("recommendedPath", measured)
+        self.assertNotIn("nextRecommendedAction", measured)
+        self.assertNotIn("actualTroubleshootingPath", measured)
+
+        status, repaired = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-wire",
+                "actionType": "replaceWire",
+                "target": {"type": "wire", "id": "edge-sim-scope"},
+                "faultId": "fault-wire",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(repaired["ruleResult"]["ruleCode"], "ACTION_ALLOWED")
+        self.assertNotIn("recommendedPath", repaired)
+        self.assertNotIn("nextRecommendedAction", repaired)
+        self.assertNotIn("actualTroubleshootingPath", repaired)
+
+        status, submitted = self._post(
+            f"/api/practice/session/{session_id}/submit",
+            {"finalFaultId": "target-fault"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertIn("initialRecommendedPath", submitted)
+        self.assertNotIn("initialBestPath", submitted)
+        initial_steps = submitted["initialRecommendedPath"]["steps"]
+        self.assertEqual(initial_steps[0]["actionType"], "measurePoint")
+        self.assertTrue(
+            any(
+                step.get("actionType") == "replaceWire"
+                and step.get("target") == {"type": "wire", "id": "edge-sim-scope"}
+                and step.get("faultId") == "fault-wire"
+                and step.get("routeRole") == "repairAttempt"
+                for step in initial_steps
+            )
+        )
+        actual_path = submitted["record"]["actualTroubleshootingPath"]
+        self.assertEqual(actual_path["basis"], "studentActions")
+        self.assertEqual([step["actionType"] for step in actual_path["steps"]], ["measurePoint", "replaceWire"])
+        self.assertEqual(actual_path["steps"][0]["routeRole"], "evidenceCollection")
+        self.assertEqual(actual_path["steps"][0]["pointCode"], "V1")
+        self.assertEqual(actual_path["steps"][1]["routeRole"], "repairAttempt")
+        self.assertEqual(actual_path["steps"][1]["target"], {"type": "wire", "id": "edge-sim-scope"})
+        self.assertEqual(actual_path["steps"][1]["faultId"], "fault-wire")
+        self.assertIn("repairEffect", actual_path["steps"][1])
+        self.assertEqual(submitted["record"]["pathEvaluation"]["measuredVirtualPointCount"], 1)
+        self.assertEqual(submitted["record"]["pathEvaluation"]["wireRepairAttemptCount"], 1)
+        self.assertEqual(submitted["record"]["pathEvaluation"]["componentRepairAttemptCount"], 0)
+        self.assertEqual(submitted["record"]["pathEvaluation"]["totalStepCount"], 2)
+        breakdown = submitted["record"]["pathEvaluation"]["routeQualityBreakdown"]
+        self.assertEqual(
+            set(breakdown.keys()),
+            {
+                "evidenceCollection",
+                "pathOrder",
+                "repairLocalization",
+                "recoveryVerification",
+                "operationControl",
+            },
+        )
+        self.assertEqual(sum(breakdown.values()), submitted["record"]["pathEvaluation"]["routeQualityScore"])
+        self.assertEqual(submitted["scoreBreakdown"]["routeQuality"], submitted["record"]["pathEvaluation"]["routeQualityScore"])
+
+    def test_dynamic_reference_scores_direct_repair_from_physical_evidence(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 0.5
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.5,
+            "parameters": {"bias": 0.5},
+        }]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        status, repaired = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-direct-component",
+                "actionType": "replaceComponent",
+                "target": {"type": "component", "id": "sim-1"},
+                "faultId": "fault-bias",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertNotIn("dynamicReferenceHistory", repaired)
+        self.assertNotIn("recommendedActionSet", repaired)
+        self.assertNotIn("nextRecommendedAction", repaired)
+
+        status, status_body = self._get(f"/api/practice/session/{session_id}/status")
+        self.assertEqual(status, 200)
+        self.assertNotIn("dynamicReferenceHistory", status_body)
+        self.assertNotIn("recommendedActionSet", status_body)
+
+        status, submitted = self._post(
+            f"/api/practice/session/{session_id}/submit",
+            {"finalFaultId": "target-fault"},
+        )
+
+        self.assertEqual(status, 200)
+        history = submitted["record"]["dynamicReferenceHistory"]
+        self.assertEqual(len(history), 1)
+        reference_actions = history[0]["referenceBeforeAction"]["recommendedActionSet"]
+        self.assertTrue(
+            any(
+                action.get("actionType") == "replaceComponent"
+                and action.get("target") == {"type": "component", "id": "sim-1"}
+                and action.get("faultId") == "fault-bias"
+                and action.get("routeRole") == "repairAttempt"
+                for action in reference_actions
+            )
+        )
+        self.assertTrue(history[0]["matchResult"]["matched"])
+        self.assertEqual(history[0]["matchResult"]["matchType"], "exactRepair")
+        evaluation = submitted["record"]["pathEvaluation"]
+        self.assertEqual(evaluation["dynamicReferenceMatchedCount"], 1)
+        self.assertEqual(evaluation["dynamicReferenceUnmatchedCount"], 0)
+        self.assertEqual(evaluation["routeQualityBreakdown"]["pathOrder"], 8)
+
+    def test_recommended_actions_are_ranked_without_adding_recovery_verification_step(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 0.5
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.5,
+            "parameters": {"bias": 0.5},
+        }]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": d_matrix_with_rankable_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        status, measured = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-v1",
+                "actionType": "measurePoint",
+                "target": {"type": "testPoint", "id": "scope-2.ch1"},
+                "pointCode": "V1",
+            },
+        )
+        self.assertEqual(status, 200)
+
+        status, submitted = self._post(
+            f"/api/practice/session/{session_id}/submit",
+            {"finalFaultId": "target-fault"},
+        )
+
+        self.assertEqual(status, 200)
+        history = submitted["record"]["dynamicReferenceHistory"]
+        actions = history[0]["referenceBeforeAction"]["recommendedActionSet"]
+        self.assertEqual(actions[0]["actionType"], "measurePoint")
+        self.assertEqual(actions[0]["pointCode"], "V1")
+        self.assertEqual(actions[0]["rank"], 1)
+        self.assertEqual(actions[0]["recommendationTier"], "optimal")
+        self.assertGreater(actions[0]["expectedInformationGain"], actions[1]["expectedInformationGain"])
+        self.assertGreater(actions[0]["priority"], actions[-1]["priority"])
+        self.assertIn("confidence", actions[0])
+
+        initial_steps = submitted["initialRecommendedPath"]["steps"]
+        self.assertNotIn("verifyRecovery", [step["actionType"] for step in initial_steps])
+        self.assertEqual(initial_steps[-1]["actionType"], "replaceComponent")
+        self.assertEqual(initial_steps[-1]["routeRole"], "repairAttempt")
 
     def test_practice_session_creation_returns_physical_measurement_snapshot(self):
         package = valid_package()
@@ -596,6 +881,195 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 404)
         self.assertEqual(missing_practice["errorCode"], "SESSION_NOT_FOUND")
+
+        status, missing_simulation = self._post(f"/api/simulations/session/{simulation_session_id}/step", {})
+        self.assertEqual(status, 404)
+        self.assertEqual(missing_simulation["errorCode"], "SESSION_NOT_FOUND")
+
+    def test_rejects_new_practice_session_when_active_practice_limit_is_reached(self):
+        SimulationBackendHandler.max_active_practice_sessions = 1
+        payload = {
+            "simulationPackage": valid_package(),
+            "dMatrix": sample_d_matrix(),
+            "targetFaultId": "target-fault",
+        }
+        status, created = self._post("/api/practice/session", payload)
+        self.assertEqual(status, 200)
+
+        status, rejected = self._post("/api/practice/session", payload)
+
+        self.assertEqual(status, 400)
+        self.assertEqual(rejected["errorCode"], "SIMULATION_LIMIT_EXCEEDED")
+        self.assertEqual(rejected["field"], "practiceSessions")
+
+    def test_practice_session_rejects_actions_after_action_limit(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 0.4
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+                "resourceLimits": {"maxActions": 1},
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        status, first = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-1",
+                "actionType": "measurePoint",
+                "target": {"type": "testPoint", "id": "scope-2.ch1"},
+                "pointCode": "V1",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(first["virtualMeasurement"]["pointCode"], "V1")
+
+        status, rejected = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-2",
+                "actionType": "measurePoint",
+                "target": {"type": "testPoint", "id": "scope-2.ch1"},
+                "pointCode": "V1",
+            },
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(rejected["errorCode"], "SIMULATION_LIMIT_EXCEEDED")
+        self.assertEqual(rejected["field"], "resourceLimits.maxActions")
+
+    def test_repair_action_requires_power_off_when_configured(self):
+        package = valid_package()
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.3,
+            "parameters": {"bias": 0.5},
+        }]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+                "actionRules": {
+                    "replaceComponent": {
+                        "requiresPowerOff": True,
+                        "durationSeconds": 120,
+                        "riskLevel": "high",
+                    },
+                },
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        status, blocked = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-hot-swap",
+                "actionType": "replaceComponent",
+                "target": {"type": "component", "id": "sim-1"},
+                "faultId": "fault-bias",
+                "safetyState": {"powerOff": False},
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(blocked["ruleResult"]["allowed"], False)
+        self.assertEqual(blocked["ruleResult"]["ruleCode"], "POWER_NOT_OFF")
+        self.assertTrue(blocked["normalizedAction"]["safetyViolation"])
+        self.assertEqual(blocked["appliedAction"]["status"], "skipped")
+
+    def test_get_practice_session_status_reports_lifecycle_state(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        status, body = self._get(f"/api/practice/session/{session_id}/status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["status"], "success")
+        self.assertEqual(body["practiceSessionId"], session_id)
+        self.assertEqual(body["simulationSessionId"], created["simulationSessionId"])
+        self.assertEqual(body["lifecycle"]["state"], "active")
+        self.assertEqual(body["lifecycle"]["actionCount"], 0)
+        self.assertIn("createdAt", body["lifecycle"])
+        self.assertIn("lastActivityAt", body["lifecycle"])
+        self.assertIn("troubleshootingState", body)
+
+    def test_deletes_practice_session_and_bound_simulation_session(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        practice_session_id = created["sessionId"]
+        simulation_session_id = created["simulationSessionId"]
+
+        status, deleted = self._delete(f"/api/practice/session/{practice_session_id}")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(deleted["status"], "success")
+        self.assertEqual(deleted["practiceSessionId"], practice_session_id)
+        self.assertEqual(deleted["simulationSessionId"], simulation_session_id)
+        self.assertEqual(deleted["lifecycle"]["state"], "abandoned")
+
+        status, missing_practice = self._get(f"/api/practice/session/{practice_session_id}/status")
+        self.assertEqual(status, 404)
+        self.assertEqual(missing_practice["errorCode"], "SESSION_NOT_FOUND")
+
+        status, missing_simulation = self._post(f"/api/simulations/session/{simulation_session_id}/step", {})
+        self.assertEqual(status, 404)
+        self.assertEqual(missing_simulation["errorCode"], "SESSION_NOT_FOUND")
+
+    def test_expired_practice_session_is_cleaned_before_action(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+                "lifecycle": {"maxLifetimeSeconds": 0},
+            },
+        )
+        self.assertEqual(status, 200)
+        practice_session_id = created["sessionId"]
+        simulation_session_id = created["simulationSessionId"]
+
+        status, expired = self._post(
+            f"/api/practice/session/{practice_session_id}/action",
+            {
+                "operationId": "op-expired",
+                "actionType": "measurePoint",
+                "target": {"type": "testPoint", "id": "scope-2.ch1"},
+                "pointCode": "V1",
+            },
+        )
+
+        self.assertEqual(status, 410)
+        self.assertEqual(expired["status"], "error")
+        self.assertEqual(expired["errorCode"], "SESSION_EXPIRED")
+        self.assertEqual(expired["field"], "sessionId")
 
         status, missing_simulation = self._post(f"/api/simulations/session/{simulation_session_id}/step", {})
         self.assertEqual(status, 404)

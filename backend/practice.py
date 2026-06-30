@@ -102,14 +102,25 @@ class PracticeSession:
             "recordedAt": action_record["recordedAt"],
             "result": _clone(action_application),
         })
-        recommendation_record = self._build_recommendation_record(action_record)
-        troubleshooting_result = self.troubleshooting.record_operation(action_record)
-        recommendation_record["nextRecommendedStepAfterAction"] = _clone(troubleshooting_result.get("nextRecommendedStep"))
-        recommendation_record["remainingFaultIdsAfterAction"] = _clone(troubleshooting_result.get("remainingFaultIds"))
-        recommendation_record["routeQuality"] = _clone(troubleshooting_result.get("routeQuality"))
-        self.recommended_path_history.append(recommendation_record)
+        previous_snapshot = _clone(self.latest_physical_measurement_snapshot or {})
         simulation_result = self.simulation_session.step(steps)
         simulation_result["sessionId"] = self.simulation_session_id
+        snapshot = evaluate_physical_measurement_snapshot(self.troubleshooting.d_matrix, simulation_result)
+        repair_effect = compare_physical_snapshots(previous_snapshot, snapshot)
+        self.latest_physical_measurement_snapshot = _clone(snapshot)
+        self.physical_measurement_snapshots.append(_clone(snapshot))
+        repair_attempt = {
+            "operationId": action_record.get("operationId") or f"operation-{len(self.repair_attempts) + 1}",
+            "actionType": action_record.get("actionType") or "",
+            "target": _clone(action_record.get("target") or {}),
+            "faultId": action_record.get("faultId") or "",
+            "ruleResult": _clone(rule_result),
+            "appliedAction": _clone(action_application),
+            "repairEffect": _clone(repair_effect),
+        }
+        self.repair_attempts.append(repair_attempt)
+        action_record["repairEffect"] = _clone(repair_effect)
+        action_record["physicalMeasurementSnapshot"] = _clone(snapshot)
         self.simulation_results.append(_clone(simulation_result))
         return {
             "status": "success",
@@ -119,6 +130,9 @@ class PracticeSession:
             "normalizedAction": normalized_action,
             "ruleResult": _clone(rule_result),
             "appliedAction": action_application,
+            "repairEffect": repair_effect,
+            "physicalMeasurementSnapshot": snapshot,
+            "troubleshootingState": self._build_troubleshooting_state(),
             "simulationResult": simulation_result,
         }
 

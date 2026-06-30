@@ -53,6 +53,7 @@ class PracticeSession:
         self.virtual_measurements = []
         self.repair_attempts = []
         self.latest_physical_measurement_snapshot = None
+        self.initial_physical_measurement_snapshot = None
 
     def _build_troubleshooting_state(self):
         return {
@@ -69,6 +70,7 @@ class PracticeSession:
         self.simulation_results.append(_clone(simulation_result))
         snapshot = evaluate_physical_measurement_snapshot(self.troubleshooting.d_matrix, simulation_result)
         self.latest_physical_measurement_snapshot = _clone(snapshot)
+        self.initial_physical_measurement_snapshot = _clone(snapshot)
         self.physical_measurement_snapshots.append(_clone(snapshot))
         return {
             "status": "success",
@@ -218,6 +220,11 @@ class PracticeSession:
                 "durationSeconds": elapsed_seconds,
                 "studentActions": _clone(self.student_actions),
                 "simulationActionHistory": _clone(self.simulation_action_history),
+                "initialPhysicalMeasurementSnapshot": _clone(self.initial_physical_measurement_snapshot or {}),
+                "physicalMeasurementSnapshots": _clone(self.physical_measurement_snapshots),
+                "virtualMeasurements": _clone(self.virtual_measurements),
+                "repairAttempts": _clone(self.repair_attempts),
+                "troubleshootingState": self._build_troubleshooting_state(),
                 "actualTroubleshootingPath": self.troubleshooting._current_path(),
                 "recommendedPathHistory": _clone(self.recommended_path_history),
             },

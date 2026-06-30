@@ -107,20 +107,20 @@ Content-Type: application/json
 ```json
 {
   "protocolVersion": "1.0",
-  "operationId": "op-measure-001",
+  "operationId": "op-measure-virtual-001",
   "actionType": "measurePoint",
   "target": {
     "type": "testPoint",
-    "id": "scope-1.ch1"
+    "id": "scope-2.ch1"
   },
-  "pointCode": "M1",
+  "pointCode": "V1",
   "steps": 1,
   "clientTime": "2026-06-29T16:20:00+08:00",
   "rawAction": {}
 }
 ```
 
-三维端不需要提交 `observed`。后端会根据仿真曲线和测点规则生成 `observationResult.observed`，再用该结果更新排故路径。
+`measurePoint` 只用于虚拟测点。物理测点由显控台统一展示，后端通过 `physicalMeasurementSnapshot` 返回；三维端不需要提交 `observed`。后端会根据仿真曲线和测点规则生成 `virtualMeasurement.observed`。
 
 ## 成功返回
 
@@ -166,13 +166,51 @@ Content-Type: application/json
     ],
     "warnings": []
   },
+  "repairEffect": {
+    "effective": true,
+    "status": "recovered",
+    "recoveredPointCodes": ["M1"],
+    "newAbnormalPointCodes": [],
+    "remainingAbnormalPointCodes": [],
+    "unchangedAbnormalPointCodes": []
+  },
+  "physicalMeasurementSnapshot": {
+    "source": "backend",
+    "points": [],
+    "abnormalPointCodes": [],
+    "normalPointCodes": [],
+    "unknownPointCodes": []
+  },
+  "troubleshootingState": {
+    "physicalMeasurementSnapshot": {},
+    "virtualMeasurements": [],
+    "repairAttempts": [],
+    "faultCandidates": [],
+    "status": "resolved"
+  },
   "simulationResult": {}
 }
 ```
 
 `simulationResult` 为当前后端已有仿真结果结构，包含曲线、事件、指标和警告。
 
-`measurePoint` 成功返回时包含 `observationResult` 和 `troubleshootingResult`，不包含 `ruleResult` 和 `appliedAction`。
+`measurePoint` 成功返回时包含 `virtualMeasurement` 和 `troubleshootingState`，不包含 `ruleResult` 和 `appliedAction`。
+
+```json
+{
+  "virtualMeasurement": {
+    "pointCode": "V1",
+    "pointId": "tp-virtual",
+    "pointType": "virtual",
+    "channel": "scope-2.ch1",
+    "observed": "normal",
+    "actualValue": 1.0,
+    "referenceValue": 1.0,
+    "metricValue": 0.0,
+    "reason": "metric-below-normal-threshold"
+  }
+}
+```
 
 ## 业务规则结果
 
@@ -228,4 +266,5 @@ Content-Type: application/json
 - 三维端必须能拿到当前任务中故障实例的 `faultId`。
 - 一个部件或一根电线在当前联调阶段只绑定一个故障。
 - 三维端每次学生更换对象时提交一次 `/action`。
-- 三维端不得把测量、点击查看、展开面板等非更换行为提交为学生动作。
+- 学生使用仪器测量虚拟测点时，三维端提交 `measurePoint`；物理测点由显控台快照展示，不通过 `measurePoint` 提交。
+- 三维端不得把点击查看、展开面板等非动作行为提交为学生动作。

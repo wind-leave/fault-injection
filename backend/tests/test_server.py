@@ -143,7 +143,7 @@ class SimulationBackendServerTests(unittest.TestCase):
             "/api/practice/session",
             {
                 "simulationPackage": package,
-                "dMatrix": sample_d_matrix(),
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
                 "targetFaultId": "target-fault",
             },
         )
@@ -190,6 +190,19 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertNotIn("nextRecommendedStep", updated)
         self.assertNotIn("remainingFaultIds", updated)
 
+        status, measured = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-virtual-before-submit",
+                "actionType": "measurePoint",
+                "target": {"type": "testPoint", "id": "scope-2.ch1"},
+                "pointCode": "V1",
+                "steps": 1,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(measured["virtualMeasurement"]["pointCode"], "V1")
+
         status, submitted = self._post(
             f"/api/practice/session/{session_id}/submit",
             {"finalFaultId": "target-fault", "submittedAt": "2026-06-28T00:01:00Z"},
@@ -204,6 +217,14 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(submitted["record"]["finalFaultId"], "target-fault")
         self.assertEqual(submitted["record"]["studentActions"][0]["faultId"], "fault-bias")
         self.assertEqual(submitted["record"]["recommendedPathHistory"], [])
+        self.assertIn("initialPhysicalMeasurementSnapshot", submitted["record"])
+        self.assertIn("physicalMeasurementSnapshots", submitted["record"])
+        self.assertIn("virtualMeasurements", submitted["record"])
+        self.assertIn("repairAttempts", submitted["record"])
+        self.assertGreaterEqual(len(submitted["record"]["physicalMeasurementSnapshots"]), 2)
+        self.assertEqual(submitted["record"]["repairAttempts"][0]["faultId"], "fault-bias")
+        self.assertIn("repairEffect", submitted["record"]["repairAttempts"][0])
+        self.assertEqual(submitted["record"]["troubleshootingState"]["repairAttempts"], submitted["record"]["repairAttempts"])
         self.assertNotIn("simulationResults", submitted["record"])
 
     def test_practice_session_creation_returns_physical_measurement_snapshot(self):

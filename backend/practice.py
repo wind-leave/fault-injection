@@ -15,7 +15,7 @@ from backend.practice_scoring import (
     grade_for_score,
 )
 from backend.schemas import SimulationBackendError
-from backend.troubleshooting import TroubleshootingSession
+from backend.troubleshooting import TroubleshootingSession, _fault_id
 
 
 def _clone(value):
@@ -747,7 +747,7 @@ class PracticeSession:
                 "pointCode",
                 "measurePoint can only be used for virtual measurement points",
             )
-        simulation_result = self.simulation_session.step(steps)
+        simulation_result = _clone(self.simulation_results[-1]) if self.simulation_results else self.simulation_session.step(1)
         simulation_result["sessionId"] = self.simulation_session_id
         virtual_measurement = evaluate_observation(self.troubleshooting.d_matrix, action_record, simulation_result)
         action_record["observed"] = virtual_measurement["observed"]
@@ -763,7 +763,6 @@ class PracticeSession:
             "recordedAt": action_record["recordedAt"],
             "result": {"status": "measured", "virtualMeasurement": _clone(virtual_measurement)},
         })
-        self.simulation_results.append(_clone(simulation_result))
         return {
             "status": "success",
             "sessionId": self.practice_session_id,
@@ -778,12 +777,27 @@ class PracticeSession:
     def submit(self, payload):
         if not isinstance(payload, dict):
             raise SimulationBackendError("INVALID_SCHEMA", "submission", "submission must be an object")
-        final_fault_id = _text(payload.get("finalFaultId") or payload.get("faultId"))
-        if not final_fault_id:
-            raise SimulationBackendError("INVALID_SCHEMA", "finalFaultId", "finalFaultId is required")
+        final_fault_input = _text(payload.get("finalFaultName") or payload.get("faultName") or payload.get("finalFaultId") or payload.get("faultId"))
+        if not final_fault_input:
+            raise SimulationBackendError("INVALID_SCHEMA", "finalFaultName", "finalFaultName is required")
+        target_fault_name = _text(self.troubleshooting.target_row.get("faultName"), self.target_fault_id)
+        matched_final_row = next(
+            (
+                row
+                for row in _arr(self.troubleshooting.d_matrix.get("rows"))
+                if _fault_id(row) == final_fault_input or _text(row.get("faultName")) == final_fault_input
+            ),
+            None,
+        )
+        final_fault_id = _fault_id(matched_final_row) if matched_final_row else _text(payload.get("finalFaultId") or payload.get("faultId"))
+        final_fault_name = (
+            _text(matched_final_row.get("faultName"), final_fault_id)
+            if matched_final_row
+            else _text(payload.get("finalFaultName") or payload.get("faultName"), final_fault_input)
+        )
         self.submitted_at = time.time()
         self.close("submitted", now=self.submitted_at)
-        correct = final_fault_id == self.target_fault_id
+        correct = bool(matched_final_row and _fault_id(matched_final_row) == self.target_fault_id)
         elapsed_seconds = max(0.0, self.submitted_at - self.started_at)
         path_evaluation = self._evaluate_path_quality()
         scoring_result = evaluate_practice_submission_score(
@@ -807,7 +821,9 @@ class PracticeSession:
                 "sessionId": self.practice_session_id,
                 "simulationSessionId": self.simulation_session_id,
                 "targetFaultId": self.target_fault_id,
+                "targetFaultName": target_fault_name,
                 "finalFaultId": final_fault_id,
+                "finalFaultName": final_fault_name,
                 "correct": correct,
                 "startedAt": self.started_at,
                 "submittedAt": payload.get("submittedAt") or self.submitted_at,

@@ -265,7 +265,7 @@ class SimulationBackendServerTests(unittest.TestCase):
 
         status, submitted = self._post(
             f"/api/practice/session/{session_id}/submit",
-            {"finalFaultId": "target-fault", "submittedAt": "2026-06-28T00:01:00Z"},
+            {"finalFaultName": "Target fault", "submittedAt": "2026-06-28T00:01:00Z"},
         )
 
         self.assertEqual(status, 200)
@@ -290,7 +290,9 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(submitted["initialRecommendedPath"]["steps"][0]["pointCode"], "M1")
         self.assertIn("replaceComponent", [step["actionType"] for step in submitted["initialRecommendedPath"]["steps"]])
         self.assertEqual(submitted["record"]["targetFaultId"], "target-fault")
+        self.assertEqual(submitted["record"]["targetFaultName"], "Target fault")
         self.assertEqual(submitted["record"]["finalFaultId"], "target-fault")
+        self.assertEqual(submitted["record"]["finalFaultName"], "Target fault")
         self.assertEqual(submitted["record"]["studentActions"][0]["faultId"], "fault-bias")
         self.assertEqual(submitted["record"]["recommendedPathHistory"], [])
         self.assertIn("initialPhysicalMeasurementSnapshot", submitted["record"])
@@ -782,6 +784,8 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(body["virtualMeasurement"]["pointCode"], "V1")
         self.assertEqual(body["virtualMeasurement"]["pointType"], "virtual")
         self.assertEqual(body["virtualMeasurement"]["source"], "backend")
+        self.assertEqual(body["simulationResult"]["metrics"]["stepIndex"], 1)
+        self.assertEqual(body["simulationResult"]["curves"]["time"], [0.0])
         self.assertEqual(body["troubleshootingState"]["virtualMeasurements"][0]["pointCode"], "V1")
         self.assertEqual(body["troubleshootingState"]["repairAttempts"], [])
 

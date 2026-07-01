@@ -270,6 +270,7 @@ class SimulationBackendServerTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(submitted["status"], "success")
+        path_evaluation = submitted["record"]["pathEvaluation"]
         self.assertEqual(submitted["scoreBreakdown"]["faultLocalization"], 30)
         self.assertEqual(
             submitted["scoreBreakdown"]["diagnosticTreePath"],
@@ -277,8 +278,10 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
         self.assertEqual(
             submitted["scoreBreakdown"]["informationGain"],
-            round(submitted["record"]["pathEvaluation"]["routeQualityScore"] * 20 / 50, 3),
+            path_evaluation["informationGainScore"],
         )
+        self.assertIn("informationGain", path_evaluation)
+        self.assertEqual(path_evaluation["informationGain"]["score"], path_evaluation["informationGainScore"])
         self.assertEqual(submitted["scoreBreakdown"]["efficiency"], 5)
         self.assertEqual(submitted["scoreBreakdown"]["safetyCompliance"], 15)
         self.assertNotIn("initialBestPath", submitted)
@@ -404,7 +407,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertIn("keyNodeCoverage", path_evaluation)
         self.assertIn("diagnosticTreePathBreakdown", path_evaluation)
         key_nodes = path_evaluation["faultTreeKeyNodes"]
-        self.assertEqual({node["type"] for node in key_nodes}, {"physicalEvidence", "measurePoint", "repairTarget"})
+        self.assertEqual({node["type"] for node in key_nodes}, {"measurePoint", "repairTarget"})
         self.assertEqual(path_evaluation["keyNodeCoverage"]["score"], 12)
         self.assertEqual(path_evaluation["keyNodeCoverage"]["maxScore"], 12)
         self.assertEqual(path_evaluation["keyNodeCoverage"]["missedNodeIds"], [])
@@ -423,8 +426,10 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
         self.assertEqual(
             submitted["scoreBreakdown"]["informationGain"],
-            round(submitted["record"]["pathEvaluation"]["routeQualityScore"] * 20 / 50, 3),
+            path_evaluation["informationGainScore"],
         )
+        self.assertIn("informationGain", path_evaluation)
+        self.assertEqual(path_evaluation["informationGain"]["score"], path_evaluation["informationGainScore"])
 
     def test_dynamic_reference_scores_direct_repair_from_physical_evidence(self):
         package = valid_package()

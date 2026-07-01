@@ -277,26 +277,11 @@ class PracticeSession:
             for cell in _arr(target_row.get("cells"))
             if cell.get("detectable") and _text(cell.get("pointCode"))
         ]
-        physical_cells = [
-            cell
-            for cell in cells
-            if point_type(self.troubleshooting.d_matrix, _text(cell.get("pointCode"))) == "physical"
-        ]
         virtual_cells = [
             cell
             for cell in cells
             if point_type(self.troubleshooting.d_matrix, _text(cell.get("pointCode"))) == "virtual"
         ]
-        if physical_cells:
-            cell = sorted(physical_cells, key=lambda item: _text(item.get("pointCode")))[0]
-            point_code = _text(cell.get("pointCode"))
-            nodes.append({
-                "nodeId": f"physical-{point_code}",
-                "type": "physicalEvidence",
-                "pointCode": point_code,
-                "label": self._key_node_label_for_point("观察物理测点", point_code),
-                "score": 3,
-            })
         if virtual_cells:
             ranked_virtual = sorted(
                 virtual_cells,
@@ -308,7 +293,7 @@ class PracticeSession:
                 "type": "measurePoint",
                 "pointCode": point_code,
                 "label": self._key_node_label_for_point("测量虚拟测点", point_code),
-                "score": 5,
+                "score": 6,
             })
 
         edge_ids = {edge.id for edge in self.simulation_session.graph.edges}
@@ -333,7 +318,7 @@ class PracticeSession:
                 "target": target,
                 "faultId": fault_id,
                 "label": label,
-                "score": 4,
+                "score": 6,
             })
             break
         return nodes

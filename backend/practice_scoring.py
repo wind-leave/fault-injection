@@ -144,6 +144,53 @@ def _path_efficiency_score(ineffective_repairs, repairs, unmatched_count):
     return max(0, 8 - min(8, deductions))
 
 
+def _normalized_match_score(entry):
+    match_result = entry.get("matchResult") if isinstance(entry, dict) else {}
+    if not isinstance(match_result, dict):
+        return 0.0
+    try:
+        score = float(match_result.get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0.0
+    return max(0.0, min(1.0, score))
+
+
+def calculate_single_step_decision_reasonability_score(dynamic_reference_history):
+    step_scores = []
+    for entry in _arr(dynamic_reference_history):
+        match_result = entry.get("matchResult") if isinstance(entry, dict) else {}
+        if not isinstance(match_result, dict):
+            match_result = {}
+        decision_score = _normalized_match_score(entry)
+        step_scores.append({
+            "stepIndex": entry.get("stepIndex"),
+            "operationId": entry.get("operationId") or "",
+            "matched": bool(match_result.get("matched")),
+            "matchQuality": match_result.get("matchQuality") or "unmatched",
+            "decisionScore": _round_score(decision_score),
+        })
+
+    step_count = len(step_scores)
+    raw_average_decision_score = (
+        sum(item["decisionScore"] for item in step_scores) / step_count
+        if step_count
+        else 0
+    )
+    average_decision_score = _round_score(raw_average_decision_score)
+    return {
+        "metric": "singleStepDecisionReasonability",
+        "score": _round_score(INFORMATION_GAIN_SCORE * raw_average_decision_score),
+        "maxScore": INFORMATION_GAIN_SCORE,
+        "stepCount": step_count,
+        "averageDecisionScore": average_decision_score,
+        "stepScores": step_scores,
+    }
+
+
+def calculate_information_gain_score(dynamic_reference_history):
+    return calculate_single_step_decision_reasonability_score(dynamic_reference_history)
+
+
 FAULT_DETECTION_SCORE = 30
 ROUTE_QUALITY_SCORE = 50
 DIAGNOSTIC_TREE_PATH_SCORE = 30
@@ -252,6 +299,7 @@ def evaluate_path_quality(
         steps,
         initial_physical_measurement_snapshot,
     )
+    information_gain = calculate_information_gain_score(dynamic_history)
     sequence_reasonability = _sequence_reasonability_score(
         steps,
         repairs,
@@ -321,6 +369,8 @@ def evaluate_path_quality(
         "keyNodeCoverage": key_node_coverage,
         "diagnosticTreePathBreakdown": diagnostic_tree_path_breakdown,
         "diagnosticTreePathScore": min(DIAGNOSTIC_TREE_PATH_SCORE, diagnostic_tree_path_score),
+        "informationGain": information_gain,
+        "informationGainScore": information_gain["score"],
         "routeQualityBreakdown": breakdown,
         "routeQualityScore": score,
     }

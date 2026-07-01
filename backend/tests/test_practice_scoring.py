@@ -1,6 +1,7 @@
 import unittest
 
 from backend.practice_scoring import (
+    calculate_single_step_decision_reasonability_score,
     evaluate_path_quality,
     evaluate_practice_submission_score,
     grade_for_score,
@@ -57,6 +58,35 @@ class PracticeScoringTests(unittest.TestCase):
         )
 
         self.assertEqual(result["scoreBreakdown"]["efficiency"], 2.5)
+
+    def test_single_step_decision_reasonability_scores_each_action_match(self):
+        dynamic_reference_history = [
+            {
+                "operationId": "measure-1",
+                "matchResult": {"matched": True, "matchQuality": "optimal", "score": 1.0},
+            },
+            {
+                "operationId": "measure-2",
+                "matchResult": {"matched": True, "matchQuality": "acceptable", "score": 0.7},
+            },
+            {
+                "operationId": "repair-1",
+                "matchResult": {"matched": False, "matchQuality": "unmatched", "score": 0.0},
+            },
+        ]
+
+        result = calculate_single_step_decision_reasonability_score(dynamic_reference_history)
+
+        self.assertEqual(result["score"], 11.333)
+        self.assertEqual(result["metric"], "singleStepDecisionReasonability")
+        self.assertEqual(result["stepCount"], 3)
+        self.assertEqual(result["averageDecisionScore"], 0.567)
+
+    def test_single_step_decision_reasonability_scores_empty_path_as_zero(self):
+        result = calculate_single_step_decision_reasonability_score([])
+
+        self.assertEqual(result["score"], 0)
+        self.assertEqual(result["stepCount"], 0)
 
     def test_evaluates_existing_path_quality_breakdown(self):
         actual_steps = [

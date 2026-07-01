@@ -9,6 +9,11 @@ from backend.practice_observation import (
     evaluate_physical_measurement_snapshot,
     point_type,
 )
+from backend.practice_scoring import (
+    evaluate_path_quality,
+    evaluate_practice_submission_score,
+    grade_for_score,
+)
 from backend.schemas import SimulationBackendError
 from backend.troubleshooting import TroubleshootingSession
 
@@ -124,6 +129,7 @@ class PracticeSession:
         self.latest_physical_measurement_snapshot = None
         self.initial_physical_measurement_snapshot = None
         self.initial_best_path = self._build_initial_recommended_path(self.troubleshooting.initial_response()["currentPath"])
+        self.fault_tree_key_nodes = self._build_fault_tree_key_nodes()
         lifecycle_config = lifecycle if isinstance(lifecycle, dict) else {}
         self.max_lifetime_seconds = _lifecycle_seconds(lifecycle_config, "maxLifetimeSeconds")
         self.idle_timeout_seconds = _lifecycle_seconds(lifecycle_config, "idleTimeoutSeconds")
@@ -254,6 +260,83 @@ class PracticeSession:
         path["basis"] = "initialEvidenceAndFaultModel"
         path["steps"] = steps
         return path
+
+    def _key_node_label_for_point(self, prefix, point_code):
+        point = _point_by_code(self.troubleshooting.d_matrix, point_code)
+        name = _text(point.get("name") or point.get("pointName") or point_code, point_code)
+        return f"{prefix} {point_code} {name}".strip()
+
+    def _build_fault_tree_key_nodes(self):
+        target_row = self.troubleshooting.target_row
+        if not isinstance(target_row, dict):
+            return []
+
+        nodes = []
+        cells = [
+            cell
+            for cell in _arr(target_row.get("cells"))
+            if cell.get("detectable") and _text(cell.get("pointCode"))
+        ]
+        physical_cells = [
+            cell
+            for cell in cells
+            if point_type(self.troubleshooting.d_matrix, _text(cell.get("pointCode"))) == "physical"
+        ]
+        virtual_cells = [
+            cell
+            for cell in cells
+            if point_type(self.troubleshooting.d_matrix, _text(cell.get("pointCode"))) == "virtual"
+        ]
+        if physical_cells:
+            cell = sorted(physical_cells, key=lambda item: _text(item.get("pointCode")))[0]
+            point_code = _text(cell.get("pointCode"))
+            nodes.append({
+                "nodeId": f"physical-{point_code}",
+                "type": "physicalEvidence",
+                "pointCode": point_code,
+                "label": self._key_node_label_for_point("观察物理测点", point_code),
+                "score": 3,
+            })
+        if virtual_cells:
+            ranked_virtual = sorted(
+                virtual_cells,
+                key=lambda item: (-self._expected_information_gain(_text(item.get("pointCode"))), _text(item.get("pointCode"))),
+            )
+            point_code = _text(ranked_virtual[0].get("pointCode"))
+            nodes.append({
+                "nodeId": f"measure-{point_code}",
+                "type": "measurePoint",
+                "pointCode": point_code,
+                "label": self._key_node_label_for_point("测量虚拟测点", point_code),
+                "score": 5,
+            })
+
+        edge_ids = {edge.id for edge in self.simulation_session.graph.edges}
+        for fault in self.simulation_session.fault_runtime.fault_instances:
+            if not bool(fault.get("enabled", True)):
+                continue
+            fault_id = _text(fault.get("faultId"))
+            target_id = _text(fault.get("targetId"))
+            if not fault_id or not target_id:
+                continue
+            if target_id in self.simulation_session.graph.nodes:
+                target = {"type": "component", "id": target_id}
+                label = "更换故障组件"
+            elif target_id in edge_ids:
+                target = {"type": "wire", "id": target_id}
+                label = "更换故障线路"
+            else:
+                continue
+            nodes.append({
+                "nodeId": f"repair-{fault_id}",
+                "type": "repairTarget",
+                "target": target,
+                "faultId": fault_id,
+                "label": label,
+                "score": 4,
+            })
+            break
+        return nodes
 
     def _known_point_observations(self):
         observations = {}
@@ -575,116 +658,13 @@ class PracticeSession:
         })
 
     def _evaluate_path_quality(self):
-        steps = self.actual_troubleshooting_steps
-        measurement_count = sum(1 for step in steps if step.get("actionType") == "measurePoint")
-        component_repairs = [step for step in steps if step.get("actionType") == "replaceComponent"]
-        wire_repairs = [step for step in steps if step.get("actionType") == "replaceWire"]
-        repairs = component_repairs + wire_repairs
-        effective_repairs = [step for step in repairs if (step.get("repairEffect") or {}).get("effective")]
-        ineffective_repairs = [step for step in repairs if not (step.get("repairEffect") or {}).get("effective")]
-        safety_violations = sum(1 for action in self.student_actions if action.get("safetyViolation"))
-        first_repair_index = min((step.get("stepIndex", 0) for step in repairs), default=0)
-        evidence_before_first_repair = bool(first_repair_index and any(
-            step.get("actionType") == "measurePoint" and step.get("stepIndex", 0) < first_repair_index
-            for step in steps
-        ))
-        has_repair = bool(repairs)
-        has_effective_repair = bool(effective_repairs)
-        repair_statuses = {(step.get("repairEffect") or {}).get("status") for step in repairs}
-        has_recovery_signal = bool({"recovered", "improved"} & repair_statuses)
-        dynamic_matches = [entry for entry in self.dynamic_reference_history if (entry.get("matchResult") or {}).get("matched")]
-        dynamic_unmatched = [entry for entry in self.dynamic_reference_history if not (entry.get("matchResult") or {}).get("matched")]
-        dynamic_scores = [
-            float((entry.get("matchResult") or {}).get("score") or 0)
-            for entry in self.dynamic_reference_history
-        ]
-        dynamic_score_total = _round_score(sum(dynamic_scores))
-        dynamic_average_score = (
-            _round_score(dynamic_score_total / len(self.dynamic_reference_history))
-            if self.dynamic_reference_history
-            else 0
+        return evaluate_path_quality(
+            actual_troubleshooting_steps=self.actual_troubleshooting_steps,
+            student_actions=self.student_actions,
+            dynamic_reference_history=self.dynamic_reference_history,
+            initial_physical_measurement_snapshot=self.initial_physical_measurement_snapshot,
+            fault_tree_key_nodes=self.fault_tree_key_nodes,
         )
-        dynamic_match_score = dynamic_average_score
-        dynamic_quality_counts = {
-            "optimal": 0,
-            "acceptable": 0,
-            "lowValue": 0,
-            "unsafe": 0,
-            "unmatched": 0,
-        }
-        for entry in self.dynamic_reference_history:
-            quality = (entry.get("matchResult") or {}).get("matchQuality") or "unmatched"
-            if quality not in dynamic_quality_counts:
-                quality = "unmatched"
-            dynamic_quality_counts[quality] += 1
-        first_repair_dynamic_match = False
-        if repairs:
-            first_repair_operation_id = next(
-                (
-                    step.get("operationId")
-                    for step in sorted(repairs, key=lambda item: item.get("stepIndex", 0))
-                    if step.get("operationId")
-                ),
-                "",
-            )
-            first_repair_dynamic_match = any(
-                entry.get("operationId") == first_repair_operation_id
-                and (entry.get("matchResult") or {}).get("matched")
-                and (entry.get("matchResult") or {}).get("matchQuality") != "unsafe"
-                for entry in self.dynamic_reference_history
-            )
-        physical_evidence_available = bool(
-            _arr((self.initial_physical_measurement_snapshot or {}).get("abnormalPointCodes"))
-            or _arr((self.initial_physical_measurement_snapshot or {}).get("normalPointCodes"))
-        )
-        evidence_credited = bool(measurement_count) or (has_repair and first_repair_dynamic_match and physical_evidence_available)
-        if not steps:
-            breakdown = {
-                "evidenceCollection": 0,
-                "pathOrder": 0,
-                "repairLocalization": 0,
-                "recoveryVerification": 0,
-                "operationControl": 0,
-            }
-        else:
-            breakdown = {
-                "evidenceCollection": 10 if evidence_credited else 0,
-                "pathOrder": 8 if (not has_repair or evidence_before_first_repair or first_repair_dynamic_match) else 0,
-                "repairLocalization": 12 if has_effective_repair else (6 if has_repair and not ineffective_repairs else 0),
-                "recoveryVerification": 6 if has_recovery_signal else 0,
-                "operationControl": max(
-                    0,
-                    4 - min(
-                        4,
-                        (len(ineffective_repairs) * 2)
-                        + (max(safety_violations, dynamic_quality_counts["unsafe"]) * 2),
-                    ),
-                ),
-            }
-        score = sum(breakdown.values())
-        score = max(0, min(40, score))
-        return {
-            "totalStepCount": len(steps),
-            "measuredVirtualPointCount": measurement_count,
-            "componentRepairAttemptCount": len(component_repairs),
-            "wireRepairAttemptCount": len(wire_repairs),
-            "repairAttemptCount": len(repairs),
-            "effectiveRepairCount": len(effective_repairs),
-            "ineffectiveRepairCount": len(ineffective_repairs),
-            "safetyViolationCount": safety_violations,
-            "evidenceBeforeFirstRepair": evidence_before_first_repair,
-            "dynamicReferenceMatchedCount": len(dynamic_matches),
-            "dynamicReferenceUnmatchedCount": len(dynamic_unmatched),
-            "dynamicReferenceMatchScore": dynamic_match_score,
-            "dynamicReferenceScoreTotal": dynamic_score_total,
-            "dynamicReferenceAverageScore": dynamic_average_score,
-            "dynamicReferenceOptimalCount": dynamic_quality_counts["optimal"],
-            "dynamicReferenceAcceptableCount": dynamic_quality_counts["acceptable"],
-            "dynamicReferenceLowValueCount": dynamic_quality_counts["lowValue"],
-            "dynamicReferenceUnsafeCount": dynamic_quality_counts["unsafe"],
-            "routeQualityBreakdown": breakdown,
-            "routeQualityScore": score,
-        }
 
     def initial_response(self):
         simulation_result = self.simulation_session.step(1)
@@ -821,32 +801,22 @@ class PracticeSession:
         correct = final_fault_id == self.target_fault_id
         elapsed_seconds = max(0.0, self.submitted_at - self.started_at)
         path_evaluation = self._evaluate_path_quality()
-        route_quality = path_evaluation["routeQualityScore"]
-        safety_violations = sum(1 for action in self.student_actions if action.get("safetyViolation"))
-        safety = max(0, 10 - (safety_violations * 5))
-        efficiency = 10 if elapsed_seconds <= float(self.scoring_rules.get("fullEfficiencySeconds", 600)) else 5
-        fault_detection = 40 if correct else 0
-        score_breakdown = {
-            "faultDetection": fault_detection,
-            "routeQuality": route_quality,
-            "efficiency": efficiency,
-            "safety": safety,
-        }
-        score = sum(score_breakdown.values())
-        deductions = []
-        if not correct:
-            deductions.append({"reason": "最终故障判断错误", "points": -40})
-        if safety_violations:
-            deductions.append({"reason": "存在安全违规操作", "points": -(10 - safety)})
+        scoring_result = evaluate_practice_submission_score(
+            correct=correct,
+            elapsed_seconds=elapsed_seconds,
+            scoring_rules=self.scoring_rules,
+            student_actions=self.student_actions,
+            path_evaluation=path_evaluation,
+        )
         return {
             "status": "success",
             "sessionId": self.practice_session_id,
             "practiceSessionId": self.practice_session_id,
             "simulationSessionId": self.simulation_session_id,
-            "score": score,
-            "grade": self._grade(score),
-            "scoreBreakdown": score_breakdown,
-            "deductions": deductions,
+            "score": scoring_result["score"],
+            "grade": scoring_result["grade"],
+            "scoreBreakdown": scoring_result["scoreBreakdown"],
+            "deductions": scoring_result["deductions"],
             "initialRecommendedPath": _clone(self.initial_best_path),
             "record": {
                 "sessionId": self.practice_session_id,
@@ -891,12 +861,4 @@ class PracticeSession:
 
     @staticmethod
     def _grade(score):
-        if score >= 90:
-            return "优秀"
-        if score >= 80:
-            return "良好"
-        if score >= 70:
-            return "中等"
-        if score >= 60:
-            return "合格"
-        return "不合格"
+        return grade_for_score(score)

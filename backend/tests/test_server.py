@@ -270,7 +270,17 @@ class SimulationBackendServerTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(submitted["status"], "success")
-        self.assertEqual(submitted["scoreBreakdown"]["faultDetection"], 40)
+        self.assertEqual(submitted["scoreBreakdown"]["faultLocalization"], 30)
+        self.assertEqual(
+            submitted["scoreBreakdown"]["diagnosticTreePath"],
+            submitted["record"]["pathEvaluation"]["diagnosticTreePathScore"],
+        )
+        self.assertEqual(
+            submitted["scoreBreakdown"]["informationGain"],
+            round(submitted["record"]["pathEvaluation"]["routeQualityScore"] * 20 / 50, 3),
+        )
+        self.assertEqual(submitted["scoreBreakdown"]["efficiency"], 5)
+        self.assertEqual(submitted["scoreBreakdown"]["safetyCompliance"], 15)
         self.assertNotIn("initialBestPath", submitted)
         self.assertEqual(submitted["initialRecommendedPath"]["faultId"], "target-fault")
         self.assertEqual(submitted["initialRecommendedPath"]["steps"][0]["actionType"], "measurePoint")
@@ -306,13 +316,14 @@ class SimulationBackendServerTests(unittest.TestCase):
             "/api/practice/session",
             {
                 "simulationPackage": package,
-                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "dMatrix": d_matrix_with_rankable_virtual_points(),
                 "targetFaultId": "target-fault",
             },
         )
         self.assertEqual(status, 200)
         self.assertNotIn("initialRecommendedPath", created)
         self.assertNotIn("actualTroubleshootingPath", created)
+        self.assertNotIn("faultTreeKeyNodes", created)
         session_id = created["sessionId"]
 
         status, measured = self._post(
@@ -388,7 +399,32 @@ class SimulationBackendServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(sum(breakdown.values()), submitted["record"]["pathEvaluation"]["routeQualityScore"])
-        self.assertEqual(submitted["scoreBreakdown"]["routeQuality"], submitted["record"]["pathEvaluation"]["routeQualityScore"])
+        path_evaluation = submitted["record"]["pathEvaluation"]
+        self.assertIn("faultTreeKeyNodes", path_evaluation)
+        self.assertIn("keyNodeCoverage", path_evaluation)
+        self.assertIn("diagnosticTreePathBreakdown", path_evaluation)
+        key_nodes = path_evaluation["faultTreeKeyNodes"]
+        self.assertEqual({node["type"] for node in key_nodes}, {"physicalEvidence", "measurePoint", "repairTarget"})
+        self.assertEqual(path_evaluation["keyNodeCoverage"]["score"], 12)
+        self.assertEqual(path_evaluation["keyNodeCoverage"]["maxScore"], 12)
+        self.assertEqual(path_evaluation["keyNodeCoverage"]["missedNodeIds"], [])
+        self.assertEqual(
+            path_evaluation["diagnosticTreePathBreakdown"],
+            {
+                "keyNodeCoverage": 12,
+                "sequenceReasonability": 10,
+                "pathEfficiency": 6,
+            },
+        )
+        self.assertEqual(path_evaluation["diagnosticTreePathScore"], 28)
+        self.assertEqual(
+            submitted["scoreBreakdown"]["diagnosticTreePath"],
+            path_evaluation["diagnosticTreePathScore"],
+        )
+        self.assertEqual(
+            submitted["scoreBreakdown"]["informationGain"],
+            round(submitted["record"]["pathEvaluation"]["routeQualityScore"] * 20 / 50, 3),
+        )
 
     def test_dynamic_reference_scores_direct_repair_from_physical_evidence(self):
         package = valid_package()
@@ -455,7 +491,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         evaluation = submitted["record"]["pathEvaluation"]
         self.assertEqual(evaluation["dynamicReferenceMatchedCount"], 1)
         self.assertEqual(evaluation["dynamicReferenceUnmatchedCount"], 0)
-        self.assertEqual(evaluation["routeQualityBreakdown"]["pathOrder"], 8)
+        self.assertEqual(evaluation["routeQualityBreakdown"]["pathOrder"], 10)
 
     def test_recommended_actions_are_ranked_without_adding_recovery_verification_step(self):
         package = valid_package()

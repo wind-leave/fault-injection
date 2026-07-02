@@ -320,6 +320,41 @@ class SimulationEngineTests(unittest.TestCase):
         self.assertEqual(empty["metrics"]["sampleCount"], 0)
         self.assertTrue(empty["metrics"]["done"])
 
+    def test_signal_source_domain_scalar_fallbacks(self):
+        package = {
+            "schemaVersion": 1,
+            "packageId": "signal-domain-package",
+            "simulationConfig": {"duration": 0.1, "stepSize": 0.1},
+            "nodes": [
+                {"id": "analog", "type": "signal_source", "parameters": {"amplitude": 1.5}, "outputs": [{"name": "out"}]},
+                {"id": "digital", "type": "signal_source", "parameters": {"initialState": 1}, "outputs": [{"name": "out"}]},
+                {"id": "command", "type": "signal_source", "parameters": {"payloadValue": 7}, "outputs": [{"name": "out"}]},
+                {"id": "rf", "type": "signal_source", "parameters": {"power": 10}, "outputs": [{"name": "out"}]},
+                {"id": "scope-1", "type": "instrument_scope", "inputs": [{"name": "CH1"}, {"name": "CH2"}, {"name": "CH3"}, {"name": "CH4"}]},
+            ],
+            "edges": [
+                {"id": "edge-analog", "sourceNodeId": "analog", "sourcePortIndex": 0, "targetNodeId": "scope-1", "targetPortIndex": 0},
+                {"id": "edge-digital", "sourceNodeId": "digital", "sourcePortIndex": 0, "targetNodeId": "scope-1", "targetPortIndex": 1},
+                {"id": "edge-command", "sourceNodeId": "command", "sourcePortIndex": 0, "targetNodeId": "scope-1", "targetPortIndex": 2},
+                {"id": "edge-rf", "sourceNodeId": "rf", "sourcePortIndex": 0, "targetNodeId": "scope-1", "targetPortIndex": 3},
+            ],
+            "faultInstances": [],
+            "measurementPoints": [
+                {"id": "scope-1.ch1", "scopeNodeId": "scope-1", "channel": "ch1"},
+                {"id": "scope-1.ch2", "scopeNodeId": "scope-1", "channel": "ch2"},
+                {"id": "scope-1.ch3", "scopeNodeId": "scope-1", "channel": "ch3"},
+                {"id": "scope-1.ch4", "scopeNodeId": "scope-1", "channel": "ch4"},
+            ],
+        }
+
+        graph = compile_graph(package, ModuleRegistry.from_builtin_manifest())
+        result = run_simulation(graph)
+
+        self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch1.actual"], [1.5])
+        self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch2.actual"], [1.0])
+        self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch3.actual"], [7.0])
+        self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch4.actual"], [10.0])
+
 
 if __name__ == "__main__":
     unittest.main()

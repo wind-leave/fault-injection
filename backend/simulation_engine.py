@@ -5,12 +5,20 @@ def _round_time(value):
     return round(float(value) + 0.0, 10)
 
 
+def _first_numeric(params, keys, fallback=0.0):
+    for key in keys:
+        if key in params:
+            return float(params[key])
+    return float(fallback)
+
+
 def _source_value(node, time):
     params = node.parameters
-    if "value" in params:
-        return float(params["value"])
-    amplitude = float(params.get("amplitude", 1.0))
-    return amplitude
+    return _first_numeric(
+        params,
+        ("value", "amplitude", "initialState", "payloadValue", "commandValue", "power"),
+        0.0,
+    )
 
 
 def _node_output_names(node):

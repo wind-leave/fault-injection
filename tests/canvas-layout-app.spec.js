@@ -1163,9 +1163,67 @@ describe('canvas layout cleanup', () => {
     const matrixPanel = document.getElementById('d-matrix-panel');
     const targetRow = Array.from(matrixPanel?.querySelectorAll('tbody tr') || [])
       .find((row) => row.textContent?.includes('controller_gain'));
+    const matrixRow = window.buildDetectionMatrixModel().rows
+      .find((row) => row.faultDisplayDetail === 'controller_gain');
     expect(targetRow).not.toBeNull();
-    expect(targetRow?.querySelector('.d-matrix-sticky strong')?.textContent).toBe('偏差故障');
+    expect(targetRow?.querySelector('.d-matrix-sticky strong')?.textContent).toBe(matrixRow?.faultName);
     expect(targetRow?.querySelector('.d-matrix-sticky small')?.textContent).toBe('controller_gain');
+
+    wrapper.unmount();
+  }, 10000);
+
+  it('uses the canvas fault name as the D matrix row title when catalog and runtime names differ', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const controller = window.createNode('simulation_block', 460, 220);
+    const scope = window.createNode('instrument_scope', 700, 220);
+    const state = window.__GZ_STATE__;
+    const canvasFaultName = 'Canvas controller gain bias';
+    state.importedFaultModels = [{
+      id: 'controller-gain-bias',
+      name: 'Catalog controller gain bias',
+      category: 'catalog'
+    }];
+    state.modelEdges.push({
+      id: 'edge-controller-output-name-check',
+      lineType: 'normal',
+      sourceNodeId: controller.id,
+      targetNodeId: scope.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0,
+      signalId: 'controller.output',
+      injectedFault: {
+        id: 'controller-gain-bias',
+        modelId: 'controller-gain-bias',
+        name: canvasFaultName,
+        layer: 'physical',
+        targetEdgeId: 'edge-controller-output-name-check',
+        affectedEdges: ['edge-controller-output-name-check']
+      }
+    });
+    state.manualDiagnosticTestPoints = [{
+      pointId: 'tp-controller-output-name-check',
+      shortName: 'M1',
+      name: 'Controller output',
+      edgeId: 'edge-controller-output-name-check',
+      detects: ['controller-gain-bias']
+    }];
+    window.installDiagnosticTestPoint('tp-controller-output-name-check');
+    window.renderEdges();
+    await flushRuntime();
+
+    window.setCanvasView('dmatrix');
+    await flushRuntime();
+
+    const matrix = window.buildDetectionMatrixModel();
+    const matrixRow = matrix.rows.find((row) => row.faultName === canvasFaultName);
+    expect(matrixRow).toBeTruthy();
+
+    const row = Array.from(document.querySelectorAll('#d-matrix-panel tbody tr'))
+      .find((item) => item.textContent?.includes('controller-gain-bias'));
+    expect(row?.querySelector('.d-matrix-sticky strong')?.textContent).toBe(canvasFaultName);
 
     wrapper.unmount();
   });

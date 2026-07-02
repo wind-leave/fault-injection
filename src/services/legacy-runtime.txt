@@ -22634,7 +22634,7 @@ function decorateDataflowEdges(){
       const id=model.id||model.modelId||model.faultModelId||model.faultId||model.name;
       if(!id) return;
       const existing=merged.get(id);
-      merged.set(id,existing?{...model,...existing,id}:{...model,id});
+      merged.set(id,existing?{...existing,...model,id}:{...model,id});
     });
     return Array.from(merged.values()).map(model=>({
       ...model,
@@ -22659,12 +22659,12 @@ function decorateDataflowEdges(){
       const id=model.id||model.modelId||model.faultModelId||model.faultId||model.name;
       if(!id) return;
       const existing=merged.get(id);
-      merged.set(id,existing?{...model,...existing,id}:{...model,id});
+      merged.set(id,existing?{...existing,...model,id}:{...model,id});
     });
     return Array.from(merged.values()).map(model=>({
       ...model,
       id:model.id||model.modelId||model.faultModelId||model.faultId||model.name,
-      name:model.name||model.label||model.title||model.id||'fault',
+      name:model.name||model.displayName||model.faultName||model.faultModelName||model.label||model.title||model.id||'fault',
       category:model.category||model.layer||model.domain||model.faultLayer||'fault',
       targetNodeId:model.targetNodeId||(model.targetKind==='node'?model.targetId:'')||model.recommendedModuleId||model.injectionDesign?.targetNodeId||model.injectionDesign?.targetId||model.injectionTarget?.nodeId,
       targetEdgeId:model.targetEdgeId||(model.targetKind==='edge'?model.targetId:'')||model.injectionDesign?.targetEdgeId||model.injectionTarget?.edgeId,
@@ -22998,7 +22998,7 @@ function decorateDataflowEdges(){
     return Array.from(map.entries()).map(([id,item])=>({
       ...(typeof item==='object'?item:{}),
       id,
-      name:item?.name||item?.label||id,
+      name:item?.name||item?.displayName||item?.faultName||item?.faultModelName||item?.label||id,
       category:item?.category||item?.layer||'已注入'
     }));
   }
@@ -23417,10 +23417,14 @@ function decorateDataflowEdges(){
   function getDMatrixFaultDisplay(fault){
     const behaviorLabel=getDMatrixRuntimeBehaviorLabel(fault);
     const targetParameter=getDMatrixTargetParameterText(fault);
-    if(behaviorLabel&&targetParameter){
-      return {title:behaviorLabel,detail:targetParameter};
+    const title=fault?.name||fault?.displayName||fault?.faultName||fault?.faultModelName||getFaultKey(fault);
+    if(targetParameter){
+      return {title,detail:targetParameter};
     }
-    return {title:fault?.name||getFaultKey(fault),detail:getFaultKey(fault)};
+    if(behaviorLabel){
+      return {title,detail:behaviorLabel};
+    }
+    return {title,detail:getFaultKey(fault)};
   }
 
   function mapDiagnosticMatrixRowToFault(row){

@@ -63,6 +63,25 @@ describe('backendExecutablePackageService', () => {
     expect(pkg.simulationConfig).toEqual({ duration: 10, stepSize: 0.1 });
   });
 
+  it('exports numeric scalar fallbacks for all signal source domains', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [
+        { id: 'analog', type: 'signal_source', props: { signalDomain: 'analog', amplitude: '1.5' } },
+        { id: 'digital', type: 'signal_source', props: { signalDomain: 'digital', initialState: '1' } },
+        { id: 'command', type: 'signal_source', props: { signalDomain: 'command', payloadValue: '7' } },
+        { id: 'rf', type: 'signal_source', props: { signalDomain: 'rf', power: '10' } }
+      ],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes).toEqual([
+      expect.objectContaining({ id: 'analog', parameters: expect.objectContaining({ amplitude: 1.5, value: 1.5 }) }),
+      expect.objectContaining({ id: 'digital', parameters: expect.objectContaining({ initialState: 1, value: 1 }) }),
+      expect.objectContaining({ id: 'command', parameters: expect.objectContaining({ payloadValue: 7, value: 7 }) }),
+      expect.objectContaining({ id: 'rf', parameters: expect.objectContaining({ power: 10, value: 10 }) })
+    ]);
+  });
+
   it('drops edges and measurement points that reference unsupported nodes', () => {
     const pkg = buildBackendExecutablePackage({
       modelNodes: [

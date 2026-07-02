@@ -1,3 +1,8 @@
+import {
+  getSignalSourceScalarFallback,
+  normalizeSignalSourceProps
+} from './signalSourceDomainService.js';
+
 const SUPPORTED_NODE_TYPES = new Set([
   'signal_source',
   'flow_block',
@@ -16,7 +21,7 @@ function sanitizeNumber(value, fallback = 0) {
 function pickNumericParameters(props = {}) {
   return Object.fromEntries(
     Object.entries(props)
-      .filter(([, value]) => Number.isFinite(Number(value)))
+      .filter(([, value]) => String(value ?? '').trim() !== '' && Number.isFinite(Number(value)))
       .map(([key, value]) => [key, Number(value)])
   );
 }
@@ -28,10 +33,19 @@ function normalizePorts(ports = []) {
 }
 
 function normalizeNode(node) {
+  const rawProps = node.props ?? node.parameters ?? {};
+  const props = node.type === 'signal_source'
+    ? normalizeSignalSourceProps(rawProps)
+    : rawProps;
+  const parameters = pickNumericParameters(rawProps);
+  if (node.type === 'signal_source') {
+    parameters.value = getSignalSourceScalarFallback(props);
+  }
+
   const normalized = {
     id: String(node.id),
     type: node.type,
-    parameters: pickNumericParameters(node.props ?? node.parameters ?? {}),
+    parameters,
     inputs: normalizePorts(node.inputs ?? node.props?.inputs),
     outputs: normalizePorts(node.outputs ?? node.props?.outputs)
   };

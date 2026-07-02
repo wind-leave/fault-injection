@@ -1,3 +1,5 @@
+import { normalizeSignalSourceProps } from './signalSourceDomainService.js';
+
 export const FAULT_MATH_MODEL_DEFINITIONS = Object.freeze({
   physical: [
     {
@@ -504,6 +506,10 @@ function capabilitySlotsForTarget(target = {}, targetKind = 'node', capabilityMa
 
 export function normalizeModelNode(node = {}, { faultCapabilityMap = [] } = {}) {
   const safeNode = isPlainObject(node) ? clone(node) : {};
+  if (safeNode.type === 'signal_source') {
+    safeNode.props = normalizeSignalSourceProps(safeNode.props ?? {});
+  }
+
   if (hasComponentFaultDeclaration(safeNode)) {
     return {
       ...safeNode,

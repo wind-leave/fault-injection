@@ -1514,6 +1514,39 @@ describe('flightModelPackageService', () => {
     ]));
   });
 
+  it('normalizes legacy signal sources to analog domain during package import', () => {
+    const pkg = {
+      schemaVersion: 1,
+      packageType: 'flight-control-model',
+      modelId: 'legacy-signal-source',
+      modelName: 'Legacy Signal Source',
+      pythonModules: [],
+      faultLibrary: [],
+      workbenchSnapshot: {
+        modelNodes: [
+          {
+            id: 'node-source',
+            type: 'signal_source',
+            props: { name: 'Legacy Source', waveType: '常值', amplitude: '1', frequency: '0', outputFormat: '标量' }
+          }
+        ],
+        modelEdges: []
+      }
+    };
+
+    const result = applyFlightModelPackage(pkg);
+
+    expect(result.ok).toBe(true);
+    expect(result.snapshot.modelNodes[0].props).toMatchObject({
+      name: 'Legacy Source',
+      signalDomain: 'analog',
+      waveType: '常值',
+      amplitude: '1',
+      frequency: '0',
+      outputFormat: '标量'
+    });
+  });
+
   it('maps closed-loop demo fault type metadata to declared visual runtime targets', () => {
     const closedLoopPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
     const targetsByFaultId = Object.fromEntries(

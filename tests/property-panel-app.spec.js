@@ -98,6 +98,62 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
+  it('creates domain-specific signal source templates through the legacy runtime', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    window.createNode('signal_source_digital', 180, 220);
+    window.createNode('signal_source_command', 360, 220);
+    window.createNode('signal_source_rf', 540, 220);
+    await flushRuntime();
+
+    const sources = window.__GZ_STATE__.modelNodes.filter((node) => node.type === 'signal_source');
+
+    expect(sources.map((node) => node.props.signalDomain)).toEqual(['digital', 'command', 'rf']);
+    expect(sources.map((node) => node.props.name)).toEqual([
+      '数字信号源 1',
+      '指令信号源 2',
+      '射频信号源 3'
+    ]);
+
+    wrapper.unmount();
+  });
+
+  it('renders and saves RF signal source fields through the legacy property panel', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_rf', 220, 220);
+    await flushRuntime();
+
+    window.selectNode(source.id);
+    await flushRuntime();
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    expect(document.getElementById('prop-signalDomain').value).toBe('rf');
+    expect(document.getElementById('prop-centerFrequency')).not.toBeNull();
+    expect(document.getElementById('prop-waveType')).toBeNull();
+
+    setFieldValue('#prop-name', 'RF Test Source');
+    setFieldValue('#prop-centerFrequency', '5.8GHz');
+    setFieldValue('#prop-bandwidth', '40MHz');
+    setFieldValue('#prop-power', '12');
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+
+    expect(source.props).toMatchObject({
+      name: 'RF Test Source',
+      signalDomain: 'rf',
+      centerFrequency: '5.8GHz',
+      bandwidth: '40MHz',
+      power: '12',
+      powerUnit: 'dBm'
+    });
+
+    wrapper.unmount();
+  });
+
   it('saves simple component parameters through the extracted property schema', async () => {
     const wrapper = await mountWorkbench();
 
@@ -962,7 +1018,7 @@ describe('property panel interaction', () => {
       '力矩需求',
       '积分状态'
     ]);
-    expect(document.querySelectorAll('.props-layer-toggle')).toHaveLength(15);
+    expect(document.querySelectorAll('.props-layer-toggle')).toHaveLength(9);
     expect(document.querySelector('[data-fault-slot-variable="姿态误差"]')?.textContent).toContain('姿态误差');
     expect(document.querySelector('[data-fault-slot-variable="力矩需求"]')?.textContent).toContain('力矩需求');
     expect(document.querySelector('[data-fault-slot-variable="积分状态"]')?.textContent).toContain('积分状态');

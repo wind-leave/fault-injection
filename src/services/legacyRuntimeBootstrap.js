@@ -12,6 +12,7 @@ import * as faultTagPanelSchema from './faultTagPanelSchema.js';
 import * as propertyPanelSchema from './propertyPanelSchema.js';
 import * as simulationPropertyPanelSchema from './simulationPropertyPanelSchema.js';
 import * as signalComponentRuntime from './signalComponentRuntime.js';
+import * as signalSourceDomainService from './signalSourceDomainService.js';
 import * as subsystemPropertyPanelSchema from './subsystemPropertyPanelSchema.js';
 import { installBackendStepSimulationRuntime } from './backendStepSimulationRuntime.js';
 import {
@@ -210,6 +211,7 @@ export function mountLegacyRuntime() {
   window.__GZ_SIMULATION_PROPERTY_PANEL_SCHEMA__ = simulationPropertyPanelSchema;
   window.__GZ_SUBSYSTEM_PROPERTY_PANEL_SCHEMA__ = subsystemPropertyPanelSchema;
   window.__GZ_SIGNAL_COMPONENT_RUNTIME__ = signalComponentRuntime;
+  window.__GZ_SIGNAL_SOURCE_DOMAIN__ = signalSourceDomainService;
   window.__GZ_FLIGHT_MODEL_PACKAGE__ = {
     validate(pkg) {
       return validateFlightModelPackage(pkg);
@@ -364,6 +366,7 @@ export function __resetLegacyRuntimeForTests() {
   delete window.__GZ_SIMULATION_PROPERTY_PANEL_SCHEMA__;
   delete window.__GZ_SUBSYSTEM_PROPERTY_PANEL_SCHEMA__;
   delete window.__GZ_SIGNAL_COMPONENT_RUNTIME__;
+  delete window.__GZ_SIGNAL_SOURCE_DOMAIN__;
   delete window.__GZ_FLIGHT_MODEL_PACKAGE__;
   delete window.__GZ_LOAD_DEFAULT_FLIGHT_MODEL__;
   delete window.__GZ_DEFAULT_FLIGHT_MODEL_LOADING__;

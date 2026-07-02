@@ -63,6 +63,9 @@ describe('left palette taxonomy', () => {
 
     expect(groupComponents(wrapper, 'signals')).toEqual([
       'signal_source',
+      'signal_source_digital',
+      'signal_source_command',
+      'signal_source_rf',
       'middle_var_assign'
     ]);
     expect(groupComponents(wrapper, 'signal-ops')).toEqual([
@@ -97,7 +100,10 @@ describe('left palette taxonomy', () => {
   it('renders component palette icons from registry metadata', () => {
     const wrapper = mountPalette();
 
-    expect(wrapper.find('[data-component="signal_source"] .citem-icon-badge').text()).toBe('S');
+    expect(wrapper.find('[data-component="signal_source"] .citem-icon-badge').text()).toBe('A');
+    expect(wrapper.find('[data-component="signal_source_digital"] .citem-icon-badge').text()).toBe('D');
+    expect(wrapper.find('[data-component="signal_source_command"] .citem-icon-badge').text()).toBe('C');
+    expect(wrapper.find('[data-component="signal_source_rf"] .citem-icon-badge').text()).toBe('RF');
     expect(wrapper.find('[data-component="sum_block"] .citem-icon-badge').text()).toBe('+');
     expect(wrapper.find('[data-component="instrument_scope"] .citem-icon-badge').text()).toBe('波');
     expect(wrapper.find('[data-component="instrument_scope"] .citem-icon-badge').classes()).toContain(

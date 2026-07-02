@@ -91,10 +91,42 @@ function readSchemaPropertyValues(node){
   return api.readPropertyValuesFromSchema(schema,document);
 }
 
+function signalSourceDomainApi(){
+  return window.__GZ_SIGNAL_SOURCE_DOMAIN__;
+}
+
+function normalizeSignalSourcePropsRuntime(props){
+  const api=signalSourceDomainApi();
+  if(api?.normalizeSignalSourceProps){
+    return api.normalizeSignalSourceProps(props||{});
+  }
+  return {
+    signalDomain:'analog',
+    name:'signal_source',
+    waveType:'sine',
+    amplitude:'1.0',
+    frequency:'1.0',
+    outputFormat:'scalar',
+    ...(props||{})
+  };
+}
+
+function summarizeSignalSourceRuntime(node){
+  const api=signalSourceDomainApi();
+  if(api?.summarizeSignalSource){
+    return api.summarizeSignalSource(node);
+  }
+  const props=normalizeSignalSourcePropsRuntime(node?.props||{});
+  return `${props.waveType||'signal'} · ${props.amplitude||'1'} · ${props.outputFormat||'scalar'}`;
+}
+
 function applySchemaPropertyValues(node){
   const values=readSchemaPropertyValues(node);
   if(!values){return false;}
   node.props={...(node.props||{}),...values};
+  if(node.type==='signal_source'){
+    node.props=normalizeSignalSourcePropsRuntime(node.props);
+  }
   if(node.type==='gain_block'||node.type==='sum_block'||node.type==='mux_block'){
     normalizeSignalUtilityNode(node);
   }
@@ -1870,7 +1902,11 @@ function markTopologyDirty(scope='system'){
 }
 
 function buildSelectOptions(options,selected){
-  return options.map(option=>`<option value="${escapeHtml(option)}"${option===selected?' selected':''}>${escapeHtml(option)}</option>`).join('');
+  return (options||[]).map(option=>{
+    const optionValue=typeof option==='object'&&option!==null?String(option.value):String(option);
+    const optionLabel=typeof option==='object'&&option!==null?String(option.label):optionValue;
+    return `<option value="${escapeHtml(optionValue)}"${optionValue===String(selected)?' selected':''}>${escapeHtml(optionLabel)}</option>`;
+  }).join('');
 }
 
 const FAULT_PARAMETER_LABELS={
@@ -2001,7 +2037,7 @@ function buildNodeSubtitle(node){
   const faultNote=node.injectedFault?' · 电气故障':''; 
   switch(node.type){
     case 'signal_source':
-      return `${props.waveType} · 幅值${props.amplitude} · ${props.outputFormat}`;
+      return summarizeSignalSourceRuntime(node);
     case 'flow_block':
       return `${props.inputName} / ${props.inputFormat} → ${props.outputName} / ${props.outputFormat}${faultNote}`;
     case 'simulation_block':
@@ -2519,7 +2555,11 @@ function createNode(type,rawX,rawY){
   const props=cloneDefaults(meta.defaults);
   const count=getNodeTypeCount(nodeType);
   if(meta.templateId){props.name=`${meta.label} ${count}`;}
-  else if(nodeType==='signal_source'){props.name=`信号源 ${count}`;}
+  else if(nodeType==='signal_source'){
+    const baseName=props.name||meta.label||'信号源';
+    Object.assign(props,normalizeSignalSourcePropsRuntime(props));
+    props.name=`${baseName} ${count}`;
+  }
   else if(nodeType==='flow_block'){props.name=`流程块 ${count}`;}
   else if(nodeType==='simulation_block'){props.name=`仿真块 ${count}`;}
   if(type.startsWith('fault_')){props.name=`${meta.label} ${count}`;}
@@ -5726,7 +5766,7 @@ buildNodeSubtitle = function(node){
   const faultNote=node.injectedFault?' · 电气故障':'';
   switch(node.type){
     case 'signal_source':
-      return `${props.waveType||'正弦'} · 幅值 ${props.amplitude} · ${props.outputFormat||'标量'}`;
+      return summarizeSignalSourceRuntime(node);
     case 'flow_block':
       return `${props.inputName||'输入信号'} / ${props.inputFormat||'标量'} → ${props.outputName||'输出信号'} / ${props.outputFormat||'标量'}${faultNote}`;
     case 'simulation_block':
@@ -6918,7 +6958,7 @@ buildNodeSubtitle = function(node){
   }
   switch(node.type){
     case 'signal_source':
-      return `${props.waveType||'正弦'} · 幅值 ${props.amplitude} · ${props.outputFormat||'标量'}`;
+      return summarizeSignalSourceRuntime(node);
     case 'flow_block':
       return `${props.inputName||'输入'} → ${props.outputName||'输出'} · ${props.outputFormat||'标量'}${faultNote}`;
     case 'simulation_block':
@@ -8621,7 +8661,7 @@ buildNodeSubtitle = function(node){
   const faultNote=node.injectedFault?' · 电气故障':'';
   switch(node.type){
     case 'signal_source':
-      return `${props.waveType||'信号'} · 幅值 ${props.amplitude||'1'} · ${props.outputFormat||'标量'}`;
+      return summarizeSignalSourceRuntime(node);
     case 'flow_block':
       return `${props.inputName||'输入'} / ${props.inputFormat||'标量'} → ${props.outputName||'输出'} / ${props.outputFormat||'标量'}${faultNote}`;
     case 'simulation_block':
@@ -12226,6 +12266,19 @@ Object.assign(window,{
     return plainValue(value,fallback).replace(/\s+/g,'_');
   }
 
+  function faultVariableAliases(item){
+    if(!item||typeof item!=='object') return [];
+    return [
+      item.key,
+      item.id,
+      item.varName,
+      item.name,
+      item.displayName,
+      item.label,
+      item.comment
+    ].map(value=>plainValue(value,'')).filter(Boolean);
+  }
+
   function defaultFaultVariableField(role,key){
     if(role==='parameter') return `params.${key}`;
     if(role==='input') return `inputs.${key}`;
@@ -12313,19 +12366,22 @@ Object.assign(window,{
     const props=node?.props||{};
     const result=[];
     const seen=new Set();
+    const inputItems=list(props.inputs);
+    const outputItems=list(props.outputs);
+    const middleItems=list(props.middleVars);
+    const interfaceAliases=new Set([...inputItems,...outputItems,...middleItems].flatMap(faultVariableAliases));
+    const pythonParameterItems=getPythonBindingFaultParameters(node)
+      .filter(item=>!faultVariableAliases(item).some(alias=>interfaceAliases.has(alias)));
     [
       ['parameter',list(props.parameters)],
       ['parameter',list(props.modelParameters)],
       ['parameter',list(props.physicalParameters)],
       ['parameter',list(node?.parameters)],
       ['parameter',list(node?.physicalParameters)],
-      ['parameter',getPythonBindingFaultParameters(node)],
-      ['input',list(props.inputs)],
-      ['input',getPythonBindingFaultInterfaceItems(node,'inputs')],
-      ['output',list(props.outputs)],
-      ['output',getPythonBindingFaultInterfaceItems(node,'outputs')],
-      ['middle',list(props.middleVars)],
-      ['middle',getPythonBindingFaultInterfaceItems(node,'middleVars')]
+      ['parameter',pythonParameterItems],
+      ['input',inputItems.length?inputItems:getPythonBindingFaultInterfaceItems(node,'inputs')],
+      ['output',outputItems.length?outputItems:getPythonBindingFaultInterfaceItems(node,'outputs')],
+      ['middle',middleItems.length?middleItems:getPythonBindingFaultInterfaceItems(node,'middleVars')]
     ].forEach(([role,items])=>items.forEach((item,index)=>pushFaultConfigVariable(result,seen,role,item,index)));
     pushFaultConfigDeclarationVariables(result,seen,node);
     return result;

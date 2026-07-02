@@ -260,6 +260,21 @@ function pythonBindingParameterInputs(node = {}) {
   return source.filter(hasDefaultParameterValue);
 }
 
+function variableAliasValues(item = {}) {
+  if (!isPlainObject(item)) {
+    return [];
+  }
+  return [
+    item.key,
+    item.id,
+    item.varName,
+    item.name,
+    item.displayName,
+    item.label,
+    item.comment
+  ].map((value) => text(value)).filter(Boolean);
+}
+
 function pythonBindingInterfaceItems(node = {}, group = 'inputs') {
   const binding = isPlainObject(node.pythonBinding) ? node.pythonBinding : {};
   const parsedItems = arrayOrEmpty(binding.parsedInterface?.[group]);
@@ -270,19 +285,22 @@ export function getComponentFaultVariables(node = {}) {
   const props = isPlainObject(node.props) ? node.props : {};
   const variables = [];
   const seen = new Set();
+  const inputItems = arrayOrEmpty(props.inputs);
+  const outputItems = arrayOrEmpty(props.outputs);
+  const middleItems = arrayOrEmpty(props.middleVars);
+  const interfaceAliases = new Set([...inputItems, ...outputItems, ...middleItems].flatMap(variableAliasValues));
+  const pythonParameterItems = pythonBindingParameterInputs(node)
+    .filter((item) => !variableAliasValues(item).some((alias) => interfaceAliases.has(alias)));
   [
     ['parameter', arrayOrEmpty(props.parameters)],
     ['parameter', arrayOrEmpty(props.modelParameters)],
     ['parameter', arrayOrEmpty(props.physicalParameters)],
     ['parameter', arrayOrEmpty(node.parameters)],
     ['parameter', arrayOrEmpty(node.physicalParameters)],
-    ['parameter', pythonBindingParameterInputs(node)],
-    ['input', arrayOrEmpty(props.inputs)],
-    ['input', pythonBindingInterfaceItems(node, 'inputs')],
-    ['output', arrayOrEmpty(props.outputs)],
-    ['output', pythonBindingInterfaceItems(node, 'outputs')],
-    ['middle', arrayOrEmpty(props.middleVars)],
-    ['middle', pythonBindingInterfaceItems(node, 'middleVars')]
+    ['parameter', pythonParameterItems],
+    ['input', inputItems.length ? inputItems : pythonBindingInterfaceItems(node, 'inputs')],
+    ['output', outputItems.length ? outputItems : pythonBindingInterfaceItems(node, 'outputs')],
+    ['middle', middleItems.length ? middleItems : pythonBindingInterfaceItems(node, 'middleVars')]
   ].forEach(([role, items]) => {
     items.forEach((item, index) => pushUniqueVariable(variables, seen, role, item, index));
   });

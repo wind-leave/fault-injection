@@ -89,4 +89,71 @@ describe('property panel schema service', () => {
 
     expect(getComponentPropertySchema('instrument_scope').groups[0].fields[0].label).toBe('模块名称');
   });
+
+  it('renders analog signal source fields for old signal sources by default', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    const html = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: {
+        name: 'Old Source',
+        waveType: '常值',
+        amplitude: '2',
+        frequency: '0'
+      }
+    }, schema);
+
+    expect(html).toContain('id="prop-signalDomain"');
+    expect(html).toContain('<option value="analog" selected>模拟信号</option>');
+    expect(html).toContain('id="prop-waveType"');
+    expect(html).toContain('id="prop-amplitude"');
+    expect(html).not.toContain('id="prop-centerFrequency"');
+    expect(html).not.toContain('id="prop-messageId"');
+  });
+
+  it('renders RF-only fields for RF signal sources', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    const html = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: {
+        signalDomain: 'rf',
+        centerFrequency: '2.4GHz',
+        bandwidth: '20MHz',
+        modulation: 'QPSK'
+      }
+    }, schema);
+
+    expect(html).toContain('id="prop-centerFrequency"');
+    expect(html).toContain('id="prop-bandwidth"');
+    expect(html).toContain('id="prop-modulation"');
+    expect(html).not.toContain('id="prop-waveType"');
+    expect(html).not.toContain('id="prop-digitalMode"');
+  });
+
+  it('reads rendered signal source values with normalized domain defaults', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    document.body.innerHTML = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: {
+        name: 'RF Source',
+        signalDomain: 'rf',
+        centerFrequency: '2.4GHz',
+        bandwidth: '20MHz',
+        power: '10',
+        modulation: 'QPSK'
+      }
+    }, schema);
+
+    document.getElementById('prop-name').value = 'RF Updated';
+    document.getElementById('prop-signalDomain').value = 'rf';
+    document.getElementById('prop-centerFrequency').value = '5.8GHz';
+
+    expect(readPropertyValuesFromSchema(schema, document)).toEqual(expect.objectContaining({
+      name: 'RF Updated',
+      signalDomain: 'rf',
+      centerFrequency: '5.8GHz',
+      bandwidth: '20MHz',
+      power: '10',
+      modulation: 'QPSK'
+    }));
+  });
 });

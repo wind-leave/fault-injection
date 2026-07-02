@@ -1,3 +1,5 @@
+import { createSignalSourceProps } from './signalSourceDomainService.js';
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -15,23 +17,63 @@ export const COMPONENT_GROUPS = [
 export const COMPONENT_REGISTRY = {
   signal_source: {
     type: 'signal_source',
+    nodeType: 'signal_source',
     group: 'signals',
-    label: '信号源',
-    badge: '信号',
+    label: '模拟信号源',
+    badge: '模拟',
     className: 'b-source',
     width: 164,
     height: 84,
     palette: {
-      icon: 'S',
+      icon: 'A',
       iconClass: 'source'
     },
-    defaults: {
-      name: '信号源',
-      waveType: '正弦',
-      amplitude: '1.0',
-      frequency: '1.0',
-      outputFormat: '标量'
-    }
+    defaults: createSignalSourceProps('analog')
+  },
+  signal_source_digital: {
+    type: 'signal_source_digital',
+    nodeType: 'signal_source',
+    group: 'signals',
+    label: '数字信号源',
+    badge: '数字',
+    className: 'b-source',
+    width: 164,
+    height: 84,
+    palette: {
+      icon: 'D',
+      iconClass: 'source'
+    },
+    defaults: createSignalSourceProps('digital')
+  },
+  signal_source_command: {
+    type: 'signal_source_command',
+    nodeType: 'signal_source',
+    group: 'signals',
+    label: '指令信号源',
+    badge: '指令',
+    className: 'b-source',
+    width: 164,
+    height: 84,
+    palette: {
+      icon: 'C',
+      iconClass: 'source'
+    },
+    defaults: createSignalSourceProps('command')
+  },
+  signal_source_rf: {
+    type: 'signal_source_rf',
+    nodeType: 'signal_source',
+    group: 'signals',
+    label: '射频信号源',
+    badge: '射频',
+    className: 'b-source',
+    width: 164,
+    height: 84,
+    palette: {
+      icon: 'RF',
+      iconClass: 'source'
+    },
+    defaults: createSignalSourceProps('rf')
   },
   middle_var_assign: {
     type: 'middle_var_assign',

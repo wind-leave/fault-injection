@@ -1,5 +1,9 @@
+import {
+  SIGNAL_DOMAINS,
+  normalizeSignalSourceProps
+} from './signalSourceDomainService.js';
+
 const PORT_FORMATS = ['标量', '向量', '矩阵', '布尔', '事件'];
-const SIGNAL_WAVE_TYPES = ['正弦', '阶跃', '常值'];
 
 const PROPERTY_SCHEMAS = {
   signal_source: {
@@ -7,13 +11,78 @@ const PROPERTY_SCHEMAS = {
     groups: [
       {
         label: '信号定义',
-        help: '信号源用于提供系统建模和仿真的输入激励，可直接连接到流程块、仿真块或示波器。',
         fields: [
           { key: 'name', label: '模块名称', type: 'text', fallback: '信号源' },
-          { key: 'waveType', label: '信号类型', type: 'select', options: SIGNAL_WAVE_TYPES, fallback: '正弦', row: 'signal-kind' },
-          { key: 'outputFormat', label: '输出格式', type: 'select', options: PORT_FORMATS, fallback: '标量', row: 'signal-kind' },
-          { key: 'amplitude', label: '幅值', type: 'text', fallback: '1.0', row: 'signal-params' },
-          { key: 'frequency', label: '频率 / 周期', type: 'text', fallback: '1.0', row: 'signal-params' }
+          { key: 'signalDomain', label: '信号域', type: 'select', options: SIGNAL_DOMAINS, fallback: 'analog', row: 'signal-domain' },
+          { key: 'signalName', label: '信号名称', type: 'text', fallback: '', row: 'signal-id' },
+          { key: 'signalId', label: '信号 ID', type: 'text', fallback: '', row: 'signal-id' },
+          { key: 'unit', label: '单位', type: 'text', fallback: '', row: 'signal-meta' },
+          { key: 'description', label: '说明', type: 'text', fallback: '', row: 'signal-meta' }
+        ]
+      },
+      {
+        label: '数字信号配置',
+        domains: ['digital'],
+        fields: [
+          { key: 'digitalMode', label: '数字模式', type: 'select', options: ['boolean', 'level', 'pulse', 'enum'], fallback: 'boolean', row: 'digital-mode' },
+          { key: 'initialState', label: '初始状态', type: 'text', fallback: '0', row: 'digital-mode' },
+          { key: 'highLevel', label: '高电平', type: 'text', fallback: '1', row: 'digital-level' },
+          { key: 'lowLevel', label: '低电平', type: 'text', fallback: '0', row: 'digital-level' },
+          { key: 'pulseWidth', label: '脉宽', type: 'text', fallback: '', row: 'digital-pulse' },
+          { key: 'period', label: '周期', type: 'text', fallback: '', row: 'digital-pulse' },
+          { key: 'dutyCycle', label: '占空比', type: 'text', fallback: '', row: 'digital-duty' },
+          { key: 'enumValues', label: '枚举值', type: 'text', fallback: '', row: 'digital-duty' }
+        ]
+      },
+      {
+        label: '指令信号配置',
+        domains: ['command'],
+        fields: [
+          { key: 'commandType', label: '指令类型', type: 'select', options: ['control', 'bus-message', 'task', 'mode'], fallback: 'control', row: 'command-type' },
+          { key: 'commandName', label: '指令名称', type: 'text', fallback: '', row: 'command-type' },
+          { key: 'protocol', label: '协议', type: 'text', fallback: 'CAN', row: 'command-protocol' },
+          { key: 'messageId', label: '报文 ID', type: 'text', fallback: '', row: 'command-protocol' },
+          { key: 'payloadKind', label: '载荷类型', type: 'text', fallback: 'float32', row: 'command-payload' },
+          { key: 'payloadValue', label: '载荷数值', type: 'text', fallback: '', row: 'command-payload' },
+          { key: 'payloadSchema', label: '载荷结构', type: 'text', fallback: '', row: 'command-schema' },
+          { key: 'sendPeriod', label: '发送周期', type: 'text', fallback: '', row: 'command-timing' },
+          { key: 'triggerCondition', label: '触发条件', type: 'text', fallback: '', row: 'command-timing' }
+        ]
+      },
+      {
+        label: '模拟信号配置',
+        domains: ['analog'],
+        fields: [
+          { key: 'analogKind', label: '模拟类型', type: 'select', options: ['voltage', 'current', 'sensor', 'control', 'generic'], fallback: 'generic', row: 'analog-kind' },
+          { key: 'waveType', label: '波形', type: 'select', options: ['正弦', '阶跃', '常值', 'sine', 'step', 'constant', 'ramp', 'noise'], fallback: '正弦', row: 'analog-kind' },
+          { key: 'outputFormat', label: '输出格式', type: 'select', options: PORT_FORMATS, fallback: '标量', row: 'analog-format' },
+          { key: 'amplitude', label: '幅值', type: 'text', fallback: '1.0', row: 'analog-basic' },
+          { key: 'frequency', label: '频率 / 周期', type: 'text', fallback: '1.0', row: 'analog-basic' },
+          { key: 'phase', label: '相位', type: 'text', fallback: '0', row: 'analog-phase' },
+          { key: 'offset', label: '偏置', type: 'text', fallback: '0', row: 'analog-phase' },
+          { key: 'sampleRate', label: '采样率', type: 'text', fallback: '', row: 'analog-rate' },
+          { key: 'minValue', label: '下限', type: 'text', fallback: '', row: 'analog-limit' },
+          { key: 'maxValue', label: '上限', type: 'text', fallback: '', row: 'analog-limit' }
+        ]
+      },
+      {
+        label: '射频信号配置',
+        domains: ['rf'],
+        fields: [
+          { key: 'rfKind', label: '射频类型', type: 'select', options: ['communication', 'radar', 'navigation', 'jamming', 'generic'], fallback: 'communication', row: 'rf-kind' },
+          { key: 'centerFrequency', label: '中心频率', type: 'text', fallback: '', row: 'rf-frequency' },
+          { key: 'bandwidth', label: '带宽', type: 'text', fallback: '', row: 'rf-frequency' },
+          { key: 'power', label: '功率', type: 'text', fallback: '', row: 'rf-power' },
+          { key: 'powerUnit', label: '功率单位', type: 'select', options: ['dBm', 'W', 'mW'], fallback: 'dBm', row: 'rf-power' },
+          { key: 'modulation', label: '调制方式', type: 'text', fallback: '', row: 'rf-modulation' },
+          { key: 'phase', label: '相位', type: 'text', fallback: '', row: 'rf-modulation' },
+          { key: 'snr', label: '信噪比', type: 'text', fallback: '', row: 'rf-quality' },
+          { key: 'sampleRate', label: '采样率', type: 'text', fallback: '', row: 'rf-quality' },
+          { key: 'pulseWidth', label: '脉宽', type: 'text', fallback: '', row: 'rf-pulse' },
+          { key: 'prf', label: 'PRF', type: 'text', fallback: '', row: 'rf-pulse' },
+          { key: 'channel', label: '信道', type: 'text', fallback: '', row: 'rf-extra' },
+          { key: 'polarization', label: '极化', type: 'text', fallback: '', row: 'rf-extra' },
+          { key: 'rfProfile', label: 'RF 配置', type: 'text', fallback: '', row: 'rf-profile' }
         ]
       }
     ]
@@ -171,9 +240,10 @@ function buildSelectOptions(options, selected, helper) {
   }
 
   return options.map((option) => {
-    const optionText = String(option);
-    const isSelected = optionText === String(selected);
-    return `<option value="${escapeHtml(optionText)}"${isSelected ? ' selected' : ''}>${escapeHtml(optionText)}</option>`;
+    const optionValue = typeof option === 'object' ? String(option.value) : String(option);
+    const optionLabel = typeof option === 'object' ? String(option.label) : optionValue;
+    const isSelected = optionValue === String(selected);
+    return `<option value="${escapeHtml(optionValue)}"${isSelected ? ' selected' : ''}>${escapeHtml(optionLabel)}</option>`;
   }).join('');
 }
 
@@ -237,10 +307,15 @@ export function renderPropertyFieldsFromSchema(node, schema, helpers = {}) {
   }
 
   const escape = helpers.escapeHtml || escapeHtml;
-  return schema.groups.map((group) => `
+  const nodeForRender = schema.type === 'signal_source'
+    ? { ...node, props: normalizeSignalSourceProps(node?.props ?? {}) }
+    : node;
+  const domain = nodeForRender?.props?.signalDomain;
+
+  return schema.groups.filter((group) => !group.domains || group.domains.includes(domain)).map((group) => `
       <div class="pgroup">
         <div class="pglbl">${escape(group.label)}</div>
-        ${renderFieldsInRows(node, group.fields || [], helpers)}
+        ${renderFieldsInRows(nodeForRender, group.fields || [], helpers)}
         ${group.help ? `<div class="props-help">${escape(group.help)}</div>` : ''}
       </div>`).join('');
 }
@@ -282,5 +357,5 @@ export function readPropertyValuesFromSchema(schema, documentLike) {
     values[field.key] = normalizeTextValue(element.value, field.fallback ?? '');
   });
 
-  return values;
+  return schema.type === 'signal_source' ? normalizeSignalSourceProps(values) : values;
 }

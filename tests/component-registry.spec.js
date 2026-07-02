@@ -40,6 +40,9 @@ describe('component registry', () => {
       'physical_fault_injector',
       'protocol_fault_injector',
       'signal_source',
+      'signal_source_command',
+      'signal_source_digital',
+      'signal_source_rf',
       'simulation_block',
       'subsystem_block',
       'subsystem_in_port',
@@ -80,17 +83,50 @@ describe('component registry', () => {
     const library = buildComponentLibraryFromRegistry();
 
     expect(library.signal_source).toMatchObject({
-      label: '信号源',
-      badge: '信号',
+      label: '模拟信号源',
+      badge: '模拟',
       className: 'b-source',
       width: 164,
       height: 84,
+      nodeType: 'signal_source',
       defaults: {
-        name: '信号源',
+        name: '模拟信号源',
+        signalDomain: 'analog',
         waveType: '正弦',
         amplitude: '1.0',
         frequency: '1.0',
         outputFormat: '标量'
+      }
+    });
+
+    expect(library.signal_source_digital).toMatchObject({
+      label: '数字信号源',
+      nodeType: 'signal_source',
+      defaults: {
+        name: '数字信号源',
+        signalDomain: 'digital',
+        initialState: '0'
+      }
+    });
+
+    expect(library.signal_source_command).toMatchObject({
+      label: '指令信号源',
+      nodeType: 'signal_source',
+      defaults: {
+        name: '指令信号源',
+        signalDomain: 'command',
+        protocol: 'CAN',
+        payloadKind: 'float32'
+      }
+    });
+
+    expect(library.signal_source_rf).toMatchObject({
+      label: '射频信号源',
+      nodeType: 'signal_source',
+      defaults: {
+        name: '射频信号源',
+        signalDomain: 'rf',
+        powerUnit: 'dBm'
       }
     });
 
@@ -150,6 +186,7 @@ describe('component registry', () => {
 
   it('groups palette components by registry group without mutating registry entries', () => {
     const paletteGroups = getPaletteGroups();
+    const signals = paletteGroups.find((group) => group.id === 'signals');
     const signalOps = paletteGroups.find((group) => group.id === 'signal-ops');
     const faults = paletteGroups.find((group) => group.id === 'faults');
     const canLines = paletteGroups.find((group) => group.id === 'can-lines');
@@ -164,6 +201,13 @@ describe('component registry', () => {
       'can-lines'
     ]);
     expect(paletteGroups[0]).not.toBe(COMPONENT_GROUPS[0]);
+    expect(signals.components.map((item) => item.type)).toEqual([
+      'signal_source',
+      'signal_source_digital',
+      'signal_source_command',
+      'signal_source_rf',
+      'middle_var_assign'
+    ]);
     expect(signalOps.components.map((item) => item.type)).toEqual([
       'flow_block',
       'gain_block',

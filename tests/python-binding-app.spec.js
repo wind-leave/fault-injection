@@ -420,7 +420,7 @@ describe('Python binding app integration', () => {
 
     expect(document.getElementById('btn-imp-sys')?.textContent).toContain('导入系统模型');
     expect(document.getElementById('btn-imp-sys')?.textContent).not.toContain('Import System Model');
-    expect(document.querySelector('[data-component=\"middle_var_assign\"]')?.textContent).toContain('中间变量赋值块');
+    expect(document.querySelector('[data-component=middle_var_assign]')).toBeNull();
 
     window.createNode('signal_source', 360, 260);
     await flushRuntime();
@@ -428,6 +428,8 @@ describe('Python binding app integration', () => {
     const signalNode = document.querySelector('.blk.b-source');
     const signalId = signalNode.id.replace('b-', '');
     window.selectNode(signalId);
+    await flushRuntime();
+    window.setPropertyPanelTab('parameters');
     await flushRuntime();
 
     const inspector = document.getElementById('pd');

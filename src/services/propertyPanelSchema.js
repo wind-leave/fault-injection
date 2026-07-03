@@ -5,6 +5,58 @@ import {
 
 const PORT_FORMATS = ['标量', '向量', '矩阵', '布尔', '事件'];
 
+const ANALOG_KIND_OPTIONS = [
+  { value: 'voltage', label: '电压信号' },
+  { value: 'current', label: '电流信号' },
+  { value: 'sensor', label: '传感器量' },
+  { value: 'control', label: '控制量' },
+  { value: 'generic', label: '通用模拟量' }
+];
+
+const WAVE_TYPE_OPTIONS = [
+  { value: 'sine', label: '正弦' },
+  { value: 'step', label: '阶跃' },
+  { value: 'constant', label: '常值' },
+  { value: 'ramp', label: '斜坡' },
+  { value: 'noise', label: '噪声' }
+];
+
+const WAVE_TYPE_ALIASES = {
+  正弦: 'sine',
+  阶跃: 'step',
+  常值: 'constant'
+};
+
+const DIGITAL_MODE_OPTIONS = [
+  { value: 'boolean', label: '布尔量' },
+  { value: 'level', label: '电平信号' },
+  { value: 'pulse', label: '脉冲信号' },
+  { value: 'enum', label: '枚举状态' }
+];
+
+const COMMAND_TYPE_OPTIONS = [
+  { value: 'control', label: '控制指令' },
+  { value: 'bus-message', label: '总线报文' },
+  { value: 'task', label: '任务指令' },
+  { value: 'mode', label: '模式指令' }
+];
+
+const RF_KIND_OPTIONS = [
+  { value: 'communication', label: '通信射频' },
+  { value: 'radar', label: '雷达射频' },
+  { value: 'navigation', label: '导航射频' },
+  { value: 'jamming', label: '干扰射频' },
+  { value: 'generic', label: '通用射频' }
+];
+
+const SELECT_OPTION_OVERRIDES = {
+  analogKind: ANALOG_KIND_OPTIONS,
+  waveType: WAVE_TYPE_OPTIONS,
+  digitalMode: DIGITAL_MODE_OPTIONS,
+  commandType: COMMAND_TYPE_OPTIONS,
+  rfKind: RF_KIND_OPTIONS
+};
+
 const PROPERTY_SCHEMAS = {
   signal_source: {
     type: 'signal_source',
@@ -231,6 +283,10 @@ function getFieldValue(node, field) {
   if (field.valueType === 'signs') {
     return normalizeSigns(raw ?? field.fallback, node?.props?.[field.inputCountKey] ?? 2).join(' ');
   }
+  if (field.key === 'waveType') {
+    const value = raw ?? field.fallback ?? '';
+    return WAVE_TYPE_ALIASES[value] || value;
+  }
   return raw ?? field.fallback ?? '';
 }
 
@@ -253,7 +309,8 @@ function renderField(node, field, helpers = {}) {
   const value = getFieldValue(node, field);
 
   if (field.type === 'select') {
-    const options = buildSelectOptions(field.options || [], value, helpers.buildSelectOptions);
+    const fieldOptions = SELECT_OPTION_OVERRIDES[field.key] || field.options || [];
+    const options = buildSelectOptions(fieldOptions, value, helpers.buildSelectOptions);
     return `<div class="props-field"><label>${escape(field.label)}</label><select id="${id}">${options}</select></div>`;
   }
 
@@ -296,6 +353,14 @@ function renderFieldsInRows(node, fields, helpers) {
   return rows.join('');
 }
 
+function getEditableFieldsForSchema(schema, group) {
+  const fields = group.fields || [];
+  if (schema?.type !== 'signal_source') {
+    return fields;
+  }
+  return fields.filter((field) => field.key !== 'signalDomain');
+}
+
 export function getComponentPropertySchema(type) {
   const schema = PROPERTY_SCHEMAS[type];
   return schema ? deepClone(schema) : null;
@@ -315,7 +380,7 @@ export function renderPropertyFieldsFromSchema(node, schema, helpers = {}) {
   return schema.groups.filter((group) => !group.domains || group.domains.includes(domain)).map((group) => `
       <div class="pgroup">
         <div class="pglbl">${escape(group.label)}</div>
-        ${renderFieldsInRows(nodeForRender, group.fields || [], helpers)}
+        ${renderFieldsInRows(nodeForRender, getEditableFieldsForSchema(schema, group), helpers)}
         ${group.help ? `<div class="props-help">${escape(group.help)}</div>` : ''}
       </div>`).join('');
 }
@@ -326,7 +391,7 @@ export function readPropertyValuesFromSchema(schema, documentLike) {
   }
 
   const values = {};
-  const fields = schema.groups.flatMap((group) => group.fields || []);
+  const fields = schema.groups.flatMap((group) => getEditableFieldsForSchema(schema, group));
 
   fields.forEach((field) => {
     if (field.type === 'readonly') {
@@ -357,5 +422,5 @@ export function readPropertyValuesFromSchema(schema, documentLike) {
     values[field.key] = normalizeTextValue(element.value, field.fallback ?? '');
   });
 
-  return schema.type === 'signal_source' ? normalizeSignalSourceProps(values) : values;
+  return values;
 }

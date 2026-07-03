@@ -65,8 +65,7 @@ describe('left palette taxonomy', () => {
       'signal_source',
       'signal_source_digital',
       'signal_source_command',
-      'signal_source_rf',
-      'middle_var_assign'
+      'signal_source_rf'
     ]);
     expect(groupComponents(wrapper, 'signal-ops')).toEqual([
       'flow_block',

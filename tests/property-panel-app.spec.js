@@ -131,7 +131,7 @@ describe('property panel interaction', () => {
     window.setPropertyPanelTab('parameters');
     await flushRuntime();
 
-    expect(document.getElementById('prop-signalDomain').value).toBe('rf');
+    expect(document.getElementById('prop-signalDomain')).toBeNull();
     expect(document.getElementById('prop-centerFrequency')).not.toBeNull();
     expect(document.getElementById('prop-waveType')).toBeNull();
 
@@ -150,6 +150,32 @@ describe('property panel interaction', () => {
       power: '12',
       powerUnit: 'dBm'
     });
+
+    wrapper.unmount();
+  });
+
+  it('shows signal source definition only in parameter configuration', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_rf', 220, 220);
+    await flushRuntime();
+
+    window.selectNode(source.id);
+    await flushRuntime();
+
+    expect(document.querySelector('[data-props-tab="overview"]')?.classList.contains('is-active')).toBe(true);
+    expect(document.getElementById('prop-signalName')).toBeNull();
+    expect(document.getElementById('prop-centerFrequency')).toBeNull();
+    expect(document.getElementById('prop-signalDomain')).toBeNull();
+
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    expect(document.querySelector('[data-props-tab="parameters"]')?.classList.contains('is-active')).toBe(true);
+    expect(document.getElementById('prop-signalName')).not.toBeNull();
+    expect(document.getElementById('prop-centerFrequency')).not.toBeNull();
+    expect(document.getElementById('prop-signalDomain')).toBeNull();
 
     wrapper.unmount();
   });

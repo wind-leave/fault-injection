@@ -205,9 +205,9 @@ describe('component registry', () => {
       'signal_source',
       'signal_source_digital',
       'signal_source_command',
-      'signal_source_rf',
-      'middle_var_assign'
+      'signal_source_rf'
     ]);
+    expect(COMPONENT_REGISTRY.middle_var_assign.palette?.visible).toBe(false);
     expect(signalOps.components.map((item) => item.type)).toEqual([
       'flow_block',
       'gain_block',

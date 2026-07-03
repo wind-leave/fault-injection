@@ -84,6 +84,7 @@ export const COMPONENT_REGISTRY = {
     width: 176,
     height: 82,
     palette: {
+      visible: false,
       icon: '中',
       iconClass: 'middle'
     },

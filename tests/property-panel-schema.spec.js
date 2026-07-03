@@ -102,12 +102,163 @@ describe('property panel schema service', () => {
       }
     }, schema);
 
-    expect(html).toContain('id="prop-signalDomain"');
-    expect(html).toContain('<option value="analog" selected>模拟信号</option>');
+    expect(html).not.toContain('id="prop-signalDomain"');
     expect(html).toContain('id="prop-waveType"');
     expect(html).toContain('id="prop-amplitude"');
     expect(html).not.toContain('id="prop-centerFrequency"');
     expect(html).not.toContain('id="prop-messageId"');
+  });
+
+  it('does not render signal domain as an editable signal source field', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    const html = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: {
+        signalDomain: 'analog',
+        signalName: 'Pitch Command',
+        signalId: 'cmd.pitch'
+      }
+    }, schema);
+
+    expect(html).not.toContain('id="prop-signalDomain"');
+    expect(html).toContain('id="prop-signalName"');
+    expect(html).toContain('id="prop-signalId"');
+  });
+
+  it('renders analog type options with Chinese labels while preserving values', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    document.body.innerHTML = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: {
+        signalDomain: 'analog',
+        analogKind: 'sensor'
+      }
+    }, schema);
+
+    const options = Array.from(document.getElementById('prop-analogKind').options);
+    expect(options.map((option) => option.value)).toEqual([
+      'voltage',
+      'current',
+      'sensor',
+      'control',
+      'generic'
+    ]);
+    expect(options.map((option) => option.textContent)).toEqual([
+      '电压信号',
+      '电流信号',
+      '传感器量',
+      '控制量',
+      '通用模拟量'
+    ]);
+    expect(document.getElementById('prop-analogKind').value).toBe('sensor');
+  });
+
+  it('renders waveform options once with Chinese labels and supports legacy Chinese values', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    document.body.innerHTML = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: {
+        signalDomain: 'analog',
+        waveType: '正弦'
+      }
+    }, schema);
+
+    const options = Array.from(document.getElementById('prop-waveType').options);
+    expect(options.map((option) => option.value)).toEqual([
+      'sine',
+      'step',
+      'constant',
+      'ramp',
+      'noise'
+    ]);
+    expect(options.map((option) => option.textContent)).toEqual([
+      '正弦',
+      '阶跃',
+      '常值',
+      '斜坡',
+      '噪声'
+    ]);
+    expect(document.getElementById('prop-waveType').value).toBe('sine');
+  });
+
+  it('renders digital mode options with Chinese labels while preserving values', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    document.body.innerHTML = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: {
+        signalDomain: 'digital',
+        digitalMode: 'pulse'
+      }
+    }, schema);
+
+    const options = Array.from(document.getElementById('prop-digitalMode').options);
+    expect(options.map((option) => option.value)).toEqual([
+      'boolean',
+      'level',
+      'pulse',
+      'enum'
+    ]);
+    expect(options.map((option) => option.textContent)).toEqual([
+      '布尔量',
+      '电平信号',
+      '脉冲信号',
+      '枚举状态'
+    ]);
+    expect(document.getElementById('prop-digitalMode').value).toBe('pulse');
+  });
+
+  it('renders command type options with Chinese labels while preserving values', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    document.body.innerHTML = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: {
+        signalDomain: 'command',
+        commandType: 'bus-message'
+      }
+    }, schema);
+
+    const options = Array.from(document.getElementById('prop-commandType').options);
+    expect(options.map((option) => option.value)).toEqual([
+      'control',
+      'bus-message',
+      'task',
+      'mode'
+    ]);
+    expect(options.map((option) => option.textContent)).toEqual([
+      '控制指令',
+      '总线报文',
+      '任务指令',
+      '模式指令'
+    ]);
+    expect(document.getElementById('prop-commandType').value).toBe('bus-message');
+  });
+
+  it('renders RF kind options with Chinese labels while preserving values', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    document.body.innerHTML = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: {
+        signalDomain: 'rf',
+        rfKind: 'radar'
+      }
+    }, schema);
+
+    const options = Array.from(document.getElementById('prop-rfKind').options);
+    expect(options.map((option) => option.value)).toEqual([
+      'communication',
+      'radar',
+      'navigation',
+      'jamming',
+      'generic'
+    ]);
+    expect(options.map((option) => option.textContent)).toEqual([
+      '通信射频',
+      '雷达射频',
+      '导航射频',
+      '干扰射频',
+      '通用射频'
+    ]);
+    expect(document.getElementById('prop-rfKind').value).toBe('radar');
   });
 
   it('renders RF-only fields for RF signal sources', () => {
@@ -144,12 +295,10 @@ describe('property panel schema service', () => {
     }, schema);
 
     document.getElementById('prop-name').value = 'RF Updated';
-    document.getElementById('prop-signalDomain').value = 'rf';
     document.getElementById('prop-centerFrequency').value = '5.8GHz';
 
     expect(readPropertyValuesFromSchema(schema, document)).toEqual(expect.objectContaining({
       name: 'RF Updated',
-      signalDomain: 'rf',
       centerFrequency: '5.8GHz',
       bandwidth: '20MHz',
       power: '10',

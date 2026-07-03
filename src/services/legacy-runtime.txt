@@ -11846,7 +11846,6 @@ Object.assign(window,{
   }
 
   const LEGACY_OVERVIEW_NODE_TYPES=new Set([
-    'signal_source',
     'flow_block',
     'instrument_scope',
     'instrument_logger',

@@ -312,28 +312,16 @@ describe('Oscilloscope app integration', () => {
     expect(spectrumOverviewText).not.toContain('模块状态');
     expect(spectrumOverviewText).not.toContain('画布位置');
 
+    expect(document.querySelector('[data-props-tab="parameters"]')?.hidden).toBe(true);
+    expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
     window.setPropertyPanelTab('parameters');
     await flushRuntime();
-
-    expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
-    const spectrumParameterText = document.getElementById('pd')?.textContent || '';
-    expect(spectrumParameterText).not.toContain('频谱分析配置');
-    expect(spectrumParameterText).not.toContain('频谱分析仪配置');
-    expect(spectrumParameterText).not.toContain('模块名称');
-    expect(document.getElementById('prop-frequencyRange')).not.toBeNull();
-    expect(document.getElementById('prop-fftSize')).not.toBeNull();
-    expect(document.getElementById('prop-windowFunction')).not.toBeNull();
-    document.getElementById('prop-frequencyRange').value = '0-8kHz';
-    document.getElementById('prop-fftSize').value = '2048';
-    document.getElementById('prop-windowFunction').value = 'Blackman';
-    document.querySelector('.props-save').click();
-    await flushRuntime();
-
-    expect(spectrum.props).toMatchObject({
-      frequencyRange: '0-8kHz',
-      fftSize: '2048',
-      windowFunction: 'Blackman'
-    });
+    expect(document.querySelector('[data-props-tab="overview"]')?.classList.contains('is-active')).toBe(true);
+    expect(document.getElementById('prop-frequencyRange')).toBeNull();
+    expect(document.getElementById('prop-fftSize')).toBeNull();
+    expect(document.getElementById('prop-windowFunction')).toBeNull();
+    expect(document.querySelector('.props-save')).toBeNull();
+    expect(document.querySelector('.props-danger')).toBeNull();
 
     window.simInit(true);
     for (let step = 0; step < 4; step += 1) {
@@ -356,36 +344,15 @@ describe('Oscilloscope app integration', () => {
     expect(meterPanel?.textContent).toContain('12.5');
     expect(meterPanel?.querySelector('[data-instrument-action="export"]')).not.toBeNull();
 
+    expect(document.querySelector('[data-props-tab="parameters"]')?.hidden).toBe(true);
+    expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
     window.setPropertyPanelTab('parameters');
     await flushRuntime();
-
-    expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
-    const meterParameterText = document.getElementById('pd')?.textContent || '';
-    expect(meterParameterText).not.toContain('数字万用表配置');
-    expect(meterParameterText).not.toContain('模块名称');
-    const measurementMode = document.getElementById('prop-measurementMode');
-    expect(measurementMode).toBeInstanceOf(HTMLSelectElement);
-    expect(Array.from(measurementMode.options).map((option) => option.value)).toEqual([
-      '直流电压',
-      '交流电压',
-      '直流电流',
-      '交流电流',
-      '电阻',
-      '通断'
-    ]);
-    expect(Array.from(measurementMode.options).map((option) => option.textContent)).toEqual([
-      '直流电压',
-      '交流电压',
-      '直流电流',
-      '交流电流',
-      '电阻',
-      '通断'
-    ]);
-    measurementMode.value = '电阻';
-    expect(document.getElementById('prop-range')).not.toBeNull();
-    document.querySelector('.props-save').click();
-    await flushRuntime();
-    expect(meter.props.measurementMode).toBe('电阻');
+    expect(document.querySelector('[data-props-tab="overview"]')?.classList.contains('is-active')).toBe(true);
+    expect(document.getElementById('prop-measurementMode')).toBeNull();
+    expect(document.getElementById('prop-range')).toBeNull();
+    expect(document.querySelector('.props-save')).toBeNull();
+    expect(document.querySelector('.props-danger')).toBeNull();
 
     wrapper.unmount();
   });

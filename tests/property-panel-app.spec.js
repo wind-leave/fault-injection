@@ -427,6 +427,30 @@ describe('property panel interaction', () => {
       }
       expect(document.getElementById('pd')?.textContent).toContain(node.props.name);
 
+      const hasNoParameterSettings = ['instrument_spectrum', 'instrument_multimeter'].includes(type);
+      if (hasNoParameterSettings) {
+        expect(visiblePropertyTabs()).toEqual(['overview', 'outputs']);
+        window.setPropertyPanelTab('parameters');
+        await flushRuntime();
+        expect(document.querySelector('[data-props-tab="overview"]')?.classList.contains('is-active')).toBe(true);
+        expect(document.getElementById('prop-frequencyRange')).toBeNull();
+        expect(document.getElementById('prop-measurementMode')).toBeNull();
+        expect(document.querySelector('.props-save')).toBeNull();
+        expect(document.querySelector('.props-danger')).toBeNull();
+
+        window.setPropertyPanelTab('faults');
+        await flushRuntime();
+        expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
+        expect(document.querySelector('.props-fault-panel')).toBeNull();
+        expect(document.querySelector('[data-instrument-panel]')).not.toBeNull();
+
+        window.setPropertyPanelTab('outputs');
+        await flushRuntime();
+        expect(document.querySelector('.props-target-card')).not.toBeNull();
+        expect(document.getElementById('pd')?.textContent).toContain('端口与变量');
+        continue;
+      }
+
       window.setPropertyPanelTab('parameters');
       await flushRuntime();
       expect(document.querySelector('.props-form')).not.toBeNull();

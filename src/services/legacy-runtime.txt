@@ -10930,7 +10930,6 @@ Object.assign(window,{
           <button type="button" class="instrument-primary" data-instrument-action="export">导出数据</button>
           <button type="button" class="instrument-secondary" data-instrument-action="clear">清空记录</button>
         </div>
-        ${buildSpectrumConfigFields(node)}
       </div>`;
   }
 
@@ -10966,7 +10965,6 @@ Object.assign(window,{
           <button type="button" class="instrument-primary" data-instrument-action="export">导出数据</button>
           <button type="button" class="instrument-secondary" data-instrument-action="clear">清空记录</button>
         </div>
-        ${buildMultimeterConfigFields(node)}
       </div>`;
   }
 
@@ -11099,6 +11097,15 @@ Object.assign(window,{
     const faultSummary=node.injectedFault
       ?`<div class="prow"><span class="pk">电气故障</span><span class="pv pv-fault">${escapeHtml(node.injectedFault.name)}</span></div>`
       :'';
+    const actionButtons=['instrument_spectrum','instrument_multimeter'].includes(node.type)
+      ?''
+      :`
+          ${node.type==='simulation_block'?`<button class="props-secondary" onclick="openPythonBindingDialog('${node.id}')">${pythonBound?'重新绑定 Python':'绑定 Python 文件'}</button>`:''}
+          ${node.type==='simulation_block'&&pythonBound?`<button class="props-secondary" onclick="unbindPythonBinding('${node.id}')">解除 Python 绑定</button>`:''}
+          ${isElectricalInjectableType(node.type)?`<button class="props-secondary props-fault-action" onclick="openElectricalFaultImport()">${node.injectedFault?'更换故障':'导入故障'}</button>`:''}
+          <button class="props-save" onclick="saveSelectedNode()">保存设置</button>
+          <button class="props-danger" onclick="deleteSelectedNode()">删除模块</button>
+        `;
 
     pe.style.display='none';
     pd.style.display='block';
@@ -11116,13 +11123,7 @@ Object.assign(window,{
       </div>
       <div class="props-form">
         ${fields}
-        <div class="props-actions">
-          ${node.type==='simulation_block'?`<button class="props-secondary" onclick="openPythonBindingDialog('${node.id}')">${pythonBound?'重新绑定 Python':'绑定 Python 文件'}</button>`:''}
-          ${node.type==='simulation_block'&&pythonBound?`<button class="props-secondary" onclick="unbindPythonBinding('${node.id}')">解除 Python 绑定</button>`:''}
-          ${isElectricalInjectableType(node.type)?`<button class="props-secondary props-fault-action" onclick="openElectricalFaultImport()">${node.injectedFault?'更换故障':'导入故障'}</button>`:''}
-          <button class="props-save" onclick="saveSelectedNode()">保存设置</button>
-          <button class="props-danger" onclick="deleteSelectedNode()">删除模块</button>
-        </div>
+        ${actionButtons?`<div class="props-actions">${actionButtons}</div>`:''}
       </div>`;
     bindInstrumentPropertyPanelActions(node,pd);
     if(node.type==='simulation_block'){
@@ -11331,7 +11332,7 @@ Object.assign(window,{
     if(kind==='fault-tag'){return ['overview','parameters'];}
     if(kind==='fault-injector'){return ['overview'];}
     if(kind==='scope'){return ['overview','parameters','outputs'];}
-    if(kind==='measurement-instrument'){return ['overview','parameters','outputs'];}
+    if(kind==='measurement-instrument'){return ['overview','outputs'];}
     if(kind==='empty'){return ['overview'];}
     return ['overview','parameters','faults','outputs'];
   }

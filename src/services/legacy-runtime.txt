@@ -120,6 +120,28 @@ function summarizeSignalSourceRuntime(node){
   return `${props.waveType||'signal'} · ${props.amplitude||'1'} · ${props.outputFormat||'scalar'}`;
 }
 
+function getSignalSourceComponentKey(domain){
+  switch(domain){
+    case 'digital':
+      return 'signal_source_digital';
+    case 'command':
+      return 'signal_source_command';
+    case 'rf':
+      return 'signal_source_rf';
+    default:
+      return 'signal_source';
+  }
+}
+
+function getNodeDisplayMeta(node){
+  const fallback=COMPONENT_LIBRARY[node?.type]||{};
+  if(node?.type!=='signal_source'){
+    return fallback;
+  }
+  const props=normalizeSignalSourcePropsRuntime(node.props||{});
+  return COMPONENT_LIBRARY[getSignalSourceComponentKey(props.signalDomain)]||fallback;
+}
+
 function applySchemaPropertyValues(node){
   const values=readSchemaPropertyValues(node);
   if(!values){return false;}
@@ -2265,6 +2287,7 @@ function renderModelNodes(){
   S.modelNodes.forEach(node=>{
     applyNodeGeometry(node);
     const meta=COMPONENT_LIBRARY[node.type];
+    const displayMeta=getNodeDisplayMeta(node);
     const nodeFaultTags=getFaultTagsForNode(node.id);
     const expandedFaultTags=nodeFaultTags.filter(tag=>tag.expanded);
     const faulted=S.faultedBlks.includes(node.id)||Boolean(node.injectedFault)||nodeFaultTags.length>0;
@@ -2296,7 +2319,7 @@ function renderModelNodes(){
       :'';
     el.innerHTML=`
       <div class="fbadge">F</div>
-      <div class="blk-kicker">${faulted&&!isFaultNodeType(node.type)?`${meta.badge} 故障` : meta.badge}</div>
+      <div class="blk-kicker">${faulted&&!isFaultNodeType(node.type)?`${displayMeta.badge} 故障` : displayMeta.badge}</div>
       <div class="blk-lbl">${escapeHtml(nodeTitle)}</div>
       <div class="blk-sub">${escapeHtml(nodeSubtitle)}</div>
       ${faultTagToggle}`;
@@ -3680,11 +3703,39 @@ function getScopeNodes(){
 }
 
 function getAuxInstrumentNodes(){
-  return S.modelNodes.filter(node=>node.type==='instrument_logger'||node.type==='instrument_spectrum');
+  const nodes=[
+    ...(S.modelNodes||[]),
+    ...Object.values(S.canvases||{}).flatMap(canvas=>canvas?.nodes||[])
+  ];
+  const byId=new Map();
+  nodes.forEach(node=>{
+    if(node?.id&&(node.type==='instrument_logger'||node.type==='instrument_spectrum'||node.type==='instrument_multimeter')){
+      byId.set(node.id,node);
+    }
+  });
+  return Array.from(byId.values());
 }
 
 function getConnectedScopeNodes(){
   return getScopeNodes().filter(node=>getIncomingEdgesForNode(node.id).length>0);
+}
+
+function getMeasurementInstrumentNodes(){
+  const nodes=[...getScopeNodes(),...getAuxInstrumentNodes()];
+  return Array.from(new Map(nodes.map(node=>[node.id,node])).values());
+}
+
+function getInstrumentIncomingEdges(node){
+  const canvasId=typeof findCanvasIdForNodeId==='function'?findCanvasIdForNodeId(node.id,S.activeCanvasId):S.activeCanvasId;
+  if(typeof getIncomingEdgesForNodeFromCanvas==='function'){
+    const canvasEdges=getIncomingEdgesForNodeFromCanvas(canvasId,node.id);
+    if(canvasEdges.length){return canvasEdges;}
+  }
+  return getIncomingEdgesForNode(node.id);
+}
+
+function getConnectedMeasurementInstrumentNodes(){
+  return getMeasurementInstrumentNodes().filter(node=>getInstrumentIncomingEdges(node).length>0);
 }
 
 function getIncomingEdgesForNode(nodeId){
@@ -3993,12 +4044,12 @@ function validateSimulationTopology(){
     toast('请至少放置一个信号源','w');
     return false;
   }
-  if(getScopeNodes().length===0){
-    toast('请至少放置一个示波器用于观察信号','w');
+  if(getMeasurementInstrumentNodes().length===0){
+    toast('请至少放置一个测量仪器用于观察信号','w');
     return false;
   }
-  if(getConnectedScopeNodes().length===0){
-    toast('请至少让一个示波器接入信号链路，才能查看波形','w');
+  if(getConnectedMeasurementInstrumentNodes().length===0){
+    toast('请至少让一个测量仪器接入信号链路，才能查看测量结果','w');
     return false;
   }
   const conflicts=findInputCouplingConflicts();
@@ -4010,7 +4061,38 @@ function validateSimulationTopology(){
   return true;
 }
 
+function parseDigitalLevel(value,fallback=0){
+  const raw=String(value??'').trim().toLowerCase();
+  if(raw==='true'||raw==='on'||raw==='high'){return 1;}
+  if(raw==='false'||raw==='off'||raw==='low'){return 0;}
+  return parseScalar(value,fallback);
+}
+
+function computeDigitalSourceSignal(props,time){
+  const high=parseDigitalLevel(props.highLevel,1);
+  const low=parseDigitalLevel(props.lowLevel,0);
+  const initial=parseDigitalLevel(props.initialState,low);
+  if(props.digitalMode==='pulse'){
+    const period=Math.max(parseScalar(props.period,1),1e-9);
+    const dutyFromWidth=parseScalar(props.pulseWidth,0)/period;
+    const duty=clamp(parseScalar(props.dutyCycle,dutyFromWidth||0.5),0,1);
+    const phase=((time%period)+period)%period;
+    return phase<period*duty?high:low;
+  }
+  return initial;
+}
+
 function computeSourceSignal(node,time){
+  const props=normalizeSignalSourcePropsRuntime(node.props||{});
+  if(props.signalDomain==='digital'){
+    return computeDigitalSourceSignal(props,time);
+  }
+  if(props.signalDomain==='command'){
+    return parseScalar(props.commandValue||props.payloadValue,0);
+  }
+  if(props.signalDomain==='rf'){
+    return parseScalar(props.power,0);
+  }
   const amplitude=parseScalar(node.props.amplitude,1);
   const frequency=parseScalar(node.props.frequency,1);
   if(node.props.waveType==='闃惰穬'){
@@ -5761,6 +5843,23 @@ window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__ = function(pkg,prepared){
   toast(`飞控模型包“${S.activeModelPackage.modelName||'未命名模型'}”已导入`,'s');
 };
 
+function normalizeMultimeterMeasurementMode(value){
+  const raw=String(value||'').trim();
+  const aliases={
+    'DC Voltage':'直流电压',
+    'AC Voltage':'交流电压',
+    'DC Current':'直流电流',
+    'AC Current':'交流电流',
+    Resistance:'电阻',
+    Continuity:'通断'
+  };
+  return aliases[raw]||raw||'直流电压';
+}
+
+function getMultimeterMeasurementModeOptions(){
+  return ['直流电压','交流电压','直流电流','交流电流','电阻','通断'];
+}
+
 buildNodeSubtitle = function(node){
   const props=node.props||{};
   const faultNote=node.injectedFault?' · 电气故障':'';
@@ -5991,7 +6090,7 @@ function buildRenderDataChannelsForNode(node,actualScopeSamples,actualInstrument
         .filter(([,channel])=>channel.series.length)
     );
   }
-  if(node.type==='instrument_logger'||node.type==='instrument_spectrum'){
+  if(node.type==='instrument_logger'||node.type==='instrument_spectrum'||node.type==='instrument_multimeter'){
     const series=normalizeRenderDataSeries(actualInstrumentSamples[node.id]||[]);
     if(!series.length) return {};
     return {
@@ -6376,6 +6475,16 @@ showTplDetail = function(t){
 };
 
 computeSourceSignal = function(node,time){
+  const props=normalizeSignalSourcePropsRuntime(node.props||{});
+  if(props.signalDomain==='digital'){
+    return computeDigitalSourceSignal(props,time);
+  }
+  if(props.signalDomain==='command'){
+    return parseScalar(props.commandValue||props.payloadValue,0);
+  }
+  if(props.signalDomain==='rf'){
+    return parseScalar(props.power,0);
+  }
   const amplitude=parseScalar(node.props.amplitude,1);
   const frequency=parseScalar(node.props.frequency,1);
   if(node.props.waveType==='阶跃'){
@@ -6435,12 +6544,12 @@ validateSimulationTopology = function(){
     toast('请至少放置一个信号源','w');
     return false;
   }
-  if(getScopeNodes().length===0){
-    toast('请至少放置一个示波器用于观察信号','w');
+  if(getMeasurementInstrumentNodes().length===0){
+    toast('请至少放置一个测量仪器用于观察信号','w');
     return false;
   }
-  if(getConnectedScopeNodes().length===0){
-    toast('请至少让一个示波器接入信号链路，才能查看波形','w');
+  if(getConnectedMeasurementInstrumentNodes().length===0){
+    toast('请至少让一个测量仪器接入信号链路，才能查看测量结果','w');
     return false;
   }
   const conflicts=findInputCouplingConflicts();
@@ -6967,6 +7076,9 @@ buildNodeSubtitle = function(node){
     case 'instrument_scope':
       return `${props.instrumentType||'示波器'} · 双击查看波形`;
     case 'instrument_spectrum':
+      return `${props.instrumentType||'频谱分析'} · 采样率 ${props.sampleRate||'32kHz'} · ${props.frequencyRange||'0-16kHz'}`;
+    case 'instrument_multimeter':
+      return `${normalizeMultimeterMeasurementMode(props.measurementMode)} · ${props.range||'Auto'} · ${props.refreshRate||props.sampleRate||'5Hz'}`;
     case 'instrument_logger':
       return `${props.instrumentType||COMPONENT_LIBRARY[node.type].label} · 采样率 ${props.sampleRate||'未设置'}`;
     default:
@@ -7024,6 +7136,7 @@ renderModelNodes = function(){
   S.modelNodes.forEach(node=>{
     applyNodeGeometry(node);
     const meta=COMPONENT_LIBRARY[node.type];
+    const displayMeta=getNodeDisplayMeta(node);
     const faulted=S.faultedBlks.includes(node.id)||Boolean(node.injectedFault);
     const pythonBound=node.type==='simulation_block'&&isPythonBoundFlowBlock(node);
     const el=document.createElement('div');
@@ -7047,7 +7160,7 @@ renderModelNodes = function(){
     const showInlinePortLabels=!(pythonBound&&node.type==='simulation_block');
     el.innerHTML=`
       <div class="fbadge">F</div>
-      <div class="blk-kicker">${faulted&&!isFaultNodeType(node.type)?`${meta.badge} 故障`:meta.badge}</div>
+      <div class="blk-kicker">${faulted&&!isFaultNodeType(node.type)?`${displayMeta.badge} 故障`:displayMeta.badge}</div>
       <div class="blk-lbl">${escapeHtml(nodeTitle)}</div>
       <div class="blk-sub">${escapeHtml(nodeSubtitle)}</div>`;
 
@@ -8415,7 +8528,7 @@ recordScopeSamples = function(time,dt){
     });
   });
   getAuxInstrumentNodes().forEach(instrumentNode=>{
-    const incoming=getIncomingEdgesForNode(instrumentNode.id)[0];
+    const incoming=getInstrumentIncomingEdges(instrumentNode)[0];
     if(!incoming){return;}
     if(!SIM.actual.instrumentSamples){SIM.actual.instrumentSamples={};}
     if(!SIM.reference.instrumentSamples){SIM.reference.instrumentSamples={};}
@@ -10711,6 +10824,41 @@ Object.assign(window,{
       </div>`;
   }
 
+  function buildSpectrumConfigFields(node){
+    return `
+      <div class="pgroup">
+        <div class="props-row">
+          <div class="props-field"><label>仪器类型</label><input value="频谱分析" disabled></div>
+          <div class="props-field"><label>采样率</label><input id="prop-sampleRate" value="${escapeHtml(node.props.sampleRate||'32kHz')}"></div>
+        </div>
+        <div class="props-row">
+          <div class="props-field"><label>频率范围</label><input id="prop-frequencyRange" value="${escapeHtml(node.props.frequencyRange||'0-16kHz')}"></div>
+          <div class="props-field"><label>FFT 点数</label><input id="prop-fftSize" value="${escapeHtml(node.props.fftSize||'1024')}"></div>
+        </div>
+        <div class="props-row">
+          <div class="props-field"><label>窗函数</label><input id="prop-windowFunction" value="${escapeHtml(node.props.windowFunction||'Hann')}"></div>
+          <div class="props-field"><label>幅值单位</label><input id="prop-amplitudeUnit" value="${escapeHtml(node.props.amplitudeUnit||'dB')}"></div>
+        </div>
+        <div class="props-field"><label>观测信号</label><input id="prop-signal" value="${escapeHtml(node.props.signal||getInstrumentSignalName(node))}"></div>
+      </div>`;
+  }
+
+  function buildMultimeterConfigFields(node){
+    const modeOptions=getMultimeterMeasurementModeOptions();
+    return `
+      <div class="pgroup">
+        <div class="props-row">
+          <div class="props-field"><label>测量模式</label><select id="prop-measurementMode">${buildSelectOptions(modeOptions,normalizeMultimeterMeasurementMode(node.props.measurementMode))}</select></div>
+          <div class="props-field"><label>量程</label><input id="prop-range" value="${escapeHtml(node.props.range||'Auto')}"></div>
+        </div>
+        <div class="props-row">
+          <div class="props-field"><label>刷新率</label><input id="prop-refreshRate" value="${escapeHtml(node.props.refreshRate||'5Hz')}"></div>
+          <div class="props-field"><label>采样率</label><input id="prop-sampleRate" value="${escapeHtml(node.props.sampleRate||node.props.refreshRate||'5Hz')}"></div>
+        </div>
+        <div class="props-field"><label>观测信号</label><input id="prop-signal" value="${escapeHtml(node.props.signal||getInstrumentSignalName(node))}"></div>
+      </div>`;
+  }
+
   function buildLoggerFieldsClean(node){
     const samples=getInstrumentSamples(node);
     const summary=summarizeInstrumentSamples(samples);
@@ -10774,12 +10922,51 @@ Object.assign(window,{
           <span><b>${summary.count}</b><em>样本</em></span>
           <span><b>${summary.peak}</b><em>幅值峰值</em></span>
           <span><b>${samples.length?formatScopeMetric(peakValue):'--'}</b><em>归一能量</em></span>
+          <span><b>${escapeHtml(node.props.frequencyRange||'0-16kHz')}</b><em>频率范围</em></span>
+          <span><b>${escapeHtml(node.props.fftSize||'1024')}</b><em>FFT 点数</em></span>
+          <span><b>${escapeHtml(node.props.windowFunction||'Hann')}</b><em>窗函数</em></span>
         </div>
         <div class="instrument-actions">
           <button type="button" class="instrument-primary" data-instrument-action="export">导出数据</button>
           <button type="button" class="instrument-secondary" data-instrument-action="clear">清空记录</button>
         </div>
-        ${buildInstrumentConfigFields(node,'频谱分析')}
+        ${buildSpectrumConfigFields(node)}
+      </div>`;
+  }
+
+  function buildMultimeterFieldsClean(node){
+    const samples=getInstrumentSamples(node);
+    const summary=summarizeInstrumentSamples(samples);
+    const values=samples.map(getSampleValue).filter(Number.isFinite);
+    const min=values.length?formatScopeMetric(Math.min(...values)):'--';
+    const max=values.length?formatScopeMetric(Math.max(...values)):'--';
+    const avg=values.length?formatScopeMetric(values.reduce((sum,value)=>sum+value,0)/values.length):'--';
+    return `
+      <div class="instrument-props instrument-props--multimeter" data-instrument-panel="multimeter">
+        <div class="instrument-hero">
+          <div>
+            <div class="instrument-kicker">Digital Multimeter</div>
+            <div class="instrument-title">数字万用表</div>
+            <div class="instrument-copy">${escapeHtml(getInstrumentSignalName(node))}</div>
+          </div>
+          <div class="instrument-count">
+            <strong>${summary.current}</strong>
+            <span>当前读数</span>
+          </div>
+        </div>
+        <div class="instrument-metrics">
+          <span><b>${summary.current}</b><em>${escapeHtml(normalizeMultimeterMeasurementMode(node.props.measurementMode))}</em></span>
+          <span><b>${min}</b><em>最小值</em></span>
+          <span><b>${max}</b><em>最大值</em></span>
+          <span><b>${avg}</b><em>平均值</em></span>
+          <span><b>${escapeHtml(node.props.range||'Auto')}</b><em>量程</em></span>
+          <span><b>${escapeHtml(node.props.refreshRate||node.props.sampleRate||'5Hz')}</b><em>刷新率</em></span>
+        </div>
+        <div class="instrument-actions">
+          <button type="button" class="instrument-primary" data-instrument-action="export">导出数据</button>
+          <button type="button" class="instrument-secondary" data-instrument-action="clear">清空记录</button>
+        </div>
+        ${buildMultimeterConfigFields(node)}
       </div>`;
   }
 
@@ -10792,6 +10979,9 @@ Object.assign(window,{
     }
     if(node.type==='instrument_spectrum'){
       return buildSpectrumFieldsClean(node);
+    }
+    if(node.type==='instrument_multimeter'){
+      return buildMultimeterFieldsClean(node);
     }
     return `
       <div class="pgroup">
@@ -10977,6 +11167,17 @@ Object.assign(window,{
       node.props.name=document.getElementById('prop-name')?.value.trim()||node.props.name;
       node.props.sampleRate=document.getElementById('prop-sampleRate')?.value.trim()||node.props.sampleRate||'64kHz';
       node.props.signal=document.getElementById('prop-signal')?.value.trim()||node.props.signal||'输入信号';
+      if(node.type==='instrument_spectrum'){
+        node.props.frequencyRange=document.getElementById('prop-frequencyRange')?.value.trim()||node.props.frequencyRange||'0-16kHz';
+        node.props.fftSize=document.getElementById('prop-fftSize')?.value.trim()||node.props.fftSize||'1024';
+        node.props.windowFunction=document.getElementById('prop-windowFunction')?.value.trim()||node.props.windowFunction||'Hann';
+        node.props.amplitudeUnit=document.getElementById('prop-amplitudeUnit')?.value.trim()||node.props.amplitudeUnit||'dB';
+      }
+      if(node.type==='instrument_multimeter'){
+        node.props.measurementMode=normalizeMultimeterMeasurementMode(document.getElementById('prop-measurementMode')?.value||node.props.measurementMode);
+        node.props.range=document.getElementById('prop-range')?.value.trim()||node.props.range||'Auto';
+        node.props.refreshRate=document.getElementById('prop-refreshRate')?.value.trim()||node.props.refreshRate||node.props.sampleRate||'5Hz';
+      }
     }else{
       return __finalCleanSaveSelectedNode();
     }
@@ -11071,456 +11272,6 @@ Object.assign(window,{
   });
 })();
 
-;(function installFinalCanvasVisualSemantics(){
-  if(typeof window==='undefined'||window.__canvasVisualSemanticFinalWrapped) return;
-  window.__canvasVisualSemanticFinalWrapped=true;
-
-  function getState(){
-    return window.__GZ_STATE__||(typeof S!=='undefined'?S:{});
-  }
-
-  function nodeText(node){
-    return [
-      node?.id,
-      node?.props?.name,
-      node?.props?.moduleType,
-      node?.props?.instrumentType
-    ].filter(Boolean).join(' ').toLowerCase();
-  }
-
-  function moduleText(node){
-    return [
-      node?.props?.name,
-      node?.props?.moduleType,
-      node?.props?.instrumentType
-    ].filter(Boolean).join(' ').toLowerCase();
-  }
-
-  function getVisualKind(node){
-    const text=nodeText(node);
-    if(!node) return 'unknown';
-    if(node.type==='signal_source'||node.type==='subsystem_in_port') return 'source';
-    if(node.type==='sum_block') return 'sum';
-    if(node.type==='gain_block'||node.type==='mux_block'||node.type==='middle_var_assign') return 'utility';
-    if(node.type?.startsWith('fault_')) return 'fault';
-    if(node.type==='subsystem_block'||node.type==='subsystem_out_port') return 'subsystem';
-    if(node.type?.startsWith('instrument_')||node.type==='instrument_signal_flow') return 'instrument';
-    if(/imu|sensor|gyro|测量|反馈/.test(text)) return 'sensor';
-    if(/motor|actuator|mixer|thrust|电机|执行/.test(text)) return 'actuator';
-    if(/dynamic|plant|airframe|vehicle|动力|机体/.test(text)) return 'plant';
-    if(/allocat|分配/.test(text)) return 'allocator';
-    if(/control|controller|pid|控制/.test(text)) return 'control';
-    return 'process';
-  }
-
-  function decorateCanvasNodes(){
-    const state=getState();
-    if(!Array.isArray(state.modelNodes)||typeof document==='undefined') return;
-    const byId=new Map(state.modelNodes.map(node=>[node.id,node]));
-    document.querySelectorAll('.blk[id^="b-"]').forEach(el=>{
-      const node=byId.get(el.id.replace(/^b-/,''));
-      const kind=getVisualKind(node);
-      Array.from(el.classList)
-        .filter(cls=>cls.startsWith('canvas-node--'))
-        .forEach(cls=>el.classList.remove(cls));
-      el.classList.add(`canvas-node--${kind}`);
-      el.dataset.visualKind=kind;
-    });
-  }
-
-  const previousRenderModelNodes=window.renderModelNodes||(typeof renderModelNodes!=='undefined'?renderModelNodes:null);
-  if(previousRenderModelNodes){
-    window.renderModelNodes=function(){
-      const result=previousRenderModelNodes.apply(this,arguments);
-      decorateCanvasNodes();
-      return result;
-    };
-    if(typeof renderModelNodes!=='undefined') renderModelNodes=window.renderModelNodes;
-  }
-
-  const previousUpdateUI=window.updateUI||(typeof updateUI!=='undefined'?updateUI:null);
-  if(previousUpdateUI){
-    window.updateUI=function(){
-      const result=previousUpdateUI.apply(this,arguments);
-      decorateCanvasNodes();
-      return result;
-    };
-    if(typeof updateUI!=='undefined') updateUI=window.updateUI;
-  }
-
-  window.decorateCanvasNodesByVisualKind=decorateCanvasNodes;
-  setTimeout(decorateCanvasNodes,0);
-})();
-
-;(function installCanvasVisualSemantics(){
-  if(typeof window==='undefined') return;
-
-  function getState(){
-    return window.__GZ_STATE__||(typeof S!=='undefined'?S:{});
-  }
-
-  function nodeText(node){
-    return [
-      node?.id,
-      node?.props?.name,
-      node?.props?.moduleType,
-      node?.props?.instrumentType
-    ].filter(Boolean).join(' ').toLowerCase();
-  }
-
-  function getVisualKind(node){
-    const text=nodeText(node);
-    if(!node) return 'unknown';
-    if(node.type==='signal_source'||node.type==='subsystem_in_port') return 'source';
-    if(node.type==='sum_block') return 'sum';
-    if(node.type==='gain_block'||node.type==='mux_block'||node.type==='middle_var_assign') return 'utility';
-    if(node.type?.startsWith('fault_')) return 'fault';
-    if(node.type==='subsystem_block'||node.type==='subsystem_out_port') return 'subsystem';
-    if(node.type?.startsWith('instrument_')||node.type==='instrument_signal_flow') return 'instrument';
-    if(/imu|sensor|gyro|测量|反馈/.test(text)) return 'sensor';
-    if(/motor|actuator|mixer|thrust|电机|执行/.test(text)) return 'actuator';
-    if(/dynamic|plant|airframe|vehicle|动力|机体/.test(text)) return 'plant';
-    if(/allocat|分配/.test(text)) return 'allocator';
-    if(/control|controller|pid|控制/.test(text)) return 'control';
-    if(node.type==='simulation_block'||node.type==='flow_block') return 'process';
-    return 'process';
-  }
-
-  function decorateCanvasNodes(){
-    const state=getState();
-    if(!Array.isArray(state.modelNodes)) return;
-    const byId=new Map(state.modelNodes.map(node=>[node.id,node]));
-    if(typeof document==='undefined') return;
-    document.querySelectorAll('.blk[id^="b-"]').forEach(el=>{
-      const nodeId=el.id.replace(/^b-/,'');
-      const node=byId.get(nodeId);
-      const kind=getVisualKind(node);
-      Array.from(el.classList)
-        .filter(cls=>cls.startsWith('canvas-node--'))
-        .forEach(cls=>el.classList.remove(cls));
-      el.classList.add(`canvas-node--${kind}`);
-      el.dataset.visualKind=kind;
-    });
-  }
-
-  const previousRenderModelNodes=window.renderModelNodes||(typeof renderModelNodes!=='undefined'?renderModelNodes:null);
-  if(previousRenderModelNodes&&!window.__canvasVisualSemanticRenderWrapped){
-    window.__canvasVisualSemanticRenderWrapped=true;
-    window.renderModelNodes=function(){
-      const result=previousRenderModelNodes.apply(this,arguments);
-      decorateCanvasNodes();
-      return result;
-    };
-    if(typeof renderModelNodes!=='undefined') renderModelNodes=window.renderModelNodes;
-  }
-
-  const previousUpdateUI=window.updateUI||(typeof updateUI!=='undefined'?updateUI:null);
-  if(previousUpdateUI&&!window.__canvasVisualSemanticUpdateWrapped){
-    window.__canvasVisualSemanticUpdateWrapped=true;
-    window.updateUI=function(){
-      const result=previousUpdateUI.apply(this,arguments);
-      decorateCanvasNodes();
-      return result;
-    };
-    if(typeof updateUI!=='undefined') updateUI=window.updateUI;
-  }
-
-  window.decorateCanvasNodesByVisualKind=decorateCanvasNodes;
-  setTimeout(decorateCanvasNodes,0);
-})();
-
-// --- 系统-故障库兼容过滤与独立注入入口 ---
-(function(){
-  const UAV_FAULT_LIBRARY_ID='uav-flight-control-faults';
-  const UAV_SYSTEM_FAMILY='uav-flight-control';
-
-  function getCompatibilityApi(){
-    return window.__GZ_FAULT_INJECTION_RUNTIME__?.compatibility||null;
-  }
-
-  function html(value){
-    if(typeof escapeHtml==='function'){
-      return escapeHtml(String(value??''));
-    }
-    return String(value??'').replace(/[&<>"']/g,(ch)=>({
-      '&':'&amp;',
-      '<':'&lt;',
-      '>':'&gt;',
-      '"':'&quot;',
-      "'":'&#39;'
-    }[ch]));
-  }
-
-  function setTextById(id,value){
-    const el=document.getElementById(id);
-    if(el){el.textContent=String(value??'');}
-  }
-
-  function normalizeFaultInjectionCopy(){
-    const btn=document.getElementById('btn-imp-flt');
-    if(btn){btn.textContent='注入故障';}
-    const title=document.querySelector('#ov-ifm .mtitle');
-    if(title){title.textContent='注入故障';}
-    const sub=document.querySelector('#ov-ifm .ifm-modal-sub');
-    if(sub){
-      sub.textContent='按当前系统模型筛选匹配的故障库，可选择一个或多个故障并配置参数后注入到画布组件或 CAN 边。';
-    }
-    const listHead=document.querySelector('#ov-ifm .ifm-list-head span');
-    if(listHead){listHead.textContent='可注入故障';}
-    const buildHint=document.querySelector('#ov-ifm .ifm-build-hint');
-    if(buildHint){
-      buildHint.textContent='当前库为无人机飞控系统故障库，仅在导入兼容飞控模型后可注入；其他系统需单独设计故障库。';
-    }
-    const ok=document.querySelector('#ov-ifm .btn-ok-r');
-    if(ok){ok.textContent='确认注入';}
-  }
-
-  function buildActiveFaultCatalog(models){
-    return {
-      libraryId:UAV_FAULT_LIBRARY_ID,
-      systemFamily:UAV_SYSTEM_FAMILY,
-      faultTypes:Array.isArray(models)?models:[]
-    };
-  }
-
-  function collectCatalogCandidateModels(){
-    if(typeof window.getFaultTypeCatalogModels==='function'){
-      const catalogModels=window.getFaultTypeCatalogModels();
-      if(Array.isArray(catalogModels)&&catalogModels.length>0){
-        return catalogModels;
-      }
-    }
-    const byId=new Map();
-    const append=(items)=>{
-      if(!Array.isArray(items)){return;}
-      items.forEach((model)=>{
-        if(!model||typeof model!=='object'){return;}
-        const key=model.id||`${model.name||''}::${model.layer||''}`;
-        if(key&&!byId.has(key)){
-          byId.set(key,model);
-        }
-      });
-    };
-    append(S.availableFaultModels||[]);
-    return Array.from(byId.values());
-  }
-
-  function getCompatibleFaultCatalogModels(){
-    const api=getCompatibilityApi();
-    const candidates=collectCatalogCandidateModels();
-    if(!api||!S.activeModelPackage){
-      return [];
-    }
-    return api.filterCompatibleFaultTypes?.(buildActiveFaultCatalog(candidates),S.activeModelPackage)||[];
-  }
-
-  function getVisibleCompatibleFaultModels(models){
-    const layer=S.faultCatalogLayerFilter||'all';
-    const query=String(S.faultCatalogSearch||'').trim().toLowerCase();
-    return models.filter((model)=>{
-      if(layer!=='all'&&model.layer!==layer){return false;}
-      if(!query){return true;}
-      return [
-        model.id,
-        model.name,
-        model.layer,
-        model.modelClass,
-        model.desc,
-        model.description,
-        model.formula,
-        model.platformImplementation?.recommendedModule,
-        model.platformImplementation?.pythonFunction,
-        ...(Array.isArray(model.typicalTargets)?model.typicalTargets:[]),
-        ...(Array.isArray(model.observableSignals)?model.observableSignals:[])
-      ].filter(Boolean).join(' ').toLowerCase().includes(query);
-    });
-  }
-
-  function updateFaultCatalogCompatibilitySummary(compatibleModels){
-    const summary={total:0,physical:0,electrical:0,protocol:0};
-    compatibleModels.forEach((model)=>{
-      summary.total+=1;
-      if(summary[model.layer]!==undefined){
-        summary[model.layer]+=1;
-      }
-    });
-    setTextById('ifm-total-count',summary.total);
-    setTextById('ifm-physical-count',summary.physical);
-    setTextById('ifm-electrical-count',summary.electrical);
-    setTextById('ifm-protocol-count',summary.protocol);
-    setTextById('ifm-visible-count',getVisibleCompatibleFaultModels(compatibleModels).length);
-  }
-
-  function countSystemNodes(){
-    const seen=new Set();
-    const append=(items)=>{
-      if(!Array.isArray(items)){return;}
-      items.forEach((node)=>{
-        if(node?.id){seen.add(node.id);}
-      });
-    };
-    append(S.modelNodes);
-    if(S.canvases&&typeof S.canvases==='object'){
-      Object.values(S.canvases).forEach((canvas)=>append(canvas?.nodes));
-    }
-    return seen.size;
-  }
-
-  function renderCompatibilityEmptyState(message){
-    const container=document.getElementById('ifm-list-container');
-    if(container){
-      container.innerHTML=`<div class="ifm-empty">${html(message)}</div>`;
-    }
-    const detail=document.getElementById('fault-type-detail');
-    if(detail){
-      detail.innerHTML=`<div class="ifm-detail-empty">${html(message)}</div>`;
-    }
-    const hint=document.getElementById('ifm-sel-hint');
-    if(hint){
-      hint.textContent='已选：当前系统没有可注入的飞控故障';
-    }
-    const ok=document.querySelector('#ov-ifm .btn-ok-r');
-    if(ok){ok.disabled=true;}
-  }
-
-  function syncActivePackageCompatibilityMetadata(pkg,prepared){
-    if(!S.activeModelPackage){return;}
-    const descriptor=prepared?.descriptor||{};
-    const systemFamily=pkg?.systemFamily??descriptor.systemFamily??null;
-    const hasPackageLibraries=Array.isArray(pkg?.supportedFaultLibraries);
-    const hasDescriptorLibraries=Array.isArray(descriptor.supportedFaultLibraries)&&descriptor.supportedFaultLibraries.length>0;
-    const supportedFaultLibraries=hasPackageLibraries
-      ? cloneDefaults(pkg.supportedFaultLibraries)
-      : hasDescriptorLibraries
-        ? cloneDefaults(descriptor.supportedFaultLibraries)
-        : undefined;
-    const capabilities=(pkg?.capabilities&&typeof pkg.capabilities==='object')
-      ? cloneDefaults(pkg.capabilities)
-      : (descriptor.capabilities&&typeof descriptor.capabilities==='object')
-        ? cloneDefaults(descriptor.capabilities)
-        : {};
-
-    if(systemFamily){
-      S.activeModelPackage.systemFamily=systemFamily;
-    }
-    if(supportedFaultLibraries){
-      S.activeModelPackage.supportedFaultLibraries=supportedFaultLibraries;
-    }
-    S.activeModelPackage.capabilities=capabilities;
-  }
-
-  if(typeof window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__==='function'){
-    const __compatApplyFlightModelPackage=window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__;
-    window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__=function(pkg,prepared){
-      const result=__compatApplyFlightModelPackage(pkg,prepared);
-      if(result?.ok!==false){
-        syncActivePackageCompatibilityMetadata(pkg,prepared);
-      }
-      return result;
-    };
-  }
-
-  const __compatRenderFaultCatalogList=renderFaultCatalogList;
-  renderFaultCatalogList=function(){
-    normalizeFaultInjectionCopy();
-    const compatibleModels=getCompatibleFaultCatalogModels();
-    const visibleCompatible=getVisibleCompatibleFaultModels(compatibleModels);
-    const compatibleIds=new Set(compatibleModels.map((model)=>model.id));
-
-    if(!compatibleIds.has(S.selectedFaultCatalogId)&&!getFaultCatalogModel(S.selectedFaultCatalogId)){
-      S.selectedFaultCatalogId=visibleCompatible[0]?.id||compatibleModels[0]?.id||'';
-    }
-
-    const result=__compatRenderFaultCatalogList();
-    updateFaultCatalogCompatibilitySummary(compatibleModels);
-
-    const ok=document.querySelector('#ov-ifm .btn-ok-r');
-    if(ok){ok.disabled=false;}
-
-    if(!S.activeModelPackage){
-      S.availableFaultModels=[];
-      renderCompatibilityEmptyState('当前系统没有模型包元数据，无法匹配无人机飞控故障库。');
-      return result;
-    }
-
-    if(compatibleModels.length===0){
-      S.availableFaultModels=[];
-      S.selectedFaultCatalogId='';
-      renderCompatibilityEmptyState('当前系统不支持无人机飞控故障库，请为该系统设计对应的故障库。');
-      return result;
-    }
-
-    document.querySelectorAll('#ifm-list-container [data-fault-id]').forEach((item)=>{
-      if(!compatibleIds.has(item.dataset.faultId)){
-        item.remove();
-      }
-    });
-
-    if(visibleCompatible.length===0){
-      const container=document.getElementById('ifm-list-container');
-      if(container){
-        container.innerHTML='<div class="ifm-empty">当前筛选条件下没有可注入故障。</div>';
-      }
-    }
-
-    const selected=compatibleModels.find((model)=>model.id===S.selectedFaultCatalogId)||getFaultCatalogModel(S.selectedFaultCatalogId);
-    if(!selected){
-      const detail=document.getElementById('fault-type-detail');
-      if(detail){
-        detail.innerHTML='<div class="ifm-detail-empty">请选择一个与当前飞控系统匹配的故障。</div>';
-      }
-    }
-
-    return result;
-  };
-
-  const __compatDoImportFault=doImportFault;
-  doImportFault=function(){
-    normalizeFaultInjectionCopy();
-    if(!S.sysLoaded){
-      toast('请先导入或新建系统模型','w');
-      return;
-    }
-    if(countSystemNodes()===0){
-      toast('请先在系统建模页拖入组件','w');
-      return;
-    }
-
-    const compatibleModels=getCompatibleFaultCatalogModels();
-    renderFaultCatalogList();
-    openOv('ov-ifm');
-
-    if(compatibleModels.length===0){
-      toast('当前系统未绑定无人机飞控故障库，需为该系统单独设计故障。','w');
-    }
-  };
-
-  const __compatConfirmImportFault=confirmImportFault;
-  confirmImportFault=function(){
-    const compatibleModels=getCompatibleFaultCatalogModels();
-    const selected=compatibleModels.find((model)=>model.id===S.selectedFaultCatalogId)||getFaultCatalogModel(S.selectedFaultCatalogId);
-    if(!selected){
-      toast('请先选择与当前系统匹配的故障','w');
-      return;
-    }
-    return __compatConfirmImportFault();
-  };
-
-  const __compatUpdateUI=updateUI;
-  updateUI=function(){
-    const result=__compatUpdateUI();
-    normalizeFaultInjectionCopy();
-    return result;
-  };
-
-  normalizeFaultInjectionCopy();
-  Object.assign(window,{
-    confirmImportFault,
-    doImportFault,
-    renderFaultCatalogList
-  });
-})();
-
 // --- Typed property panel, fault cancellation, and edge signal metadata ---
 (function(){
   const PANEL_TABS=['overview','parameters','faults','testpoints','outputs'];
@@ -11560,12 +11311,17 @@ Object.assign(window,{
     ].includes(target.type));
   }
 
+  function isFaultlessMeasurementInstrument(target){
+    return Boolean(target&&['instrument_spectrum','instrument_multimeter'].includes(target.type));
+  }
+
   function getCurrentPropertyPanelKind(target=getSelectedPropertyTarget()){
     if(getSelectedFaultTag()){return 'fault-tag';}
     if(!target){return 'empty';}
     if(isEdgeTarget(target)){return 'edge';}
     if(target.type==='instrument_scope'){return 'scope';}
-    if(['instrument_logger','instrument_spectrum','instrument_signal_flow'].includes(target.type)){return 'instrument';}
+    if(isFaultlessMeasurementInstrument(target)){return 'measurement-instrument';}
+    if(['instrument_logger','instrument_spectrum','instrument_multimeter','instrument_signal_flow'].includes(target.type)){return 'instrument';}
     if(isLayeredFaultInjectorPanelTarget(target)){return 'fault-injector';}
     return 'component';
   }
@@ -11575,6 +11331,7 @@ Object.assign(window,{
     if(kind==='fault-tag'){return ['overview','parameters'];}
     if(kind==='fault-injector'){return ['overview'];}
     if(kind==='scope'){return ['overview','parameters','outputs'];}
+    if(kind==='measurement-instrument'){return ['overview','parameters','outputs'];}
     if(kind==='empty'){return ['overview'];}
     return ['overview','parameters','faults','outputs'];
   }
@@ -11850,6 +11607,7 @@ Object.assign(window,{
     'instrument_scope',
     'instrument_logger',
     'instrument_spectrum',
+    'instrument_multimeter',
     'subsystem_block'
   ]);
   let legacyOverviewSnapshot='';
@@ -11867,6 +11625,11 @@ Object.assign(window,{
   }
 
   function renderNodeOverview(node){
+    if(isFaultlessMeasurementInstrument(node)){
+      return `
+        ${renderTargetHeader(node)}
+        ${renderLegacyOverviewCompat(node)}`;
+    }
     const meta=COMPONENT_LIBRARY[node.type]||{};
     const ports=getNodePorts(node);
     const pythonBound=isPythonBoundFlowBlock(node);
@@ -12030,6 +11793,7 @@ Object.assign(window,{
       || node.type==='instrument_scope'
       || node.type==='instrument_logger'
       || node.type==='instrument_spectrum'
+      || node.type==='instrument_multimeter'
     )){return schemaFields;}
     if(node.type==='signal_source'){return renderSignalSourceFields(node);}
     if(node.type==='simulation_block'){return buildSimulationBlockFields(node);}
@@ -13390,6 +13154,9 @@ Object.assign(window,{
       target.id=target.id||pointId;
       target.edgeId=edge.id;
       target.name=nextName;
+      target.nameZh=nextName;
+      target.labelZh=nextName;
+      target.positionNameZh=nextName;
       target.pointType=nextPointType;
       target.detects=[...nextDetects];
       target.signalId=nextSignalId;
@@ -20851,8 +20618,14 @@ function decorateDataflowEdges(){
           : hasDescriptorLibraries
             ? cloneDefaults(descriptor.supportedFaultLibraries)
             : undefined;
+        const capabilities=(pkg?.capabilities&&typeof pkg.capabilities==='object')
+          ? cloneDefaults(pkg.capabilities)
+          : (descriptor.capabilities&&typeof descriptor.capabilities==='object')
+            ? cloneDefaults(descriptor.capabilities)
+            : {};
         if(systemFamily){S.activeModelPackage.systemFamily=systemFamily;}
         if(supportedFaultLibraries){S.activeModelPackage.supportedFaultLibraries=supportedFaultLibraries;}
+        S.activeModelPackage.capabilities=capabilities;
       }
       return result;
     };
@@ -21097,7 +20870,7 @@ function decorateDataflowEdges(){
     if(!target){return 'empty';}
     if(isEdgeLike(target)){return 'edge';}
     if(target.type==='instrument_scope'){return 'scope';}
-    if(['instrument_logger','instrument_spectrum','instrument_signal_flow'].includes(target.type)){return 'instrument';}
+    if(['instrument_logger','instrument_spectrum','instrument_multimeter','instrument_signal_flow'].includes(target.type)){return 'instrument';}
     if(['physical_fault_injector','electrical_fault_injector','protocol_fault_injector'].includes(target.type)){return 'fault-injector';}
     return 'component';
   }
@@ -25754,7 +25527,6 @@ function decorateDataflowEdges(){
         node.props={...(node.props||{}),layerKey:config.layer,layer:config.layerLabel,faultType:config.faultType};
         if(typeof renderModelNodes==='function') renderModelNodes();
         if(S.selBlk===node.id&&typeof renderPropertyPanel==='function') renderPropertyPanel(node);
-        if(typeof updateUI==='function') updateUI();
         return node;
       }
       return result||node;
@@ -26476,61 +26248,6 @@ function decorateDataflowEdges(){
   });
 })();
 
-;(function disableLegacyFaultLibraryWorkflow(){
-  if(typeof window==='undefined') return;
-
-  function syncLegacyFaultLibraryButton(){
-    const button=document.getElementById('btn-imp-flt');
-    if(button){
-      button.disabled=true;
-      button.setAttribute('aria-disabled','true');
-      button.classList.add('tbtn-disabled');
-      button.classList.remove('ready');
-      button.title='当前版本已关闭故障库注入，请使用左侧三类故障注入组件先放置再绑定目标。';
-    }
-    clearLegacyFaultLibraryContent();
-  }
-
-  function clearLegacyFaultLibraryContent(){
-    const container=document.getElementById('ifm-list-container');
-    if(container){
-      container.innerHTML='<div class="ifm-empty">当前版本已关闭故障库注入。请使用左侧三类故障注入组件先放置，再通过“绑定目标”完成绑定。</div>';
-    }
-    const detail=document.getElementById('fault-type-detail');
-    if(detail){
-      detail.innerHTML='<div class="ifm-detail-empty">当前版本不使用故障库直注流程。</div>';
-    }
-    ['ifm-total-count','ifm-physical-count','ifm-electrical-count','ifm-protocol-count','ifm-visible-count'].forEach(id=>{
-      const el=document.getElementById(id);
-      if(el) el.textContent='0';
-    });
-  }
-
-  window.doImportFault=function(){
-    document.getElementById('ov-ifm')?.classList.remove('open');
-    syncLegacyFaultLibraryButton();
-    if(typeof toast==='function'){
-      toast('当前版本已关闭故障库注入，请使用左侧故障注入组件先放置，再通过“绑定目标”完成绑定。','w');
-    }
-    return {ok:false,reason:'fault-library-disabled'};
-  };
-  if(typeof doImportFault!=='undefined') doImportFault=window.doImportFault;
-
-  const previousUpdateUI=window.updateUI||(typeof updateUI!=='undefined'?updateUI:null);
-  if(previousUpdateUI){
-    window.updateUI=function(){
-      const result=previousUpdateUI.apply(this,arguments);
-      syncLegacyFaultLibraryButton();
-      return result;
-    };
-    if(typeof updateUI!=='undefined') updateUI=window.updateUI;
-  }
-
-  syncLegacyFaultLibraryButton();
-  setTimeout(syncLegacyFaultLibraryButton,0);
-  window.__GZ_LEGACY_FAULT_LIBRARY_DISABLED__=true;
-})();
-
 ;(function installFaultTaskLoaderWorkflow(){
   if(typeof window==='undefined') return;
 
@@ -26813,13 +26530,48 @@ function decorateDataflowEdges(){
     return {...result,demo:true};
   }
 
+  function collectInjectedFaultModelIdsFromPackage(pkg){
+    const ids=new Set();
+    const appendNodes=(nodes)=>{
+      arr(nodes).forEach(node=>{
+        const modelId=String(node?.injectedFault?.modelId||'').trim();
+        if(modelId) ids.add(modelId);
+      });
+    };
+    appendNodes(pkg?.workbenchSnapshot?.modelNodes);
+    Object.values(pkg?.workbenchSnapshot?.canvases||{}).forEach(canvas=>appendNodes(canvas?.nodes));
+    return Array.from(ids);
+  }
+
+  function ensureFaultTaskModelsInPackage(pkg){
+    if(!pkg||typeof pkg!=='object') return pkg;
+    const existing=arr(pkg.faultLibrary);
+    const existingIds=new Set(existing.map(model=>model?.id).filter(Boolean));
+    const candidates=[];
+    const appendCandidates=(items)=>arr(items).forEach(item=>candidates.push(item));
+    appendCandidates(existing);
+    appendCandidates(typeof window.getFaultTypeCatalogModels==='function'?window.getFaultTypeCatalogModels():[]);
+    appendCandidates(getState().availableFaultModels);
+    appendCandidates(getState().faultLibrary);
+    appendCandidates(getState().importedFaultModels);
+    const byId=new Map(candidates.filter(item=>item?.id).map(item=>[item.id,item]));
+    collectInjectedFaultModelIdsFromPackage(pkg).forEach(modelId=>{
+      if(existingIds.has(modelId)) return;
+      const source=byId.get(modelId);
+      existing.push(source?clone(source):{id:modelId,name:modelId,layer:'fault-task'});
+      existingIds.add(modelId);
+    });
+    pkg.faultLibrary=existing;
+    return pkg;
+  }
+
   function saveCurrentFaultTaskPackage(){
     const packageApi=window.__GZ_FLIGHT_MODEL_PACKAGE__;
     if(typeof packageApi?.exportCurrent!=='function'){
       if(typeof toast==='function') toast('当前运行时不支持导出故障模型。','w');
       return {ok:false,reason:'export-not-ready'};
     }
-    const pkg=packageApi.exportCurrent();
+    const pkg=ensureFaultTaskModelsInPackage(packageApi.exportCurrent());
     try{
       window.localStorage?.setItem(STORAGE_KEY,JSON.stringify(pkg));
       if(typeof toast==='function') toast('当前故障模型已保存，可通过加载已保存模型恢复。','s');
@@ -26838,10 +26590,9 @@ function decorateDataflowEdges(){
     try{
       const raw=window.localStorage?.getItem(STORAGE_KEY);
       if(!raw) return {ok:false,reason:'saved-package-not-found'};
-      const result=packageApi.importObject(JSON.parse(raw));
+      const result=packageApi.importObject(JSON.parse(raw))||{ok:true,reason:'import-completed'};
       if(result?.ok){
         if(typeof toast==='function') toast('已加载保存的故障模型。','s');
-        if(typeof updateUI==='function') updateUI();
         removeFaultTaskLoader();
       }
       return result;

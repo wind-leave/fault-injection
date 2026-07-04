@@ -31,6 +31,7 @@ describe('component registry', () => {
       'flow_block',
       'gain_block',
       'instrument_logger',
+      'instrument_multimeter',
       'instrument_scope',
       'instrument_spectrum',
       'link_can',
@@ -174,6 +175,34 @@ describe('component registry', () => {
       }
     });
 
+    expect(library.instrument_spectrum).toMatchObject({
+      label: '频谱分析仪',
+      badge: '频谱',
+      className: 'b-inst',
+      defaults: {
+        name: '频谱分析仪',
+        instrumentType: '频谱分析',
+        sampleRate: '32kHz',
+        frequencyRange: '0-16kHz',
+        fftSize: '1024',
+        windowFunction: 'Hann',
+        amplitudeUnit: 'dB'
+      }
+    });
+
+    expect(library.instrument_multimeter).toMatchObject({
+      label: '数字万用表',
+      badge: '万用表',
+      className: 'b-inst',
+      defaults: {
+        name: '数字万用表',
+        instrumentType: '数字万用表',
+        measurementMode: '直流电压',
+        range: 'Auto',
+        refreshRate: '5Hz'
+      }
+    });
+
     Object.values(library).forEach((definition) => {
       expect(definition).not.toHaveProperty('group');
     });
@@ -223,6 +252,12 @@ describe('component registry', () => {
       'electrical_fault_injector',
       'protocol_fault_injector'
     ]);
+    expect(paletteGroups.find((group) => group.id === 'instruments').components.map((item) => item.type)).toEqual([
+      'instrument_scope',
+      'instrument_spectrum',
+      'instrument_multimeter'
+    ]);
+    expect(COMPONENT_REGISTRY.instrument_logger.palette?.visible).toBe(false);
     expect(canLines.components.map((item) => item.type)).toEqual([
       'link_normal',
       'link_can'

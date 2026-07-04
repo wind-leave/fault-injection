@@ -456,10 +456,10 @@ export const COMPONENT_REGISTRY = {
     type: 'instrument_spectrum',
     group: 'instruments',
     label: '频谱分析仪',
-    badge: '仪器',
+    badge: '频谱',
     className: 'b-inst',
-    width: 158,
-    height: 74,
+    width: 172,
+    height: 82,
     palette: {
       icon: '谱',
       iconClass: 'spectrum'
@@ -468,7 +468,11 @@ export const COMPONENT_REGISTRY = {
       name: '频谱分析仪',
       instrumentType: '频谱分析',
       sampleRate: '32kHz',
-      signal: '仿真块输出'
+      signal: '仿真块输出',
+      frequencyRange: '0-16kHz',
+      fftSize: '1024',
+      windowFunction: 'Hann',
+      amplitudeUnit: 'dB'
     }
   },
   instrument_logger: {
@@ -480,6 +484,7 @@ export const COMPONENT_REGISTRY = {
     width: 158,
     height: 74,
     palette: {
+      visible: false,
       icon: '记',
       iconClass: 'logger'
     },
@@ -488,6 +493,28 @@ export const COMPONENT_REGISTRY = {
       instrumentType: '数据记录',
       sampleRate: '10Hz',
       signal: '系统总线'
+    }
+  },
+  instrument_multimeter: {
+    type: 'instrument_multimeter',
+    group: 'instruments',
+    label: '数字万用表',
+    badge: '万用表',
+    className: 'b-inst',
+    width: 166,
+    height: 82,
+    palette: {
+      icon: 'VΩ',
+      iconClass: 'multimeter'
+    },
+    defaults: {
+      name: '数字万用表',
+      instrumentType: '数字万用表',
+      measurementMode: '直流电压',
+      range: 'Auto',
+      refreshRate: '5Hz',
+      sampleRate: '5Hz',
+      signal: '输入信号'
     }
   },
   link_normal: {

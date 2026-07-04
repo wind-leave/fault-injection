@@ -115,6 +115,8 @@ describe('property panel interaction', () => {
       '指令信号源 2',
       '射频信号源 3'
     ]);
+    expect(Array.from(document.querySelectorAll('.blk.b-source .blk-kicker')).map((item) => item.textContent.trim()))
+      .toEqual(['数字', '指令', '射频']);
 
     wrapper.unmount();
   });
@@ -404,7 +406,8 @@ describe('property panel interaction', () => {
       'subsystem_block',
       'instrument_scope',
       'instrument_spectrum',
-      'instrument_logger'
+      'instrument_logger',
+      'instrument_multimeter'
     ];
 
     for (const [index, type] of componentTypes.entries()) {
@@ -428,18 +431,28 @@ describe('property panel interaction', () => {
       await flushRuntime();
       expect(document.querySelector('.props-form')).not.toBeNull();
       expect(document.querySelector('.props-save')).not.toBeNull();
-      if (type === 'instrument_scope') {
+      const hasNoFaultSettings = ['instrument_scope', 'instrument_spectrum', 'instrument_multimeter'].includes(type);
+      if (hasNoFaultSettings) {
         window.setPropertyPanelTab('faults');
         await flushRuntime();
         expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
         expect(document.querySelector('.props-fault-panel')).toBeNull();
-        expect(document.querySelector('[data-scope-overview-panel]')).not.toBeNull();
+        if (type === 'instrument_scope') {
+          expect(document.querySelector('[data-scope-overview-panel]')).not.toBeNull();
+        } else {
+          expect(document.querySelector('[data-instrument-panel]')).not.toBeNull();
+        }
 
         window.setPropertyPanelTab('outputs');
         await flushRuntime();
-        expect(document.querySelector('[data-props-tab="outputs"]')?.textContent?.trim()).toBe('导出设置');
-        expect(document.querySelector('[data-scope-export-settings]')).not.toBeNull();
-        expect(document.querySelector('.props-target-card')).toBeNull();
+        if (type === 'instrument_scope') {
+          expect(document.querySelector('[data-props-tab="outputs"]')?.textContent?.trim()).toBe('导出设置');
+          expect(document.querySelector('[data-scope-export-settings]')).not.toBeNull();
+          expect(document.querySelector('.props-target-card')).toBeNull();
+        } else {
+          expect(document.querySelector('.props-target-card')).not.toBeNull();
+          expect(document.getElementById('pd')?.textContent).toContain('端口与变量');
+        }
         continue;
       }
       expect(document.getElementById('pd')?.textContent).toContain('保存设置');
@@ -1516,7 +1529,25 @@ describe('property panel interaction', () => {
     const diagnosticPositions = window.buildDiagnosticTestPointModel().positions
       .filter((item) => item.edgeId === 'edge-source-scope-testpoint');
     expect(diagnosticPositions).toHaveLength(2);
+    expect(diagnosticPositions.map((point) => point.name)).toEqual([
+      'Controller output monitor A',
+      'Controller output monitor B'
+    ]);
 
+    window.setCanvasView('components');
+    await flushRuntime();
+    expect(document.getElementById('simulation-panel')?.textContent).toContain('Controller output monitor A');
+    expect(document.getElementById('simulation-panel')?.textContent).toContain('Controller output monitor B');
+
+    window.setCanvasView('dataflow');
+    await flushRuntime();
+    expect(document.getElementById('dataflow-panel')?.textContent).toContain('Controller output monitor A');
+    expect(document.getElementById('dataflow-panel')?.textContent).toContain('Controller output monitor B');
+
+    window.selectEdge('edge-source-scope-testpoint');
+    await flushRuntime();
+    window.setPropertyPanelTab('testpoints');
+    await flushRuntime();
     document.querySelector('[data-edge-testpoint-card] [data-delete-edge-testpoint]').click();
     await flushRuntime();
 
@@ -1532,6 +1563,44 @@ describe('property panel interaction', () => {
     expect(remainingCards[0].querySelector('[data-edge-testpoint-name]').value).toBe('Controller output monitor B');
     expect(window.buildDiagnosticTestPointModel().positions
       .filter((item) => item.edgeId === 'edge-source-scope-testpoint')).toHaveLength(1);
+
+    wrapper.unmount();
+  });
+
+  it('syncs renamed imported diagnostic test points into simulation and dataflow views', async () => {
+    const wrapper = await mountWorkbench();
+
+    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
+    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
+    await flushRuntime();
+
+    expect(importResult).toMatchObject({ ok: true });
+
+    window.selectEdge('edge-error-controller');
+    await flushRuntime();
+    expect(visiblePropertyTabs()).toContain('testpoints');
+    window.setPropertyPanelTab('testpoints');
+    await flushRuntime();
+
+    const card = document.querySelector('[data-edge-testpoint-card]');
+    expect(card).not.toBeNull();
+    const oldName = card.querySelector('[data-edge-testpoint-name]')?.value;
+    expect(oldName).toBeTruthy();
+
+    card.querySelector('[data-edge-testpoint-name]').value = 'Renamed attitude error monitor';
+    card.querySelector('[data-edge-testpoint-name]').dispatchEvent(new Event('input', { bubbles: true }));
+    card.querySelector('[data-save-edge-testpoint]').click();
+    await flushRuntime();
+
+    window.setCanvasView('components');
+    await flushRuntime();
+    expect(document.getElementById('simulation-panel')?.textContent).toContain('Renamed attitude error monitor');
+    expect(document.getElementById('simulation-panel')?.textContent).not.toContain(oldName);
+
+    window.setCanvasView('dataflow');
+    await flushRuntime();
+    expect(document.getElementById('dataflow-panel')?.textContent).toContain('Renamed attitude error monitor');
+    expect(document.getElementById('dataflow-panel')?.textContent).not.toContain(oldName);
 
     wrapper.unmount();
   });

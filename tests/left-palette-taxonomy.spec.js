@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mount } from '@vue/test-utils';
@@ -32,6 +32,12 @@ describe('left palette taxonomy', () => {
     expect(source).not.toContain('left-panel.html?raw');
     expect(source).not.toContain('badgeIcons');
     expect(source).not.toContain('badgeClassByType');
+  });
+
+  it('does not keep obsolete static fragments that duplicate live Vue surfaces', () => {
+    for (const fileName of ['left-panel.html', 'main.html', 'dialogs.html']) {
+      expect(existsSync(path.join(repoRoot, 'src', 'fragments', fileName))).toBe(false);
+    }
   });
 
   it('orders modeling entries by role and keeps analysis views out of the component palette', () => {
@@ -88,8 +94,10 @@ describe('left palette taxonomy', () => {
     expect(groupComponents(wrapper, 'instruments')).toEqual([
       'instrument_scope',
       'instrument_spectrum',
-      'instrument_logger'
+      'instrument_multimeter'
     ]);
+    expect(groupBody(wrapper, 'instruments').text()).not.toContain('数据记录仪');
+    expect(groupBody(wrapper, 'instruments').text()).toContain('数字万用表');
     expect(groupBody(wrapper, 'can-lines').find('[data-line-type="normal"]').exists()).toBe(true);
     expect(groupBody(wrapper, 'can-lines').find('[data-line-type="can"]').exists()).toBe(true);
 
@@ -108,6 +116,8 @@ describe('left palette taxonomy', () => {
     expect(wrapper.find('[data-component="instrument_scope"] .citem-icon-badge').classes()).toContain(
       'citem-icon-badge--scope'
     );
+    expect(wrapper.find('[data-component="instrument_spectrum"] .citem-icon-badge').text()).toBe('谱');
+    expect(wrapper.find('[data-component="instrument_multimeter"] .citem-icon-badge').text()).toBe('VΩ');
 
     wrapper.unmount();
   });

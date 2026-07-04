@@ -269,6 +269,127 @@ describe('Oscilloscope app integration', () => {
     wrapper.unmount();
   });
 
+  it('configures spectrum analysis and renders digital multimeter readings', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 300, 260);
+    const spectrum = window.createNode('instrument_spectrum', 560, 220);
+    const meter = window.createNode('instrument_multimeter', 560, 340);
+    source.props.waveType = '常值';
+    source.props.amplitude = '12.5';
+    source.props.frequency = '0';
+
+    const canvas = window.getActiveCanvasRecord();
+    canvas.edges.push(window.makeTask5Edge(
+      'normal',
+      source.id,
+      spectrum.id,
+      0,
+      0,
+      window.getNodePorts(source).outputs[0],
+      window.getNodePorts(spectrum).inputs[0],
+      null
+    ));
+    canvas.edges.push(window.makeTask5Edge(
+      'normal',
+      source.id,
+      meter.id,
+      0,
+      0,
+      window.getNodePorts(source).outputs[0],
+      window.getNodePorts(meter).inputs[0],
+      null
+    ));
+    window.renderEdges();
+    await flushRuntime();
+
+    window.selectNode(spectrum.id);
+    await flushRuntime();
+    window.setPropertyPanelTab('overview');
+    await flushRuntime();
+    const spectrumOverviewText = document.getElementById('pd')?.textContent || '';
+    expect(spectrumOverviewText).not.toContain('模块状态');
+    expect(spectrumOverviewText).not.toContain('画布位置');
+
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
+    const spectrumParameterText = document.getElementById('pd')?.textContent || '';
+    expect(spectrumParameterText).not.toContain('频谱分析配置');
+    expect(spectrumParameterText).not.toContain('频谱分析仪配置');
+    expect(spectrumParameterText).not.toContain('模块名称');
+    expect(document.getElementById('prop-frequencyRange')).not.toBeNull();
+    expect(document.getElementById('prop-fftSize')).not.toBeNull();
+    expect(document.getElementById('prop-windowFunction')).not.toBeNull();
+    document.getElementById('prop-frequencyRange').value = '0-8kHz';
+    document.getElementById('prop-fftSize').value = '2048';
+    document.getElementById('prop-windowFunction').value = 'Blackman';
+    document.querySelector('.props-save').click();
+    await flushRuntime();
+
+    expect(spectrum.props).toMatchObject({
+      frequencyRange: '0-8kHz',
+      fftSize: '2048',
+      windowFunction: 'Blackman'
+    });
+
+    window.simInit(true);
+    for (let step = 0; step < 4; step += 1) {
+      window.simStep();
+    }
+    await flushRuntime();
+
+    window.selectNode(meter.id);
+    await flushRuntime();
+    window.setPropertyPanelTab('overview');
+    await flushRuntime();
+    const meterOverviewText = document.getElementById('pd')?.textContent || '';
+    expect(meterOverviewText).not.toContain('模块状态');
+    expect(meterOverviewText).not.toContain('画布位置');
+
+    const meterPanel = document.querySelector('[data-instrument-panel="multimeter"]');
+    expect(meterPanel).not.toBeNull();
+    expect(meterPanel?.textContent).toContain('数字万用表');
+    expect(meterPanel?.textContent).toContain('当前读数');
+    expect(meterPanel?.textContent).toContain('12.5');
+    expect(meterPanel?.querySelector('[data-instrument-action="export"]')).not.toBeNull();
+
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
+    const meterParameterText = document.getElementById('pd')?.textContent || '';
+    expect(meterParameterText).not.toContain('数字万用表配置');
+    expect(meterParameterText).not.toContain('模块名称');
+    const measurementMode = document.getElementById('prop-measurementMode');
+    expect(measurementMode).toBeInstanceOf(HTMLSelectElement);
+    expect(Array.from(measurementMode.options).map((option) => option.value)).toEqual([
+      '直流电压',
+      '交流电压',
+      '直流电流',
+      '交流电流',
+      '电阻',
+      '通断'
+    ]);
+    expect(Array.from(measurementMode.options).map((option) => option.textContent)).toEqual([
+      '直流电压',
+      '交流电压',
+      '直流电流',
+      '交流电流',
+      '电阻',
+      '通断'
+    ]);
+    measurementMode.value = '电阻';
+    expect(document.getElementById('prop-range')).not.toBeNull();
+    document.querySelector('.props-save').click();
+    await flushRuntime();
+    expect(meter.props.measurementMode).toBe('电阻');
+
+    wrapper.unmount();
+  });
+
   it('renders dedicated scope property actions that open waveform windows', async () => {
     const wrapper = await mountWorkbench();
 
@@ -489,6 +610,42 @@ describe('Oscilloscope app integration', () => {
     await flushRuntime();
     expect(window.__GZ_SIM__.scopeWindows[scope.id].windowSeconds).toBe(8);
     expect(windowButton.classList.contains('is-active')).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it('samples a digital signal source as a stable level instead of an analog sine wave', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_digital', 300, 260);
+    const scope = window.createNode('instrument_scope', 560, 260);
+    source.props.initialState = '1';
+    const canvas = window.getActiveCanvasRecord();
+    canvas.edges.push(window.makeTask5Edge(
+      'normal',
+      source.id,
+      scope.id,
+      0,
+      0,
+      window.getNodePorts(source).outputs[0],
+      window.getNodePorts(scope).inputs[0],
+      null
+    ));
+    window.renderEdges();
+    await flushRuntime();
+
+    document.getElementById('sim-dur').value = '1';
+    document.getElementById('sim-step').value = '0.1';
+    window.simInit(true);
+    for (let step = 0; step < 5; step += 1) {
+      window.runSimulationTick();
+    }
+    await flushRuntime();
+
+    const samples = window.__GZ_SIM__.actual.scopeSamples[scope.id].ch1;
+    expect(samples.map((sample) => sample.actual)).toEqual([1, 1, 1, 1, 1]);
+    expect(peakToPeak(samples)).toBe(0);
 
     wrapper.unmount();
   });

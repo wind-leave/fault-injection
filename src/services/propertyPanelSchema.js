@@ -49,12 +49,22 @@ const RF_KIND_OPTIONS = [
   { value: 'generic', label: '通用射频' }
 ];
 
+const MULTIMETER_MODE_OPTIONS = [
+  { value: '直流电压', label: '直流电压' },
+  { value: '交流电压', label: '交流电压' },
+  { value: '直流电流', label: '直流电流' },
+  { value: '交流电流', label: '交流电流' },
+  { value: '电阻', label: '电阻' },
+  { value: '通断', label: '通断' }
+];
+
 const SELECT_OPTION_OVERRIDES = {
   analogKind: ANALOG_KIND_OPTIONS,
   waveType: WAVE_TYPE_OPTIONS,
   digitalMode: DIGITAL_MODE_OPTIONS,
   commandType: COMMAND_TYPE_OPTIONS,
-  rfKind: RF_KIND_OPTIONS
+  rfKind: RF_KIND_OPTIONS,
+  measurementMode: MULTIMETER_MODE_OPTIONS
 };
 
 const PROPERTY_SCHEMAS = {
@@ -214,12 +224,15 @@ const PROPERTY_SCHEMAS = {
     type: 'instrument_spectrum',
     groups: [
       {
-        label: '仪器配置',
+        label: '',
         fields: [
-          { key: 'name', label: '模块名称', type: 'text', fallback: '频谱分析仪' },
           { key: 'instrumentType', label: '仪器类型', type: 'readonly', fallback: '频谱分析' },
-          { key: 'sampleRate', label: '采样率', type: 'text', fallback: '10Hz' },
-          { key: 'signal', label: '观测信号', type: 'text', fallback: '输入信号' }
+          { key: 'sampleRate', label: '采样率', type: 'text', fallback: '32kHz', row: 'spectrum-sampling' },
+          { key: 'frequencyRange', label: '频率范围', type: 'text', fallback: '0-16kHz', row: 'spectrum-sampling' },
+          { key: 'fftSize', label: 'FFT 点数', type: 'text', fallback: '1024', row: 'spectrum-analysis' },
+          { key: 'windowFunction', label: '窗函数', type: 'text', fallback: 'Hann', row: 'spectrum-analysis' },
+          { key: 'amplitudeUnit', label: '幅值单位', type: 'text', fallback: 'dB', row: 'spectrum-unit' },
+          { key: 'signal', label: '观测信号', type: 'text', fallback: '输入信号', row: 'spectrum-unit' }
         ]
       }
     ]
@@ -233,6 +246,22 @@ const PROPERTY_SCHEMAS = {
           { key: 'name', label: '模块名称', type: 'text', fallback: '数据记录仪' },
           { key: 'instrumentType', label: '仪器类型', type: 'readonly', fallback: '数据记录' },
           { key: 'sampleRate', label: '采样率', type: 'text', fallback: '10Hz' },
+          { key: 'signal', label: '观测信号', type: 'text', fallback: '输入信号' }
+        ]
+      }
+    ]
+  },
+  instrument_multimeter: {
+    type: 'instrument_multimeter',
+    groups: [
+      {
+        label: '',
+        fields: [
+          { key: 'instrumentType', label: '仪器类型', type: 'readonly', fallback: '数字万用表' },
+          { key: 'measurementMode', label: '测量模式', type: 'select', options: MULTIMETER_MODE_OPTIONS, fallback: '直流电压', row: 'meter-mode' },
+          { key: 'range', label: '量程', type: 'text', fallback: 'Auto', row: 'meter-mode' },
+          { key: 'refreshRate', label: '刷新率', type: 'text', fallback: '5Hz', row: 'meter-rate' },
+          { key: 'sampleRate', label: '采样率', type: 'text', fallback: '5Hz', row: 'meter-rate' },
           { key: 'signal', label: '观测信号', type: 'text', fallback: '输入信号' }
         ]
       }
@@ -278,6 +307,19 @@ function normalizeSigns(value, inputCount = 2) {
   ));
 }
 
+function normalizeMultimeterMeasurementMode(value) {
+  const raw = String(value ?? '').trim();
+  const aliases = {
+    'DC Voltage': '直流电压',
+    'AC Voltage': '交流电压',
+    'DC Current': '直流电流',
+    'AC Current': '交流电流',
+    Resistance: '电阻',
+    Continuity: '通断'
+  };
+  return aliases[raw] || raw || '直流电压';
+}
+
 function getFieldValue(node, field) {
   const raw = node?.props?.[field.key];
   if (field.valueType === 'signs') {
@@ -286,6 +328,9 @@ function getFieldValue(node, field) {
   if (field.key === 'waveType') {
     const value = raw ?? field.fallback ?? '';
     return WAVE_TYPE_ALIASES[value] || value;
+  }
+  if (field.key === 'measurementMode') {
+    return normalizeMultimeterMeasurementMode(raw ?? field.fallback);
   }
   return raw ?? field.fallback ?? '';
 }
@@ -379,7 +424,7 @@ export function renderPropertyFieldsFromSchema(node, schema, helpers = {}) {
 
   return schema.groups.filter((group) => !group.domains || group.domains.includes(domain)).map((group) => `
       <div class="pgroup">
-        <div class="pglbl">${escape(group.label)}</div>
+        ${group.label ? `<div class="pglbl">${escape(group.label)}</div>` : ''}
         ${renderFieldsInRows(nodeForRender, getEditableFieldsForSchema(schema, group), helpers)}
         ${group.help ? `<div class="props-help">${escape(group.help)}</div>` : ''}
       </div>`).join('');

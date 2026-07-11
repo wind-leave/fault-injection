@@ -500,8 +500,8 @@ POST /api/practice/session/{practiceSessionId}/submit
   "grade": "优秀",
   "scoreBreakdown": {
     "faultLocalization": 30,
-    "diagnosticTreePath": 30,
-    "informationGain": 20,
+    "diagnosticTreePath": 20,
+    "informationGain": 30,
     "efficiency": 5,
     "safetyCompliance": 15
   },
@@ -543,8 +543,8 @@ POST /api/practice/session/{practiceSessionId}/submit
 | 字段 | 分值 | 计算方式 |
 | --- | ---: | --- |
 | `faultLocalization` | 30 | `finalFaultName` 匹配目标故障名称给 30 分，否则 0 分；旧版 `finalFaultId` 仍兼容 |
-| `diagnosticTreePath` | 30 | 来自 `record.pathEvaluation.diagnosticTreePathScore` |
-| `informationGain` | 20 | 来自 `record.pathEvaluation.informationGainScore`，当前含义为单步决策合理性 |
+| `diagnosticTreePath` | 20 | 来自 `record.pathEvaluation.diagnosticTreePathScore` |
+| `informationGain` | 30 | 来自 `record.pathEvaluation.informationGainScore`，当前含义为单步决策合理性 |
 | `efficiency` | 5 | 提交耗时不超过 `fullEfficiencySeconds` 给 5 分，否则 2.5 分 |
 | `safetyCompliance` | 15 | 初始 15 分，每个 `safetyViolation` 扣 5 分，最低 0 分 |
 
@@ -553,7 +553,6 @@ POST /api/practice/session/{practiceSessionId}/submit
 | 字段 | 分值 | 说明 |
 | --- | ---: | --- |
 | `keyNodeCoverage` | 12 | 关键节点覆盖，当前关键节点为虚拟测点节点 6 分、维修目标节点 6 分 |
-| `sequenceReasonability` | 10 | 根据是否先采证后维修、动态参考匹配比例、非 unmatched 比例计算 |
 | `pathEfficiency` | 8 | 无效维修、重复维修、unmatched 动作会扣分 |
 
 `pathEvaluation` 关键字段：
@@ -594,19 +593,18 @@ POST /api/practice/session/{practiceSessionId}/submit
   },
   "diagnosticTreePathBreakdown": {
     "keyNodeCoverage": 12,
-    "sequenceReasonability": 10,
     "pathEfficiency": 8
   },
-  "diagnosticTreePathScore": 30,
+  "diagnosticTreePathScore": 20,
   "informationGain": {
     "metric": "singleStepDecisionReasonability",
-    "score": 20,
-    "maxScore": 20,
+    "score": 30,
+    "maxScore": 30,
     "stepCount": 2,
     "averageDecisionScore": 1.0,
     "stepScores": []
   },
-  "informationGainScore": 20,
+  "informationGainScore": 30,
   "routeQualityBreakdown": {},
   "routeQualityScore": 50
 }

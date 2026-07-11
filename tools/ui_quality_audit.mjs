@@ -453,7 +453,7 @@ function makeAudit() {
     'Platform files are classified without deleting cleanup candidates',
     hasAll(files.platformFileMapDoc, [
       'src/services/legacy-runtime.txt',
-      'public/model-packages/evtol_closed_loop_fault_demo.json',
+      'public/model-packages/evtol-small-flight-control-fault-display.json',
       'tools/python_model_runner/server.py',
       '可以人工评估删除的候选',
       '不要在本阶段自动删除'

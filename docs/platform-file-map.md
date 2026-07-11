@@ -19,8 +19,6 @@
 | --- | --- | --- |
 | `src/fragments/header.html` | 正在使用 | 顶部项目区、阶段导航、导入/注入/保存按钮。 |
 | `src/fragments/canvas.html` | 正在使用 | 画布、视图切换、SVG 连线层、工具栏、仿真控制停靠区。 |
-| `src/fragments/main.html` | 正在使用 | 旧片段兼容文件，仍含画布结构镜像；改动 canvas 坐标时需同步检查。 |
-| `src/fragments/left-panel.html` | 正在使用 | 左侧组件库。 |
 | `src/fragments/right-panel.html` | 正在使用 | 属性面板。 |
 | `src/fragments/statusbar.html` | 正在使用 | 底部日志、告警、仿真结果和性能趋势。 |
 | `src/styles/base.css` | 正在使用 | 全局变量、主网格尺寸、字体和基础布局。 |
@@ -55,7 +53,7 @@
 
 | 路径 | 状态 | 说明 |
 | --- | --- | --- |
-| `public/model-packages/evtol_closed_loop_fault_demo.json` | 当前主 Demo | 默认演示模型，包含四旋翼姿态闭环画布、故障类型、故障能力映射、测点和 D 矩阵基础数据。 |
+| `public/model-packages/evtol-small-flight-control-fault-display.json` | 当前主 Demo | 默认演示模型，包含 eVTOL 小型飞控系统画布、故障类型、故障能力映射、测点和 D 矩阵基础数据。 |
 | `public/model-packages/evtol_small_nonlinear.json` | 参考 Demo | 较早期小型非线性模型包，可作为格式参考。 |
 | `public/model-packages/evtol_small_nonlinear_fault_injected.json` | 测试/参考 | 带故障注入状态的模型包，测试仍在使用。 |
 | `model-authoring/evtol_small_nonlinear/package-meta.json` | 建模源数据 | 模型包元信息。 |
@@ -100,7 +98,7 @@
 当前平台可演示，但存在历史包袱：
 
 - `legacy-runtime.txt` 承载过多职责。建议后续按“画布渲染、模型数据、故障绑定、测点诊断、导入导出、属性面板”拆分。
-- `canvas.html` 与 `main.html` 存在结构镜像。后续应明确单一事实来源，避免坐标和 SVG viewBox 不同步。
+- `main.html` 旧结构镜像已删除，当前画布以 `canvas.html` 为单一来源。
 - 故障库应从“通用列表”整理为“系统匹配后的故障能力图”。一个系统一个故障库，其他系统单独设计。
 - Python 模块目前有源文件参考，但主 Demo 包未嵌入源码。正式交付时应让模型包自带 `pythonModules`，保证别人导入即可仿真。
 - 故障注入建议最终统一为“拖入层级注入块 -> 选择目标 -> 选择槽位和数学模型 -> 确认生成故障标签”的流程。

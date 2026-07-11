@@ -24,7 +24,8 @@ const COMMON_DEFAULTS = {
   signalName: '',
   signalId: '',
   unit: '',
-  description: ''
+  description: '',
+  outputPortName: '输出'
 };
 
 const DOMAIN_DEFAULTS = {
@@ -33,11 +34,10 @@ const DOMAIN_DEFAULTS = {
     signalDomain: 'digital',
     digitalMode: 'boolean',
     initialState: '0',
+    minValue: '0',
+    maxValue: '100',
     highLevel: '1',
     lowLevel: '0',
-    pulseWidth: '',
-    period: '',
-    dutyCycle: '',
     enumValues: '',
     outputFormat: '布尔'
   },
@@ -119,7 +119,8 @@ export function summarizeSignalSource(node = {}) {
   const props = normalizeSignalSourceProps(node.props ?? node);
 
   if (props.signalDomain === 'digital') {
-    return ['数字', props.digitalMode, props.period ? `周期 ${props.period}` : ''].filter(Boolean).join(' · ');
+    const valueText = firstText(props.initialState, props.value, props.lowLevel);
+    return ['数字', props.digitalMode, valueText !== '' ? `取值 ${valueText}` : ''].filter(Boolean).join(' · ');
   }
 
   if (props.signalDomain === 'command') {

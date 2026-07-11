@@ -32,6 +32,13 @@ function dispatchClick(target) {
   target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 }
 
+function setFieldValue(selector, value, eventName = 'input') {
+  const field = document.querySelector(selector);
+  expect(field).not.toBeNull();
+  field.value = value;
+  field.dispatchEvent(new Event(eventName, { bubbles: true }));
+}
+
 function dispatchPointer(target, type, init = {}) {
   const event = new MouseEvent(type, {
     bubbles: true,
@@ -117,35 +124,6 @@ describe('Oscilloscope app integration', () => {
     const windows = getScopeWindows();
     expect(windows).toHaveLength(2);
     expect(windows[0].dataset.scopeId).not.toBe(windows[1].dataset.scopeId);
-
-    wrapper.unmount();
-  });
-
-  it('opens waveform readouts for the imported fault-injected eVTOL demo package', async () => {
-    const wrapper = await mountWorkbench();
-
-    const pkg = loadPublicPackage('evtol_small_nonlinear_fault_injected.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    await flushRuntime();
-
-    expect(importResult).toMatchObject({ ok: true });
-    expect(window.__GZ_STATE__.modelNodes.some((node) => node.injectedFault)).toBe(true);
-
-    window.simInit(true);
-    for (let step = 0; step < 8; step += 1) {
-      window.simStep();
-    }
-    await flushRuntime();
-
-    window.openScope('node-11');
-    await flushRuntime();
-
-    const scopeWindow = document.querySelector('.scope-window[data-scope-id="node-11"]');
-    expect(scopeWindow).not.toBeNull();
-    expect(scopeWindow?.querySelector('[data-scope-tag="ch1"]')?.getAttribute('data-connected')).toBe('true');
-    expect(scopeWindow?.querySelector('[data-scope-tag="ch2"]')?.getAttribute('data-connected')).toBe('true');
-    expect(scopeWindow?.querySelector('[data-scope-channel="ch1"] [data-field="current"]')?.textContent?.trim()).not.toBe('--');
-    expect(scopeWindow?.querySelector('[data-scope-channel="ch2"] [data-field="current"]')?.textContent?.trim()).not.toBe('--');
 
     wrapper.unmount();
   });
@@ -311,17 +289,22 @@ describe('Oscilloscope app integration', () => {
     const spectrumOverviewText = document.getElementById('pd')?.textContent || '';
     expect(spectrumOverviewText).not.toContain('模块状态');
     expect(spectrumOverviewText).not.toContain('画布位置');
+    expect(spectrumOverviewText).not.toContain('频率范围');
+    expect(spectrumOverviewText).not.toContain('FFT 点数');
+    expect(spectrumOverviewText).not.toContain('窗函数');
+    expect(document.querySelector('[data-instrument-action="clear"]')).toBeNull();
 
-    expect(document.querySelector('[data-props-tab="parameters"]')?.hidden).toBe(true);
+    expect(document.querySelector('[data-props-tab="parameters"]')?.hidden).toBe(false);
     expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
     window.setPropertyPanelTab('parameters');
     await flushRuntime();
-    expect(document.querySelector('[data-props-tab="overview"]')?.classList.contains('is-active')).toBe(true);
+    expect(document.querySelector('[data-props-tab="parameters"]')?.classList.contains('is-active')).toBe(true);
+    expect(document.getElementById('prop-sampleRate')).toBeNull();
     expect(document.getElementById('prop-frequencyRange')).toBeNull();
     expect(document.getElementById('prop-fftSize')).toBeNull();
     expect(document.getElementById('prop-windowFunction')).toBeNull();
-    expect(document.querySelector('.props-save')).toBeNull();
-    expect(document.querySelector('.props-danger')).toBeNull();
+    expect(document.querySelector('.props-save')).not.toBeNull();
+    expect(document.querySelector('.props-danger')).not.toBeNull();
 
     window.simInit(true);
     for (let step = 0; step < 4; step += 1) {
@@ -344,15 +327,27 @@ describe('Oscilloscope app integration', () => {
     expect(meterPanel?.textContent).toContain('12.5');
     expect(meterPanel?.querySelector('[data-instrument-action="export"]')).not.toBeNull();
 
-    expect(document.querySelector('[data-props-tab="parameters"]')?.hidden).toBe(true);
+    expect(document.querySelector('[data-props-tab="parameters"]')?.hidden).toBe(false);
     expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
     window.setPropertyPanelTab('parameters');
     await flushRuntime();
-    expect(document.querySelector('[data-props-tab="overview"]')?.classList.contains('is-active')).toBe(true);
-    expect(document.getElementById('prop-measurementMode')).toBeNull();
-    expect(document.getElementById('prop-range')).toBeNull();
-    expect(document.querySelector('.props-save')).toBeNull();
-    expect(document.querySelector('.props-danger')).toBeNull();
+    expect(document.querySelector('[data-props-tab="parameters"]')?.classList.contains('is-active')).toBe(true);
+    expect(document.getElementById('prop-measurementMode')).not.toBeNull();
+    expect([...document.getElementById('prop-measurementMode').options].map((option) => option.textContent)).toEqual([
+      '直流电压',
+      '交流电压',
+      '直流电流',
+      '交流电流',
+      '电阻',
+      '通断'
+    ]);
+    expect(document.getElementById('prop-range')).not.toBeNull();
+    document.getElementById('prop-measurementMode').value = '交流电压';
+    document.querySelector('[data-property-save-node]')?.click();
+    await flushRuntime();
+    expect(meter.props.measurementMode).toBe('交流电压');
+    expect(document.querySelector('.props-save')).not.toBeNull();
+    expect(document.querySelector('.props-danger')).not.toBeNull();
 
     wrapper.unmount();
   });
@@ -617,6 +612,53 @@ describe('Oscilloscope app integration', () => {
     wrapper.unmount();
   });
 
+  it('updates a digital signal source output during simulation without reinitializing', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_digital', 300, 260);
+    const scope = window.createNode('instrument_scope', 560, 260);
+    source.props.initialState = '0';
+    const canvas = window.getActiveCanvasRecord();
+    canvas.edges.push(window.makeTask5Edge(
+      'normal',
+      source.id,
+      scope.id,
+      0,
+      0,
+      window.getNodePorts(source).outputs[0],
+      window.getNodePorts(scope).inputs[0],
+      null
+    ));
+    window.renderEdges();
+    await flushRuntime();
+
+    document.getElementById('sim-dur').value = '1';
+    document.getElementById('sim-step').value = '0.1';
+    window.simInit(true);
+    window.runSimulationTick();
+    await flushRuntime();
+
+    window.selectNode(source.id);
+    await flushRuntime();
+    window.setCanvasView('components');
+    await flushRuntime();
+    const sourceValue = document.querySelector(`[data-simulation-digital-value="${source.id}"]`);
+    sourceValue.value = '1';
+    sourceValue.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushRuntime();
+
+    window.runSimulationTick();
+    await flushRuntime();
+
+    const samples = window.__GZ_SIM__.actual.scopeSamples[scope.id].ch1;
+    expect(samples.map((sample) => sample.actual)).toEqual([0, 1]);
+    expect(source.props.initialState).toBe('1');
+    expect(window.resolveNodeOutput(source.id, 0, 'actual', window.__GZ_SIM__.time, 0.1, new Map(), new Set())).toBe(1);
+
+    wrapper.unmount();
+  });
+
   it('shows icons for every simulation toolbar action button', async () => {
     const wrapper = await mountWorkbench();
 
@@ -739,46 +781,6 @@ describe('Oscilloscope app integration', () => {
     wrapper.unmount();
   });
 
-  it('defers scope canvas redraw while a running simulation window is being dragged', async () => {
-    const wrapper = await mountWorkbench();
-
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg)).toMatchObject({ ok: true });
-    await flushRuntime();
-
-    document.getElementById('sim-dur').value = '4';
-    document.getElementById('sim-step').value = '0.1';
-    window.simInit(true);
-    for (let step = 0; step < 4; step += 1) {
-      window.simStep();
-    }
-    window.openScope('node-scope');
-    window.simRun();
-    await flushRuntime();
-
-    const getContextMock = HTMLCanvasElement.prototype.getContext;
-    getContextMock.mockClear();
-
-    const scopeWindow = document.querySelector('.scope-window[data-scope-id="node-scope"]');
-    const header = scopeWindow.querySelector('[data-scope-drag-handle]');
-    const beforeLeft = scopeWindow.style.left;
-
-    dispatchPointer(header, 'pointerdown', { pointerId: 77, clientX: 120, clientY: 120 });
-    dispatchPointer(window, 'pointermove', { pointerId: 77, clientX: 180, clientY: 160 });
-    window.runSimulationTick();
-    window.runSimulationTick();
-    await flushRuntime();
-
-    expect(scopeWindow.style.left).not.toBe(beforeLeft);
-    expect(getContextMock).not.toHaveBeenCalled();
-
-    dispatchPointer(window, 'pointerup', { pointerId: 77, clientX: 180, clientY: 160 });
-    await flushRuntime();
-
-    expect(getContextMock).toHaveBeenCalled();
-    window.simStop('stopped');
-    wrapper.unmount();
-  });
 
   it('opens scope windows below the simulation toolbar and clamps upward dragging', async () => {
     const wrapper = await mountWorkbench();

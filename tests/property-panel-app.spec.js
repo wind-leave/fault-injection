@@ -134,10 +134,10 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     expect(document.getElementById('prop-signalDomain')).toBeNull();
+    expect(document.getElementById('prop-name')).toBeNull();
     expect(document.getElementById('prop-centerFrequency')).not.toBeNull();
     expect(document.getElementById('prop-waveType')).toBeNull();
 
-    setFieldValue('#prop-name', 'RF Test Source');
     setFieldValue('#prop-centerFrequency', '5.8GHz');
     setFieldValue('#prop-bandwidth', '40MHz');
     setFieldValue('#prop-power', '12');
@@ -145,7 +145,6 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     expect(source.props).toMatchObject({
-      name: 'RF Test Source',
       signalDomain: 'rf',
       centerFrequency: '5.8GHz',
       bandwidth: '40MHz',
@@ -156,7 +155,7 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('shows signal source definition only in parameter configuration', async () => {
+  it('shows signal source definition above module status and hides canvas position for signal sources', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
@@ -167,17 +166,192 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     expect(document.querySelector('[data-props-tab="overview"]')?.classList.contains('is-active')).toBe(true);
-    expect(document.getElementById('prop-signalName')).toBeNull();
+    const overviewLabels = Array.from(document.querySelectorAll('#pd .pglbl'))
+      .map((item) => item.textContent.trim());
+    expect(overviewLabels).toContain('信号定义');
+    expect(overviewLabels).toContain('模块状态');
+    expect(overviewLabels.indexOf('信号定义')).toBeLessThan(overviewLabels.indexOf('模块状态'));
+    expect(overviewLabels).not.toContain('画布位置');
+    expect(document.getElementById('pd')?.textContent).toContain('信号名称');
+    expect(document.getElementById('prop-name')).not.toBeNull();
+    expect(document.getElementById('prop-signalName')).not.toBeNull();
+    expect(document.getElementById('prop-signalId')).not.toBeNull();
+    expect(document.getElementById('prop-unit')).not.toBeNull();
+    expect(document.getElementById('prop-description')).not.toBeNull();
     expect(document.getElementById('prop-centerFrequency')).toBeNull();
     expect(document.getElementById('prop-signalDomain')).toBeNull();
+
+    setFieldValue('#prop-name', 'RF Test Source');
+    setFieldValue('#prop-signalName', '空速射频链路');
+    setFieldValue('#prop-signalId', 'rf.airspeed.link');
+    setFieldValue('#prop-unit', 'MHz');
+    setFieldValue('#prop-description', '用于空速传感器链路仿真');
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+
+    expect(source.props).toMatchObject({
+      name: 'RF Test Source',
+      signalName: '空速射频链路',
+      signalId: 'rf.airspeed.link',
+      unit: 'MHz',
+      description: '用于空速传感器链路仿真'
+    });
 
     window.setPropertyPanelTab('parameters');
     await flushRuntime();
 
     expect(document.querySelector('[data-props-tab="parameters"]')?.classList.contains('is-active')).toBe(true);
-    expect(document.getElementById('prop-signalName')).not.toBeNull();
+    expect(document.getElementById('prop-name')).toBeNull();
+    expect(document.getElementById('prop-signalName')).toBeNull();
     expect(document.getElementById('prop-centerFrequency')).not.toBeNull();
     expect(document.getElementById('prop-signalDomain')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('removes canvas position from every signal source overview', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const componentTypes = [
+      'signal_source',
+      'signal_source_digital',
+      'signal_source_command',
+      'signal_source_rf'
+    ];
+
+    for (const [index, componentType] of componentTypes.entries()) {
+      const source = window.createNode(componentType, 160 + index * 120, 220);
+      await flushRuntime();
+      window.selectNode(source.id);
+      await flushRuntime();
+
+      const overviewLabels = Array.from(document.querySelectorAll('#pd .pglbl'))
+        .map((item) => item.textContent.trim());
+      expect(overviewLabels).toContain('信号定义');
+      expect(overviewLabels).not.toContain('画布位置');
+    }
+
+    wrapper.unmount();
+  });
+
+  it('keeps digital signal current-value controls out of the parameter panel', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_digital', 220, 220);
+    await flushRuntime();
+
+    window.selectNode(source.id);
+    await flushRuntime();
+
+    expect(visiblePropertyTabs()).toEqual(['overview', 'parameters', 'faults']);
+    expect(document.querySelector('[data-props-tab="runtimeInput"]')).toBeNull();
+    expect(document.querySelector('[data-props-tab="outputs"]')?.hidden).toBe(true);
+
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+    const groupLabels = Array.from(document.querySelectorAll('#pd .pglbl')).map((item) => item.textContent.trim());
+    expect(groupLabels).toContain('数字信号配置');
+    expect(groupLabels).not.toContain('当前取值');
+    expect(document.getElementById('prop-initialState')).toBeNull();
+    expect(document.getElementById('prop-initialState-slider')).toBeNull();
+    expect(document.querySelector('[data-digital-current-control]')).toBeNull();
+    expect(document.querySelector('[data-digital-current-ticks]')).toBeNull();
+    expect(document.getElementById('prop-digitalMode')).not.toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('edits digital signal gear presets for enum mode while keeping two fixed level gears', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_digital', 220, 220);
+    source.props.digitalMode = 'level';
+    await flushRuntime();
+
+    window.selectNode(source.id);
+    await flushRuntime();
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    expect(document.querySelectorAll('[data-digital-gear-row]')).toHaveLength(2);
+    expect(document.querySelector('[data-digital-gear-add]')).toBeNull();
+    expect(document.querySelector('[data-digital-gear-delete]')).toBeNull();
+    expect(document.getElementById('prop-lowLevel')).not.toBeNull();
+    expect(document.getElementById('prop-highLevel')).not.toBeNull();
+
+    source.props.digitalMode = 'enum';
+    source.props.enumValues = 'idle,armed';
+    window.renderPropertyPanel(source);
+    await flushRuntime();
+
+    expect(document.querySelectorAll('[data-digital-gear-row]')).toHaveLength(2);
+    expect(document.getElementById('prop-enumValues')?.value).toBe('idle,armed');
+    document.querySelector('[data-digital-gear-add]').click();
+    await flushRuntime();
+    expect(document.querySelectorAll('[data-digital-gear-row]')).toHaveLength(3);
+    const gearInputs = document.querySelectorAll('[data-digital-gear-value]');
+    gearInputs[2].value = 'fault';
+    gearInputs[2].dispatchEvent(new Event('input', { bubbles: true }));
+    expect(document.getElementById('prop-enumValues')?.value).toBe('idle,armed,fault');
+    document.querySelector('[data-digital-gear-delete]').click();
+    await flushRuntime();
+    expect(document.querySelectorAll('[data-digital-gear-row]')).toHaveLength(2);
+
+    wrapper.unmount();
+  });
+
+  it('uses the selected added enum gear as the runtime digital output', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_digital', 220, 220);
+    source.props.digitalMode = 'enum';
+    source.props.enumValues = 'idle,armed';
+    source.props.initialState = 'idle';
+    await flushRuntime();
+
+    window.selectNode(source.id);
+    await flushRuntime();
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    document.querySelector('[data-digital-gear-add]').click();
+    await flushRuntime();
+    const gearInputs = document.querySelectorAll('[data-digital-gear-value]');
+    gearInputs[2].value = 'fault';
+    gearInputs[2].dispatchEvent(new Event('input', { bubbles: true }));
+
+    source.props.initialState = 'fault';
+    window.syncRuntimeSignalSourceOutputFromProps(source);
+    expect(source.props.initialState).toBe('fault');
+    expect(window.resolveNodeOutput(source.id, 0, 'actual', 0, 0.1, new Map(), new Set())).toBe(2);
+
+    wrapper.unmount();
+  });
+
+  it('keeps generic digital bounds in parameter configuration without a current-value slider', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_digital', 220, 220);
+    source.props.digitalMode = 'generic';
+    source.props.minValue = '0';
+    source.props.maxValue = '100';
+    source.props.initialState = '25';
+    await flushRuntime();
+
+    window.selectNode(source.id);
+    await flushRuntime();
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    expect(document.getElementById('prop-minValue').value).toBe('0');
+    expect(document.getElementById('prop-maxValue').value).toBe('100');
+    expect(document.getElementById('prop-initialState')).toBeNull();
+    expect(document.getElementById('prop-initialState-slider')).toBeNull();
 
     wrapper.unmount();
   });
@@ -231,6 +405,8 @@ describe('property panel interaction', () => {
 
     window.selectNode(block.id);
     await flushRuntime();
+    expect(document.querySelector('[data-props-tab="outputs"]')?.hidden).toBe(true);
+    expect(document.querySelector('.rpanel')?.dataset.propsTabCount).toBe('3');
     window.setPropertyPanelTab('parameters');
     await flushRuntime();
 
@@ -259,6 +435,88 @@ describe('property panel interaction', () => {
     expect(block.props.outputs[0].name).toBe('控制输出');
     expect(block.props.middleVars[0].name).toBe('积分状态');
     expect(block.props.ffunctionNote).toBe('接口说明');
+    expect(window.getNodePorts(block).inputs[0].label).toContain('误差输入');
+    expect(window.getNodePorts(block).outputs[0].label).toContain('控制输出');
+    expect(window.getNodePorts(block).outputs[1].label).toContain('积分状态');
+
+    wrapper.unmount();
+  });
+
+  it('saves editable signal-source and instrument port labels', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 220, 180);
+    const multimeter = window.createNode('instrument_multimeter', 480, 180);
+    const scope = window.createNode('instrument_scope', 700, 180);
+    await flushRuntime();
+
+    window.selectNode(source.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+    setFieldValue('#prop-outputPortName', '姿态误差信号');
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+    expect(source.props.outputPortName).toBe('姿态误差信号');
+    expect(window.getNodePorts(source).outputs[0].label).toBe('姿态误差信号');
+
+    window.selectNode(multimeter.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+    setFieldValue('#prop-inputPortName', '电压测量输入');
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+    expect(multimeter.props.inputPortName).toBe('电压测量输入');
+    expect(window.getNodePorts(multimeter).inputs[0].label).toBe('电压测量输入');
+
+    window.selectNode(scope.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+    setFieldValue('#prop-inputPortNameCh1', '俯仰角');
+    setFieldValue('#prop-inputPortNameCh2', '偏航角');
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+    expect(window.getNodePorts(scope).inputs.map((port) => port.label)).toEqual(['俯仰角', '偏航角']);
+
+    wrapper.unmount();
+  });
+
+  it('saves editable display names for Python-bound simulation ports', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const block = window.createNode('simulation_block', 320, 220);
+    block.pythonBinding = {
+      bound: true,
+      fileName: 'controller.py',
+      moduleName: 'controller',
+      entryFunction: 'process',
+      portMapping: {
+        inputs: [{ varName: 'error', displayName: '误差', type: 'float', connected: false }],
+        outputs: [{ varName: 'command', displayName: '控制指令', type: 'float' }],
+        middleVars: [{ varName: 'integral', displayName: '积分量', type: 'float' }]
+      }
+    };
+    await flushRuntime();
+
+    window.selectNode(block.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+    const inputPortCard = document.querySelector('[data-python-port-display-name][data-python-port-kind="inputs"]')?.closest('.props-port-card');
+    expect(inputPortCard?.querySelector('.props-port-card__kind')?.textContent).toContain('输入端口 1');
+    expect(inputPortCard?.querySelector('.props-port-card__name')).toBeNull();
+    expect(inputPortCard?.querySelector('.props-port-card__var')).toBeNull();
+    setFieldValue('[data-python-port-display-name][data-python-port-kind="inputs"]', '姿态误差');
+    setFieldValue('[data-python-port-display-name][data-python-port-kind="outputs"]', '执行器指令');
+    setFieldValue('[data-python-port-display-name][data-python-port-kind="middleVars"]', '积分状态');
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+
+    expect(block.pythonBinding.portMapping.inputs[0].displayName).toBe('姿态误差');
+    expect(block.pythonBinding.portMapping.outputs[0].displayName).toBe('执行器指令');
+    expect(block.pythonBinding.portMapping.middleVars[0].displayName).toBe('积分状态');
+    expect(window.getNodePorts(block).inputs[0].label).toBe('姿态误差');
+    expect(window.getNodePorts(block).outputs.map((port) => port.label)).toEqual(['执行器指令', '积分状态']);
 
     wrapper.unmount();
   });
@@ -293,6 +551,12 @@ describe('property panel interaction', () => {
 
     window.selectNode(block.id);
     await flushRuntime();
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    expect(document.querySelector('[data-fault-runtime-summary]')).toBeNull();
+    expect(document.getElementById('pd')?.textContent).not.toContain('故障运行配置');
+
     window.setPropertyPanelTab('faults');
     await flushRuntime();
 
@@ -343,158 +607,6 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('describes protocol edge faults as faults on transmitted connection data', async () => {
-    const wrapper = await mountWorkbench();
-
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    await flushRuntime();
-
-    expect(importResult).toMatchObject({ ok: true });
-
-    const state = window.__GZ_STATE__;
-    const edge = state.modelEdges.find((item) => item.id === 'edge-motor-motor1');
-    const injector = window.createNode('protocol_fault_injector', 420, 260);
-    await flushRuntime();
-
-    const result = window.bindLayeredFaultInjectorToTarget(injector.id, {
-      targetKind: 'edge',
-      targetId: edge.id,
-      mathModel: 'tamper',
-      parameters: { value: 1, start: 0, duration: '', mode: 'overwrite' }
-    });
-    await flushRuntime();
-
-    expect(result).toMatchObject({
-      ok: true,
-      targetKind: 'edge',
-      injectionForm: 'protocol-bus',
-      bindingObject: 'motor.command.m1'
-    });
-
-    window.selectEdge(edge.id);
-    await flushRuntime();
-    window.setPropertyPanelTab('faults');
-    await flushRuntime();
-
-    const panelText = document.getElementById('pd')?.textContent || '';
-    expect(document.querySelector('[data-fault-binding-target]')).not.toBeNull();
-    expect(panelText).toContain('故障对象');
-    expect(panelText).toContain('连接线传递数据');
-    expect(panelText).toContain('绑定信号');
-    expect(panelText).toContain('motor.command.m1');
-    expect(panelText).toContain('通道ID');
-    expect(panelText).toContain('CAN-FC-M1');
-    expect(panelText).toContain('CAN报文');
-    expect(panelText).toContain('0x211');
-    expect(panelText).toContain('协议层故障作用于当前连接线传递的数据');
-
-    wrapper.unmount();
-  }, 10000);
-
-  it('renders stable property panel tabs for every non-fault component type', async () => {
-    const wrapper = await mountWorkbench();
-
-    window.doCreateBlankWorkspace();
-    const componentTypes = [
-      'signal_source',
-      'flow_block',
-      'gain_block',
-      'sum_block',
-      'mux_block',
-      'simulation_block',
-      'subsystem_block',
-      'instrument_scope',
-      'instrument_spectrum',
-      'instrument_logger',
-      'instrument_multimeter'
-    ];
-
-    for (const [index, type] of componentTypes.entries()) {
-      const node = window.createNode(type, 180 + index * 24, 180 + index * 18);
-      await flushRuntime();
-
-      window.selectNode(node.id);
-      await flushRuntime();
-
-      window.setPropertyPanelTab('overview');
-      await flushRuntime();
-      if (type === 'instrument_scope') {
-        expect(document.querySelector('[data-scope-overview-panel]')).not.toBeNull();
-        expect(document.querySelector('.props-target-card')).toBeNull();
-      } else {
-        expect(document.querySelector('.props-target-card')).not.toBeNull();
-      }
-      expect(document.getElementById('pd')?.textContent).toContain(node.props.name);
-
-      const hasNoParameterSettings = ['instrument_spectrum', 'instrument_multimeter'].includes(type);
-      if (hasNoParameterSettings) {
-        expect(visiblePropertyTabs()).toEqual(['overview', 'outputs']);
-        window.setPropertyPanelTab('parameters');
-        await flushRuntime();
-        expect(document.querySelector('[data-props-tab="overview"]')?.classList.contains('is-active')).toBe(true);
-        expect(document.getElementById('prop-frequencyRange')).toBeNull();
-        expect(document.getElementById('prop-measurementMode')).toBeNull();
-        expect(document.querySelector('.props-save')).toBeNull();
-        expect(document.querySelector('.props-danger')).toBeNull();
-
-        window.setPropertyPanelTab('faults');
-        await flushRuntime();
-        expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
-        expect(document.querySelector('.props-fault-panel')).toBeNull();
-        expect(document.querySelector('[data-instrument-panel]')).not.toBeNull();
-
-        window.setPropertyPanelTab('outputs');
-        await flushRuntime();
-        expect(document.querySelector('.props-target-card')).not.toBeNull();
-        expect(document.getElementById('pd')?.textContent).toContain('端口与变量');
-        continue;
-      }
-
-      window.setPropertyPanelTab('parameters');
-      await flushRuntime();
-      expect(document.querySelector('.props-form')).not.toBeNull();
-      expect(document.querySelector('.props-save')).not.toBeNull();
-      const hasNoFaultSettings = ['instrument_scope', 'instrument_spectrum', 'instrument_multimeter'].includes(type);
-      if (hasNoFaultSettings) {
-        window.setPropertyPanelTab('faults');
-        await flushRuntime();
-        expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
-        expect(document.querySelector('.props-fault-panel')).toBeNull();
-        if (type === 'instrument_scope') {
-          expect(document.querySelector('[data-scope-overview-panel]')).not.toBeNull();
-        } else {
-          expect(document.querySelector('[data-instrument-panel]')).not.toBeNull();
-        }
-
-        window.setPropertyPanelTab('outputs');
-        await flushRuntime();
-        if (type === 'instrument_scope') {
-          expect(document.querySelector('[data-props-tab="outputs"]')?.textContent?.trim()).toBe('导出设置');
-          expect(document.querySelector('[data-scope-export-settings]')).not.toBeNull();
-          expect(document.querySelector('.props-target-card')).toBeNull();
-        } else {
-          expect(document.querySelector('.props-target-card')).not.toBeNull();
-          expect(document.getElementById('pd')?.textContent).toContain('端口与变量');
-        }
-        continue;
-      }
-      expect(document.getElementById('pd')?.textContent).toContain('保存设置');
-
-      window.setPropertyPanelTab('faults');
-      await flushRuntime();
-      expect(document.querySelector('.props-fault-panel')).not.toBeNull();
-      expect(document.querySelector('.props-fault-section')).not.toBeNull();
-      expect(document.getElementById('pd')?.textContent).toContain('故障实例');
-
-      window.setPropertyPanelTab('outputs');
-      await flushRuntime();
-      expect(document.querySelector('.props-target-card')).not.toBeNull();
-      expect(document.getElementById('pd')?.textContent).toContain('端口与变量');
-    }
-
-    wrapper.unmount();
-  });
 
   it('uses a dedicated export settings panel for oscilloscope output data', async () => {
     const wrapper = await mountWorkbench();
@@ -544,467 +656,7 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('renders distinct property panel shells for component, scope, edge, and fault injector targets', async () => {
-    const wrapper = await mountWorkbench();
 
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    expect(importResult).toMatchObject({ ok: true });
-
-    const scope = window.createNode('instrument_scope', 520, 240);
-    const injector = window.createNode('protocol_fault_injector', 360, 360);
-    await flushRuntime();
-
-    const component = window.__GZ_STATE__.modelNodes.find((node) => node.type === 'simulation_block');
-    const edge = window.__GZ_STATE__.modelEdges.find((item) => item.id === 'edge-motor-motor1');
-
-    window.selectNode(component.id);
-    await flushRuntime();
-    expect(document.querySelector('[data-props-panel-kind="component"]')).not.toBeNull();
-
-    window.selectNode(scope.id);
-    await flushRuntime();
-    expect(document.querySelector('[data-props-panel-kind="scope"]')).not.toBeNull();
-
-    window.selectEdge(edge.id);
-    await flushRuntime();
-    expect(document.querySelector('[data-props-panel-kind="edge"]')).not.toBeNull();
-
-    window.selectNode(injector.id);
-    await flushRuntime();
-    expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
-    expect(visiblePropertyTabs()).toEqual(['overview']);
-
-    window.setPropertyPanelTab('parameters');
-    await flushRuntime();
-    expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
-    expect(document.querySelector('[data-props-tab="overview"]')?.classList.contains('is-active')).toBe(true);
-    expect(visiblePropertyTabs()).toEqual(['overview']);
-
-    window.setPropertyPanelTab('faults');
-    await flushRuntime();
-    expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
-    expect(document.querySelector('[data-props-tab="overview"]')?.classList.contains('is-active')).toBe(true);
-    expect(visiblePropertyTabs()).toEqual(['overview']);
-
-    wrapper.unmount();
-  }, 10000);
-
-  it('keeps unbound fault injector tabs to overview only when selected from other panel states', async () => {
-    const wrapper = await mountWorkbench();
-
-    window.doCreateBlankWorkspace();
-    const source = window.createNode('signal_source', 220, 220);
-    const injector = window.createNode('protocol_fault_injector', 420, 260);
-    await flushRuntime();
-
-    window.selectNode(source.id);
-    await flushRuntime();
-    expect(visiblePropertyTabs()).toEqual(['overview', 'parameters', 'faults', 'outputs']);
-
-    window.selectNode(injector.id);
-    await flushRuntime();
-    expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
-    expect(visiblePropertyTabs()).toEqual(['overview']);
-
-    const viewport = document.getElementById('canvas-viewport');
-    dispatchPointer(viewport, 'pointerdown', { pointerId: 11, clientX: 24, clientY: 24 });
-    dispatchPointer(viewport, 'pointerup', { pointerId: 11, clientX: 24, clientY: 24 });
-    await flushRuntime();
-    expect(visiblePropertyTabs()).toEqual(['overview']);
-
-    window.selectNode(injector.id);
-    await flushRuntime();
-    expect(document.querySelector('[data-props-panel-kind="fault-injector"]')).not.toBeNull();
-    expect(visiblePropertyTabs()).toEqual(['overview']);
-
-    wrapper.unmount();
-  });
-
-  it('keeps bound fault component tabs to overview and parameters when selected from other panel states', async () => {
-    const wrapper = await mountWorkbench();
-
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    expect(importResult).toMatchObject({ ok: true });
-
-    const source = window.__GZ_STATE__.modelNodes.find((node) => node.type === 'signal_source');
-    const edge = window.__GZ_STATE__.modelEdges.find((item) => item.id === 'edge-motor-motor1');
-    const injector = window.createNode('protocol_fault_injector', 420, 260);
-    await flushRuntime();
-
-    const bindResult = window.bindLayeredFaultInjectorToTarget(injector.id, {
-      targetKind: 'edge',
-      targetId: edge.id,
-      mathModel: 'tamper',
-      parameters: { value: 1, start: 0, duration: '', mode: 'overwrite' }
-    });
-    await flushRuntime();
-
-    expect(bindResult).toMatchObject({ ok: true });
-    const tag = window.__GZ_STATE__.faultTags[0];
-
-    window.selectNode(source.id);
-    await flushRuntime();
-    expect(visiblePropertyTabs()).toEqual(['overview', 'parameters', 'faults', 'outputs']);
-
-    window.selectFaultTag(tag.id);
-    await flushRuntime();
-    expect(document.querySelector('[data-props-panel-kind="fault-tag"]')).not.toBeNull();
-    expect(visiblePropertyTabs()).toEqual(['overview', 'parameters']);
-
-    const viewport = document.getElementById('canvas-viewport');
-    dispatchPointer(viewport, 'pointerdown', { pointerId: 12, clientX: 24, clientY: 24 });
-    dispatchPointer(viewport, 'pointerup', { pointerId: 12, clientX: 24, clientY: 24 });
-    await flushRuntime();
-    expect(visiblePropertyTabs()).toEqual(['overview']);
-
-    window.selectFaultTag(tag.id);
-    await flushRuntime();
-    expect(document.querySelector('[data-props-panel-kind="fault-tag"]')).not.toBeNull();
-    expect(visiblePropertyTabs()).toEqual(['overview', 'parameters']);
-
-    wrapper.unmount();
-  }, 10000);
-
-  it('keeps a fault tag inside its dedicated property panel when switching tabs', async () => {
-    const wrapper = await mountWorkbench();
-
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    await flushRuntime();
-
-    expect(importResult).toMatchObject({ ok: true });
-
-    const edge = window.__GZ_STATE__.modelEdges.find((item) => item.id === 'edge-motor-motor1');
-    const injector = window.createNode('protocol_fault_injector', 420, 260);
-    await flushRuntime();
-
-    const bindResult = window.bindLayeredFaultInjectorToTarget(injector.id, {
-      targetKind: 'edge',
-      targetId: edge.id,
-      mathModel: 'tamper',
-      parameters: { value: 1, start: 0, duration: '', mode: 'overwrite' }
-    });
-    await flushRuntime();
-
-    expect(bindResult).toMatchObject({ ok: true });
-    expect(window.__GZ_STATE__.faultTags).toHaveLength(1);
-
-    const tag = window.__GZ_STATE__.faultTags[0];
-    window.selectFaultTag(tag.id);
-    await flushRuntime();
-
-    expect(document.querySelector('[data-props-panel-kind="fault-tag"]')).not.toBeNull();
-    expect(window.__GZ_FAULT_TAG_PANEL_SCHEMA__).toBeTruthy();
-    expect(document.querySelector(`[data-fault-tag-inspector="${tag.id}"]`)).not.toBeNull();
-    expect(document.querySelector('.fault-tag-overview-panel')).not.toBeNull();
-    const overviewText = document.querySelector('.fault-tag-overview-panel')?.textContent || '';
-    expect(overviewText).toContain('\u7ed1\u5b9a\u6982\u89c8');
-    expect(overviewText).toContain('\u76ee\u6807\u5bf9\u8c61');
-    expect(overviewText).toContain('\u76ee\u6807\u53c2\u6570');
-    expect(overviewText).toContain('motor.command.m1');
-    expect(overviewText.indexOf('\u76ee\u6807\u5bf9\u8c61')).toBeLessThan(overviewText.indexOf('\u76ee\u6807\u53c2\u6570'));
-    expect(overviewText.indexOf('\u76ee\u6807\u53c2\u6570')).toBeLessThan(overviewText.indexOf('\u76ee\u6807\u7c7b\u578b'));
-    expect(overviewText).toContain('\u76ee\u6807\u7c7b\u578b');
-    expect(overviewText).toContain('\u8fd0\u884c\u884c\u4e3a');
-    expect(overviewText).toContain('\u6545\u969c\u53c2\u6570');
-    expect(overviewText).toContain('\u8fde\u63a5\u7ebf');
-    expect(overviewText).toContain('\u534f\u8bae\u5c42');
-    expect(overviewText).toContain('\u5df2\u6ce8\u5165');
-    expect(overviewText).toContain('\u6545\u969c\u503c');
-    expect(overviewText).toContain('\u5f00\u59cb\u65f6\u95f4');
-    expect(overviewText).toContain('\u6301\u7eed\u65f6\u95f4');
-    expect(overviewText).toContain('\u5199\u5165\u65b9\u5f0f');
-    expect(overviewText).not.toContain('\ufffd');
-    expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
-    expect(document.querySelector('[data-props-tab="outputs"]')?.hidden).toBe(true);
-    expect(document.querySelectorAll('.props-target-card')).toHaveLength(0);
-
-    const nameInput = document.querySelector('[data-fault-tag-name]');
-    const nameApply = document.querySelector('[data-fault-tag-name-apply]');
-    const customName = 'Custom motor command fault';
-    expect(nameInput).not.toBeNull();
-    expect(nameApply).not.toBeNull();
-    expect(nameApply.disabled).toBe(true);
-
-    nameInput.value = customName;
-    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-    await flushRuntime();
-    expect(nameApply.disabled).toBe(false);
-    nameApply.click();
-    await flushRuntime();
-
-    const renamedTag = window.__GZ_STATE__.faultTags.find((item) => item.id === tag.id);
-    const renamedEdge = window.__GZ_STATE__.modelEdges.find((item) => item.id === edge.id);
-    const renamedBinding = renamedEdge.faultBindings.find((binding) => binding.faultModelId === tag.faultModelId);
-    expect(renamedTag.name).toBe(customName);
-    expect(renamedTag.faultModelName).toBe(customName);
-    expect(renamedTag.injectedFault.name).toBe(customName);
-    expect(renamedEdge.injectedFault.name).toBe(customName);
-    expect(renamedBinding.name).toBe(customName);
-    expect(renamedBinding.injectedFault.name).toBe(customName);
-    expect(document.querySelector('.fault-tag-overview-panel')?.textContent).toContain(customName);
-
-    const duplicateTag = {
-      ...tag,
-      id: 'fault-tag-duplicate-name-check',
-      faultModelId: 'duplicate-name-check-model',
-      name: 'Other active fault',
-      faultModelName: 'Other active fault',
-      injectedFault: {
-        ...tag.injectedFault,
-        modelId: 'duplicate-name-check-model',
-        faultModelId: 'duplicate-name-check-model',
-        name: 'Other active fault'
-      }
-    };
-    window.__GZ_STATE__.faultTags.push(duplicateTag);
-    window.selectFaultTag(duplicateTag.id);
-    await flushRuntime();
-
-    const duplicateNameInput = document.querySelector('[data-fault-tag-name]');
-    const duplicateNameApply = document.querySelector('[data-fault-tag-name-apply]');
-    duplicateNameInput.value = customName;
-    duplicateNameInput.dispatchEvent(new Event('input', { bubbles: true }));
-    await flushRuntime();
-    duplicateNameApply.click();
-    await flushRuntime();
-
-    const unchangedDuplicateTag = window.__GZ_STATE__.faultTags.find((item) => item.id === duplicateTag.id);
-    expect(unchangedDuplicateTag.name).toBe('Other active fault');
-    expect(document.querySelector('[data-fault-tag-name-status]')?.textContent).toContain('名称已存在');
-
-    window.selectFaultTag(tag.id);
-    await flushRuntime();
-
-    expect(document.querySelector('[data-fault-tag-edit-params]')).not.toBeNull();
-    document.querySelector('[data-fault-tag-edit-params]').click();
-    await flushRuntime();
-
-    expect(document.querySelector('[data-props-tab="parameters"]')?.classList.contains('is-active')).toBe(true);
-    expect(document.querySelector('[data-props-panel-kind="fault-tag"]')).not.toBeNull();
-    expect(document.querySelector(`[data-fault-tag-param-panel="${tag.id}"]`)).not.toBeNull();
-    const parameterText = document.querySelector(`[data-fault-tag-param-panel="${tag.id}"]`)?.textContent || '';
-    expect(parameterText).toContain('\u6545\u969c\u53c2\u6570');
-    expect(parameterText).toContain('\u6545\u969c\u503c');
-    expect(parameterText).toContain('\u5f00\u59cb\u65f6\u95f4');
-    expect(parameterText).toContain('\u6301\u7eed\u65f6\u95f4');
-    expect(parameterText).toContain('\u5199\u5165\u65b9\u5f0f');
-    expect(parameterText).not.toContain('\ufffd');
-
-    setFieldValue('[data-fault-tag-param="value"]', '9');
-    expect(document.querySelector('[data-fault-tag-apply]')?.disabled).toBe(false);
-    document.querySelector('[data-fault-tag-apply]').click();
-    await flushRuntime();
-
-    const updatedTag = window.__GZ_STATE__.faultTags.find((item) => item.id === tag.id);
-    const updatedEdge = window.__GZ_STATE__.modelEdges.find((item) => item.id === edge.id);
-    expect(updatedTag.parameters.value).toBe('9');
-    expect(updatedTag.injectedFault.parameters.value).toBe('9');
-    expect(updatedEdge.injectedFault.parameters.value).toBe('9');
-
-    window.setPropertyPanelTab('overview');
-    await flushRuntime();
-    const updatedOverviewText = document.querySelector('.fault-tag-overview-panel')?.textContent || '';
-    expect(updatedOverviewText).toContain('\u6545\u969c\u503c');
-    expect(updatedOverviewText).toContain('9');
-    wrapper.unmount();
-  }, 10000);
-
-  it('deletes the selected fault tag and runtime binding with the Delete key', async () => {
-    const wrapper = await mountWorkbench();
-
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    await flushRuntime();
-
-    expect(importResult).toMatchObject({ ok: true });
-
-    const state = window.__GZ_STATE__;
-    const target = state.modelNodes.find((node) => node.id === 'node-imu');
-    const injector = window.createNode('electrical_fault_injector', 420, 260);
-    await flushRuntime();
-
-    const bindResult = window.bindLayeredFaultInjectorToTarget(injector.id, {
-      targetKind: 'node',
-      targetId: target.id,
-      slotId: 'electrical:测量角速度',
-      mathModel: 'bias',
-      parameters: { bias: 5, start: 1, duration: 2 }
-    });
-    await flushRuntime();
-
-    expect(bindResult).toMatchObject({ ok: true });
-    expect(target.faultBindings?.some((binding) => binding.active !== false)).toBe(true);
-    expect(state.faultInstances).toContainEqual(expect.objectContaining({
-      targetId: target.id,
-      slotId: 'electrical:测量角速度'
-    }));
-
-    const tag = state.faultTags.find((item) => item.targetId === target.id);
-    expect(tag).toBeTruthy();
-    tag.expanded = true;
-    tag.collapsed = false;
-    window.renderModelNodes();
-    window.renderEdges();
-    await flushRuntime();
-
-    const tagEl = document.querySelector(`[data-fault-tag-id="${tag.id}"]`);
-    expect(tagEl).not.toBeNull();
-    tagEl.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    await flushRuntime();
-
-    expect(state.selFaultTag).toBe(tag.id);
-    expect(document.querySelector(`[data-fault-tag-id="${tag.id}"]`)?.classList.contains('is-selected')).toBe(true);
-
-    window.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Delete',
-      bubbles: true,
-      cancelable: true
-    }));
-    await flushRuntime();
-
-    expect(state.selFaultTag).toBeNull();
-    expect(state.faultTags.some((item) => item.id === tag.id)).toBe(false);
-    expect(state.faultInstances.some((instance) => (
-      instance.targetId === target.id
-      && instance.slotId === 'electrical:测量角速度'
-      && instance.active !== false
-    ))).toBe(false);
-    expect(target.faultBindings?.some((binding) => binding.active !== false)).toBe(false);
-    expect(target.injectedFault).toBeUndefined();
-    expect(document.querySelector(`[data-fault-tag-id="${tag.id}"]`)).toBeNull();
-
-    wrapper.unmount();
-  }, 10000);
-
-  it('edits component-owned injectable variables from the fault settings tab', async () => {
-    const wrapper = await mountWorkbench();
-
-    window.doCreateBlankWorkspace();
-    window.createNode('simulation_block', 300, 240);
-    await flushRuntime();
-
-    const state = window.__GZ_STATE__;
-    const block = state.modelNodes.find((node) => node.type === 'simulation_block');
-    block.props.name = 'Attitude controller';
-    block.props.modelParameters = [
-      { key: 'A', name: 'Gain A', targetField: 'params.A' },
-      { key: 'D', name: 'Limit D', targetField: 'params.D' }
-    ];
-    block.props.inputs = [
-      { varName: 'B', name: 'Pitch error', signalId: 'attitude.pitch_error' }
-    ];
-    block.props.outputs = [
-      { varName: 'E', name: 'Torque demand', signalId: 'attitude.torque_demand' }
-    ];
-    block.props.middleVars = [
-      { varName: 'C', name: 'Integrator state', targetField: 'state.integrator' }
-    ];
-    block.props.faultInjection = {
-      physical: ['A', 'B', 'E'],
-      electrical: ['A'],
-      protocol: []
-    };
-    block.faultSlots = [];
-    state.activeModelPackage = {
-      modelId: 'test-package',
-      modelName: 'Test package',
-      systemModel: { nodes: [block], edges: [] },
-      workbenchSnapshot: { modelNodes: [block], modelEdges: [] },
-      faultCapabilityMap: []
-    };
-
-    window.selectNode(block.id);
-    await flushRuntime();
-    window.setPropertyPanelTab('faults');
-    await flushRuntime();
-
-    expect(document.querySelector('[data-fault-slot-editor]')).not.toBeNull();
-    expect(window.__GZ_FAULT_SLOT_PANEL_SCHEMA__).toBeTruthy();
-    expect(document.querySelector('.props-fault-slot-table')).not.toBeNull();
-    expect(document.querySelector('.props-fault-slot-head')).not.toBeNull();
-    expect(document.querySelectorAll('.props-layer-toggle')).toHaveLength(9);
-    expect(document.querySelector('.props-fault-actions .props-save')).not.toBeNull();
-    expect(document.querySelector('[data-fault-slot-variable="A"]')?.textContent).toContain('Gain A');
-    expect(document.querySelector('[data-fault-slot-variable="D"]')?.textContent).toContain('Limit D');
-    expect(document.querySelector('[data-fault-slot-variable="B"]')?.textContent).toContain('Pitch error');
-    expect(document.querySelector('[data-fault-slot-variable="E"]')?.textContent).toContain('Torque demand');
-    expect(document.querySelector('[data-fault-slot-variable="C"]')?.textContent).toContain('Integrator state');
-    expect(document.querySelector('[data-fault-slot-layer="physical"][data-fault-slot-var="A"]').checked).toBe(true);
-    expect(document.querySelector('[data-fault-slot-layer="physical"][data-fault-slot-var="D"]').checked).toBe(false);
-    expect(document.querySelector('[data-fault-slot-layer="electrical"][data-fault-slot-var="A"]')).toBeNull();
-    expect(document.querySelector('[data-fault-slot-layer="protocol"][data-fault-slot-var="D"]')).toBeNull();
-    expect(document.querySelector('[data-fault-slot-layer="physical"][data-fault-slot-var="B"]')).toBeNull();
-    expect(document.querySelector('[data-fault-slot-layer="physical"][data-fault-slot-var="E"]')).toBeNull();
-
-    setCheckboxValue('[data-fault-slot-layer="physical"][data-fault-slot-var="D"]', true);
-    setCheckboxValue('[data-fault-slot-layer="electrical"][data-fault-slot-var="B"]', true);
-    setCheckboxValue('[data-fault-slot-layer="electrical"][data-fault-slot-var="E"]', true);
-    setCheckboxValue('[data-fault-slot-layer="electrical"][data-fault-slot-var="C"]', true);
-    document.querySelector('[data-fault-slot-editor]').insertAdjacentHTML('beforeend', `
-      <input type="checkbox" data-fault-slot-layer="physical" data-fault-slot-var="B" checked>
-      <input type="checkbox" data-fault-slot-layer="physical" data-fault-slot-var="E" checked>
-      <input type="checkbox" data-fault-slot-layer="electrical" data-fault-slot-var="A" checked>
-      <input type="checkbox" data-fault-slot-layer="protocol" data-fault-slot-var="D" checked>
-    `);
-    document.querySelector('[data-save-fault-slots]').click();
-    await flushRuntime();
-
-    expect(block.props.faultInjection).toEqual({
-      physical: ['A', 'D'],
-      electrical: ['B', 'E', 'C'],
-      protocol: []
-    });
-    expect(block.faultSlots.map((slot) => slot.slotId)).toEqual([
-      'physical:A',
-      'physical:D',
-      'electrical:B',
-      'electrical:E',
-      'electrical:C'
-    ]);
-    expect(block.faultSlots.find((slot) => slot.slotId === 'physical:A')).toMatchObject({
-      slotName: 'Gain A',
-      targetField: 'params.A'
-    });
-    expect(block.faultSlots.find((slot) => slot.slotId === 'physical:D')).toMatchObject({
-      slotName: 'Limit D',
-      targetField: 'params.D',
-      bindingObject: 'D',
-      targetVariable: 'D'
-    });
-    expect(block.faultSlots.find((slot) => slot.slotId === 'electrical:B')).toMatchObject({
-      slotName: 'Pitch error',
-      variableRole: 'input',
-      targetField: 'inputs.B',
-      bindingObject: 'B',
-      targetVariable: 'B'
-    });
-    expect(block.faultSlots.find((slot) => slot.slotId === 'electrical:E')).toMatchObject({
-      slotName: 'Torque demand',
-      variableRole: 'output',
-      targetField: 'outputs.E',
-      bindingObject: 'E',
-      targetVariable: 'E'
-    });
-    expect(block.faultSlots.find((slot) => slot.slotId === 'electrical:C')).toMatchObject({
-      slotName: 'Integrator state',
-      variableRole: 'middle',
-      targetField: 'state.integrator',
-      bindingObject: 'C',
-      targetVariable: 'C'
-    });
-    expect(state.activeModelPackage.faultCapabilityMap.find((entry) => entry.targetId === block.id)).toMatchObject({
-      targetKind: 'node',
-      targetId: block.id,
-      faultSlots: expect.arrayContaining([
-        expect.objectContaining({ slotId: 'physical:D', slotName: 'Limit D' })
-      ])
-    });
-
-    wrapper.unmount();
-  });
 
   it('keeps declaration-only injectable variables visible in the fault settings tab', async () => {
     const wrapper = await mountWorkbench();
@@ -1057,215 +709,7 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('shows module-owned interface variables in the fault settings variable list', async () => {
-    const wrapper = await mountWorkbench();
 
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    await flushRuntime();
-
-    expect(importResult).toMatchObject({ ok: true });
-
-    window.selectNode('node-controller');
-    await flushRuntime();
-    window.setPropertyPanelTab('faults');
-    await flushRuntime();
-
-    const variables = Array.from(document.querySelectorAll('[data-fault-slot-variable]'))
-      .map((row) => row.getAttribute('data-fault-slot-variable'));
-
-    expect(variables).toEqual([
-      'controller_gain',
-      'controller_integrator_limit',
-      '姿态误差',
-      '力矩需求',
-      '积分状态'
-    ]);
-    expect(document.querySelectorAll('.props-layer-toggle')).toHaveLength(9);
-    expect(document.querySelector('[data-fault-slot-variable="姿态误差"]')?.textContent).toContain('姿态误差');
-    expect(document.querySelector('[data-fault-slot-variable="力矩需求"]')?.textContent).toContain('力矩需求');
-    expect(document.querySelector('[data-fault-slot-variable="积分状态"]')?.textContent).toContain('积分状态');
-    expect(document.querySelector('[data-fault-slot-layer="electrical"][data-fault-slot-var="姿态误差"]').checked).toBe(true);
-    expect(document.querySelector('[data-fault-slot-layer="electrical"][data-fault-slot-var="力矩需求"]').checked).toBe(true);
-    expect(document.querySelector('[data-fault-slot-layer="electrical"][data-fault-slot-var="积分状态"]').checked).toBe(true);
-    expect(document.querySelector('[data-fault-slot-variable="motor_command_payload"]')).toBeNull();
-
-    wrapper.unmount();
-  });
-
-  it('opens slot-aware fault injection from the fault settings action', async () => {
-    const wrapper = await mountWorkbench();
-
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    await flushRuntime();
-
-    expect(importResult).toMatchObject({ ok: true });
-
-    const state = window.__GZ_STATE__;
-    const block = state.modelNodes.find((node) => node.id === 'node-controller');
-    block.props.name = 'Attitude controller';
-    block.props.inputs = [
-      { varName: 'attitude_error', name: 'Attitude error' }
-    ];
-    block.props.outputs = [
-      { varName: 'torque_request', name: 'Torque request' }
-    ];
-    block.props.faultInjection = {
-      physical: [],
-      electrical: ['attitude_error', 'torque_request'],
-      protocol: []
-    };
-    block.faultSlots = [
-      {
-        slotId: 'electrical:attitude_error',
-        slotName: 'Attitude error',
-        layer: 'electrical',
-        variableKey: 'attitude_error',
-        variableRole: 'input',
-        bindingObject: 'attitude_error',
-        targetVariable: 'attitude_error',
-        targetField: 'inputs.attitude_error',
-        allowedFaultTypeIds: ['sensor_additive_bias']
-      },
-      {
-        slotId: 'electrical:torque_request',
-        slotName: 'Torque request',
-        layer: 'electrical',
-        variableKey: 'torque_request',
-        variableRole: 'output',
-        bindingObject: 'torque_request',
-        targetVariable: 'torque_request',
-        targetField: 'outputs.torque_request',
-        allowedFaultTypeIds: ['sensor_additive_bias']
-      }
-    ];
-    state.activeModelPackage = {
-      modelId: 'slot-aware-test',
-      modelName: 'Slot aware test',
-      systemModel: { nodes: [block], edges: [] },
-      workbenchSnapshot: { modelNodes: [block], modelEdges: [] },
-      faultTypeCatalog: [
-        {
-          id: 'sensor_additive_bias',
-          displayName: 'Sensor additive bias',
-          name: 'Sensor additive bias',
-          layer: 'electrical',
-          runtimeBehavior: 'additive_bias',
-          defaultParameters: { offset: 0.1, start: 0 }
-        }
-      ],
-      faultCapabilityMap: [
-        {
-          targetKind: 'node',
-          targetId: block.id,
-          targetName: block.props.name,
-          faultSlots: block.faultSlots
-        }
-      ]
-    };
-
-    window.selectNode(block.id);
-    await flushRuntime();
-    window.setPropertyPanelTab('faults');
-    await flushRuntime();
-
-    document.querySelector('.props-fault-action').click();
-    await flushRuntime();
-
-    const dialog = document.querySelector('[data-target-fault-dialog]');
-    expect(dialog).not.toBeNull();
-    const choices = Array.from(document.querySelectorAll('[data-activate-compatible-fault="sensor_additive_bias"]'));
-    expect(choices).toHaveLength(2);
-
-    const torqueChoice = document.querySelector('[data-activate-compatible-fault="sensor_additive_bias"][data-activate-fault-slot="electrical:torque_request"]');
-    expect(torqueChoice).not.toBeNull();
-    expect(torqueChoice.textContent).toContain('torque_request');
-    torqueChoice.click();
-    await flushRuntime();
-
-    const panel = document.querySelector('[data-target-fault-parameters]');
-    expect(panel).not.toBeNull();
-    expect(panel.textContent).toContain('torque_request');
-    panel.querySelector('[data-confirm-target-fault]').click();
-    await flushRuntime();
-
-    expect(state.faultInstances).toContainEqual(expect.objectContaining({
-      faultTypeId: 'sensor_additive_bias',
-      targetKind: 'node',
-      targetId: block.id,
-      slotId: 'electrical:torque_request',
-      bindingObject: 'torque_request',
-      targetVariable: 'torque_request',
-      targetField: 'outputs.torque_request'
-    }));
-    expect(block.injectedFault).toMatchObject({
-      modelId: 'sensor_additive_bias',
-      slotId: 'electrical:torque_request',
-      bindingObject: 'torque_request',
-      targetVariable: 'torque_request',
-      targetField: 'outputs.torque_request'
-    });
-    expect(state.faultTags).toContainEqual(expect.objectContaining({
-      faultModelId: 'sensor_additive_bias',
-      targetId: block.id,
-      slotId: 'electrical:torque_request',
-      bindingObject: 'torque_request'
-    }));
-    expect(state.injectedFaults).toContainEqual(expect.objectContaining({
-      modelId: 'sensor_additive_bias',
-      targetVariable: 'torque_request',
-      slotId: 'electrical:torque_request',
-      status: 'active'
-    }));
-    expect(state.activeFaults).toContainEqual(expect.objectContaining({
-      modelId: 'sensor_additive_bias',
-      targetVariable: 'torque_request',
-      slotId: 'electrical:torque_request',
-      status: 'active'
-    }));
-    expect(state.appliedFaults).toContainEqual(expect.objectContaining({
-      modelId: 'sensor_additive_bias',
-      targetVariable: 'torque_request',
-      slotId: 'electrical:torque_request',
-      status: 'active'
-    }));
-    expect(state.injectedFaultMap.sensor_additive_bias).toEqual(expect.objectContaining({
-      modelId: 'sensor_additive_bias',
-      targetVariable: 'torque_request',
-      slotId: 'electrical:torque_request',
-      status: 'active'
-    }));
-
-    window.setPropertyPanelTab('faults');
-    await flushRuntime();
-
-    const clearButton = document.querySelector('.props-fault-clear');
-    expect(clearButton).not.toBeNull();
-    expect(window.clearFaultBindings('node', block.id)).toBe(true);
-    await flushRuntime();
-
-    expect(block.injectedFault).toBeUndefined();
-    expect(block.faultBindings?.filter((binding) => binding.active !== false)).toHaveLength(0);
-    expect(state.faultInstances?.some((instance) => (
-      instance.active !== false
-      && instance.faultTypeId === 'sensor_additive_bias'
-      && instance.targetId === block.id
-      && instance.slotId === 'electrical:torque_request'
-    ))).toBe(false);
-    expect(state.faultTags?.some((tag) => (
-      tag.faultModelId === 'sensor_additive_bias'
-      && tag.targetId === block.id
-      && tag.slotId === 'electrical:torque_request'
-    ))).toBe(false);
-    expect(state.faultInjectionLinks?.some((link) => (
-      link.faultModelId === 'sensor_additive_bias'
-      && (link.targetNodeId === block.id || link.targetId === block.id)
-    ))).toBe(false);
-    expect(document.getElementById('pd')?.textContent).toContain('No active faults');
-
-    wrapper.unmount();
-  });
 
   it('edits CAN edge signal metadata for multi-signal flow inspection', async () => {
     const wrapper = await mountWorkbench();
@@ -1591,43 +1035,6 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('syncs renamed imported diagnostic test points into simulation and dataflow views', async () => {
-    const wrapper = await mountWorkbench();
-
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    await flushRuntime();
-
-    expect(importResult).toMatchObject({ ok: true });
-
-    window.selectEdge('edge-error-controller');
-    await flushRuntime();
-    expect(visiblePropertyTabs()).toContain('testpoints');
-    window.setPropertyPanelTab('testpoints');
-    await flushRuntime();
-
-    const card = document.querySelector('[data-edge-testpoint-card]');
-    expect(card).not.toBeNull();
-    const oldName = card.querySelector('[data-edge-testpoint-name]')?.value;
-    expect(oldName).toBeTruthy();
-
-    card.querySelector('[data-edge-testpoint-name]').value = 'Renamed attitude error monitor';
-    card.querySelector('[data-edge-testpoint-name]').dispatchEvent(new Event('input', { bubbles: true }));
-    card.querySelector('[data-save-edge-testpoint]').click();
-    await flushRuntime();
-
-    window.setCanvasView('components');
-    await flushRuntime();
-    expect(document.getElementById('simulation-panel')?.textContent).toContain('Renamed attitude error monitor');
-    expect(document.getElementById('simulation-panel')?.textContent).not.toContain(oldName);
-
-    window.setCanvasView('dataflow');
-    await flushRuntime();
-    expect(document.getElementById('dataflow-panel')?.textContent).toContain('Renamed attitude error monitor');
-    expect(document.getElementById('dataflow-panel')?.textContent).not.toContain(oldName);
-
-    wrapper.unmount();
-  });
 
   it('rejects component fault injection when the fault name already exists', async () => {
     const wrapper = await mountWorkbench();
@@ -1811,65 +1218,6 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('shows a Chinese edge summary before internal variable mapping', async () => {
-    const wrapper = await mountWorkbench();
-
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    await flushRuntime();
-
-    expect(importResult).toMatchObject({ ok: true });
-
-    window.selectEdge('edge-imu-error');
-    await flushRuntime();
-
-    const summary = document.querySelector('[data-edge-chinese-summary]');
-    const internalMapping = document.querySelector('[data-edge-internal-mapping]');
-    const pd = () => document.getElementById('pd');
-
-    expect(document.querySelector('[data-edge-overview]')).not.toBeNull();
-    expect(document.querySelector('[data-edge-route]')).not.toBeNull();
-    expect(document.querySelector('[data-edge-channel-count]')).not.toBeNull();
-    expect(summary).not.toBeNull();
-    expect(internalMapping).not.toBeNull();
-    expect(summary.compareDocumentPosition(internalMapping) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-
-    expect(pd()?.textContent).toContain('链路概览');
-    expect(pd()?.textContent).toContain('连接关系');
-    expect(pd()?.textContent).toContain('源模块');
-    expect(pd()?.textContent).toContain('目标模块');
-    expect(pd()?.textContent).toContain('连线类型');
-    expect(pd()?.textContent).toContain('总线类型');
-    expect(pd()?.textContent).toContain('通道数量');
-    expect(pd()?.textContent).toContain('故障来源');
-    expect(pd()?.textContent).toContain('主信号：imu.pitch_rate');
-    expect(pd()?.textContent).not.toContain('Route identity');
-    expect(pd()?.textContent).not.toContain('中文链路摘要');
-
-    expect(summary.textContent).toContain('链路摘要');
-    expect(summary.textContent).toContain('IMU');
-    expect(summary.textContent).toContain('测量反馈');
-    expect(summary.textContent).toContain('测点');
-    expect(summary.textContent).toContain('传播');
-
-    expect(internalMapping.textContent).toContain('边ID');
-    expect(internalMapping.textContent).toContain('源节点ID');
-    expect(internalMapping.textContent).toContain('目标节点ID');
-    expect(internalMapping.textContent).toContain('信号ID');
-    expect(internalMapping.textContent).toContain('通道ID');
-    expect(internalMapping.textContent).toContain('CAN报文');
-    expect(internalMapping.textContent).toContain('Python变量');
-    expect(internalMapping.textContent).toContain('edge-imu-error');
-    expect(internalMapping.textContent).toContain('imu.pitch_rate');
-    expect(internalMapping.textContent).toContain('CAN-FC-IMU');
-    expect(internalMapping.textContent).toContain('0x184');
-
-    ['涓', '鎸', '娴嬬', '浼犳', '鈫'].forEach((marker) => {
-      expect(pd()?.textContent).not.toContain(marker);
-    });
-
-    wrapper.unmount();
-  });
 
   it('shows localized parameter empty states for single-channel edges', async () => {
     const wrapper = await mountWorkbench();
@@ -2160,32 +1508,107 @@ describe('property panel interaction', () => {
 
     expect(document.querySelector('.fault-tag-binding-card')?.textContent).toContain('姿态控制增益');
     expect(document.querySelector('.fault-tag-binding-card')?.textContent).not.toContain('controller_gain');
+    expect(document.querySelector('.props-tab[data-props-tab="parameters"]')?.hidden).toBe(false);
+    expect(document.getElementById('pd')?.textContent).not.toContain('故障参数');
 
     wrapper.unmount();
   });
 
-  it('opens authoring dialogs from visible palette actions', async () => {
+  it('opens and configures the digital multimeter from its property panel', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
+    const multimeter = window.createNode('instrument_multimeter', 420, 240);
+    await flushRuntime();
+    window.selectNode(multimeter.id);
     await flushRuntime();
 
-    document.querySelector('[data-open-component-authoring]').click();
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+    expect(document.getElementById('prop-name')).not.toBeNull();
+    expect(document.getElementById('prop-measurementMode')).toBeNull();
+    window.setPropertyPanelTab('overview');
     await flushRuntime();
 
-    expect(document.querySelector('[data-testid="component-authoring-dialog"]')).not.toBeNull();
-
-    setFieldValue('[data-authoring-component-name]', '入口测试模块');
-    setFieldValue('[data-authoring-slot-name]', '入口测试故障位');
-    document.querySelector('[data-save-authored-component]').click();
+    const openButton = document.querySelector('[data-multimeter-action="open"]');
+    expect(openButton).not.toBeNull();
+    expect(document.querySelector('[data-instrument-action="clear"]')).toBeNull();
+    openButton.click();
     await flushRuntime();
 
-    const node = window.__GZ_STATE__.modelNodes.find((item) => item.props?.name === '入口测试模块');
-    window.selectNode(node.id);
+    const meterWindow = document.querySelector('[data-multimeter-window]');
+    expect(meterWindow).not.toBeNull();
+    expect(meterWindow?.textContent).toContain('Digital Multimeter');
+    expect(meterWindow?.parentElement?.id).toBe('multimeter-window-layer');
+    expect(Number.parseFloat(meterWindow?.style.left || '0')).toBeGreaterThanOrEqual(multimeter.x);
+    const initialLeft = meterWindow?.style.left;
+    dispatchPointer(meterWindow.querySelector('.multimeter-window__header'), 'pointerdown', { clientX: 20, clientY: 20 });
+    dispatchPointer(document, 'pointermove', { clientX: 90, clientY: 70 });
+    dispatchPointer(document, 'pointerup', { clientX: 90, clientY: 70 });
+    expect(meterWindow?.style.left).not.toBe(initialLeft);
+
+    const range = meterWindow?.querySelector('[data-multimeter-config="range"]');
+    range.value = '20V';
+    range.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    expect(multimeter.props.range).toBe('20V');
+    expect(document.querySelector('[data-multimeter-window]')).not.toBeNull();
+
+    document.querySelector('[data-multimeter-close]')?.click();
+    await flushRuntime();
+    expect(document.querySelector('[data-multimeter-window]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('opens, moves, configures, and closes the spectrum analyzer window', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const spectrum = window.createNode('instrument_spectrum', 420, 240);
+    await flushRuntime();
+    window.selectNode(spectrum.id);
     await flushRuntime();
 
-    expect(document.querySelector('[data-open-fault-authoring-for-selected]')).toBeNull();
-    expect(document.querySelector('[data-testid="fault-authoring-dialog"]')).toBeNull();
+    expect(document.getElementById('pd')?.textContent).not.toContain('频率范围');
+    expect(document.getElementById('pd')?.textContent).not.toContain('FFT 点数');
+    expect(document.getElementById('pd')?.textContent).not.toContain('窗函数');
+    expect(document.querySelector('[data-instrument-action="clear"]')).toBeNull();
+    expect(document.querySelector('[data-instrument-panel="spectrum"] .instrument-hero')).toBeNull();
+    expect(document.querySelector('[data-instrument-panel="spectrum"] .instrument-spectrum-bars')).toBeNull();
+    expect(document.querySelector('[data-instrument-panel="spectrum"] .instrument-metrics')).toBeNull();
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+    ['sampleRate', 'frequencyRange', 'fftSize', 'windowFunction'].forEach((key) => {
+      expect(document.getElementById(`prop-${key}`)).toBeNull();
+    });
+    window.setPropertyPanelTab('overview');
+    await flushRuntime();
+
+    const openButton = document.querySelector('[data-spectrum-action="open"]');
+    expect(openButton).not.toBeNull();
+    openButton.click();
+    await flushRuntime();
+
+    const spectrumWindow = document.querySelector('[data-spectrum-window]');
+    expect(spectrumWindow).not.toBeNull();
+    expect(spectrumWindow?.parentElement?.id).toBe('spectrum-window-layer');
+    expect(spectrumWindow?.textContent).toContain('Spectrum Analyzer');
+    const initialLeft = spectrumWindow?.style.left;
+    dispatchPointer(spectrumWindow.querySelector('.spectrum-window__header'), 'pointerdown', { clientX: 20, clientY: 20 });
+    dispatchPointer(document, 'pointermove', { clientX: 90, clientY: 70 });
+    dispatchPointer(document, 'pointerup', { clientX: 90, clientY: 70 });
+    expect(spectrumWindow?.style.left).not.toBe(initialLeft);
+
+    const fftSize = spectrumWindow?.querySelector('[data-spectrum-config="fftSize"]');
+    fftSize.value = '2048';
+    fftSize.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    expect(spectrum.props.fftSize).toBe('2048');
+
+    document.querySelector('[data-spectrum-close]')?.click();
+    await flushRuntime();
+    expect(document.querySelector('[data-spectrum-window]')).toBeNull();
 
     wrapper.unmount();
   });

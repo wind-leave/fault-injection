@@ -1,6 +1,5 @@
 <script setup>
 import { reactive } from 'vue';
-import { openComponentAuthoringDialog } from '../../composables/useDialogsState.js';
 import { getPaletteGroups } from '../../services/componentRegistry.js';
 
 const paletteGroups = getPaletteGroups();
@@ -77,9 +76,6 @@ function handleLineToolClick(component) {
   }
 }
 
-function openComponentAuthoring() {
-  openComponentAuthoringDialog({});
-}
 </script>
 
 <template>
@@ -127,16 +123,6 @@ function openComponentAuthoring() {
               <span class="citem-label">{{ component.label }}</span>
             </div>
           </template>
-          <button
-            v-if="group.id === 'simulation'"
-            type="button"
-            class="citem citem-authoring-action"
-            data-open-component-authoring
-            @click.stop="openComponentAuthoring"
-          >
-            <span class="citem-icon-badge citem-icon-badge--simulation">新</span>
-            <span class="citem-label">新增组件</span>
-          </button>
         </div>
       </template>
     </div>

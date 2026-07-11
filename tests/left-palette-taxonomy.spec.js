@@ -64,7 +64,7 @@ describe('left palette taxonomy', () => {
     wrapper.unmount();
   });
 
-  it('puts signal transforms, subsystem, authoring, instruments, and CAN tools in separate groups', () => {
+  it('puts signal transforms, subsystem, instruments, and CAN tools in separate groups', () => {
     const wrapper = mountPalette();
 
     expect(groupComponents(wrapper, 'signals')).toEqual([
@@ -81,7 +81,7 @@ describe('left palette taxonomy', () => {
     ]);
     expect(groupComponents(wrapper, 'simulation')).toEqual(['simulation_block', 'airspeed_sensor']);
     expect(groupBody(wrapper, 'simulation').text()).toContain('空速传感器');
-    expect(groupBody(wrapper, 'simulation').find('[data-open-component-authoring]').exists()).toBe(true);
+    expect(groupBody(wrapper, 'simulation').find('[data-open-component-authoring]').exists()).toBe(false);
     expect(groupComponents(wrapper, 'subsystem')).toEqual(['subsystem_block']);
     expect(groupComponents(wrapper, 'faults')).toEqual([
       'physical_fault_injector',

@@ -122,6 +122,22 @@ function syncSimulationControls(target) {
   }
 }
 
+function resetBackendRuntimeSamples(sim) {
+  if (!sim) {
+    return;
+  }
+  if (sim.actual) {
+    sim.actual.scopeSamples = {};
+    sim.actual.instrumentSamples = {};
+  }
+  if (sim.reference) {
+    sim.reference.scopeSamples = {};
+    sim.reference.instrumentSamples = {};
+  }
+  sim.componentOutputs = { time: [], steps: [] };
+  sim.hasSamples = false;
+}
+
 export function appendBackendSimulationChunk(target, chunk, { sampleLimit = DEFAULT_SAMPLE_LIMIT } = {}) {
   const sim = getSimulationState(target);
   if (!sim || chunk?.status === 'error') {
@@ -222,6 +238,7 @@ async function ensureBackendSession(target, legacy, options = {}) {
   }
 
   const executablePackage = api.buildExecutablePackage(state);
+  resetBackendRuntimeSamples(sim);
   const created = await api.createSession(executablePackage);
   sim.backendSessionId = created.sessionId;
   sim.backendRunId = created.runId || '';

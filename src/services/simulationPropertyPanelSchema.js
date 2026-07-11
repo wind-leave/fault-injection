@@ -143,14 +143,34 @@ function renderUnboundSimulationFields(node, helpers = {}) {
 }
 
 function renderPythonPortRows(binding, kind, helpers) {
-  if (typeof helpers.buildPythonBindingPortRows === 'function') {
-    return helpers.buildPythonBindingPortRows(list(binding?.portMapping?.[kind]), kind);
+  const escape = helpers.escapeHtml || escapeHtml;
+  const items = list(binding?.portMapping?.[kind]);
+  const kindLabel = {
+    inputs: '输入端口',
+    outputs: '输出端口',
+    middleVars: '中间变量'
+  }[kind] || '端口';
+  if (!items.length) {
+    return '<div class="props-help">当前没有可用端口</div>';
   }
-  return list(binding?.portMapping?.[kind]).map((item, index) => `
-      <div class="prow">
-        <span class="pk">${escapeHtml(item?.name || `${kind} ${index + 1}`)}</span>
-        <span class="pv">${escapeHtml(item?.type || 'value')}</span>
-      </div>`).join('');
+  return `<div class="props-port-list">${items.map((item, index) => {
+    const fallbackName = item?.displayName || item?.varName || item?.name || `${kind} ${index + 1}`;
+    const status = kind === 'inputs'
+      ? (item?.connected ? '<span class="pv pv-ok">已连接</span>' : '<span class="pv pv-fault">未连接</span>')
+      : '<span class="pv pv-ok">已暴露</span>';
+    return `
+      <div class="props-port-card props-port-card--editable">
+        <div class="props-port-card__head">
+          <span class="props-port-card__kind">${escape(kindLabel)} ${index + 1}</span>
+          ${status}
+        </div>
+        <div class="props-field">
+          <label>端口名称</label>
+          <input data-python-port-display-name data-python-port-kind="${escape(kind)}" data-python-port-index="${index}" value="${escape(fallbackName)}">
+        </div>
+        <div class="props-port-card__meta"><span>${escape(item?.type || 'any')}</span></div>
+      </div>`;
+  }).join('')}</div>`;
 }
 
 function renderBoundSimulationFields(node, binding, helpers = {}) {
@@ -207,8 +227,14 @@ export function readSimulationBlockValuesFromPanel(node, documentLike, helpers =
   const name = textValue(documentLike?.getElementById?.('prop-name')?.value, props.name || '');
 
   if (binding?.bound) {
+    const portDisplayNames = ['inputs', 'outputs', 'middleVars'].reduce((result, kind) => {
+      result[kind] = [...(documentLike?.querySelectorAll?.(`[data-python-port-display-name][data-python-port-kind="${kind}"]`) || [])]
+        .map((element, index) => textValue(element.value, list(binding?.portMapping?.[kind])[index]?.displayName || ''));
+      return result;
+    }, {});
     return {
       values: { name },
+      portDisplayNames,
       shouldPruneInvalidEdges: false
     };
   }

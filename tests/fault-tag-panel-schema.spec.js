@@ -18,7 +18,7 @@ describe('fault tag panel schema service', () => {
     }
   };
 
-  it('renders the fault tag overview with escaped labels and parameter preview', () => {
+  it('renders the fault tag overview with escaped labels without fault parameters', () => {
     const html = renderFaultTagOverviewPanel({
       tag,
       targetName: 'IMU <sensor>',
@@ -27,16 +27,17 @@ describe('fault tag panel schema service', () => {
 
     expect(html).toContain('data-fault-tag-inspector="fault-tag-1"');
     expect(html).toContain('Bias &lt;fault&gt;');
+    expect(html.match(/Bias &lt;fault&gt;/g)).toHaveLength(1);
+    expect(html).not.toContain('props-fault-card');
     expect(html).toContain('IMU &lt;sensor&gt;');
     expect(html).toContain('\u76ee\u6807\u53c2\u6570');
     expect(html).toContain('gyro_rate');
     expect(html.indexOf('\u76ee\u6807\u5bf9\u8c61')).toBeLessThan(html.indexOf('\u76ee\u6807\u53c2\u6570'));
     expect(html.indexOf('\u76ee\u6807\u53c2\u6570')).toBeLessThan(html.indexOf('\u76ee\u6807\u7c7b\u578b'));
-    expect(html).toContain('电气层');
     expect(html).toContain('偏差故障');
-    expect(html).toContain('偏置值');
-    expect(html).toContain('开始时间');
-    expect(html).toContain('data-fault-tag-edit-params');
+    expect(html).not.toContain('故障参数');
+    expect(html).not.toContain('data-fault-tag-edit-params');
+    expect(html).not.toContain('data-fault-tag-param');
   });
 
   it('renders the parameter editor with inputs and disabled actions', () => {

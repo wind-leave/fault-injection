@@ -23,6 +23,40 @@ def _fault_id(row):
     return _text(row.get("faultId") or row.get("faultTypeId") or row.get("caseId") or row.get("id"))
 
 
+def _target_kind(row):
+    value = _text(row.get("targetKind")).lower()
+    if value in {"edge", "wire", "line", "connection"}:
+        return "edge"
+    if _text(row.get("targetEdgeId")):
+        return "edge"
+    return "node"
+
+
+def _repair_targets(row):
+    targets = []
+    seen = set()
+
+    def add_target(kind, target_id, label):
+        normalized_kind = "edge" if _text(kind).lower() in {"edge", "wire", "line", "connection"} else "node"
+        normalized_id = _text(target_id)
+        if not normalized_id or (normalized_kind, normalized_id) in seen:
+            return
+        seen.add((normalized_kind, normalized_id))
+        targets.append({"kind": normalized_kind, "id": normalized_id, "label": _text(label, normalized_id)})
+
+    for target in _arr(row.get("repairTargets")):
+        if isinstance(target, dict):
+            add_target(target.get("kind") or target.get("targetKind"), target.get("id") or target.get("targetId"), target.get("label") or target.get("targetLabel") or target.get("name"))
+
+    if not targets:
+        target_kind = _target_kind(row)
+        target_id = row.get("targetEdgeId") if target_kind == "edge" else row.get("targetNodeId")
+        target_id = target_id or row.get("targetId")
+        target_label = row.get("targetLabel")
+        add_target(target_kind, target_id or target_label, target_label)
+    return targets
+
+
 def _point_code_from_operation(operation):
     return _text(operation.get("pointCode") or operation.get("shortName") or operation.get("pointId"))
 
@@ -154,7 +188,7 @@ def build_troubleshooting_path(d_matrix, target_fault_id, remaining_rows=None, u
         if len(remaining) <= 1:
             break
 
-    return {
+    path = {
         "ok": True,
         "faultId": _fault_id(target_row),
         "faultName": target_row.get("faultName") or _fault_id(target_row),
@@ -162,6 +196,51 @@ def build_troubleshooting_path(d_matrix, target_fault_id, remaining_rows=None, u
         "layer": target_row.get("layer") or "",
         "steps": steps,
         "summary": f"优先检查 {steps[0]['pointCode']} {steps[0]['pointName']}，再按剩余候选继续确认。" if steps else "该故障暂无可检测测点。",
+    }
+    repair_targets = _repair_targets(target_row)
+    path["keySteps"] = [
+        *[
+            {
+                "id": f"measure-{step['index']}-{step.get('pointId') or step['pointCode']}",
+                "action": "measure",
+                "pointId": step.get("pointId"),
+                "pointCode": step["pointCode"],
+                "text": f"测量关键测点：{step['pointCode']} {step['pointName']}。",
+            }
+            for step in steps
+        ],
+        *[
+            {
+                "id": f"replace-wire-{target['id']}",
+                "action": "replaceWire",
+                "targetId": target["id"],
+                "targetLabel": target["label"],
+                "text": f"更换关键连线：{target['label']}。",
+            }
+            for target in repair_targets
+            if target["kind"] == "edge"
+        ],
+        *[
+            {
+                "id": f"replace-device-{target['id']}",
+                "action": "replaceComponent",
+                "targetId": target["id"],
+                "targetLabel": target["label"],
+                "text": f"更换关键设备：{target['label']}。",
+            }
+            for target in repair_targets
+            if target["kind"] == "node"
+        ],
+    ]
+    return path
+
+
+def build_troubleshooting_plan(d_matrix, target_fault_id, max_steps=4):
+    path = build_troubleshooting_path(d_matrix, target_fault_id, max_steps=max_steps)
+    return {
+        **path,
+        "source": "backend-algorithm",
+        "isCustomized": False,
     }
 
 

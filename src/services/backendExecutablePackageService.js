@@ -26,6 +26,30 @@ function pickNumericParameters(props = {}) {
   );
 }
 
+function addSignalSourceExecutionParameters(parameters, rawProps = {}, normalizedProps = {}) {
+  if (String(rawProps.signalDomain ?? '').trim()) {
+    parameters.signalDomain = normalizedProps.signalDomain;
+  }
+  if (String(rawProps.waveType ?? '').trim()) {
+    parameters.waveType = String(rawProps.waveType).trim();
+  }
+}
+
+function normalizeSumBlockSigns(signs, inputCount) {
+  const source = Array.isArray(signs)
+    ? signs
+    : String(signs || '').split(/[,\s]+/).filter(Boolean);
+  return Array.from({ length: Math.max(0, Math.trunc(inputCount)) }, (_, index) => (
+    source[index] === '-' ? '-' : '+'
+  ));
+}
+
+function addSumBlockExecutionParameters(parameters, rawProps = {}) {
+  const inputCount = sanitizeNumber(rawProps.inputCount ?? parameters.inputCount, 2);
+  parameters.inputCount = Math.max(2, Math.trunc(inputCount));
+  parameters.signs = normalizeSumBlockSigns(rawProps.signs, parameters.inputCount);
+}
+
 function normalizePorts(ports = []) {
   return Array.isArray(ports)
     ? ports.map((port) => ({ name: String(port?.name ?? port?.label ?? '') })).filter((port) => port.name)
@@ -39,7 +63,11 @@ function normalizeNode(node) {
     : rawProps;
   const parameters = pickNumericParameters(rawProps);
   if (node.type === 'signal_source') {
+    addSignalSourceExecutionParameters(parameters, rawProps, props);
     parameters.value = getSignalSourceScalarFallback(props);
+  }
+  if (node.type === 'sum_block') {
+    addSumBlockExecutionParameters(parameters, rawProps);
   }
 
   const normalized = {

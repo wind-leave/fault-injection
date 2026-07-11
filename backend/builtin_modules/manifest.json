@@ -73,6 +73,88 @@
       "inputs": ["body_rate"],
       "outputs": ["measured_rate"],
       "parameters": {}
+    },
+    {
+      "moduleId": "pid_controller",
+      "importPath": "backend.builtin_modules.pid_controller",
+      "entryFunction": "process",
+      "inputs": ["attitude_command", "attitude_feedback"],
+      "outputs": ["moment_command"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "control_allocation",
+      "importPath": "backend.builtin_modules.control_allocation",
+      "entryFunction": "process",
+      "inputs": ["moment_command", "speed_command", "altitude_command"],
+      "outputs": ["actuator_command"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "voltage_drop",
+      "importPath": "backend.builtin_modules.voltage_drop",
+      "entryFunction": "process",
+      "inputs": ["actuator_command", "bus_voltage"],
+      "outputs": ["voltage_limited_command"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "motor_actuator",
+      "importPath": "backend.builtin_modules.motor_actuator",
+      "entryFunction": "process",
+      "inputs": ["voltage_limited_command"],
+      "outputs": [
+        "rotor_1_command",
+        "rotor_2_command",
+        "rotor_3_command",
+        "rotor_4_command",
+        "rotor_5_command",
+        "rotor_6_command",
+        "rotor_7_command",
+        "rotor_8_command"
+      ],
+      "parameters": {}
+    },
+    {
+      "moduleId": "rotor_motor",
+      "importPath": "backend.builtin_modules.rotor_motor",
+      "entryFunction": "process",
+      "inputs": ["rotor_command"],
+      "outputs": ["rotor_thrust"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "aero_moment",
+      "importPath": "backend.builtin_modules.aero_moment",
+      "entryFunction": "process",
+      "inputs": [
+        "rotor_1_thrust",
+        "rotor_2_thrust",
+        "rotor_3_thrust",
+        "rotor_4_thrust",
+        "rotor_5_thrust",
+        "rotor_6_thrust",
+        "rotor_7_thrust",
+        "rotor_8_thrust"
+      ],
+      "outputs": ["total_force", "total_moment"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "six_dof",
+      "importPath": "backend.builtin_modules.six_dof",
+      "entryFunction": "process",
+      "inputs": ["total_force", "total_moment"],
+      "outputs": ["attitude", "body_rate", "altitude"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "sensor_fault_injection",
+      "importPath": "backend.builtin_modules.sensor_fault_injection",
+      "entryFunction": "process",
+      "inputs": ["attitude", "body_rate", "altitude"],
+      "outputs": ["attitude_feedback", "rate_feedback", "altitude_feedback"],
+      "parameters": {}
     }
   ]
 }

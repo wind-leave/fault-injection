@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getComponentPropertySchema,
   readPropertyValuesFromSchema,
+  renderPropertyOverviewFieldsFromSchema,
   renderPropertyFieldsFromSchema
 } from '../src/services/propertyPanelSchema.js';
 
@@ -109,7 +110,7 @@ describe('property panel schema service', () => {
     expect(html).not.toContain('id="prop-messageId"');
   });
 
-  it('does not render signal domain as an editable signal source field', () => {
+  it('does not render signal definition as editable signal source parameter fields', () => {
     const schema = getComponentPropertySchema('signal_source');
     const html = renderPropertyFieldsFromSchema({
       type: 'signal_source',
@@ -121,8 +122,33 @@ describe('property panel schema service', () => {
     }, schema);
 
     expect(html).not.toContain('id="prop-signalDomain"');
+    expect(html).not.toContain('id="prop-name"');
+    expect(html).not.toContain('id="prop-signalName"');
+    expect(html).not.toContain('id="prop-signalId"');
+    expect(html).toContain('id="prop-waveType"');
+  });
+
+  it('renders editable signal definition fields in the signal source overview schema', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    const html = renderPropertyOverviewFieldsFromSchema({
+      type: 'signal_source',
+      props: {
+        name: 'RF Source',
+        signalDomain: 'rf',
+        signalName: 'Airspeed Link',
+        signalId: 'rf.airspeed',
+        centerFrequency: '2.4GHz'
+      }
+    }, schema);
+
+    expect(html).toContain('信号定义');
+    expect(html).toContain('id="prop-name"');
     expect(html).toContain('id="prop-signalName"');
     expect(html).toContain('id="prop-signalId"');
+    expect(html).toContain('id="prop-unit"');
+    expect(html).toContain('id="prop-description"');
+    expect(html).not.toContain('id="prop-signalDomain"');
+    expect(html).not.toContain('id="prop-centerFrequency"');
   });
 
   it('renders analog type options with Chinese labels while preserving values', () => {
@@ -187,7 +213,7 @@ describe('property panel schema service', () => {
       type: 'signal_source',
       props: {
         signalDomain: 'digital',
-        digitalMode: 'pulse'
+        digitalMode: 'enum'
       }
     }, schema);
 
@@ -195,16 +221,65 @@ describe('property panel schema service', () => {
     expect(options.map((option) => option.value)).toEqual([
       'boolean',
       'level',
-      'pulse',
-      'enum'
+      'enum',
+      'generic'
     ]);
     expect(options.map((option) => option.textContent)).toEqual([
-      '布尔量',
-      '电平信号',
-      '脉冲信号',
-      '枚举状态'
+      '布尔取值',
+      '双值电平',
+      '枚举取值',
+      '通用信号'
     ]);
-    expect(document.getElementById('prop-digitalMode').value).toBe('pulse');
+    expect(document.getElementById('prop-digitalMode').value).toBe('enum');
+  });
+
+  it('renders generic digital signals with min/max bounds but no parameter current slider', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    document.body.innerHTML = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: {
+        signalDomain: 'digital',
+        digitalMode: 'generic',
+        minValue: '0',
+        maxValue: '100',
+        initialState: '40'
+      }
+    }, schema);
+
+    expect(document.getElementById('prop-digitalMode').value).toBe('generic');
+    expect(document.getElementById('prop-minValue').value).toBe('0');
+    expect(document.getElementById('prop-maxValue').value).toBe('100');
+    expect(document.getElementById('prop-initialState-slider')).toBeNull();
+    expect(document.getElementById('prop-initialState')).toBeNull();
+
+    expect(readPropertyValuesFromSchema(schema, document)).toEqual(expect.objectContaining({
+      digitalMode: 'generic',
+      minValue: '0',
+      maxValue: '100'
+    }));
+  });
+
+  it('renders digital signal sources without a current-value field or pulse timing fields', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    const html = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: {
+        signalDomain: 'digital',
+        digitalMode: 'level',
+        initialState: '1',
+        period: '20ms',
+        dutyCycle: '0.5'
+      }
+    }, schema);
+
+    expect(html).toContain('id="prop-digitalMode"');
+    expect(html).not.toContain('当前取值');
+    expect(html).not.toContain('id="prop-initialState"');
+    expect(html).toContain('id="prop-enumValues"');
+    expect(html).not.toContain('id="prop-pulseWidth"');
+    expect(html).not.toContain('id="prop-period"');
+    expect(html).not.toContain('id="prop-dutyCycle"');
+    expect(html).not.toContain('pulse');
   });
 
   it('renders command type options with Chinese labels while preserving values', () => {
@@ -294,15 +369,14 @@ describe('property panel schema service', () => {
       }
     }, schema);
 
-    document.getElementById('prop-name').value = 'RF Updated';
     document.getElementById('prop-centerFrequency').value = '5.8GHz';
 
     expect(readPropertyValuesFromSchema(schema, document)).toEqual(expect.objectContaining({
-      name: 'RF Updated',
       centerFrequency: '5.8GHz',
       bandwidth: '20MHz',
       power: '10',
       modulation: 'QPSK'
     }));
+    expect(readPropertyValuesFromSchema(schema, document)).not.toHaveProperty('name');
   });
 });

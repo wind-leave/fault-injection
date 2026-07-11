@@ -142,4 +142,36 @@ describe('workbenchSnapshotService', () => {
       offsetY: 46
     });
   });
+
+  it('preserves diagnostic test point state through snapshot round-trip', () => {
+    const snapshot = createWorkbenchSnapshot({
+      modelNodes: [],
+      modelEdges: [],
+      diagnosticTestPoints: [
+        { pointId: 'tp-fixed', edgeId: 'edge-a', name: 'Fixed point' }
+      ],
+      testPoints: [
+        { pointId: 'tp-package', edgeId: 'edge-b', name: 'Package point' }
+      ],
+      manualDiagnosticTestPoints: [
+        { pointId: 'tp-manual', edgeId: 'edge-c', name: 'Manual point' }
+      ],
+      installedDiagnosticTestPointIds: ['tp-fixed', 'tp-manual'],
+      diagnosticTestPointManualCleared: true
+    });
+
+    const restored = restoreWorkbenchSnapshot(snapshot);
+
+    expect(snapshot.diagnosticTestPoints).toEqual([
+      { pointId: 'tp-fixed', edgeId: 'edge-a', name: 'Fixed point' }
+    ]);
+    expect(snapshot.manualDiagnosticTestPoints).toEqual([
+      { pointId: 'tp-manual', edgeId: 'edge-c', name: 'Manual point' }
+    ]);
+    expect(snapshot.installedDiagnosticTestPointIds).toEqual(['tp-fixed', 'tp-manual']);
+    expect(restored.testPoints).toEqual([
+      { pointId: 'tp-package', edgeId: 'edge-b', name: 'Package point' }
+    ]);
+    expect(restored.diagnosticTestPointManualCleared).toBe(true);
+  });
 });

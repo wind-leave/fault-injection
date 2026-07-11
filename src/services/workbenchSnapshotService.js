@@ -200,7 +200,12 @@ export function createWorkbenchSnapshot(state) {
     importedFaultModels: toSafeArray(safeState.importedFaultModels),
     faultInstances: toSafeArray(safeState.faultInstances),
     faultTags: toSafeArray(safeState.faultTags),
-    faultInjectionLinks: toSafeArray(safeState.faultInjectionLinks)
+    faultInjectionLinks: toSafeArray(safeState.faultInjectionLinks),
+    diagnosticTestPoints: toSafeArray(safeState.diagnosticTestPoints),
+    testPoints: toSafeArray(safeState.testPoints),
+    manualDiagnosticTestPoints: toSafeArray(safeState.manualDiagnosticTestPoints),
+    installedDiagnosticTestPointIds: toSafeArray(safeState.installedDiagnosticTestPointIds),
+    diagnosticTestPointManualCleared: Boolean(safeState.diagnosticTestPointManualCleared)
   });
 }
 
@@ -230,6 +235,11 @@ export function restoreWorkbenchSnapshot(snapshot) {
     importedFaultModels: toSafeArray(safeSnapshot.importedFaultModels),
     faultInstances: toSafeArray(safeSnapshot.faultInstances),
     faultTags: toSafeArray(safeSnapshot.faultTags),
-    faultInjectionLinks: toSafeArray(safeSnapshot.faultInjectionLinks)
+    faultInjectionLinks: toSafeArray(safeSnapshot.faultInjectionLinks),
+    diagnosticTestPoints: toSafeArray(safeSnapshot.diagnosticTestPoints),
+    testPoints: toSafeArray(safeSnapshot.testPoints),
+    manualDiagnosticTestPoints: toSafeArray(safeSnapshot.manualDiagnosticTestPoints),
+    installedDiagnosticTestPointIds: toSafeArray(safeSnapshot.installedDiagnosticTestPointIds),
+    diagnosticTestPointManualCleared: Boolean(safeSnapshot.diagnosticTestPointManualCleared)
   });
 }

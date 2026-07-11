@@ -156,27 +156,11 @@ export function renderFaultTagOverviewPanel(options = {}) {
               </div>
             </div>
           </div>
-          <div class="props-fault-card">
-            <div class="props-fault-card__top">
-              <div>
-                <strong>${escapeHtml(tag.name || COPY.fallbackFaultName)}</strong>
-                <span>${escapeHtml(runtimeLabel)} · ${escapeHtml(layerLabel)}</span>
-              </div>
-              <span class="props-state-pill is-faulted">${escapeHtml(COPY.injected)}</span>
-            </div>
-          </div>
           <div class="fault-tag-binding-card">
             <div><span>${escapeHtml(COPY.targetObject)}</span><strong>${escapeHtml(targetName)}</strong></div>
             <div><span>${escapeHtml(COPY.targetParameter)}</span><strong>${escapeHtml(targetParameter)}</strong></div>
             <div><span>${escapeHtml(COPY.targetType)}</span><strong>${escapeHtml(targetKindLabel)}</strong></div>
             <div><span>${escapeHtml(COPY.runtimeBehavior)}</span><strong>${escapeHtml(runtimeLabel)}</strong></div>
-          </div>
-          <div class="fault-tag-param-preview">
-            <div class="fault-tag-param-preview__head">
-              <div class="pglbl">${escapeHtml(COPY.parametersTitle)}</div>
-              <button type="button" class="props-secondary fault-tag-param-edit" data-fault-tag-edit-params>${escapeHtml(COPY.editParameters)}</button>
-            </div>
-            ${renderParameterPreviewRows(parameters)}
           </div>
         </div>
       `;

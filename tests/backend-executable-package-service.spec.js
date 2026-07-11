@@ -82,6 +82,57 @@ describe('backendExecutablePackageService', () => {
     ]);
   });
 
+  it('exports analog signal waveform parameters for backend execution', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [
+        {
+          id: 'sine-source',
+          type: 'signal_source',
+          props: {
+            signalDomain: 'analog',
+            waveType: 'sine',
+            amplitude: '0.08',
+            frequency: '0.35',
+            phase: '0.2',
+            offset: '0.01'
+          }
+        }
+      ],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].parameters).toEqual(expect.objectContaining({
+      signalDomain: 'analog',
+      waveType: 'sine',
+      amplitude: 0.08,
+      frequency: 0.35,
+      phase: 0.2,
+      offset: 0.01,
+      value: 0.08
+    }));
+  });
+
+  it('exports sum block signs for backend execution', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [
+        {
+          id: 'error-sum',
+          type: 'sum_block',
+          props: {
+            inputCount: 2,
+            signs: ['+', '-']
+          }
+        }
+      ],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].parameters).toEqual({
+      inputCount: 2,
+      signs: ['+', '-']
+    });
+  });
+
   it('drops edges and measurement points that reference unsupported nodes', () => {
     const pkg = buildBackendExecutablePackage({
       modelNodes: [

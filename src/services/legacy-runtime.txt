@@ -40,6 +40,7 @@ const S={
   measurementResponseFilter:'all',
   selectedMeasurementPointId:'',
   installedDiagnosticTestPointIds:[],
+  simulationTestPointIds:[],
   selectedDiagnosticTestPointId:'',
   testPointDiagnosis:null,
   confirmedDiagnosticFaults:{},
@@ -84,6 +85,13 @@ function renderSchemaPropertyFields(node){
   return api.renderPropertyFieldsFromSchema(node,schema,{escapeHtml,buildSelectOptions});
 }
 
+function renderSchemaOverviewPropertyFields(node){
+  const api=window.__GZ_PROPERTY_PANEL_SCHEMA__;
+  const schema=getSimplePropertySchema(node);
+  if(!schema||!api?.renderPropertyOverviewFieldsFromSchema){return '';}
+  return api.renderPropertyOverviewFieldsFromSchema(node,schema,{escapeHtml,buildSelectOptions});
+}
+
 function readSchemaPropertyValues(node){
   const api=window.__GZ_PROPERTY_PANEL_SCHEMA__;
   const schema=getSimplePropertySchema(node);
@@ -109,6 +117,100 @@ function normalizeSignalSourcePropsRuntime(props){
     outputFormat:'scalar',
     ...(props||{})
   };
+}
+
+function isDigitalSignalSourceNode(node){
+  return node?.type==='signal_source'
+    && normalizeSignalSourcePropsRuntime(node.props||{}).signalDomain==='digital';
+}
+
+function splitRuntimeDigitalValues(value){
+  return String(value??'')
+    .split(/[,\uFF0C;；|]/)
+    .map(item=>item.trim())
+    .filter(Boolean);
+}
+
+function getRuntimeDigitalGenericBounds(props){
+  const rawMin=parseScalar(props?.minValue,0);
+  const rawMax=parseScalar(props?.maxValue,100);
+  return {
+    min:Math.min(rawMin,rawMax),
+    max:Math.max(rawMin,rawMax)
+  };
+}
+
+function normalizeRuntimeGenericDigitalValue(props,rawValue){
+  const bounds=getRuntimeDigitalGenericBounds(props);
+  const numeric=clamp(parseScalar(rawValue,bounds.min),bounds.min,bounds.max);
+  return String(numeric);
+}
+
+function normalizeRuntimeDigitalValue(props,rawValue){
+  const value=String(rawValue??'').trim();
+  const mode=String(props.digitalMode||'boolean');
+  if(mode==='generic'){
+    return normalizeRuntimeGenericDigitalValue(props,value);
+  }
+  if(mode==='enum'){
+    const values=splitRuntimeDigitalValues(props.enumValues);
+    if(!values.length||values.includes(value)){return value;}
+    return values[0];
+  }
+  if(mode==='boolean'){
+    const parsed=parseDigitalLevel(value,parseDigitalLevel(props.lowLevel,0));
+    const high=parseDigitalLevel(props.highLevel,1);
+    const low=parseDigitalLevel(props.lowLevel,0);
+    return String(parsed===high||parsed!==low?props.highLevel??'1':props.lowLevel??'0');
+  }
+  return value;
+}
+
+function ensureSignalSourceRuntimeStore(){
+  if(typeof SIM==='undefined'){return null;}
+  if(!SIM.signalSourceOutputs){SIM.signalSourceOutputs={};}
+  return SIM.signalSourceOutputs;
+}
+
+function updateSignalSourceRuntimeOutput(node,rawValue,{persist=true}={}){
+  if(!isDigitalSignalSourceNode(node)){return false;}
+  const props=normalizeSignalSourcePropsRuntime(node.props||{});
+  const value=normalizeRuntimeDigitalValue(props,rawValue);
+  const numericValue=computeDigitalSourceSignal({...props,initialState:value,value},SIM?.time||0);
+  const store=ensureSignalSourceRuntimeStore();
+  if(store){
+    store[node.id]={
+      value,
+      numericValue,
+      updatedAt:SIM?.time||0,
+      stepIndex:SIM?.stepIndex||0
+    };
+  }
+  if(persist){
+    node.props={...(node.props||{}),initialState:value,value};
+  }
+  ['actual','reference'].forEach(modeKey=>{
+    const nodeState=SIM?.[modeKey]?.nodeStates?.[node.id];
+    if(nodeState){
+      nodeState.lastOutput=numericValue;
+      nodeState.lastOutputs=[numericValue];
+    }
+  });
+  return true;
+}
+
+function syncRuntimeSignalSourceOutputFromProps(node){
+  if(!isDigitalSignalSourceNode(node)){return false;}
+  const props=normalizeSignalSourcePropsRuntime(node.props||{});
+  return updateSignalSourceRuntimeOutput(node,props.initialState,{persist:false});
+}
+
+function getRuntimeAdjustedSignalSourceProps(node){
+  const props=normalizeSignalSourcePropsRuntime(node.props||{});
+  if(props.signalDomain!=='digital'){return props;}
+  const runtimeValue=SIM?.signalSourceOutputs?.[node.id]?.value;
+  if(runtimeValue==null){return props;}
+  return {...props,initialState:runtimeValue,value:runtimeValue};
 }
 
 function summarizeSignalSourceRuntime(node){
@@ -148,6 +250,7 @@ function applySchemaPropertyValues(node){
   node.props={...(node.props||{}),...values};
   if(node.type==='signal_source'){
     node.props=normalizeSignalSourcePropsRuntime(node.props);
+    syncRuntimeSignalSourceOutputFromProps(node);
   }
   if(node.type==='gain_block'||node.type==='sum_block'||node.type==='mux_block'){
     normalizeSignalUtilityNode(node);
@@ -167,6 +270,17 @@ function applySimulationSchemaPropertyValues(node){
   });
   if(!result?.values){return false;}
   node.props={...(node.props||{}),...result.values};
+  if(result.portDisplayNames){
+    const binding=ensureFlowNodePythonBinding(node);
+    ['inputs','outputs','middleVars'].forEach(kind=>{
+      const names=Array.isArray(result.portDisplayNames[kind])?result.portDisplayNames[kind]:[];
+      const ports=Array.isArray(binding.portMapping?.[kind])?binding.portMapping[kind]:[];
+      ports.forEach((port,index)=>{
+        const name=String(names[index]||'').trim();
+        if(name){port.displayName=name;}
+      });
+    });
+  }
   if(result.shouldPruneInvalidEdges){
     pruneInvalidEdgesForNode(node);
   }
@@ -744,7 +858,13 @@ function createSystemModelSnapshot(){
     importedFaultModels:S.importedFaultModels,
     faultInstances:S.faultInstances,
     faultTags:S.faultTags,
-    faultInjectionLinks:S.faultInjectionLinks
+    faultInjectionLinks:S.faultInjectionLinks,
+    diagnosticTestPoints:S.diagnosticTestPoints,
+    testPoints:S.testPoints,
+    manualDiagnosticTestPoints:S.manualDiagnosticTestPoints,
+    installedDiagnosticTestPointIds:S.installedDiagnosticTestPointIds,
+    simulationTestPointIds:S.simulationTestPointIds,
+    diagnosticTestPointManualCleared:S.diagnosticTestPointManualCleared
   });
 }
 
@@ -769,6 +889,12 @@ function restoreSystemModelSnapshot(snapshot){
   S.faultInstances=Array.isArray(restored.faultInstances)?restored.faultInstances:[];
   S.faultTags=Array.isArray(restored.faultTags)?restored.faultTags:[];
   S.faultInjectionLinks=Array.isArray(restored.faultInjectionLinks)?restored.faultInjectionLinks:[];
+  S.diagnosticTestPoints=Array.isArray(restored.diagnosticTestPoints)?cloneDefaults(restored.diagnosticTestPoints):[];
+  S.testPoints=Array.isArray(restored.testPoints)?cloneDefaults(restored.testPoints):[];
+  S.manualDiagnosticTestPoints=Array.isArray(restored.manualDiagnosticTestPoints)?cloneDefaults(restored.manualDiagnosticTestPoints):[];
+  S.installedDiagnosticTestPointIds=Array.from(new Set((Array.isArray(restored.installedDiagnosticTestPointIds)?restored.installedDiagnosticTestPointIds:[]).filter(Boolean)));
+  S.simulationTestPointIds=Array.from(new Set((Array.isArray(restored.simulationTestPointIds)?restored.simulationTestPointIds:[]).filter(Boolean)));
+  S.diagnosticTestPointManualCleared=Boolean(restored.diagnosticTestPointManualCleared);
   S.faultModels=S.importedFaultModels.length;
   S.selBlk=null;
   S.selEdge=null;
@@ -3769,6 +3895,7 @@ const SIM = {
   scopeWindowZ:10,
   actual:createRuntimeBucket(),
   reference:createRuntimeBucket(),
+  signalSourceOutputs:{},
   componentOutputs:{time:[],steps:[]}
 };
 
@@ -3972,6 +4099,8 @@ function resetSimulationRuntime(){
   SIM.hasSamples=false;
   SIM.actual=createRuntimeBucket();
   SIM.reference=createRuntimeBucket();
+  SIM.signalSourceOutputs={};
+  S.modelNodes.forEach(node=>syncRuntimeSignalSourceOutputFromProps(node));
   SIM.componentOutputs={time:[],steps:[]};
   getScopeNodes().forEach(node=>{
     SIM.actual.scopeSamples[node.id]=[];
@@ -4072,6 +4201,24 @@ function computeDigitalSourceSignal(props,time){
   const high=parseDigitalLevel(props.highLevel,1);
   const low=parseDigitalLevel(props.lowLevel,0);
   const initial=parseDigitalLevel(props.initialState,low);
+  if(props.digitalMode==='generic'){
+    const bounds=getRuntimeDigitalGenericBounds(props);
+    return clamp(parseScalar(props.initialState??props.value,bounds.min),bounds.min,bounds.max);
+  }
+  if(props.digitalMode==='enum'){
+    const gears=splitRuntimeDigitalValues(props.enumValues);
+    const rawValue=String(props.initialState??props.value??'').trim();
+    const exactIndex=gears.findIndex(gear=>String(gear)===rawValue);
+    if(exactIndex>=0){
+      const numericValue=Number(rawValue);
+      return Number.isFinite(numericValue)?numericValue:exactIndex;
+    }
+    const numericIndex=Number(rawValue);
+    if(Number.isInteger(numericIndex)&&numericIndex>=0&&numericIndex<gears.length){
+      return numericIndex;
+    }
+    return Number.isFinite(numericIndex)?numericIndex:0;
+  }
   if(props.digitalMode==='pulse'){
     const period=Math.max(parseScalar(props.period,1),1e-9);
     const dutyFromWidth=parseScalar(props.pulseWidth,0)/period;
@@ -4083,7 +4230,7 @@ function computeDigitalSourceSignal(props,time){
 }
 
 function computeSourceSignal(node,time){
-  const props=normalizeSignalSourcePropsRuntime(node.props||{});
+  const props=getRuntimeAdjustedSignalSourceProps(node);
   if(props.signalDomain==='digital'){
     return computeDigitalSourceSignal(props,time);
   }
@@ -5830,6 +5977,12 @@ window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__ = function(pkg,prepared){
   S.activeLineType=restored.activeLineType||'normal';
   S.faultedBlks=restored.faultedBlks||[];
   S.importedFaultModels=restored.importedFaultModels||[];
+  S.diagnosticTestPoints=Array.isArray(restored.diagnosticTestPoints)?cloneDefaults(restored.diagnosticTestPoints):[];
+  S.testPoints=Array.isArray(restored.testPoints)?cloneDefaults(restored.testPoints):[];
+  S.manualDiagnosticTestPoints=Array.isArray(restored.manualDiagnosticTestPoints)?cloneDefaults(restored.manualDiagnosticTestPoints):[];
+  S.installedDiagnosticTestPointIds=Array.from(new Set((Array.isArray(restored.installedDiagnosticTestPointIds)?restored.installedDiagnosticTestPointIds:[]).filter(Boolean)));
+  S.simulationTestPointIds=Array.from(new Set((Array.isArray(restored.simulationTestPointIds)?restored.simulationTestPointIds:[]).filter(Boolean)));
+  S.diagnosticTestPointManualCleared=Boolean(restored.diagnosticTestPointManualCleared);
   S.availableFaultModels=[];
   S.selectedFaultCatalogId='';
   S.activeModelPackage={
@@ -6274,6 +6427,12 @@ window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__ = function(pkg,prepared){
   S.activeLineType=restored.activeLineType||'normal';
   S.faultedBlks=restored.faultedBlks||[];
   S.importedFaultModels=restored.importedFaultModels||[];
+  S.diagnosticTestPoints=Array.isArray(restored.diagnosticTestPoints)?cloneDefaults(restored.diagnosticTestPoints):[];
+  S.testPoints=Array.isArray(restored.testPoints)?cloneDefaults(restored.testPoints):[];
+  S.manualDiagnosticTestPoints=Array.isArray(restored.manualDiagnosticTestPoints)?cloneDefaults(restored.manualDiagnosticTestPoints):[];
+  S.installedDiagnosticTestPointIds=Array.from(new Set((Array.isArray(restored.installedDiagnosticTestPointIds)?restored.installedDiagnosticTestPointIds:[]).filter(Boolean)));
+  S.simulationTestPointIds=Array.from(new Set((Array.isArray(restored.simulationTestPointIds)?restored.simulationTestPointIds:[]).filter(Boolean)));
+  S.diagnosticTestPointManualCleared=Boolean(restored.diagnosticTestPointManualCleared);
   S.availableFaultModels=[];
   S.selectedFaultCatalogId='';
   S.activeModelPackage={
@@ -6475,7 +6634,7 @@ showTplDetail = function(t){
 };
 
 computeSourceSignal = function(node,time){
-  const props=normalizeSignalSourcePropsRuntime(node.props||{});
+  const props=getRuntimeAdjustedSignalSourceProps(node);
   if(props.signalDomain==='digital'){
     return computeDigitalSourceSignal(props,time);
   }
@@ -10893,80 +11052,292 @@ Object.assign(window,{
   }
 
   function buildSpectrumFieldsClean(node){
-    const samples=getInstrumentSamples(node);
-    const values=samples.map(getSampleValue);
-    const bins=buildSpectrum(values,18);
-    const peakValue=Math.max(...bins,0);
-    const peakIndex=Math.max(0,bins.indexOf(peakValue));
-    const peakFreq=(peakIndex+1)*parseInstrumentSampleRateHz(node)/(bins.length*2);
-    const summary=summarizeInstrumentSamples(samples);
     return `
       <div class="instrument-props instrument-props--spectrum" data-instrument-panel="spectrum">
-        <div class="instrument-hero">
-          <div>
-            <div class="instrument-kicker">Spectrum Analyzer</div>
-            <div class="instrument-title">频谱分析仪</div>
-            <div class="instrument-copy">${escapeHtml(getInstrumentSignalName(node))}</div>
-          </div>
-          <div class="instrument-count">
-            <strong>${samples.length?formatScopeMetric(peakFreq):'--'}</strong>
-            <span>峰值频点</span>
-          </div>
-        </div>
-        <div class="instrument-spectrum-bars" aria-label="频谱能量分布">
-          ${bins.map((value,index)=>`
-            <span data-spectrum-bin title="${formatScopeMetric((index+1)*parseInstrumentSampleRateHz(node)/(bins.length*2))}Hz · ${formatScopeMetric(value)}" style="height:${Math.max(4,Math.round(value*52))}px"></span>
-          `).join('')}
-        </div>
-        <div class="instrument-metrics">
-          <span><b>${summary.count}</b><em>样本</em></span>
-          <span><b>${summary.peak}</b><em>幅值峰值</em></span>
-          <span><b>${samples.length?formatScopeMetric(peakValue):'--'}</b><em>归一能量</em></span>
-          <span><b>${escapeHtml(node.props.frequencyRange||'0-16kHz')}</b><em>频率范围</em></span>
-          <span><b>${escapeHtml(node.props.fftSize||'1024')}</b><em>FFT 点数</em></span>
-          <span><b>${escapeHtml(node.props.windowFunction||'Hann')}</b><em>窗函数</em></span>
-        </div>
         <div class="instrument-actions">
+          <button type="button" class="instrument-primary" data-spectrum-action="open">显示频谱</button>
           <button type="button" class="instrument-primary" data-instrument-action="export">导出数据</button>
-          <button type="button" class="instrument-secondary" data-instrument-action="clear">清空记录</button>
         </div>
       </div>`;
   }
 
   function buildMultimeterFieldsClean(node){
-    const samples=getInstrumentSamples(node);
-    const summary=summarizeInstrumentSamples(samples);
-    const values=samples.map(getSampleValue).filter(Number.isFinite);
-    const min=values.length?formatScopeMetric(Math.min(...values)):'--';
-    const max=values.length?formatScopeMetric(Math.max(...values)):'--';
-    const avg=values.length?formatScopeMetric(values.reduce((sum,value)=>sum+value,0)/values.length):'--';
     return `
       <div class="instrument-props instrument-props--multimeter" data-instrument-panel="multimeter">
-        <div class="instrument-hero">
-          <div>
-            <div class="instrument-kicker">Digital Multimeter</div>
-            <div class="instrument-title">数字万用表</div>
-            <div class="instrument-copy">${escapeHtml(getInstrumentSignalName(node))}</div>
-          </div>
-          <div class="instrument-count">
-            <strong>${summary.current}</strong>
-            <span>当前读数</span>
-          </div>
-        </div>
-        <div class="instrument-metrics">
-          <span><b>${summary.current}</b><em>${escapeHtml(normalizeMultimeterMeasurementMode(node.props.measurementMode))}</em></span>
-          <span><b>${min}</b><em>最小值</em></span>
-          <span><b>${max}</b><em>最大值</em></span>
-          <span><b>${avg}</b><em>平均值</em></span>
-          <span><b>${escapeHtml(node.props.range||'Auto')}</b><em>量程</em></span>
-          <span><b>${escapeHtml(node.props.refreshRate||node.props.sampleRate||'5Hz')}</b><em>刷新率</em></span>
-        </div>
         <div class="instrument-actions">
+          <button type="button" class="instrument-primary" data-multimeter-action="open">显示仪表</button>
           <button type="button" class="instrument-primary" data-instrument-action="export">导出数据</button>
-          <button type="button" class="instrument-secondary" data-instrument-action="clear">清空记录</button>
         </div>
       </div>`;
   }
+
+  function getMultimeterUnit(mode){
+    const label=normalizeMultimeterMeasurementMode(mode);
+    if(label.includes('电压')) return 'V';
+    if(label.includes('电流')) return 'A';
+    if(label.includes('电阻')) return 'Ω';
+    return '';
+  }
+
+  function getMultimeterWindowState(){
+    if(!SIM.multimeterWindow||typeof SIM.multimeterWindow!=='object'){
+      SIM.multimeterWindow={open:false,nodeId:'',x:null,y:null};
+    }
+    return SIM.multimeterWindow;
+  }
+
+  function renderMultimeterWindow(){
+    const host=document.getElementById('multimeter-window-layer');
+    if(!host){return;}
+    host.querySelector('[data-multimeter-window]')?.remove();
+    const state=getMultimeterWindowState();
+    if(!state.open){return;}
+    const node=getNode(state.nodeId);
+    if(!node||node.type!=='instrument_multimeter'){
+      state.open=false;
+      return;
+    }
+    const samples=getInstrumentSamples(node);
+    const summary=summarizeInstrumentSamples(samples);
+    const values=samples.map(getSampleValue).filter(Number.isFinite);
+    const mode=normalizeMultimeterMeasurementMode(node.props.measurementMode);
+    const unit=getMultimeterUnit(mode);
+    const readout=summary.current==='--'?'----':summary.current;
+    const defaultX=Math.max(18,Math.min((node.x||0)+(node.w||150)+16,(host.clientWidth||760)-380));
+    const defaultY=Math.max(48,node.y||76);
+    if(!Number.isFinite(state.x)){state.x=defaultX;}
+    if(!Number.isFinite(state.y)){state.y=defaultY;}
+    const windowEl=document.createElement('section');
+    windowEl.className='multimeter-window';
+    windowEl.dataset.multimeterWindow='true';
+    windowEl.style.left=`${state.x}px`;
+    windowEl.style.top=`${state.y}px`;
+    windowEl.innerHTML=`
+      <header class="multimeter-window__header">
+        <div>
+          <span>Digital Multimeter</span>
+          <strong>${escapeHtml(node.props.name||'数字万用表')}</strong>
+        </div>
+        <button type="button" data-multimeter-close>关闭 ×</button>
+      </header>
+      <div class="multimeter-window__body">
+        <div class="multimeter-window__display">
+          <div class="multimeter-window__display-head">
+            <span>${escapeHtml(mode)}</span>
+            <b class="${samples.length?'is-live':'is-idle'}">${samples.length?'实时':'待测'}</b>
+          </div>
+          <strong>${escapeHtml(readout)}<em>${escapeHtml(unit)}</em></strong>
+          <small>${escapeHtml(getInstrumentSignalName(node))}</small>
+        </div>
+        <div class="multimeter-window__stats">
+          <span><em>最小</em><b>${escapeHtml(values.length?formatScopeMetric(Math.min(...values)):'--')}</b></span>
+          <span><em>最大</em><b>${escapeHtml(values.length?formatScopeMetric(Math.max(...values)):'--')}</b></span>
+          <span><em>平均</em><b>${escapeHtml(values.length?formatScopeMetric(values.reduce((sum,value)=>sum+value,0)/values.length):'--')}</b></span>
+        </div>
+        <div class="multimeter-window__config">
+          <div class="multimeter-window__config-title">仪表设置</div>
+          <label class="multimeter-window__config-mode">测量模式<select data-multimeter-config="measurementMode">${buildSelectOptions(getMultimeterMeasurementModeOptions(),mode)}</select></label>
+          <label>量程<input data-multimeter-config="range" value="${escapeHtml(node.props.range||'Auto')}"></label>
+          <label>刷新率<input data-multimeter-config="refreshRate" value="${escapeHtml(node.props.refreshRate||node.props.sampleRate||'5Hz')}"></label>
+        </div>
+        <div class="multimeter-window__actions">
+          <span>${samples.length?`${samples.length} 条读数`:'暂无读数'}</span>
+          <button type="button" data-multimeter-clear>清空读数</button>
+        </div>
+      </div>
+    `;
+    host.appendChild(windowEl);
+    ['pointerdown','mousedown','click','dblclick'].forEach(type=>{
+      windowEl.addEventListener(type,event=>event.stopPropagation());
+    });
+    const dragHeader=windowEl.querySelector('.multimeter-window__header');
+    dragHeader?.addEventListener('pointerdown',event=>{
+      if(event.button!==undefined&&event.button!==0){return;}
+      if(event.target.closest('button,input,select,textarea')){return;}
+      const startX=event.clientX;
+      const startY=event.clientY;
+      const originX=state.x;
+      const originY=state.y;
+      const move=moveEvent=>{
+        const maxX=Math.max(0,(host.clientWidth||760)-windowEl.offsetWidth);
+        const maxY=Math.max(0,(host.clientHeight||520)-windowEl.offsetHeight);
+        state.x=Math.max(0,Math.min(maxX,originX+(moveEvent.clientX-startX)));
+        state.y=Math.max(0,Math.min(maxY,originY+(moveEvent.clientY-startY)));
+        windowEl.style.left=`${state.x}px`;
+        windowEl.style.top=`${state.y}px`;
+        moveEvent.stopPropagation();
+        moveEvent.preventDefault();
+      };
+      const end=()=>{
+        document.removeEventListener('pointermove',move);
+        document.removeEventListener('pointerup',end);
+      };
+      document.addEventListener('pointermove',move);
+      document.addEventListener('pointerup',end);
+      if(event.currentTarget?.setPointerCapture&&event.pointerId!==undefined){
+        try{event.currentTarget.setPointerCapture(event.pointerId);}catch(error){}
+      }
+      event.stopPropagation();
+      event.preventDefault();
+    });
+    windowEl.querySelector('[data-multimeter-close]')?.addEventListener('click',()=>{
+      state.open=false;
+      renderMultimeterWindow();
+    });
+    windowEl.querySelectorAll('[data-multimeter-config]').forEach(input=>input.addEventListener('change',()=>{
+      const key=input.dataset.multimeterConfig;
+      if(key==='measurementMode'){
+        node.props.measurementMode=normalizeMultimeterMeasurementMode(input.value);
+      }else if(key==='range'){
+        node.props.range=input.value.trim()||'Auto';
+      }else if(key==='refreshRate'){
+        node.props.refreshRate=input.value.trim()||node.props.sampleRate||'5Hz';
+      }
+      if(typeof setDirtyState==='function'){setDirtyState();}
+      renderMultimeterWindow();
+      if(S.selBlk===node.id){renderPropertyPanel(node);}
+    }));
+    windowEl.querySelector('[data-multimeter-clear]')?.addEventListener('click',()=>{
+      clearInstrumentSamples(node);
+      renderMultimeterWindow();
+    });
+  }
+
+  window.openMultimeterInstrument=function(nodeId=''){
+    const node=getNode(nodeId||S.selBlk);
+    if(!node||node.type!=='instrument_multimeter'){
+      toast('当前没有可打开的数字万用表','w');
+      return;
+    }
+    const state=getMultimeterWindowState();
+    state.open=true;
+    state.nodeId=node.id;
+    renderMultimeterWindow();
+  };
+
+  function getSpectrumWindowState(){
+    if(!SIM.spectrumWindow||typeof SIM.spectrumWindow!=='object'){
+      SIM.spectrumWindow={open:false,nodeId:'',x:null,y:null};
+    }
+    return SIM.spectrumWindow;
+  }
+
+  function renderSpectrumWindow(){
+    const host=document.getElementById('spectrum-window-layer');
+    if(!host){return;}
+    host.querySelector('[data-spectrum-window]')?.remove();
+    const state=getSpectrumWindowState();
+    if(!state.open){return;}
+    const node=getNode(state.nodeId);
+    if(!node||node.type!=='instrument_spectrum'){
+      state.open=false;
+      return;
+    }
+    const samples=getInstrumentSamples(node);
+    const values=samples.map(getSampleValue).filter(Number.isFinite);
+    const bins=buildSpectrum(values,32);
+    const peakValue=Math.max(...bins,0);
+    const peakIndex=Math.max(0,bins.indexOf(peakValue));
+    const sampleRate=parseInstrumentSampleRateHz(node);
+    const peakFrequency=values.length?(peakIndex+1)*sampleRate/(bins.length*2):null;
+    const defaultX=Math.max(18,Math.min((node.x||0)+(node.w||172)+16,(host.clientWidth||860)-520));
+    const defaultY=Math.max(48,node.y||76);
+    if(!Number.isFinite(state.x)){state.x=defaultX;}
+    if(!Number.isFinite(state.y)){state.y=defaultY;}
+    const windowEl=document.createElement('section');
+    windowEl.className='spectrum-window';
+    windowEl.dataset.spectrumWindow='true';
+    windowEl.style.left=`${state.x}px`;
+    windowEl.style.top=`${state.y}px`;
+    windowEl.innerHTML=`
+      <header class="spectrum-window__header">
+        <div>
+          <span>Spectrum Analyzer</span>
+          <strong>${escapeHtml(node.props.name||'频谱分析仪')}</strong>
+        </div>
+        <button type="button" data-spectrum-close>关闭 ×</button>
+      </header>
+      <div class="spectrum-window__body">
+        <div class="spectrum-window__summary">
+          <span><em>峰值频点</em><b>${escapeHtml(peakFrequency===null?'--':`${formatScopeMetric(peakFrequency)}Hz`)}</b></span>
+          <span><em>幅值峰值</em><b>${escapeHtml(values.length?formatScopeMetric(peakValue):'--')}</b></span>
+          <span><em>采样数量</em><b>${samples.length}</b></span>
+        </div>
+        <div class="spectrum-window__chart" aria-label="频谱能量分布">
+          ${bins.map((value,index)=>`<span class="spectrum-window__bar" title="${escapeHtml(formatScopeMetric((index+1)*sampleRate/(bins.length*2)))}Hz · ${escapeHtml(formatScopeMetric(value))}" style="height:${Math.max(4,Math.round(value*150))}px"></span>`).join('')}
+        </div>
+        <div class="spectrum-window__config">
+          <div class="spectrum-window__config-title">分析设置</div>
+          <label>采样率<input data-spectrum-config="sampleRate" value="${escapeHtml(node.props.sampleRate||'32kHz')}"></label>
+          <label>频率范围<input data-spectrum-config="frequencyRange" value="${escapeHtml(node.props.frequencyRange||'0-16kHz')}"></label>
+          <label>FFT 点数<input data-spectrum-config="fftSize" value="${escapeHtml(node.props.fftSize||'1024')}"></label>
+          <label>窗函数<input data-spectrum-config="windowFunction" value="${escapeHtml(node.props.windowFunction||'Hann')}"></label>
+        </div>
+        <div class="spectrum-window__actions">
+          <span>${escapeHtml(getInstrumentSignalName(node))}</span>
+          <button type="button" data-spectrum-clear>清空记录</button>
+        </div>
+      </div>
+    `;
+    host.appendChild(windowEl);
+    ['pointerdown','mousedown','click','dblclick'].forEach(type=>{
+      windowEl.addEventListener(type,event=>event.stopPropagation());
+    });
+    const dragHeader=windowEl.querySelector('.spectrum-window__header');
+    dragHeader?.addEventListener('pointerdown',event=>{
+      if(event.button!==undefined&&event.button!==0){return;}
+      if(event.target.closest('button,input,select,textarea')){return;}
+      const startX=event.clientX;
+      const startY=event.clientY;
+      const originX=state.x;
+      const originY=state.y;
+      const move=moveEvent=>{
+        const maxX=Math.max(0,(host.clientWidth||860)-windowEl.offsetWidth);
+        const maxY=Math.max(0,(host.clientHeight||520)-windowEl.offsetHeight);
+        state.x=Math.max(0,Math.min(maxX,originX+(moveEvent.clientX-startX)));
+        state.y=Math.max(0,Math.min(maxY,originY+(moveEvent.clientY-startY)));
+        windowEl.style.left=`${state.x}px`;
+        windowEl.style.top=`${state.y}px`;
+        moveEvent.stopPropagation();
+        moveEvent.preventDefault();
+      };
+      const end=()=>{
+        document.removeEventListener('pointermove',move);
+        document.removeEventListener('pointerup',end);
+      };
+      document.addEventListener('pointermove',move);
+      document.addEventListener('pointerup',end);
+      event.stopPropagation();
+      event.preventDefault();
+    });
+    windowEl.querySelector('[data-spectrum-close]')?.addEventListener('click',()=>{
+      state.open=false;
+      renderSpectrumWindow();
+    });
+    windowEl.querySelectorAll('[data-spectrum-config]').forEach(input=>input.addEventListener('change',()=>{
+      const key=input.dataset.spectrumConfig;
+      node.props[key]=input.value.trim()||node.props[key];
+      if(typeof setDirtyState==='function'){setDirtyState();}
+      renderSpectrumWindow();
+      if(S.selBlk===node.id){renderPropertyPanel(node);}
+    }));
+    windowEl.querySelector('[data-spectrum-clear]')?.addEventListener('click',()=>{
+      clearInstrumentSamples(node);
+      renderSpectrumWindow();
+    });
+  }
+
+  window.openSpectrumInstrument=function(nodeId=''){
+    const node=getNode(nodeId||S.selBlk);
+    if(!node||node.type!=='instrument_spectrum'){
+      toast('当前没有可打开的频谱分析仪','w');
+      return;
+    }
+    const state=getSpectrumWindowState();
+    state.open=true;
+    state.nodeId=node.id;
+    renderSpectrumWindow();
+  };
 
   function buildInstrumentFieldsClean(node){
     if(node.type==='instrument_scope'){
@@ -11007,6 +11378,16 @@ Object.assign(window,{
   function bindInstrumentPropertyPanelActions(node,host){
     bindScopePropertyPanelActions(node,host);
     if(!node.type?.startsWith('instrument_')){return;}
+    host.querySelector('[data-multimeter-action="open"]')?.addEventListener('click',event=>{
+      event.preventDefault();
+      event.stopPropagation();
+      window.openMultimeterInstrument(node.id);
+    });
+    host.querySelector('[data-spectrum-action="open"]')?.addEventListener('click',event=>{
+      event.preventDefault();
+      event.stopPropagation();
+      window.openSpectrumInstrument(node.id);
+    });
     host.querySelector('[data-instrument-action="export"]')?.addEventListener('click',event=>{
       event.preventDefault();
       event.stopPropagation();
@@ -11327,13 +11708,15 @@ Object.assign(window,{
     return 'component';
   }
 
-  function getAvailablePropertyTabs(kind){
+  function getAvailablePropertyTabs(kind,target=getSelectedPropertyTarget()){
     if(kind==='edge'){return ['overview','parameters','faults','testpoints','outputs'];}
     if(kind==='fault-tag'){return ['overview','parameters'];}
     if(kind==='fault-injector'){return ['overview'];}
     if(kind==='scope'){return ['overview','parameters','outputs'];}
-    if(kind==='measurement-instrument'){return ['overview','outputs'];}
+    if(kind==='measurement-instrument'){return ['overview','parameters','outputs'];}
     if(kind==='empty'){return ['overview'];}
+    if(target?.type==='signal_source'){return ['overview','parameters','faults'];}
+    if(target?.type==='simulation_block'){return ['overview','parameters','faults'];}
     return ['overview','parameters','faults','outputs'];
   }
 
@@ -11344,7 +11727,9 @@ Object.assign(window,{
 
   function syncPropertyTabs(){
     const kind=getCurrentPropertyPanelKind();
-    const availableTabs=getAvailablePropertyTabs(kind);
+    const availableTabs=getAvailablePropertyTabs(kind,getSelectedPropertyTarget());
+    const panel=document.querySelector('.rpanel');
+    if(panel){panel.dataset.propsTabCount=String(availableTabs.length);}
     if(!availableTabs.includes(S.propertyPanelTab)){
       S.propertyPanelTab=availableTabs[0]||'overview';
     }
@@ -11625,6 +12010,19 @@ Object.assign(window,{
       </div>`;
   }
 
+  function renderSignalSourceDefinitionOverview(node){
+    if(node?.type!=='signal_source'){return '';}
+    const fields=renderSchemaOverviewPropertyFields(node);
+    if(!fields){return '';}
+    return `
+      <div class="props-form" data-signal-source-definition-overview>
+        ${fields}
+        <div class="props-actions">
+          <button type="button" class="props-save" data-property-save-node>保存信号定义</button>
+        </div>
+      </div>`;
+  }
+
   function renderNodeOverview(node){
     if(isFaultlessMeasurementInstrument(node)){
       return `
@@ -11637,9 +12035,20 @@ Object.assign(window,{
     const simulationPackageRows=node.type==='simulation_block'&&pythonBound
       ?buildSimulationBlockPackageRows(node)
       :'';
+    const signalDefinitionRows=renderSignalSourceDefinitionOverview(node);
+    const canvasPositionRows=node.type==='signal_source'?'':`
+      <div class="pgroup">
+        <div class="pglbl">画布位置</div>
+        ${renderRows([
+          ['X',Math.round(Number(node.x)||0)],
+          ['Y',Math.round(Number(node.y)||0)],
+          ['尺寸',`${Math.round(Number(node.w)||0)} x ${Math.round(Number(node.h)||0)}`]
+        ])}
+      </div>`;
     return `
       ${renderTargetHeader(node)}
       ${simulationPackageRows}
+      ${signalDefinitionRows}
       <div class="pgroup">
         <div class="pglbl">模块状态</div>
         ${renderRows([
@@ -11650,14 +12059,7 @@ Object.assign(window,{
           ['故障实例',activeFaultBindingsForPanel(node).length||'0']
         ])}
       </div>
-      <div class="pgroup">
-        <div class="pglbl">画布位置</div>
-        ${renderRows([
-          ['X',Math.round(Number(node.x)||0)],
-          ['Y',Math.round(Number(node.y)||0)],
-          ['尺寸',`${Math.round(Number(node.w)||0)} x ${Math.round(Number(node.h)||0)}`]
-        ])}
-      </div>
+      ${canvasPositionRows}
       ${renderLegacyOverviewCompat(node)}`;
   }
 
@@ -13259,14 +13661,240 @@ Object.assign(window,{
     }
   }
 
-  function bindPropertyPanelNodeActions(host){
-    const saveButton=host?.querySelector?.('[data-property-save-node]');
-    if(!saveButton||saveButton.dataset.propertySaveNodeBound){return;}
-    saveButton.addEventListener('click',event=>{
-      event.preventDefault();
-      saveSelectedNode();
+  function bindDigitalSignalConfigurationActions(host,node){
+    const enumValuesInput=host?.querySelector?.('#prop-enumValues');
+    const readGearValues=()=>{
+      const mode=host.querySelector('#prop-digitalMode')?.value||node.props?.digitalMode||'boolean';
+      if(mode==='enum'){
+        const values=splitRuntimeDigitalValues(enumValuesInput?.value||node.props?.enumValues||'');
+        return values.length?values:['0','1'];
+      }
+      return [
+        String(host.querySelector('#prop-lowLevel')?.value??node.props?.lowLevel??'0'),
+        String(host.querySelector('#prop-highLevel')?.value??node.props?.highLevel??'1')
+      ];
+    };
+    const syncEnumValuesFromRows=()=>{
+      if(!enumValuesInput){return;}
+      const values=[...host.querySelectorAll('[data-digital-gear-value]')]
+        .map(input=>String(input.value||'').trim())
+        .filter(Boolean);
+      enumValuesInput.value=values.join(',');
+      node.props={...(node.props||{}),enumValues:enumValuesInput.value};
+    };
+    host.querySelectorAll('[data-digital-gear-value]').forEach(input=>{
+      if(input.dataset.digitalGearValueBound){return;}
+      input.addEventListener('input',syncEnumValuesFromRows);
+      input.addEventListener('change',syncEnumValuesFromRows);
+      input.dataset.digitalGearValueBound='true';
     });
-    saveButton.dataset.propertySaveNodeBound='true';
+    host.querySelectorAll('[data-digital-fixed-gear]').forEach(input=>{
+      if(input.dataset.digitalFixedGearBound){return;}
+      input.addEventListener('input',()=>{
+        if(input.dataset.digitalFixedGear==='low'){node.props.lowLevel=input.value;}
+        if(input.dataset.digitalFixedGear==='high'){node.props.highLevel=input.value;}
+      });
+      input.dataset.digitalFixedGearBound='true';
+    });
+    host.querySelectorAll('[data-digital-generic-bound]').forEach(input=>{
+      if(input.dataset.digitalGenericBoundBound){return;}
+      const syncBound=()=>{
+        if(input.dataset.digitalGenericBound==='min'){node.props.minValue=input.value;}
+        if(input.dataset.digitalGenericBound==='max'){node.props.maxValue=input.value;}
+      };
+      input.addEventListener('input',syncBound);
+      input.addEventListener('change',syncBound);
+      input.dataset.digitalGenericBoundBound='true';
+    });
+    const addButton=host.querySelector('[data-digital-gear-add]');
+    if(addButton&&!addButton.dataset.digitalGearAddBound){
+      addButton.addEventListener('click',event=>{
+        event.preventDefault();
+        const values=readGearValues();
+        values.push(`gear${values.length+1}`);
+        node.props={...(node.props||{}),enumValues:values.join(',')};
+        renderPropertyPanel(node);
+      });
+      addButton.dataset.digitalGearAddBound='true';
+    }
+    host.querySelectorAll('[data-digital-gear-delete]').forEach(button=>{
+      if(button.dataset.digitalGearDeleteBound){return;}
+      button.addEventListener('click',event=>{
+        event.preventDefault();
+        const row=button.closest('[data-digital-gear-row]');
+        const rows=[...host.querySelectorAll('[data-digital-gear-row]')];
+        const index=rows.indexOf(row);
+        const values=readGearValues();
+        if(values.length<=1){return;}
+        values.splice(index,1);
+        node.props={...(node.props||{}),enumValues:values.join(',')};
+        renderPropertyPanel(node);
+      });
+      button.dataset.digitalGearDeleteBound='true';
+    });
+  }
+
+  function bindPropertyPanelNodeActions(host){
+    const multimeterOpenButton=host?.querySelector?.('[data-multimeter-action="open"]');
+    if(multimeterOpenButton&&!multimeterOpenButton.dataset.multimeterOpenBound){
+      multimeterOpenButton.addEventListener('click',event=>{
+        event.preventDefault();
+        window.openMultimeterInstrument?.(S.selBlk);
+      });
+      multimeterOpenButton.dataset.multimeterOpenBound='true';
+    }
+    const spectrumOpenButton=host?.querySelector?.('[data-spectrum-action="open"]');
+    if(spectrumOpenButton&&!spectrumOpenButton.dataset.spectrumOpenBound){
+      spectrumOpenButton.addEventListener('click',event=>{
+        event.preventDefault();
+        window.openSpectrumInstrument?.(S.selBlk);
+      });
+      spectrumOpenButton.dataset.spectrumOpenBound='true';
+    }
+    const saveButton=host?.querySelector?.('[data-property-save-node]');
+    if(saveButton&&!saveButton.dataset.propertySaveNodeBound){
+      saveButton.addEventListener('click',event=>{
+        event.preventDefault();
+        saveSelectedNode();
+      });
+      saveButton.dataset.propertySaveNodeBound='true';
+    }
+    const node=getNode(S.selBlk);
+    if(!isDigitalSignalSourceNode(node)){return;}
+    bindDigitalSignalConfigurationActions(host,node);
+    const currentValueInput=host?.querySelector?.('#prop-initialState');
+    if(!currentValueInput||currentValueInput.dataset.runtimeSignalOutputBound){return;}
+    const currentSlider=host.querySelector('#prop-initialState-slider');
+    const enumValuesInput=host.querySelector('#prop-enumValues');
+    const readDigitalMode=()=>host.querySelector('#prop-digitalMode')?.value||node.props?.digitalMode||'boolean';
+    const isGenericMode=()=>readDigitalMode()==='generic';
+    const readGenericBounds=()=>getRuntimeDigitalGenericBounds({
+      ...(node.props||{}),
+      minValue:host.querySelector('#prop-minValue')?.value??node.props?.minValue,
+      maxValue:host.querySelector('#prop-maxValue')?.value??node.props?.maxValue
+    });
+    const readGearValues=()=>{
+      const mode=readDigitalMode();
+      if(mode==='enum'){
+        const values=splitRuntimeDigitalValues(enumValuesInput?.value||node.props?.enumValues||'');
+        return values.length?values:['0','1'];
+      }
+      return [
+        String(host.querySelector('#prop-lowLevel')?.value??node.props?.lowLevel??'0'),
+        String(host.querySelector('#prop-highLevel')?.value??node.props?.highLevel??'1')
+      ];
+    };
+    const syncSliderToValue=()=>{
+      if(!currentSlider){return;}
+      if(isGenericMode()){
+        const bounds=readGenericBounds();
+        const value=clamp(parseScalar(currentValueInput.value,bounds.min),bounds.min,bounds.max);
+        currentSlider.min=String(bounds.min);
+        currentSlider.max=String(bounds.max);
+        currentSlider.step='1';
+        currentSlider.value=String(value);
+        return;
+      }
+      const gears=readGearValues();
+      const index=Math.max(0,gears.findIndex(value=>String(value)===String(currentValueInput.value)));
+      currentSlider.min='0';
+      currentSlider.max=String(Math.max(gears.length-1,0));
+      currentSlider.step='1';
+      currentSlider.value=String(index);
+    };
+    const syncRuntimeValue=()=>{
+      if(updateSignalSourceRuntimeOutput(node,currentValueInput.value,{persist:true})){
+        currentValueInput.value=node.props?.initialState??currentValueInput.value;
+        syncSliderToValue();
+        renderModelNodes();
+        updateUI();
+      }
+    };
+    if(currentSlider&&!currentSlider.dataset.runtimeSignalSliderBound){
+      currentSlider.addEventListener('input',()=>{
+        if(isGenericMode()){
+          currentValueInput.value=currentSlider.value;
+          syncRuntimeValue();
+          return;
+        }
+        const gears=readGearValues();
+        const index=clamp(Number.parseInt(currentSlider.value,10)||0,0,Math.max(gears.length-1,0));
+        currentValueInput.value=gears[index]??gears[0]??'0';
+        syncRuntimeValue();
+      });
+      currentSlider.dataset.runtimeSignalSliderBound='true';
+    }
+    currentValueInput.addEventListener('input',syncRuntimeValue);
+    currentValueInput.addEventListener('change',syncRuntimeValue);
+    currentValueInput.dataset.runtimeSignalOutputBound='true';
+
+    const syncEnumValuesFromRows=()=>{
+      if(!enumValuesInput){return;}
+      const values=[...host.querySelectorAll('[data-digital-gear-value]')]
+        .map(input=>String(input.value||'').trim())
+        .filter(Boolean);
+      enumValuesInput.value=values.join(',');
+      node.props={...(node.props||{}),enumValues:enumValuesInput.value};
+      syncSliderToValue();
+    };
+    host.querySelectorAll('[data-digital-gear-value]').forEach(input=>{
+      if(input.dataset.digitalGearValueBound){return;}
+      input.addEventListener('input',syncEnumValuesFromRows);
+      input.addEventListener('change',syncEnumValuesFromRows);
+      input.dataset.digitalGearValueBound='true';
+    });
+    host.querySelectorAll('[data-digital-fixed-gear]').forEach(input=>{
+      if(input.dataset.digitalFixedGearBound){return;}
+      input.addEventListener('input',()=>{
+        if(input.dataset.digitalFixedGear==='low'){node.props.lowLevel=input.value;}
+        if(input.dataset.digitalFixedGear==='high'){node.props.highLevel=input.value;}
+        syncSliderToValue();
+      });
+      input.dataset.digitalFixedGearBound='true';
+    });
+    host.querySelectorAll('[data-digital-generic-bound]').forEach(input=>{
+      if(input.dataset.digitalGenericBoundBound){return;}
+      input.addEventListener('input',()=>{
+        if(input.dataset.digitalGenericBound==='min'){node.props.minValue=input.value;}
+        if(input.dataset.digitalGenericBound==='max'){node.props.maxValue=input.value;}
+        currentValueInput.value=normalizeRuntimeGenericDigitalValue(node.props,currentValueInput.value);
+        syncRuntimeValue();
+      });
+      input.addEventListener('change',()=>{
+        if(input.dataset.digitalGenericBound==='min'){node.props.minValue=input.value;}
+        if(input.dataset.digitalGenericBound==='max'){node.props.maxValue=input.value;}
+        currentValueInput.value=normalizeRuntimeGenericDigitalValue(node.props,currentValueInput.value);
+        syncRuntimeValue();
+      });
+      input.dataset.digitalGenericBoundBound='true';
+    });
+    const addButton=host.querySelector('[data-digital-gear-add]');
+    if(addButton&&!addButton.dataset.digitalGearAddBound){
+      addButton.addEventListener('click',event=>{
+        event.preventDefault();
+        const values=readGearValues();
+        values.push(`gear${values.length+1}`);
+        node.props={...(node.props||{}),enumValues:values.join(',')};
+        renderPropertyPanel(node);
+      });
+      addButton.dataset.digitalGearAddBound='true';
+    }
+    host.querySelectorAll('[data-digital-gear-delete]').forEach(button=>{
+      if(button.dataset.digitalGearDeleteBound){return;}
+      button.addEventListener('click',event=>{
+        event.preventDefault();
+        const row=button.closest('[data-digital-gear-row]');
+        const rows=[...host.querySelectorAll('[data-digital-gear-row]')];
+        const index=rows.indexOf(row);
+        const values=readGearValues();
+        if(values.length<=1){return;}
+        values.splice(index,1);
+        node.props={...(node.props||{}),enumValues:values.join(',')};
+        renderPropertyPanel(node);
+      });
+      button.dataset.digitalGearDeleteBound='true';
+    });
+    syncSliderToValue();
   }
 
   function renderScopeOverviewCompact(node){
@@ -13536,7 +14164,7 @@ Object.assign(window,{
   function setPropertyPanelTab(tab){
     const target=getSelectedPropertyTarget();
     const kind=getCurrentPropertyPanelKind(target);
-    const availableTabs=getAvailablePropertyTabs(kind);
+    const availableTabs=getAvailablePropertyTabs(kind,target);
     const nextTab=PANEL_TABS.includes(tab)&&availableTabs.includes(tab)
       ?tab
       :(availableTabs[0]||'overview');
@@ -16555,6 +17183,10 @@ function renderCanvasDiagnosticTestPointMarkers(){
     host.appendChild(layer);
   }
   layer.innerHTML='';
+  if(document.getElementById('cw')?.dataset.view!=='canvas') return;
+  const annotationVisibility=S.diagnosticAnnotationVisibility||{};
+  const shouldShowMarkers=annotationVisibility.canvasTestpoints===true;
+  if(!shouldShowMarkers) return;
   const installedPoints=getInstalledDiagnosticTestPointsForCanvas();
   installedPoints.forEach((point,index)=>{
     const position=getDiagnosticMarkerPosition(point,index);
@@ -19637,27 +20269,11 @@ function decorateDataflowEdges(){
       }):`
         <div class="pgroup fault-tag-inspector fault-tag-overview-panel" data-fault-tag-inspector="${escapeHtml(tag.id)}">
           <div class="pglbl">\u7ed1\u5b9a\u6982\u89c8</div>
-          <div class="props-fault-card">
-            <div class="props-fault-card__top">
-              <div>
-                <strong>${escapeHtml(tag.name||'\u6545\u969c')}</strong>
-                <span>${escapeHtml(runtimeLabel)} \u00b7 ${escapeHtml(layerLabel)}</span>
-              </div>
-              <span class="props-state-pill is-faulted">\u5df2\u6ce8\u5165</span>
-            </div>
-          </div>
           <div class="fault-tag-binding-card">
             <div><span>\u76ee\u6807\u5bf9\u8c61</span><strong>${escapeHtml(targetName)}</strong></div>
             <div><span>\u76ee\u6807\u53c2\u6570</span><strong>${escapeHtml(targetParameter)}</strong></div>
             <div><span>\u76ee\u6807\u7c7b\u578b</span><strong>${targetKindLabel}</strong></div>
             <div><span>\u8fd0\u884c\u884c\u4e3a</span><strong>${escapeHtml(runtimeLabel)}</strong></div>
-          </div>
-          <div class="fault-tag-param-preview">
-            <div class="fault-tag-param-preview__head">
-              <div class="pglbl">\u6545\u969c\u53c2\u6570</div>
-              <button type="button" class="props-secondary fault-tag-param-edit" data-fault-tag-edit-params>\u4fee\u6539\u53c2\u6570</button>
-            </div>
-            ${paramPreview}
           </div>
         </div>
       `;
@@ -20321,9 +20937,6 @@ function decorateDataflowEdges(){
   const __bridgeRenderPropertyPanel=renderPropertyPanel;
   renderPropertyPanel=function(node){
     const result=__bridgeRenderPropertyPanel(node);
-    if(node?.injectedFault){
-      renderInjectedFaultParameterSummary(node);
-    }
     return result;
   };
 
@@ -22368,12 +22981,26 @@ function decorateDataflowEdges(){
     return canvas?arr(canvas.nodes):getRuntimeNodes();
   }
 
+  function getDiagnosticPointEdgeId(point,edges=getRuntimeEdges()){
+    const explicit=point?.edgeId||point?.edgeID||point?.targetEdgeId;
+    if(explicit) return explicit;
+    const targetId=point?.targetId;
+    return targetId&&arr(edges).some(edge=>edge.id===targetId)?targetId:'';
+  }
+
+  function getDiagnosticPointNodeId(point,nodes=getRuntimeNodes(),edgeId=''){
+    const explicit=point?.nodeId||point?.targetNodeId;
+    if(explicit) return explicit;
+    const targetId=point?.targetId;
+    return !edgeId&&targetId&&arr(nodes).some(node=>node.id===targetId)?targetId:'';
+  }
+
   function findDiagnosticPointCanvasId(point){
     const state=getState();
     const explicit=point?.canvasId||point?.scopeCanvasId||point?.targetCanvasId||point?.workbenchCanvasId;
     if(explicit) return explicit;
-    const edgeId=point?.edgeId||point?.edgeID||point?.targetEdgeId;
-    const nodeId=point?.nodeId||point?.targetNodeId;
+    const edgeId=getDiagnosticPointEdgeId(point);
+    const nodeId=getDiagnosticPointNodeId(point,getRuntimeNodes(),edgeId);
     const canvases=state.canvases&&typeof state.canvases==='object'?state.canvases:{};
     for(const [canvasId,canvas] of Object.entries(canvases)){
       if(edgeId&&arr(canvas.edges).some(edge=>edge.id===edgeId)) return canvasId;
@@ -22386,9 +23013,9 @@ function decorateDataflowEdges(){
     const activeCanvasId=getActiveDiagnosticCanvasId();
     const pointCanvasId=findDiagnosticPointCanvasId(point);
     if(pointCanvasId) return pointCanvasId===activeCanvasId;
-    const edgeId=point?.edgeId||point?.edgeID||point?.targetEdgeId;
+    const edgeId=getDiagnosticPointEdgeId(point,activeEdges);
     if(edgeId) return activeEdges.some(edge=>edge.id===edgeId);
-    const nodeId=point?.nodeId||point?.targetNodeId;
+    const nodeId=getDiagnosticPointNodeId(point,activeNodes,edgeId);
     if(nodeId) return activeNodes.some(node=>node.id===nodeId);
     return activeCanvasId===getRootDiagnosticCanvasId();
   }
@@ -22695,12 +23322,12 @@ function decorateDataflowEdges(){
     const manualConfigured=getManualDiagnosticPoints();
     const explicitSignature=configured.map(point=>[
       point.pointId||point.id||'',
-      point.edgeId||point.edgeID||point.targetEdgeId||'',
+      point.edgeId||point.edgeID||point.targetEdgeId||point.targetId||'',
       normalizeDiagnosticTestPointType(point.pointType)
     ].join(':')).join('|');
     const manualSignature=manualConfigured.map(point=>[
       point.pointId||point.id||'',
-      point.edgeId||point.edgeID||point.targetEdgeId||'',
+      point.edgeId||point.edgeID||point.targetEdgeId||point.targetId||'',
       normalizeDiagnosticTestPointType(point.pointType)
     ].join(':')).join('|');
     const edgeSignature=[activeCanvasId,runtimeEdges.map(edge=>edge.id).join('|'),runtimeNodes.map(node=>node.id).join('|'),explicitSignature,manualSignature].join('::');
@@ -22714,7 +23341,7 @@ function decorateDataflowEdges(){
         pointId:point.pointId||point.id||`tp-config-${index}`,
         shortName:point.shortName||point.code||`M${index+1}`,
         name:point.nameZh||point.labelZh||EDGE_NAME_ZH[point.edgeId||point.edgeID||point.targetEdgeId]||point.name||point.label||point.position||`测点 ${index+1}`,
-        edgeId:point.edgeId||point.edgeID||point.targetEdgeId||'',
+        edgeId:getDiagnosticPointEdgeId(point,runtimeEdges),
         pointType:normalizeDiagnosticTestPointType(point.pointType),
         detects:arr(point.detects)
       }));
@@ -22742,7 +23369,7 @@ function decorateDataflowEdges(){
         pointId:point.pointId||point.id||`tp-manual-${index}`,
         shortName:point.shortName||point.code||`M${index+1}`,
         name:point.nameZh||point.labelZh||EDGE_NAME_ZH[point.edgeId||point.edgeID||point.targetEdgeId]||point.name||point.label||point.position||`M${index+1}`,
-        edgeId:point.edgeId||point.edgeID||point.targetEdgeId||'',
+        edgeId:getDiagnosticPointEdgeId(point,runtimeEdges),
         pointType:normalizeDiagnosticTestPointType(point.pointType),
         detects:arr(point.detects),
         manuallyAdded:true
@@ -23272,6 +23899,28 @@ function decorateDataflowEdges(){
     };
   }
 
+  function getDMatrixRepairTargets(fault){
+    const targets=[];
+    const addTarget=(kind,id,label)=>{
+      if(!id||targets.some(item=>item.kind===kind&&item.id===id)){return;}
+      targets.push({kind,id,label:label||id});
+    };
+    arr(fault?.repairTargets).forEach(target=>{
+      const kind=target?.kind||target?.targetKind;
+      const id=target?.id||target?.targetId;
+      addTarget(kind==='edge'||kind==='wire'?'edge':'node',id,target?.label||target?.targetLabel||target?.name);
+    });
+    const edgeId=fault?.targetEdgeId||fault?.injectionDesign?.targetEdgeId||fault?.injectionTarget?.edgeId
+      ||(fault?.targetKind==='edge'?fault?.targetId:'');
+    const nodeId=fault?.targetNodeId||fault?.recommendedModuleId||fault?.injectionDesign?.targetNodeId
+      ||fault?.injectionDesign?.targetId||fault?.injectionTarget?.nodeId||(fault?.targetKind==='node'?fault?.targetId:'');
+    const edge=getRuntimeEdges().find(item=>item.id===edgeId);
+    const node=getRuntimeNodes().find(item=>item.id===nodeId);
+    addTarget('edge',edgeId,edge?.label||edge?.signalLabel||edge?.name);
+    addTarget('node',nodeId,node?.props?.name||node?.name||node?.label);
+    return targets;
+  }
+
   window.buildDetectionMatrixModel=function(){
     const pointModel=window.buildDiagnosticTestPointModel();
     const points=arr(pointModel.installed);
@@ -23290,6 +23939,7 @@ function decorateDataflowEdges(){
           reason:getDetectionCellReason(point,fault)
         };
       });
+      const repairTargets=getDMatrixRepairTargets(fault);
       return {
         faultId:getFaultKey(fault),
         faultName:fault.name||getFaultKey(fault),
@@ -23297,6 +23947,11 @@ function decorateDataflowEdges(){
         faultDisplayDetail:display.detail,
         layer:getFaultLayerText(fault),
         category:fault.category||fault.modelClass||fault.layer||'故障',
+        targetKind:fault.targetKind||(fault.targetEdgeId?'edge':'node'),
+        targetId:fault.targetId||fault.targetEdgeId||fault.targetNodeId||'',
+        targetEdgeId:fault.targetEdgeId||'',
+        targetNodeId:fault.targetNodeId||'',
+        repairTargets,
         targetLabel:getFaultTargetText(fault),
         detectableCount:cells.filter(cell=>cell.detectable).length,
         cells
@@ -23350,11 +24005,11 @@ function decorateDataflowEdges(){
       .sort((a,b)=>b.score-a.score||String(a.cell.pointCode).localeCompare(String(b.cell.pointCode),'zh-Hans-CN'));
   }
 
-  window.buildTroubleshootingPathForFault=function(faultId,options={}){
+  function buildAlgorithmTroubleshootingPathForFault(faultId,options={}){
     const model=window.buildDetectionMatrixModel();
     const targetRow=arr(model.rows).find(row=>row.faultId===faultId);
     if(!targetRow){
-      return {ok:false,error:'unknown-fault',faultId,steps:[],summary:'未找到该故障的 D 矩阵行。'};
+      return {ok:false,error:'unknown-fault',faultId,steps:[],keySteps:[],summary:'未找到该故障的 D 矩阵行。'};
     }
     const maxSteps=Number.isFinite(options.maxSteps)?options.maxSteps:4;
     const usedPointCodes=new Set();
@@ -23378,7 +24033,7 @@ function decorateDataflowEdges(){
       });
       if(remainingRows.length<=1) break;
     }
-    return {
+    const path={
       ok:true,
       faultId:targetRow.faultId,
       faultName:targetRow.faultName,
@@ -23389,9 +24044,142 @@ function decorateDataflowEdges(){
         ?`优先检查 ${steps[0].pointCode} ${steps[0].pointName}，再按剩余候选继续确认。`
         :'该故障暂无可检测测点，请先在检测栏启用测点。'
     };
+    path.keySteps=[
+      {id:'confirm-target',text:`确认故障对象与故障类型：${path.faultName}。`},
+      ...steps.map(step=>({
+        id:`measure-${step.index}-${step.pointId||step.pointCode}`,
+        text:`检查 ${step.pointCode} ${step.pointName}，核对${step.expected}`
+      })),
+      {id:'confirm-result',text:steps.length?'根据测点结果缩小候选范围，确认故障并执行处置。':'补充可检测测点后重新生成排故方案。'}
+    ];
+    path.source='algorithm';
+    path.isCustomized=false;
+    return path;
+  }
+
+  function getBackendTroubleshootingPlans(){
+    if(!S.dMatrixBackendTroubleshootingPlans||typeof S.dMatrixBackendTroubleshootingPlans!=='object'){
+      S.dMatrixBackendTroubleshootingPlans={};
+    }
+    return S.dMatrixBackendTroubleshootingPlans;
+  }
+
+  function getBackendTroubleshootingPlan(faultId){
+    const plan=getBackendTroubleshootingPlans()[faultId];
+    if(plan){return plan;}
+    return {
+      ok:false,
+      error:'backend-plan-not-loaded',
+      faultId,
+      steps:[],
+      keySteps:[],
+      summary:'尚未从后端获取排故方案。'
+    };
+  }
+
+  async function requestBackendTroubleshootingPlan(faultId,options={}){
+    if(typeof window.fetch!=='function'){
+      throw new Error('浏览器不支持后端方案请求。');
+    }
+    const response=await window.fetch('/api/troubleshooting/plan',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        dMatrix:window.buildDetectionMatrixModel(),
+        targetFaultId:faultId,
+        maxSteps:Number.isFinite(options.maxSteps)?options.maxSteps:4
+      })
+    });
+    const payload=await response.json();
+    if(!response.ok||payload?.status==='error'||!payload?.plan){
+      throw new Error(payload?.message||'后端未能生成排故方案。');
+    }
+    const plan={...payload.plan,source:'backend-algorithm',isCustomized:false};
+    getBackendTroubleshootingPlans()[faultId]=plan;
+    return plan;
+  }
+
+  function getTroubleshootingPlanOverrides(){
+    if(!S.dMatrixTroubleshootingPlanOverrides||typeof S.dMatrixTroubleshootingPlanOverrides!=='object'){
+      S.dMatrixTroubleshootingPlanOverrides={};
+    }
+    return S.dMatrixTroubleshootingPlanOverrides;
+  }
+
+  function cloneTroubleshootingSteps(steps){
+    return arr(steps).map((step,index)=>({
+      ...step,
+      index:index+1,
+      remainingFaultIds:arr(step?.remainingFaultIds),
+      remainingFaultNames:arr(step?.remainingFaultNames)
+    }));
+  }
+
+  function cloneTroubleshootingKeySteps(keySteps){
+    return arr(keySteps)
+      .map((step,index)=>({id:step?.id||`key-step-${index+1}`,text:String(step?.text||'').trim()}))
+      .filter(step=>step.text);
+  }
+
+  function getTroubleshootingPointStep(faultId,pointId,index){
+    const model=window.buildDetectionMatrixModel();
+    const point=arr(model.points).find(item=>item.pointId===pointId||item.shortName===pointId)||{};
+    const row=arr(model.rows).find(item=>item.faultId===faultId)||{};
+    const cell=getMatrixCellForPoint(row,point.shortName||pointId)||{};
+    return {
+      index:index+1,
+      pointId:point.pointId||pointId,
+      pointCode:point.shortName||pointId,
+      pointName:compactDiagnosticPointName(point.name||cell.pointName||'测点'),
+      expected:cell.reason||'检查该测点的实际值与参考值是否一致。',
+      remainingFaultIds:[],
+      remainingFaultNames:[],
+      reason:'手工调整的排故测点。'
+    };
+  }
+
+  function createEditableTroubleshootingPlan(faultId){
+    const path=window.buildTroubleshootingPathForFault(faultId);
+    return {
+      steps:cloneTroubleshootingSteps(path.steps),
+      keySteps:cloneTroubleshootingKeySteps(path.keySteps)
+    };
+  }
+
+  function saveEditableTroubleshootingPlan(faultId,plan){
+    const overrides=getTroubleshootingPlanOverrides();
+    overrides[faultId]={
+      steps:cloneTroubleshootingSteps(plan.steps),
+      keySteps:cloneTroubleshootingKeySteps(plan.keySteps),
+      updatedAt:new Date().toISOString()
+    };
+  }
+
+  window.buildTroubleshootingPathForFault=function(faultId,options={}){
+    const algorithmPath=getBackendTroubleshootingPlan(faultId);
+    if(options.algorithmOnly||!algorithmPath.ok){return algorithmPath;}
+    const override=getTroubleshootingPlanOverrides()[faultId];
+    if(!override){return algorithmPath;}
+    const steps=cloneTroubleshootingSteps(override.steps);
+    const keySteps=cloneTroubleshootingKeySteps(override.keySteps);
+    return {
+      ...algorithmPath,
+      steps,
+      keySteps,
+      source:'custom',
+      isCustomized:true,
+      summary:'当前为手工调整方案；可随时恢复为 D 矩阵算法生成的路径和关键步骤。'
+    };
   };
 
-  function renderTroubleshootingPath(path){
+  function renderTroubleshootingPointOptions(selectedPointId){
+    return arr(window.buildDetectionMatrixModel().points).map(point=>`
+      <option value="${html(point.pointId)}" ${point.pointId===selectedPointId?'selected':''}>${html(point.shortName)} · ${html(compactDiagnosticPointName(point.name))}</option>
+    `).join('');
+  }
+
+  function renderTroubleshootingPath(path,options={}){
+    const editing=Boolean(options.editing);
     if(!path?.ok){
       return `<div class="troubleshooting-path__empty">${html(path?.summary||'无法生成排故路径。')}</div>`;
     }
@@ -23401,26 +24189,163 @@ function decorateDataflowEdges(){
           <span>最优排故路径</span>
           <strong>${html(path.faultName)}</strong>
         </div>
-        <button type="button" data-close-troubleshooting-path>关闭</button>
+        <div class="troubleshooting-path__title-actions">
+          <button type="button" data-edit-troubleshooting-path>${editing?'完成编辑':'编辑方案'}</button>
+          <button type="button" data-close-troubleshooting-path>关闭</button>
+        </div>
       </div>
       <div class="troubleshooting-path__meta">
         <span>${html(path.layer||'故障层级')}</span>
         <span>${html(path.targetLabel||'目标对象')}</span>
+        <span class="troubleshooting-path__source${path.isCustomized?' is-customized':''}">${path.isCustomized?'已手工调整':'算法生成'}</span>
       </div>
       <p>${html(path.summary)}</p>
+      ${editing?`<div class="troubleshooting-path__edit-note">修改将自动保存到当前方案。</div>`:''}
       <ol class="troubleshooting-path__steps">
         ${arr(path.steps).map(step=>`
           <li>
             <b>${html(step.pointCode)}</b>
             <div>
-              <strong>${html(step.pointName)}</strong>
-              <span>${html(step.expected)}</span>
-              <small>剩余候选：${html(step.remainingFaultNames.join('、')||'无')}</small>
+              ${editing?`
+                <label>测点<select data-troubleshooting-path-point data-step-index="${step.index-1}">${renderTroubleshootingPointOptions(step.pointId)}</select></label>
+                <label>检查要求<textarea data-troubleshooting-path-expected data-step-index="${step.index-1}">${html(step.expected)}</textarea></label>
+                <div class="troubleshooting-path__edit-actions">
+                  <button type="button" data-troubleshooting-path-up="${step.index-1}" ${step.index===1?'disabled':''}>上移</button>
+                  <button type="button" data-troubleshooting-path-down="${step.index-1}" ${step.index===path.steps.length?'disabled':''}>下移</button>
+                  <button type="button" data-troubleshooting-path-remove="${step.index-1}">删除</button>
+                </div>
+              `:`
+                <strong>${html(step.pointName)}</strong>
+                <span>${html(step.expected)}</span>
+                <small>剩余候选：${html(step.remainingFaultNames.join('、')||'无')}</small>
+              `}
             </div>
           </li>
         `).join('')}
       </ol>
+      ${editing?`<button type="button" class="troubleshooting-path__add" data-add-troubleshooting-path-step>添加测点步骤</button>`:''}
+      <section class="troubleshooting-key-steps">
+        <div class="troubleshooting-key-steps__head">
+          <h3>关键步骤</h3>
+          ${editing?'<button type="button" data-add-troubleshooting-key-step>添加关键步骤</button>':''}
+        </div>
+        <ol>
+          ${arr(path.keySteps).map((step,index)=>`
+            <li>
+              <b>${index+1}</b>
+              ${editing?`
+                <textarea data-troubleshooting-key-step data-key-step-index="${index}">${html(step.text)}</textarea>
+                <span class="troubleshooting-key-steps__actions">
+                  <button type="button" data-troubleshooting-key-step-up="${index}" ${index===0?'disabled':''}>上移</button>
+                  <button type="button" data-troubleshooting-key-step-down="${index}" ${index===path.keySteps.length-1?'disabled':''}>下移</button>
+                  <button type="button" data-troubleshooting-key-step-remove="${index}">删除</button>
+                </span>
+              `:`<span>${html(step.text)}</span>`}
+            </li>
+          `).join('')}
+        </ol>
+      </section>
+      ${path.isCustomized?'<button type="button" class="troubleshooting-path__reset" data-reset-troubleshooting-path>恢复算法生成的方案</button>':''}
     `;
+  }
+
+  function renderTroubleshootingPathPanel(panel,faultId,editing=false){
+    panel.dataset.faultId=faultId;
+    panel.dataset.editing=editing?'true':'false';
+    panel.innerHTML=renderTroubleshootingPath(window.buildTroubleshootingPathForFault(faultId),{editing});
+    bindTroubleshootingPathPanel(panel,faultId);
+  }
+
+  function moveItem(items,index,direction){
+    const next=[...items];
+    const target=index+direction;
+    if(target<0||target>=next.length){return next;}
+    [next[index],next[target]]=[next[target],next[index]];
+    return next;
+  }
+
+  function renderBackendPlanLoading(panel){
+    panel.innerHTML='<div class="troubleshooting-path__empty">正在请求后端算法生成排故路径和关键步骤…</div>';
+  }
+
+  function renderBackendPlanError(panel,faultId,error){
+    panel.innerHTML=`
+      <div class="troubleshooting-path__empty">${html(error?.message||'后端排故方案生成失败。')}</div>
+      <button type="button" class="troubleshooting-path__reset" data-retry-backend-troubleshooting-plan>重试</button>
+      <button type="button" data-close-troubleshooting-path>关闭</button>
+    `;
+    panel.querySelector('[data-close-troubleshooting-path]')?.addEventListener('click',()=>panel.remove());
+    panel.querySelector('[data-retry-backend-troubleshooting-plan]')?.addEventListener('click',()=>loadBackendTroubleshootingPlan(panel,faultId));
+  }
+
+  async function loadBackendTroubleshootingPlan(panel,faultId,options={}){
+    renderBackendPlanLoading(panel);
+    try{
+      await requestBackendTroubleshootingPlan(faultId,options);
+      if(options.resetCustom){delete getTroubleshootingPlanOverrides()[faultId];}
+      if(panel.isConnected){renderTroubleshootingPathPanel(panel,faultId,false);}
+    }catch(error){
+      if(panel.isConnected){renderBackendPlanError(panel,faultId,error);}
+    }
+  }
+
+  function bindTroubleshootingPathPanel(panel,faultId){
+    const rerender=(editing=panel.dataset.editing==='true')=>renderTroubleshootingPathPanel(panel,faultId,editing);
+    panel.querySelector('[data-close-troubleshooting-path]')?.addEventListener('click',()=>panel.remove());
+    panel.querySelector('[data-edit-troubleshooting-path]')?.addEventListener('click',()=>rerender(panel.dataset.editing!=='true'));
+    panel.querySelector('[data-reset-troubleshooting-path]')?.addEventListener('click',()=>loadBackendTroubleshootingPlan(panel,faultId,{resetCustom:true}));
+    panel.querySelectorAll('[data-troubleshooting-path-point]').forEach(select=>select.addEventListener('change',()=>{
+      const plan=createEditableTroubleshootingPlan(faultId);
+      const index=Number(select.dataset.stepIndex);
+      if(plan.steps[index]){plan.steps[index]=getTroubleshootingPointStep(faultId,select.value,index);}
+      saveEditableTroubleshootingPlan(faultId,plan);
+      rerender(true);
+    }));
+    panel.querySelectorAll('[data-troubleshooting-path-expected]').forEach(input=>input.addEventListener('change',()=>{
+      const plan=createEditableTroubleshootingPlan(faultId);
+      const index=Number(input.dataset.stepIndex);
+      if(plan.steps[index]){plan.steps[index].expected=input.value.trim()||'检查该测点的实际值与参考值是否一致。';}
+      saveEditableTroubleshootingPlan(faultId,plan);
+      rerender(true);
+    }));
+    panel.querySelectorAll('[data-troubleshooting-path-up],[data-troubleshooting-path-down],[data-troubleshooting-path-remove]').forEach(button=>button.addEventListener('click',()=>{
+      const plan=createEditableTroubleshootingPlan(faultId);
+      const index=Number(button.dataset.troubleshootingPathUp??button.dataset.troubleshootingPathDown??button.dataset.troubleshootingPathRemove);
+      if(button.hasAttribute('data-troubleshooting-path-up')){plan.steps=moveItem(plan.steps,index,-1);}
+      else if(button.hasAttribute('data-troubleshooting-path-down')){plan.steps=moveItem(plan.steps,index,1);}
+      else{plan.steps.splice(index,1);}
+      saveEditableTroubleshootingPlan(faultId,plan);
+      rerender(true);
+    }));
+    panel.querySelector('[data-add-troubleshooting-path-step]')?.addEventListener('click',()=>{
+      const plan=createEditableTroubleshootingPlan(faultId);
+      const point=arr(window.buildDetectionMatrixModel().points)[0];
+      if(point){plan.steps.push(getTroubleshootingPointStep(faultId,point.pointId,plan.steps.length));}
+      saveEditableTroubleshootingPlan(faultId,plan);
+      rerender(true);
+    });
+    panel.querySelectorAll('[data-troubleshooting-key-step]').forEach(input=>input.addEventListener('change',()=>{
+      const plan=createEditableTroubleshootingPlan(faultId);
+      const index=Number(input.dataset.keyStepIndex);
+      if(plan.keySteps[index]){plan.keySteps[index].text=input.value.trim();}
+      saveEditableTroubleshootingPlan(faultId,plan);
+      rerender(true);
+    }));
+    panel.querySelectorAll('[data-troubleshooting-key-step-up],[data-troubleshooting-key-step-down],[data-troubleshooting-key-step-remove]').forEach(button=>button.addEventListener('click',()=>{
+      const plan=createEditableTroubleshootingPlan(faultId);
+      const index=Number(button.dataset.troubleshootingKeyStepUp??button.dataset.troubleshootingKeyStepDown??button.dataset.troubleshootingKeyStepRemove);
+      if(button.hasAttribute('data-troubleshooting-key-step-up')){plan.keySteps=moveItem(plan.keySteps,index,-1);}
+      else if(button.hasAttribute('data-troubleshooting-key-step-down')){plan.keySteps=moveItem(plan.keySteps,index,1);}
+      else{plan.keySteps.splice(index,1);}
+      saveEditableTroubleshootingPlan(faultId,plan);
+      rerender(true);
+    }));
+    panel.querySelector('[data-add-troubleshooting-key-step]')?.addEventListener('click',()=>{
+      const plan=createEditableTroubleshootingPlan(faultId);
+      plan.keySteps.push({id:`key-step-${Date.now()}`,text:'补充关键排故步骤。'});
+      saveEditableTroubleshootingPlan(faultId,plan);
+      rerender(true);
+    });
   }
 
   window.openTroubleshootingPathPanel=function(faultId){
@@ -23429,9 +24354,8 @@ function decorateDataflowEdges(){
     const panel=document.createElement('aside');
     panel.className='troubleshooting-path';
     panel.dataset.troubleshootingPathPanel='true';
-    panel.innerHTML=renderTroubleshootingPath(window.buildTroubleshootingPathForFault(faultId));
     host.appendChild(panel);
-    panel.querySelector('[data-close-troubleshooting-path]')?.addEventListener('click',()=>panel.remove());
+    loadBackendTroubleshootingPlan(panel,faultId);
     return panel;
   };
 
@@ -24317,16 +25241,11 @@ function decorateDataflowEdges(){
     layer.innerHTML='';
     const model=window.buildDiagnosticTestPointModel();
     if(!isAnnotationVisible('testpoints')) return;
+    const canvasView=document.getElementById('cw')?.dataset.view||'canvas';
+    if(canvasView!=='canvas'||!isCanvasTestpointsVisible()) return;
     const installedIds=new Set(model.installed.map(point=>point.pointId));
     const scanByPoint=new Map(arr(getState().diagnosticScanResults).map(result=>[result.pointId,result]));
-    const canvasView=document.getElementById('cw')?.dataset.view||'canvas';
-    const selectedPointId=canvasView!=='dataflow'?(getState().selectedDiagnosticTestPointId||''):'';
-    model.positions
-      .filter(point=>{
-        if(canvasView==='canvas'&&isCanvasTestpointsVisible()) return true;
-        return installedIds.has(point.pointId)||point.pointId===selectedPointId;
-      })
-      .forEach((point,index)=>{
+    model.positions.forEach((point,index)=>{
       const installed=installedIds.has(point.pointId);
       const abnormal=scanByPoint.get(point.pointId)?.status==='abnormal';
       const pt=point.edgeId?getEdgeCanvasPoint(point.edgeId,0.52,index):getNodeCanvasCenter(point.nodeId,index);
@@ -26646,6 +27565,47 @@ function decorateDataflowEdges(){
   setTimeout(clearLegacyFaultLibraryPanel,20);
 })();
 
+// --- Editable labels for signal-source and instrument ports ---
+(function installEditablePeripheralPortLabels(){
+  const previousGetNodePorts=getNodePorts;
+
+  function configuredPortLabel(node,direction,index,fallback){
+    const props=node?.props||{};
+    let name='';
+    if(direction==='output'){
+      name=index===0?props.outputPortName:'';
+    }else if(node?.type==='instrument_scope'){
+      name=index===0?props.inputPortNameCh1:props.inputPortNameCh2;
+    }else{
+      name=index===0?props.inputPortName:'';
+    }
+    return String(name||fallback||'').trim()||fallback;
+  }
+
+  getNodePorts=function(node){
+    const ports=previousGetNodePorts(node);
+    if(node?.type==='signal_source'){
+      return {
+        ...ports,
+        outputs:(ports.outputs||[]).map((port,index)=>({
+          ...port,
+          label:configuredPortLabel(node,'output',index,port.label)
+        }))
+      };
+    }
+    if(node?.type?.startsWith('instrument_')){
+      return {
+        ...ports,
+        inputs:(ports.inputs||[]).map((port,index)=>({
+          ...port,
+          label:configuredPortLabel(node,'input',index,port.label)
+        }))
+      };
+    }
+    return ports;
+  };
+})();
+
 // --- Local simulation component output trace ---
 (function installLocalComponentOutputTrace(){
   if(typeof window==='undefined') return;
@@ -26804,6 +27764,57 @@ function decorateDataflowEdges(){
     return value==='virtual'?'virtual':'physical';
   }
 
+  function getSimulationPointIds(state=getState()){
+    if(!Array.isArray(state.simulationTestPointIds)){
+      state.simulationTestPointIds=[];
+    }
+    state.simulationTestPointIds=Array.from(new Set(state.simulationTestPointIds.filter(Boolean)));
+    return state.simulationTestPointIds;
+  }
+
+  function getSimulationCandidatePoints(){
+    const model=typeof window.buildDiagnosticTestPointModel==='function'
+      ?window.buildDiagnosticTestPointModel()
+      :{positions:[]};
+    return arr(model.positions);
+  }
+
+  function setSimulationPointIds(ids){
+    const state=getState();
+    const validIds=new Set(getSimulationCandidatePoints().map(point=>point.pointId));
+    state.simulationTestPointIds=Array.from(new Set(arr(ids).filter(id=>validIds.has(id))));
+    return state.simulationTestPointIds;
+  }
+
+  function setSimulationPointsByType(pointType){
+    const type=normalizePointType(pointType);
+    return setSimulationPointIds(getSimulationCandidatePoints()
+      .filter(point=>normalizePointType(point.pointType)===type)
+      .map(point=>point.pointId));
+  }
+
+  function addSimulationPoint(pointId){
+    if(!pointId) return false;
+    const state=getState();
+    const ids=getSimulationPointIds(state);
+    if(!getSimulationCandidatePoints().some(point=>point.pointId===pointId)) return false;
+    if(!ids.includes(pointId)) ids.push(pointId);
+    state.simulationTestPointIds=ids;
+    return true;
+  }
+
+  function removeSimulationPoint(pointId){
+    const state=getState();
+    const before=getSimulationPointIds(state).length;
+    state.simulationTestPointIds=state.simulationTestPointIds.filter(id=>id!==pointId);
+    return state.simulationTestPointIds.length!==before;
+  }
+
+  function clearSimulationPoints(){
+    getState().simulationTestPointIds=[];
+    return true;
+  }
+
   function getOutputPorts(node){
     const getter=window.getNodePorts||(typeof getNodePorts==='function'?getNodePorts:null);
     if(typeof getter!=='function') return [];
@@ -26892,10 +27903,13 @@ function decorateDataflowEdges(){
     const model=typeof window.buildDiagnosticTestPointModel==='function'
       ?window.buildDiagnosticTestPointModel()
       :{positions:[]};
+    const selectedIds=new Set(getSimulationPointIds(state));
     return arr(model.positions)
-      .filter(point=>normalizePointType(point.pointType)==='physical')
+      .filter(point=>selectedIds.has(point.pointId))
       .map((point,index)=>{
-        const edgeId=point.edgeId||point.edgeID||point.targetEdgeId||'';
+        const explicitEdgeId=point.edgeId||point.edgeID||point.targetEdgeId;
+        const targetId=point.targetId||'';
+        const edgeId=explicitEdgeId||(targetId&&edges.has(targetId)?targetId:'');
         const edge=edges.get(edgeId)||null;
         const sourceNodeId=edge?.sourceNodeId||edge?.source||edge?.from||point.sourceNodeId||point.nodeId||'';
         const targetNodeId=edge?.targetNodeId||edge?.target||edge?.to||point.targetNodeId||'';
@@ -26917,6 +27931,8 @@ function decorateDataflowEdges(){
           name:point.name||point.nameZh||point.label||point.labelZh||edge?.label||edgeId||`测点 ${index+1}`,
           sourceName:point.sourceName||sourceNode?.props?.name||sourceNode?.name||sourceNodeId||'上游组件',
           targetName:point.targetName||targetNode?.props?.name||targetNode?.name||targetNodeId||'',
+          sourceType:sourceNode?.type||'',
+          sourceProps:sourceNode?.props||{},
           portName:portCandidates[0]||'output',
           time:lastSeriesTime(actualSeries.length?actualSeries:referenceSeries),
           actual,
@@ -26958,6 +27974,140 @@ function decorateDataflowEdges(){
     }).join(' ');
   }
 
+  function getDigitalRowProps(row){
+    if(row?.sourceType!=='signal_source') return null;
+    const props=typeof normalizeSignalSourcePropsRuntime==='function'
+      ?normalizeSignalSourcePropsRuntime(row.sourceProps||{})
+      :(row.sourceProps||{});
+    return props.signalDomain==='digital'?props:null;
+  }
+
+  function getDigitalGearValues(props){
+    if(String(props?.digitalMode||'boolean')==='enum'){
+      const values=typeof splitRuntimeDigitalValues==='function'
+        ?splitRuntimeDigitalValues(props.enumValues)
+        :String(props.enumValues||'').split(/[,\s]+/).filter(Boolean);
+      return values.length?values:['0','1'];
+    }
+    return [String(props?.lowLevel??'0'),String(props?.highLevel??'1')];
+  }
+
+  function findDigitalGearIndex(value,gears){
+    const exact=gears.findIndex(gear=>String(gear)===String(value));
+    if(exact>=0) return exact;
+    const numeric=Number(value);
+    if(Number.isInteger(numeric)&&numeric>=0&&numeric<gears.length){
+      return numeric;
+    }
+    if(Number.isFinite(numeric)){
+      const numericIndex=gears.findIndex(gear=>Number(gear)===numeric);
+      if(numericIndex>=0) return numericIndex;
+    }
+    return 0;
+  }
+
+  function getDigitalGearLabel(props,value){
+    const gears=getDigitalGearValues(props);
+    const index=findDigitalGearIndex(value,gears);
+    if(String(props?.digitalMode||'boolean')==='enum'){
+      return String(gears[index]??value??'--');
+    }
+    return index===0?'低电平':'高电平';
+  }
+
+  function normalizeDigitalSeries(series,props){
+    const gears=getDigitalGearValues(props);
+    return arr(series).map(point=>({
+      ...point,
+      gearIndex:findDigitalGearIndex(point.value,gears),
+      label:getDigitalGearLabel(props,point.value)
+    }));
+  }
+
+  function collectDigitalTransitions(series){
+    const transitions=[];
+    arr(series).forEach((point,index)=>{
+      const previous=series[index-1];
+      if(previous&&previous.gearIndex!==point.gearIndex){
+        transitions.push({time:point.time,from:previous.label,to:point.label});
+      }
+    });
+    return transitions;
+  }
+
+  function buildDigitalStepPoints(series,bounds,width,height,pad,gearCount){
+    const timeRange=bounds.maxTime-bounds.minTime||1;
+    const yFor=index=>{
+      const normalized=gearCount<=1?0:index/(gearCount-1);
+      return pad.top+(1-normalized)*(height-pad.top-pad.bottom);
+    };
+    const xFor=time=>pad.left+((time-bounds.minTime)/timeRange)*(width-pad.left-pad.right);
+    const points=[];
+    arr(series).forEach((point,index)=>{
+      const x=xFor(point.time);
+      const y=yFor(point.gearIndex);
+      if(index>0){
+        const previous=series[index-1];
+        points.push(`${Math.round(x*10)/10},${Math.round(yFor(previous.gearIndex)*10)/10}`);
+      }
+      points.push(`${Math.round(x*10)/10},${Math.round(y*10)/10}`);
+    });
+    return points.join(' ');
+  }
+
+  function renderDigitalSimulationChart(row,props){
+    const width=420;
+    const height=180;
+    const pad={left:64,right:18,top:18,bottom:34};
+    const gears=getDigitalGearValues(props);
+    const actualSeries=normalizeDigitalSeries(row.actualSeries,props);
+    const referenceSeries=normalizeDigitalSeries(row.referenceSeries,props);
+    const series=actualSeries.concat(referenceSeries);
+    const times=series.map(point=>point.time).filter(value=>Number.isFinite(value));
+    const bounds={
+      minTime:times.length?Math.min(...times):0,
+      maxTime:times.length?Math.max(...times):1
+    };
+    if(bounds.minTime===bounds.maxTime){bounds.maxTime=bounds.minTime+1;}
+    const actualPoints=buildDigitalStepPoints(actualSeries,bounds,width,height,pad,gears.length);
+    const referencePoints=buildDigitalStepPoints(referenceSeries,bounds,width,height,pad,gears.length);
+    const x0=pad.left;
+    const y0=height-pad.bottom;
+    const x1=width-pad.right;
+    const y1=pad.top;
+    const timeRange=bounds.maxTime-bounds.minTime||1;
+    const transitions=collectDigitalTransitions(actualSeries).concat(collectDigitalTransitions(referenceSeries));
+    const transitionMarkers=transitions.map(item=>{
+      const x=pad.left+((item.time-bounds.minTime)/timeRange)*(width-pad.left-pad.right);
+      return `<line class="digital-simulation-chart__transition" data-digital-transition x1="${Math.round(x*10)/10}" y1="${y1}" x2="${Math.round(x*10)/10}" y2="${y0}"><title>${html(formatValue(item.time))}s: ${html(item.from)} -> ${html(item.to)}</title></line>`;
+    }).join('');
+    const yLabels=gears.map((gear,index)=>{
+      const y=gears.length<=1?y0:(pad.top+(1-index/(gears.length-1))*(height-pad.top-pad.bottom));
+      return `<text class="simulation-chart__tick digital-simulation-chart__gear" x="4" y="${Math.round(y*10)/10}">${html(getDigitalGearLabel(props,gear))}</text>`;
+    }).join('');
+    return `
+      <div class="digital-simulation-chart" data-digital-simulation-chart="${html(row.pointId)}">
+        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${html(row.name)} 数字状态时间线">
+          <line class="simulation-chart__axis" x1="${x0}" y1="${y0}" x2="${x1}" y2="${y0}"></line>
+          <line class="simulation-chart__axis" x1="${x0}" y1="${y0}" x2="${x0}" y2="${y1}"></line>
+          <line class="simulation-chart__grid" x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}"></line>
+          <line class="simulation-chart__grid" x1="${x0}" y1="${(y0+y1)/2}" x2="${x1}" y2="${(y0+y1)/2}"></line>
+          ${yLabels}
+          <text class="simulation-chart__label" data-simulation-axis="x" x="${(x0+x1)/2}" y="${height-8}">时间</text>
+          <text class="simulation-chart__tick" x="${x0}" y="${height-18}">${html(formatValue(bounds.minTime))}</text>
+          <text class="simulation-chart__tick simulation-chart__tick--end" x="${x1}" y="${height-18}">${html(formatValue(bounds.maxTime))}</text>
+          ${transitionMarkers}
+          ${referencePoints?`<polyline class="simulation-chart__line simulation-chart__line--reference digital-simulation-chart__step" data-digital-step-series="reference" points="${html(referencePoints)}"></polyline>`:''}
+          ${actualPoints?`<polyline class="simulation-chart__line simulation-chart__line--actual digital-simulation-chart__step" data-digital-step-series="actual" points="${html(actualPoints)}"></polyline>`:''}
+        </svg>
+        <div class="simulation-chart__legend">
+          <span><i class="is-actual"></i>实际状态</span>
+          ${referencePoints?'<span><i class="is-reference"></i>参考状态</span>':''}
+        </div>
+      </div>
+    `;
+  }
+
   function renderSimulationChart(row){
     const width=420;
     const height=180;
@@ -26993,18 +28143,49 @@ function decorateDataflowEdges(){
     `;
   }
 
+  function renderDigitalSimulationPointCard(row,props){
+    const actualLabel=getDigitalGearLabel(props,row.actual);
+    const referenceLabel=row.reference===undefined?'--':getDigitalGearLabel(props,row.reference);
+    const actualSeries=normalizeDigitalSeries(row.actualSeries,props);
+    const transitions=collectDigitalTransitions(actualSeries);
+    const latestTransition=transitions.length?`${formatValue(transitions[transitions.length-1].time)}s`:'--';
+    const gears=getDigitalGearValues(props);
+    const gearIndex=findDigitalGearIndex(row.actual,gears);
+    return `
+      <div class="simulation-point-card simulation-point-card--digital" data-simulation-testpoint="${html(row.pointId)}">
+        <div class="simulation-point-card__top">
+          <span class="simulation-point-card__code">${html(row.shortName)}</span>
+          <span class="simulation-point-card__main">
+            <strong>${html(row.name)}</strong>
+          </span>
+          <span class="simulation-point-card__time">${row.time===null?'--':`${formatValue(row.time)}s`}</span>
+          <button type="button" class="simulation-point-card__remove" data-remove-simulation-testpoint="${html(row.pointId)}">删除</button>
+        </div>
+        <div class="digital-simulation-status">
+          <span><em>当前挡位</em><b>${html(String(gearIndex+1))}</b></span>
+          <span><em>当前取值</em><b>${html(actualLabel)}</b></span>
+          <span><em>参考状态</em><b>${html(referenceLabel)}</b></span>
+          <span><em>最近变更</em><b>${html(latestTransition)}</b></span>
+        </div>
+        ${renderDigitalSimulationChart(row,props)}
+      </div>
+    `;
+  }
+
   function renderSimulationPointCard(row){
-    const route=[row.sourceName,row.portName].filter(Boolean).join(' / ');
-    const target=row.targetName?` -> ${row.targetName}`:'';
+    const digitalProps=getDigitalRowProps(row);
+    if(digitalProps){
+      return renderDigitalSimulationPointCard(row,digitalProps);
+    }
     return `
       <div class="simulation-point-card" data-simulation-testpoint="${html(row.pointId)}">
         <div class="simulation-point-card__top">
           <span class="simulation-point-card__code">${html(row.shortName)}</span>
           <span class="simulation-point-card__main">
             <strong>${html(row.name)}</strong>
-            <small>${html(route)}${html(target)}</small>
           </span>
           <span class="simulation-point-card__time">${row.time===null?'--':`${formatValue(row.time)}s`}</span>
+          <button type="button" class="simulation-point-card__remove" data-remove-simulation-testpoint="${html(row.pointId)}">删除</button>
         </div>
         <div class="simulation-point-card__values">
           <span><em>实际值</em><b>${html(formatValue(row.actual))}</b></span>
@@ -27016,32 +28197,190 @@ function decorateDataflowEdges(){
     `;
   }
 
+  function renderSimulationControls(points){
+    const selectedIds=new Set(getSimulationPointIds());
+    const available=arr(points).filter(point=>!selectedIds.has(point.pointId));
+    return `
+      <div class="simulation-testpoint-toolbar" data-simulation-testpoint-toolbar>
+        <div class="simulation-testpoint-toolbar__actions">
+          <button type="button" data-simulation-show-physical>展示全部物理测点</button>
+          <button type="button" data-simulation-show-virtual>展示全部虚拟测点</button>
+          <button type="button" data-simulation-clear-testpoints>清空展示测点</button>
+        </div>
+        <div class="simulation-testpoint-toolbar__custom">
+          <select data-simulation-testpoint-select aria-label="选择要展示的测点">
+            ${available.map(point=>`
+              <option value="${html(point.pointId)}">${html(point.shortName||point.pointId)} · ${html(point.name||point.label||point.edgeId||point.pointId)} · ${html(normalizePointType(point.pointType)==='virtual'?'虚拟':'物理')}</option>
+            `).join('')}
+          </select>
+          <button type="button" data-add-simulation-testpoint ${available.length?'':'disabled'}>添加测点</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function getDigitalSignalSourceNodes(){
+    return [...collectNodes(getState()).values()]
+      .filter(node=>node?.type==='signal_source'&&isDigitalSignalSourceNode(node));
+  }
+
+  function getDigitalSourceControlProps(node){
+    return typeof getRuntimeAdjustedSignalSourceProps==='function'
+      ?getRuntimeAdjustedSignalSourceProps(node)
+      :normalizeSignalSourcePropsRuntime(node?.props||{});
+  }
+
+  function renderDigitalSourceControl(node,index){
+    const props=getDigitalSourceControlProps(node);
+    const currentValue=String(props.initialState??props.value??'0');
+    const generic=props.digitalMode==='generic';
+    const bounds=generic?getRuntimeDigitalGenericBounds(props):null;
+    const gears=generic?[]:getDigitalGearValues(props);
+    const sliderValue=generic
+      ?String(clamp(parseScalar(currentValue,bounds.min),bounds.min,bounds.max))
+      :String(findDigitalGearIndex(currentValue,gears));
+    const modeLabel={boolean:'布尔',level:'电平',enum:'枚举',generic:'数值'}[props.digitalMode]||'数字';
+    return `
+      <article class="simulation-source-control" data-simulation-digital-source="${html(node.id)}">
+        <div class="simulation-source-control__head">
+          <div>
+            <span>数字信号源 ${index+1}</span>
+            <strong>${html(node.props?.name||`数字信号源 ${index+1}`)}</strong>
+          </div>
+          <em>${html(modeLabel)}</em>
+        </div>
+        <div class="digital-current-control" data-simulation-digital-control="${html(node.id)}">
+          <label>当前取值</label>
+          <div class="digital-current-control__row">
+            <input
+              class="digital-current-control__slider"
+              data-simulation-digital-slider="${html(node.id)}"
+              type="range"
+              min="${generic?html(bounds.min):'0'}"
+              max="${generic?html(bounds.max):html(Math.max(gears.length-1,0))}"
+              step="1"
+              value="${html(sliderValue)}"
+            >
+            <input class="digital-current-control__value" data-simulation-digital-value="${html(node.id)}" value="${html(currentValue)}">
+          </div>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderSimulationControlPanel(){
+    const sources=getDigitalSignalSourceNodes();
+    return `
+      <section class="simulation-control-panel" data-simulation-control-panel>
+        <div class="simulation-control-panel__header">
+          <div>
+            <span>控制面板</span>
+            <h3>数字信号源输出</h3>
+            <p>修改后会立即作为仿真输入生效。</p>
+          </div>
+          <b>${sources.length} 个信号源</b>
+        </div>
+        ${sources.length
+          ?`<div class="simulation-control-panel__list">${sources.map(renderDigitalSourceControl).join('')}</div>`
+          :'<div class="simulation-control-panel__empty">当前画布没有数字信号源。</div>'}
+      </section>
+    `;
+  }
+
+  function bindSimulationControlPanel(panel){
+    panel.querySelectorAll('[data-simulation-digital-control]').forEach(control=>{
+      const nodeId=control.getAttribute('data-simulation-digital-control');
+      const node=collectNodes(getState()).get(nodeId);
+      const slider=control.querySelector('[data-simulation-digital-slider]');
+      const valueInput=control.querySelector('[data-simulation-digital-value]');
+      if(!node||!slider||!valueInput) return;
+      const applyValue=value=>{
+        if(!updateSignalSourceRuntimeOutput(node,value,{persist:true})) return;
+        renderModelNodes();
+        updateUI();
+        window.renderSimulationViewPanel();
+      };
+      slider.addEventListener('input',()=>{
+        const props=getDigitalSourceControlProps(node);
+        if(props.digitalMode==='generic'){
+          applyValue(slider.value);
+          return;
+        }
+        const gears=getDigitalGearValues(props);
+        const index=clamp(Number.parseInt(slider.value,10)||0,0,Math.max(gears.length-1,0));
+        applyValue(gears[index]??gears[0]??'0');
+      });
+      valueInput.addEventListener('input',()=>applyValue(valueInput.value));
+      valueInput.addEventListener('change',()=>applyValue(valueInput.value));
+    });
+  }
+
+  function bindSimulationViewPanel(panel){
+    panel.querySelector('[data-simulation-show-physical]')?.addEventListener('click',event=>{
+      event.preventDefault();
+      setSimulationPointsByType('physical');
+      window.renderSimulationViewPanel();
+    });
+    panel.querySelector('[data-simulation-show-virtual]')?.addEventListener('click',event=>{
+      event.preventDefault();
+      setSimulationPointsByType('virtual');
+      window.renderSimulationViewPanel();
+    });
+    panel.querySelector('[data-simulation-clear-testpoints]')?.addEventListener('click',event=>{
+      event.preventDefault();
+      clearSimulationPoints();
+      window.renderSimulationViewPanel();
+    });
+    panel.querySelector('[data-add-simulation-testpoint]')?.addEventListener('click',event=>{
+      event.preventDefault();
+      const pointId=panel.querySelector('[data-simulation-testpoint-select]')?.value||'';
+      addSimulationPoint(pointId);
+      window.renderSimulationViewPanel();
+    });
+    panel.querySelectorAll('[data-remove-simulation-testpoint]').forEach(button=>{
+      button.addEventListener('click',event=>{
+        event.preventDefault();
+        removeSimulationPoint(button.getAttribute('data-remove-simulation-testpoint'));
+        window.renderSimulationViewPanel();
+      });
+    });
+    bindSimulationControlPanel(panel);
+  }
+
   window.renderSimulationViewPanel=function(){
     const panel=document.getElementById('simulation-panel');
     if(!panel) return false;
+    const points=getSimulationCandidatePoints();
     const rows=getPointRows();
     const sampleCount=rows.reduce((max,row)=>Math.max(max,row.sampleCount||0),0);
-    if(!rows.length){
-      panel.innerHTML='<div class="simulation-panel__empty">当前未配置物理测点。</div>';
-      return true;
-    }
     panel.innerHTML=`
       <div class="simulation-view" data-simulation-view>
         <div class="simulation-view__header">
           <div>
             <span>仿真视图</span>
-            <h2>物理测点仿真数据</h2>
+            <h2>测点仿真数据</h2>
           </div>
           <div class="simulation-view__stats">
             <span><b>${rows.length}</b>测点</span>
             <span><b>${sampleCount}</b>步</span>
           </div>
         </div>
-        <div class="simulation-point-list">
-          ${rows.map(renderSimulationPointCard).join('')}
+        <div class="simulation-view__content">
+          <main class="simulation-view__main">
+            ${renderSimulationControls(points)}
+            ${rows.length?`
+              <div class="simulation-point-list">
+                ${rows.map(renderSimulationPointCard).join('')}
+              </div>
+            `:'<div class="simulation-panel__empty">当前未配置测点。</div>'}
+          </main>
+          <aside class="simulation-view__sidebar" aria-label="仿真控制面板">
+            ${renderSimulationControlPanel()}
+          </aside>
         </div>
       </div>
     `;
+    bindSimulationViewPanel(panel);
     return true;
   };
 })();
@@ -27227,6 +28566,15 @@ function decorateDataflowEdges(){
     nodeState.prevInput=primaryInput;
     nodeState.prevAggregateInput=faultInput;
     return {outputs,middleValues};
+  };
+
+  const previousExecuteBoundFlowBlock=executeBoundFlowBlock;
+  executeBoundFlowBlock=function(node,nodeState,inputValues,modeKey,time,dt){
+    const moduleType=String(node?.props?.moduleType||'').toLowerCase();
+    if(node?.type==='simulation_block'&&stableModuleTypes.has(moduleType)){
+      return buildSimulationResult(node,nodeState,inputValues,modeKey,time,dt);
+    }
+    return previousExecuteBoundFlowBlock(node,nodeState,inputValues,modeKey,time,dt);
   };
 })();
 

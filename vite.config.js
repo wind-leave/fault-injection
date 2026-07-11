@@ -9,6 +9,10 @@ export default defineConfig({
       '/api/simulations': {
         target: 'http://127.0.0.1:8766',
         changeOrigin: true
+      },
+      '/api/troubleshooting': {
+        target: 'http://127.0.0.1:8766',
+        changeOrigin: true
       }
     }
   },

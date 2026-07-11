@@ -28,10 +28,10 @@ const WAVE_TYPE_ALIASES = {
 };
 
 const DIGITAL_MODE_OPTIONS = [
-  { value: 'boolean', label: '布尔量' },
-  { value: 'level', label: '电平信号' },
-  { value: 'pulse', label: '脉冲信号' },
-  { value: 'enum', label: '枚举状态' }
+  { value: 'boolean', label: '布尔取值' },
+  { value: 'level', label: '双值电平' },
+  { value: 'enum', label: '枚举取值' },
+  { value: 'generic', label: '通用信号' }
 ];
 
 const COMMAND_TYPE_OPTIONS = [
@@ -73,6 +73,7 @@ const PROPERTY_SCHEMAS = {
     groups: [
       {
         label: '信号定义',
+        placement: 'overview',
         fields: [
           { key: 'name', label: '模块名称', type: 'text', fallback: '信号源' },
           { key: 'signalDomain', label: '信号域', type: 'select', options: SIGNAL_DOMAINS, fallback: 'analog', row: 'signal-domain' },
@@ -83,17 +84,18 @@ const PROPERTY_SCHEMAS = {
         ]
       },
       {
+        label: '端口配置',
+        fields: [
+          { key: 'outputPortName', label: '输出端口名称', type: 'text', fallback: '输出' }
+        ]
+      },
+      {
         label: '数字信号配置',
         domains: ['digital'],
         fields: [
-          { key: 'digitalMode', label: '数字模式', type: 'select', options: ['boolean', 'level', 'pulse', 'enum'], fallback: 'boolean', row: 'digital-mode' },
-          { key: 'initialState', label: '初始状态', type: 'text', fallback: '0', row: 'digital-mode' },
-          { key: 'highLevel', label: '高电平', type: 'text', fallback: '1', row: 'digital-level' },
-          { key: 'lowLevel', label: '低电平', type: 'text', fallback: '0', row: 'digital-level' },
-          { key: 'pulseWidth', label: '脉宽', type: 'text', fallback: '', row: 'digital-pulse' },
-          { key: 'period', label: '周期', type: 'text', fallback: '', row: 'digital-pulse' },
-          { key: 'dutyCycle', label: '占空比', type: 'text', fallback: '', row: 'digital-duty' },
-          { key: 'enumValues', label: '枚举值', type: 'text', fallback: '', row: 'digital-duty' }
+          { key: 'digitalMode', label: '取值类型', type: 'select', options: ['boolean', 'level', 'enum', 'generic'], fallback: 'boolean', row: 'digital-mode' },
+          { key: 'digitalGearConfig', label: '挡位配置', type: 'digitalGearConfig' },
+          { key: 'outputFormat', label: '输出格式', type: 'select', options: PORT_FORMATS, fallback: '布尔', row: 'digital-values' }
         ]
       },
       {
@@ -215,7 +217,9 @@ const PROPERTY_SCHEMAS = {
           { key: 'name', label: '模块名称', type: 'text', fallback: '示波器' },
           { key: 'instrumentType', label: '仪器类型', type: 'readonly', fallback: '示波器', row: 'instrument-config' },
           { key: 'sampleRate', label: '采样率', type: 'text', fallback: '64kHz', row: 'instrument-config' },
-          { key: 'signal', label: '通道说明', type: 'text', fallback: 'CH1 / CH2' }
+          { key: 'signal', label: '通道说明', type: 'text', fallback: 'CH1 / CH2' },
+          { key: 'inputPortNameCh1', label: 'CH1 输入端口名称', type: 'text', fallback: 'CH1', row: 'scope-port-names' },
+          { key: 'inputPortNameCh2', label: 'CH2 输入端口名称', type: 'text', fallback: 'CH2', row: 'scope-port-names' }
         ]
       }
     ]
@@ -227,12 +231,9 @@ const PROPERTY_SCHEMAS = {
         label: '',
         fields: [
           { key: 'instrumentType', label: '仪器类型', type: 'readonly', fallback: '频谱分析' },
-          { key: 'sampleRate', label: '采样率', type: 'text', fallback: '32kHz', row: 'spectrum-sampling' },
-          { key: 'frequencyRange', label: '频率范围', type: 'text', fallback: '0-16kHz', row: 'spectrum-sampling' },
-          { key: 'fftSize', label: 'FFT 点数', type: 'text', fallback: '1024', row: 'spectrum-analysis' },
-          { key: 'windowFunction', label: '窗函数', type: 'text', fallback: 'Hann', row: 'spectrum-analysis' },
           { key: 'amplitudeUnit', label: '幅值单位', type: 'text', fallback: 'dB', row: 'spectrum-unit' },
-          { key: 'signal', label: '观测信号', type: 'text', fallback: '输入信号', row: 'spectrum-unit' }
+          { key: 'signal', label: '观测信号', type: 'text', fallback: '输入信号', row: 'spectrum-unit' },
+          { key: 'inputPortName', label: '输入端口名称', type: 'text', fallback: '观测输入' }
         ]
       }
     ]
@@ -246,7 +247,8 @@ const PROPERTY_SCHEMAS = {
           { key: 'name', label: '模块名称', type: 'text', fallback: '数据记录仪' },
           { key: 'instrumentType', label: '仪器类型', type: 'readonly', fallback: '数据记录' },
           { key: 'sampleRate', label: '采样率', type: 'text', fallback: '10Hz' },
-          { key: 'signal', label: '观测信号', type: 'text', fallback: '输入信号' }
+          { key: 'signal', label: '观测信号', type: 'text', fallback: '输入信号' },
+          { key: 'inputPortName', label: '输入端口名称', type: 'text', fallback: '观测输入' }
         ]
       }
     ]
@@ -257,12 +259,9 @@ const PROPERTY_SCHEMAS = {
       {
         label: '',
         fields: [
+          { key: 'name', label: '模块名称', type: 'text', fallback: '数字万用表' },
           { key: 'instrumentType', label: '仪器类型', type: 'readonly', fallback: '数字万用表' },
-          { key: 'measurementMode', label: '测量模式', type: 'select', options: MULTIMETER_MODE_OPTIONS, fallback: '直流电压', row: 'meter-mode' },
-          { key: 'range', label: '量程', type: 'text', fallback: 'Auto', row: 'meter-mode' },
-          { key: 'refreshRate', label: '刷新率', type: 'text', fallback: '5Hz', row: 'meter-rate' },
-          { key: 'sampleRate', label: '采样率', type: 'text', fallback: '5Hz', row: 'meter-rate' },
-          { key: 'signal', label: '观测信号', type: 'text', fallback: '输入信号' }
+          { key: 'inputPortName', label: '输入端口名称', type: 'text', fallback: '观测输入' }
         ]
       }
     ]
@@ -348,10 +347,143 @@ function buildSelectOptions(options, selected, helper) {
   }).join('');
 }
 
+function splitDigitalGearValues(value) {
+  return String(value ?? '')
+    .split(/[,，;；|]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getDigitalGearValues(props = {}) {
+  if (props.digitalMode === 'enum') {
+    const values = splitDigitalGearValues(props.enumValues);
+    return values.length ? values : ['0', '1'];
+  }
+  return [
+    String(props.lowLevel ?? '0'),
+    String(props.highLevel ?? '1')
+  ];
+}
+
+function numberOrFallback(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function getDigitalGenericBounds(props = {}) {
+  const rawMin = numberOrFallback(props.minValue, 0);
+  const rawMax = numberOrFallback(props.maxValue, 100);
+  return {
+    min: Math.min(rawMin, rawMax),
+    max: Math.max(rawMin, rawMax)
+  };
+}
+
+function clampNumber(value, min, max) {
+  const numeric = numberOrFallback(value, min);
+  return Math.min(max, Math.max(min, numeric));
+}
+
+function getDigitalGearIndex(value, gears) {
+  const index = gears.findIndex((gear) => String(gear) === String(value));
+  return index >= 0 ? index : 0;
+}
+
+function renderDigitalCurrentValueField(node, field, helpers = {}) {
+  const escape = helpers.escapeHtml || escapeHtml;
+  const props = node?.props ?? {};
+  if (props.digitalMode === 'generic') {
+    const { min, max } = getDigitalGenericBounds(props);
+    const currentValue = String(clampNumber(getFieldValue(node, field), min, max));
+    return `
+    <div class="digital-current-control" data-digital-current-control>
+      <div class="digital-current-control__row">
+        <input id="prop-initialState-slider" class="digital-current-control__slider" data-digital-current-slider type="range" min="${escape(min)}" max="${escape(max)}" step="1" value="${escape(currentValue)}">
+        <input id="prop-initialState" class="digital-current-control__value" data-digital-current-value value="${escape(currentValue)}">
+      </div>
+    </div>`;
+  }
+
+  const gears = getDigitalGearValues(props);
+  const currentValue = String(getFieldValue(node, field) || gears[0] || '0');
+  const selectedIndex = getDigitalGearIndex(currentValue, gears);
+  const max = Math.max(gears.length - 1, 0);
+
+  return `
+    <div class="digital-current-control" data-digital-current-control>
+      <div class="digital-current-control__row">
+        <input id="prop-initialState-slider" class="digital-current-control__slider" data-digital-current-slider type="range" min="0" max="${escape(max)}" step="1" value="${escape(selectedIndex)}">
+        <input id="prop-initialState" class="digital-current-control__value" data-digital-current-value value="${escape(currentValue)}">
+      </div>
+    </div>`;
+}
+
+function renderDigitalGearConfigField(node, field, helpers = {}) {
+  const escape = helpers.escapeHtml || escapeHtml;
+  const props = node?.props ?? {};
+
+  if (props.digitalMode === 'generic') {
+    return `
+    <div class="digital-gear-config digital-gear-config--generic" data-digital-gear-config>
+      <input id="prop-enumValues" type="hidden" value="${escape(props.enumValues ?? '')}">
+      <input id="prop-lowLevel" type="hidden" value="${escape(props.lowLevel ?? '0')}">
+      <input id="prop-highLevel" type="hidden" value="${escape(props.highLevel ?? '1')}">
+      <div class="digital-gear-row" data-digital-generic-bound-row>
+        <span class="digital-gear-row__index">最低</span>
+        <input id="prop-minValue" data-digital-generic-bound="min" value="${escape(props.minValue ?? '0')}" aria-label="最低值">
+      </div>
+      <div class="digital-gear-row" data-digital-generic-bound-row>
+        <span class="digital-gear-row__index">最高</span>
+        <input id="prop-maxValue" data-digital-generic-bound="max" value="${escape(props.maxValue ?? '100')}" aria-label="最高值">
+      </div>
+    </div>`;
+  }
+
+  if (props.digitalMode === 'enum') {
+    const gears = getDigitalGearValues(props);
+    const rows = gears.map((gear, index) => `
+      <div class="digital-gear-row" data-digital-gear-row>
+        <span class="digital-gear-row__index">${index + 1}</span>
+        <input data-digital-gear-value value="${escape(gear)}" aria-label="枚举挡位 ${index + 1}">
+        <button type="button" class="digital-gear-row__delete" data-digital-gear-delete aria-label="删除挡位">删除</button>
+      </div>
+    `).join('');
+    return `
+      <div class="digital-gear-config" data-digital-gear-config>
+        <input id="prop-enumValues" type="hidden" value="${escape(gears.join(','))}">
+        <input id="prop-lowLevel" type="hidden" value="${escape(props.lowLevel ?? '0')}">
+        <input id="prop-highLevel" type="hidden" value="${escape(props.highLevel ?? '1')}">
+        <div class="digital-gear-list" data-digital-gear-list>${rows}</div>
+        <button type="button" class="props-secondary digital-gear-add" data-digital-gear-add>添加挡位</button>
+      </div>`;
+  }
+
+  return `
+    <div class="digital-gear-config" data-digital-gear-config>
+      <input id="prop-enumValues" type="hidden" value="${escape(props.enumValues ?? '')}">
+      <div class="digital-gear-row" data-digital-gear-row>
+        <span class="digital-gear-row__index">低</span>
+        <input id="prop-lowLevel" data-digital-fixed-gear="low" value="${escape(props.lowLevel ?? '0')}" aria-label="低挡位">
+      </div>
+      <div class="digital-gear-row" data-digital-gear-row>
+        <span class="digital-gear-row__index">高</span>
+        <input id="prop-highLevel" data-digital-fixed-gear="high" value="${escape(props.highLevel ?? '1')}" aria-label="高挡位">
+      </div>
+    </div>`;
+}
+
 function renderField(node, field, helpers = {}) {
   const escape = helpers.escapeHtml || escapeHtml;
   const id = `prop-${field.key}`;
   const value = getFieldValue(node, field);
+
+  if (field.type === 'digitalCurrentValue') {
+    return renderDigitalCurrentValueField(node, field, helpers);
+  }
+
+  if (field.type === 'digitalGearConfig') {
+    return renderDigitalGearConfigField(node, field, helpers);
+  }
 
   if (field.type === 'select') {
     const fieldOptions = SELECT_OPTION_OVERRIDES[field.key] || field.options || [];
@@ -406,6 +538,10 @@ function getEditableFieldsForSchema(schema, group) {
   return fields.filter((field) => field.key !== 'signalDomain');
 }
 
+function isSchemaGroupInPlacement(group, placement) {
+  return (group.placement || 'parameters') === placement;
+}
+
 export function getComponentPropertySchema(type) {
   const schema = PROPERTY_SCHEMAS[type];
   return schema ? deepClone(schema) : null;
@@ -422,7 +558,30 @@ export function renderPropertyFieldsFromSchema(node, schema, helpers = {}) {
     : node;
   const domain = nodeForRender?.props?.signalDomain;
 
-  return schema.groups.filter((group) => !group.domains || group.domains.includes(domain)).map((group) => `
+  return schema.groups
+    .filter((group) => isSchemaGroupInPlacement(group, 'parameters'))
+    .filter((group) => !group.domains || group.domains.includes(domain)).map((group) => `
+      <div class="pgroup">
+        ${group.label ? `<div class="pglbl">${escape(group.label)}</div>` : ''}
+        ${renderFieldsInRows(nodeForRender, getEditableFieldsForSchema(schema, group), helpers)}
+        ${group.help ? `<div class="props-help">${escape(group.help)}</div>` : ''}
+      </div>`).join('');
+}
+
+export function renderPropertyOverviewFieldsFromSchema(node, schema, helpers = {}) {
+  if (!schema?.groups?.length) {
+    return '';
+  }
+
+  const escape = helpers.escapeHtml || escapeHtml;
+  const nodeForRender = schema.type === 'signal_source'
+    ? { ...node, props: normalizeSignalSourceProps(node?.props ?? {}) }
+    : node;
+  const domain = nodeForRender?.props?.signalDomain;
+
+  return schema.groups
+    .filter((group) => isSchemaGroupInPlacement(group, 'overview'))
+    .filter((group) => !group.domains || group.domains.includes(domain)).map((group) => `
       <div class="pgroup">
         ${group.label ? `<div class="pglbl">${escape(group.label)}</div>` : ''}
         ${renderFieldsInRows(nodeForRender, getEditableFieldsForSchema(schema, group), helpers)}
@@ -440,6 +599,30 @@ export function readPropertyValuesFromSchema(schema, documentLike) {
 
   fields.forEach((field) => {
     if (field.type === 'readonly') {
+      return;
+    }
+
+    if (field.type === 'digitalGearConfig') {
+      const lowLevel = documentLike.getElementById('prop-lowLevel');
+      const highLevel = documentLike.getElementById('prop-highLevel');
+      const enumValues = documentLike.getElementById('prop-enumValues');
+      const minValue = documentLike.getElementById('prop-minValue');
+      const maxValue = documentLike.getElementById('prop-maxValue');
+      if (lowLevel) {
+        values.lowLevel = normalizeTextValue(lowLevel.value, '0');
+      }
+      if (highLevel) {
+        values.highLevel = normalizeTextValue(highLevel.value, '1');
+      }
+      if (enumValues) {
+        values.enumValues = normalizeTextValue(enumValues.value, '');
+      }
+      if (minValue) {
+        values.minValue = normalizeTextValue(minValue.value, '0');
+      }
+      if (maxValue) {
+        values.maxValue = normalizeTextValue(maxValue.value, '100');
+      }
       return;
     }
 

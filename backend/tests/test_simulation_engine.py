@@ -225,6 +225,71 @@ class SimulationEngineTests(unittest.TestCase):
         self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch1.reference"], [1.0, 2.0, 3.0])
         self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch1.actual"], [1.0, 2.0, 3.0])
 
+    def test_sum_block_applies_signs_by_target_port(self):
+        package = {
+            "schemaVersion": 1,
+            "packageId": "signed-sum-package",
+            "simulationConfig": {"duration": 0.1, "stepSize": 0.1},
+            "nodes": [
+                {
+                    "id": "source-command",
+                    "type": "signal_source",
+                    "parameters": {"value": 3.0},
+                    "outputs": [{"name": "out"}],
+                },
+                {
+                    "id": "source-feedback",
+                    "type": "signal_source",
+                    "parameters": {"value": 1.0},
+                    "outputs": [{"name": "out"}],
+                },
+                {
+                    "id": "sum-1",
+                    "type": "sum_block",
+                    "parameters": {"inputCount": 2, "signs": ["+", "-"]},
+                    "inputs": [{"name": "command"}, {"name": "feedback"}],
+                    "outputs": [{"name": "error"}],
+                },
+                {
+                    "id": "scope-1",
+                    "type": "instrument_scope",
+                    "inputs": [{"name": "CH1"}],
+                },
+            ],
+            "edges": [
+                {
+                    "id": "edge-feedback-sum",
+                    "sourceNodeId": "source-feedback",
+                    "sourcePortIndex": 0,
+                    "targetNodeId": "sum-1",
+                    "targetPortIndex": 1,
+                },
+                {
+                    "id": "edge-command-sum",
+                    "sourceNodeId": "source-command",
+                    "sourcePortIndex": 0,
+                    "targetNodeId": "sum-1",
+                    "targetPortIndex": 0,
+                },
+                {
+                    "id": "edge-sum-scope",
+                    "sourceNodeId": "sum-1",
+                    "sourcePortIndex": 0,
+                    "targetNodeId": "scope-1",
+                    "targetPortIndex": 0,
+                },
+            ],
+            "faultInstances": [],
+            "measurementPoints": [{"id": "scope-1.ch1", "scopeNodeId": "scope-1", "channel": "ch1"}],
+        }
+        graph = compile_graph(package, ModuleRegistry.from_builtin_manifest())
+
+        result = run_simulation(graph)
+
+        self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch1.reference"], [2.0])
+        self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch1.actual"], [2.0])
+        self.assertEqual(result["componentOutputs"]["steps"][0]["actual"]["sum-1"]["error"], 2.0)
+
     def test_scope_channels_evaluate_their_own_input_ports(self):
         package = {
             "schemaVersion": 1,
@@ -354,6 +419,162 @@ class SimulationEngineTests(unittest.TestCase):
         self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch2.actual"], [1.0])
         self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch3.actual"], [7.0])
         self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch4.actual"], [10.0])
+
+    def test_analog_signal_source_sine_waveform(self):
+        package = {
+            "schemaVersion": 1,
+            "packageId": "signal-waveform-package",
+            "simulationConfig": {"duration": 0.3, "stepSize": 0.1},
+            "nodes": [
+                {
+                    "id": "sine",
+                    "type": "signal_source",
+                    "parameters": {
+                        "signalDomain": "analog",
+                        "waveType": "sine",
+                        "amplitude": 2,
+                        "frequency": 1,
+                        "phase": 0,
+                        "offset": 0,
+                    },
+                    "outputs": [{"name": "out"}],
+                },
+                {"id": "scope-1", "type": "instrument_scope", "inputs": [{"name": "CH1"}]},
+            ],
+            "edges": [
+                {"id": "edge-sine-scope", "sourceNodeId": "sine", "sourcePortIndex": 0, "targetNodeId": "scope-1", "targetPortIndex": 0},
+            ],
+            "faultInstances": [],
+            "measurementPoints": [{"id": "scope-1.ch1", "scopeNodeId": "scope-1", "channel": "ch1"}],
+        }
+
+        graph = compile_graph(package, ModuleRegistry.from_builtin_manifest())
+        result = run_simulation(graph)
+
+        self.assertFloatSeriesEqual(
+            result["curves"]["channels"]["scope-1.ch1.actual"],
+            [0.0, 1.1755705045849463, 1.902113032590307],
+        )
+
+    def test_evtol_builtin_modules_compile_and_run(self):
+        rotor_nodes = [
+            {
+                "id": f"rotor-{index}",
+                "type": "simulation_block",
+                "pythonBinding": {"moduleId": "rotor_motor", "entryFunction": "process"},
+                "parameters": {},
+                "inputs": [{"name": "rotor_command"}],
+                "outputs": [{"name": "rotor_thrust"}],
+            }
+            for index in range(1, 9)
+        ]
+        package = {
+            "schemaVersion": 1,
+            "packageId": "evtol-builtin-package",
+            "simulationConfig": {"duration": 0.3, "stepSize": 0.1},
+            "nodes": [
+                {"id": "attitude-command", "type": "signal_source", "parameters": {"value": 0.3}, "outputs": [{"name": "out"}]},
+                {"id": "attitude-feedback", "type": "signal_source", "parameters": {"value": 0.0}, "outputs": [{"name": "out"}]},
+                {"id": "speed-command", "type": "signal_source", "parameters": {"value": 0.2}, "outputs": [{"name": "out"}]},
+                {"id": "altitude-command", "type": "signal_source", "parameters": {"value": 0.1}, "outputs": [{"name": "out"}]},
+                {"id": "bus-voltage", "type": "signal_source", "parameters": {"value": 0.95}, "outputs": [{"name": "out"}]},
+                {
+                    "id": "pid",
+                    "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "pid_controller", "entryFunction": "process"},
+                    "parameters": {},
+                    "inputs": [{"name": "attitude_command"}, {"name": "attitude_feedback"}],
+                    "outputs": [{"name": "moment_command"}],
+                },
+                {
+                    "id": "allocation",
+                    "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "control_allocation", "entryFunction": "process"},
+                    "parameters": {},
+                    "inputs": [{"name": "moment_command"}, {"name": "speed_command"}, {"name": "altitude_command"}],
+                    "outputs": [{"name": "actuator_command"}],
+                },
+                {
+                    "id": "voltage",
+                    "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "voltage_drop", "entryFunction": "process"},
+                    "parameters": {},
+                    "inputs": [{"name": "actuator_command"}, {"name": "bus_voltage"}],
+                    "outputs": [{"name": "voltage_limited_command"}],
+                },
+                {
+                    "id": "actuator",
+                    "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "motor_actuator", "entryFunction": "process"},
+                    "parameters": {},
+                    "inputs": [{"name": "voltage_limited_command"}],
+                    "outputs": [{"name": f"rotor_{index}_command"} for index in range(1, 9)],
+                },
+                *rotor_nodes,
+                {
+                    "id": "aero",
+                    "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "aero_moment", "entryFunction": "process"},
+                    "parameters": {},
+                    "inputs": [{"name": f"rotor_{index}_thrust"} for index in range(1, 9)],
+                    "outputs": [{"name": "total_force"}, {"name": "total_moment"}],
+                },
+                {
+                    "id": "six-dof",
+                    "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "six_dof", "entryFunction": "process"},
+                    "parameters": {},
+                    "inputs": [{"name": "total_force"}, {"name": "total_moment"}],
+                    "outputs": [{"name": "attitude"}, {"name": "body_rate"}, {"name": "altitude"}],
+                },
+                {
+                    "id": "sensor",
+                    "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "sensor_fault_injection", "entryFunction": "process"},
+                    "parameters": {},
+                    "inputs": [{"name": "attitude"}, {"name": "body_rate"}, {"name": "altitude"}],
+                    "outputs": [{"name": "attitude_feedback"}, {"name": "rate_feedback"}, {"name": "altitude_feedback"}],
+                },
+                {"id": "scope-1", "type": "instrument_scope", "inputs": [{"name": "CH1"}]},
+            ],
+            "edges": [
+                {"id": "edge-command-pid", "sourceNodeId": "attitude-command", "sourcePortIndex": 0, "targetNodeId": "pid", "targetPortIndex": 0},
+                {"id": "edge-feedback-pid", "sourceNodeId": "attitude-feedback", "sourcePortIndex": 0, "targetNodeId": "pid", "targetPortIndex": 1},
+                {"id": "edge-pid-allocation", "sourceNodeId": "pid", "sourcePortIndex": 0, "targetNodeId": "allocation", "targetPortIndex": 0},
+                {"id": "edge-speed-allocation", "sourceNodeId": "speed-command", "sourcePortIndex": 0, "targetNodeId": "allocation", "targetPortIndex": 1},
+                {"id": "edge-altitude-allocation", "sourceNodeId": "altitude-command", "sourcePortIndex": 0, "targetNodeId": "allocation", "targetPortIndex": 2},
+                {"id": "edge-allocation-voltage", "sourceNodeId": "allocation", "sourcePortIndex": 0, "targetNodeId": "voltage", "targetPortIndex": 0},
+                {"id": "edge-bus-voltage", "sourceNodeId": "bus-voltage", "sourcePortIndex": 0, "targetNodeId": "voltage", "targetPortIndex": 1},
+                {"id": "edge-voltage-actuator", "sourceNodeId": "voltage", "sourcePortIndex": 0, "targetNodeId": "actuator", "targetPortIndex": 0},
+                *[
+                    {"id": f"edge-actuator-rotor-{index}", "sourceNodeId": "actuator", "sourcePortIndex": index - 1, "targetNodeId": f"rotor-{index}", "targetPortIndex": 0}
+                    for index in range(1, 9)
+                ],
+                *[
+                    {"id": f"edge-rotor-aero-{index}", "sourceNodeId": f"rotor-{index}", "sourcePortIndex": 0, "targetNodeId": "aero", "targetPortIndex": index - 1}
+                    for index in range(1, 9)
+                ],
+                {"id": "edge-aero-force", "sourceNodeId": "aero", "sourcePortIndex": 0, "targetNodeId": "six-dof", "targetPortIndex": 0},
+                {"id": "edge-aero-moment", "sourceNodeId": "aero", "sourcePortIndex": 1, "targetNodeId": "six-dof", "targetPortIndex": 1},
+                {"id": "edge-six-dof-attitude", "sourceNodeId": "six-dof", "sourcePortIndex": 0, "targetNodeId": "sensor", "targetPortIndex": 0},
+                {"id": "edge-six-dof-rate", "sourceNodeId": "six-dof", "sourcePortIndex": 1, "targetNodeId": "sensor", "targetPortIndex": 1},
+                {"id": "edge-six-dof-altitude", "sourceNodeId": "six-dof", "sourcePortIndex": 2, "targetNodeId": "sensor", "targetPortIndex": 2},
+                {"id": "edge-sensor-scope", "sourceNodeId": "sensor", "sourcePortIndex": 0, "targetNodeId": "scope-1", "targetPortIndex": 0},
+            ],
+            "faultInstances": [],
+            "measurementPoints": [{"id": "scope-1.ch1", "scopeNodeId": "scope-1", "channel": "ch1"}],
+        }
+        graph = compile_graph(package, ModuleRegistry.from_builtin_manifest())
+
+        result = run_simulation(graph)
+
+        self.assertEqual(result["status"], "success")
+        first_step = result["componentOutputs"]["steps"][0]["actual"]
+        self.assertIn("moment_command", first_step["pid"])
+        self.assertIn("rotor_thrust", first_step["rotor-1"])
+        self.assertIn("attitude", first_step["six-dof"])
+        self.assertIn("attitude_feedback", first_step["sensor"])
+        self.assertGreater(result["curves"]["channels"]["scope-1.ch1.actual"][-1], 0.0)
 
 
 if __name__ == "__main__":

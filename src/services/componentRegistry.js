@@ -449,7 +449,9 @@ export const COMPONENT_REGISTRY = {
       name: '示波器',
       instrumentType: '波形监测',
       sampleRate: '64kHz',
-      signal: '流程块输出'
+      signal: '流程块输出',
+      inputPortNameCh1: 'CH1',
+      inputPortNameCh2: 'CH2'
     }
   },
   instrument_spectrum: {
@@ -469,6 +471,7 @@ export const COMPONENT_REGISTRY = {
       instrumentType: '频谱分析',
       sampleRate: '32kHz',
       signal: '仿真块输出',
+      inputPortName: '观测输入',
       frequencyRange: '0-16kHz',
       fftSize: '1024',
       windowFunction: 'Hann',
@@ -492,7 +495,8 @@ export const COMPONENT_REGISTRY = {
       name: '数据记录仪',
       instrumentType: '数据记录',
       sampleRate: '10Hz',
-      signal: '系统总线'
+      signal: '系统总线',
+      inputPortName: '观测输入'
     }
   },
   instrument_multimeter: {
@@ -514,7 +518,8 @@ export const COMPONENT_REGISTRY = {
       range: 'Auto',
       refreshRate: '5Hz',
       sampleRate: '5Hz',
-      signal: '输入信号'
+      signal: '输入信号',
+      inputPortName: '观测输入'
     }
   },
   link_normal: {

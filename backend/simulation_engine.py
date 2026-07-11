@@ -1,3 +1,5 @@
+import math
+
 from backend.fault_runtime import FaultRuntime
 
 
@@ -12,8 +14,26 @@ def _first_numeric(params, keys, fallback=0.0):
     return float(fallback)
 
 
+def _text(value):
+    return str(value or "").strip().lower()
+
+
 def _source_value(node, time):
     params = node.parameters
+    wave_type = _text(params.get("waveType"))
+    if wave_type:
+        amplitude = _first_numeric(params, ("amplitude", "value"), 0.0)
+        frequency = _first_numeric(params, ("frequency",), 1.0)
+        phase = _first_numeric(params, ("phase",), 0.0)
+        offset = _first_numeric(params, ("offset",), 0.0)
+        if wave_type in {"constant", "常值"}:
+            return offset + amplitude
+        if wave_type in {"step", "阶跃"}:
+            step_time = max(0.2, frequency)
+            return offset + (amplitude if time >= step_time else 0.0)
+        if wave_type in {"sine", "sin", "正弦"}:
+            return offset + amplitude * math.sin(2.0 * math.pi * frequency * time + phase)
+
     return _first_numeric(
         params,
         ("value", "amplitude", "initialState", "payloadValue", "commandValue", "power"),
@@ -23,6 +43,32 @@ def _source_value(node, time):
 
 def _node_output_names(node):
     return tuple(node.outputs or ("output",))
+
+
+def _ordered_input_values(values_by_port):
+    if not values_by_port:
+        return []
+    return [float(values_by_port.get(index, 0.0)) for index in range(max(values_by_port) + 1)]
+
+
+def _normal_signs(value):
+    if isinstance(value, list):
+        source = value
+    else:
+        source = str(value or "").replace(",", " ").split()
+    return tuple("-" if str(item).strip() == "-" else "+" for item in source)
+
+
+def _sum_block_value(inputs, parameters):
+    signs = _normal_signs(parameters.get("signs"))
+    input_count = int(_first_numeric(parameters, ("inputCount",), max(len(inputs), len(signs))))
+    total_count = max(len(inputs), len(signs), input_count)
+    total = 0.0
+    for index in range(total_count):
+        value = inputs[index] if index < len(inputs) else 0.0
+        sign = -1.0 if index < len(signs) and signs[index] == "-" else 1.0
+        total += sign * value
+    return total
 
 
 def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_states, dt, visiting, previous_values, next_values, component_outputs):
@@ -35,7 +81,7 @@ def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_stat
     visiting.add(key)
     node = graph.nodes[node_id]
     incoming_edges = graph.incoming.get(node_id, [])
-    inputs = []
+    values_by_port = {}
     for edge in incoming_edges:
         upstream = _evaluate_node(
             graph,
@@ -53,7 +99,8 @@ def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_stat
         )
         if mode == "actual":
             upstream = fault_runtime.apply_edge_value(edge.id, upstream, time)
-        inputs.append(upstream)
+        values_by_port[edge.target_port_index] = upstream
+    inputs = _ordered_input_values(values_by_port)
 
     output_names = _node_output_names(node)
     if node.type == "signal_source":
@@ -83,7 +130,7 @@ def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_stat
         value = (inputs[0] if inputs else 0.0) * float(node.parameters.get("gain", 1.0))
         outputs = {output_names[0]: float(value)}
     elif node.type == "sum_block":
-        value = sum(inputs)
+        value = _sum_block_value(inputs, node.parameters)
         outputs = {output_names[0]: float(value)}
     elif node.type == "mux_block":
         value = inputs[0] if inputs else 0.0

@@ -28,8 +28,8 @@ class PracticeScoringTests(unittest.TestCase):
             result["scoreBreakdown"],
             {
                 "faultLocalization": 30,
-                "diagnosticTreePath": 30,
-                "informationGain": 20,
+                "diagnosticTreePath": 20,
+                "informationGain": 30,
                 "efficiency": 5,
                 "safetyCompliance": 15,
             },
@@ -77,7 +77,7 @@ class PracticeScoringTests(unittest.TestCase):
 
         result = calculate_single_step_decision_reasonability_score(dynamic_reference_history)
 
-        self.assertEqual(result["score"], 11.333)
+        self.assertEqual(result["score"], 17)
         self.assertEqual(result["metric"], "singleStepDecisionReasonability")
         self.assertEqual(result["stepCount"], 3)
         self.assertEqual(result["averageDecisionScore"], 0.567)

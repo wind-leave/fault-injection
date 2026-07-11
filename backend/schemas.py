@@ -58,11 +58,38 @@ def ensure_number(value, field):
     return float(value)
 
 
-def validate_numeric_parameters(parameters, field):
+SIGNAL_SOURCE_TEXT_PARAMETERS = {"signalDomain", "waveType", "outputFormat"}
+
+
+def ensure_sign_sequence(value, field):
+    if not isinstance(value, list):
+        raise SimulationBackendError("INVALID_SCHEMA", field, f"{field} must be an array")
+    for index, item in enumerate(value):
+        if item not in {"+", "-"}:
+            raise SimulationBackendError("INVALID_SCHEMA", f"{field}[{index}]", f"{field}[{index}] must be '+' or '-'")
+    return value
+
+
+def validate_numeric_parameters(parameters, field, text_parameters=None):
+    if parameters is None:
+        return {}
+    ensure_mapping(parameters, field)
+    allowed_text = set(text_parameters or ())
+    for key, value in parameters.items():
+        if key in allowed_text and isinstance(value, str):
+            continue
+        ensure_number(value, f"{field}.{key}")
+    return parameters
+
+
+def validate_sum_block_parameters(parameters, field):
     if parameters is None:
         return {}
     ensure_mapping(parameters, field)
     for key, value in parameters.items():
+        if key == "signs":
+            ensure_sign_sequence(value, f"{field}.{key}")
+            continue
         ensure_number(value, f"{field}.{key}")
     return parameters
 
@@ -105,6 +132,10 @@ def validate_executable_package(package):
         node_type = node.get("type")
         if node_type not in SUPPORTED_NODE_TYPES:
             raise SimulationBackendError("UNSUPPORTED_NODE_TYPE", f"nodes[{index}].type", f"unsupported node type: {node_type}")
-        validate_numeric_parameters(node.get("parameters", {}), f"nodes[{index}].parameters")
+        if node_type == "sum_block":
+            validate_sum_block_parameters(node.get("parameters", {}), f"nodes[{index}].parameters")
+        else:
+            text_parameters = SIGNAL_SOURCE_TEXT_PARAMETERS if node_type == "signal_source" else None
+            validate_numeric_parameters(node.get("parameters", {}), f"nodes[{index}].parameters", text_parameters)
 
     return package

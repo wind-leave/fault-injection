@@ -128,6 +128,18 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(status, 404)
         self.assertEqual(body["errorCode"], "NOT_FOUND")
 
+    def test_builds_d_matrix_path_and_key_steps_through_the_backend_endpoint(self):
+        status, body = self._post(
+            "/api/troubleshooting/plan",
+            {"dMatrix": sample_d_matrix(), "targetFaultId": "target-fault"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["status"], "success")
+        self.assertEqual(body["plan"]["source"], "backend-algorithm")
+        self.assertGreater(len(body["plan"]["steps"]), 0)
+        self.assertGreater(len(body["plan"]["keySteps"]), 0)
+
     def test_steps_simulation_session(self):
         status, created = self._post("/api/simulations/session", valid_package())
 
@@ -417,11 +429,10 @@ class SimulationBackendServerTests(unittest.TestCase):
             path_evaluation["diagnosticTreePathBreakdown"],
             {
                 "keyNodeCoverage": 12,
-                "sequenceReasonability": 10,
                 "pathEfficiency": 6,
             },
         )
-        self.assertEqual(path_evaluation["diagnosticTreePathScore"], 28)
+        self.assertEqual(path_evaluation["diagnosticTreePathScore"], 18)
         self.assertEqual(
             submitted["scoreBreakdown"]["diagnosticTreePath"],
             path_evaluation["diagnosticTreePathScore"],

@@ -116,29 +116,6 @@ def _evaluate_key_node_coverage(fault_tree_key_nodes, steps, initial_physical_me
     }
 
 
-def _sequence_reasonability_score(steps, repairs, evidence_before_first_repair, first_repair_dynamic_match, dynamic_history):
-    if not steps:
-        return 0
-    score = 0
-    if not repairs or evidence_before_first_repair or first_repair_dynamic_match:
-        score += 4
-    if dynamic_history:
-        non_unsafe_matches = [
-            entry
-            for entry in dynamic_history
-            if (entry.get("matchResult") or {}).get("matched")
-            and (entry.get("matchResult") or {}).get("matchQuality") != "unsafe"
-        ]
-        unmatched = [
-            entry
-            for entry in dynamic_history
-            if (entry.get("matchResult") or {}).get("matchQuality") == "unmatched"
-        ]
-        score += (len(non_unsafe_matches) / len(dynamic_history)) * 3
-        score += ((len(dynamic_history) - len(unmatched)) / len(dynamic_history)) * 3
-    return _round_score(min(10, score))
-
-
 def _path_efficiency_score(ineffective_repairs, repairs, unmatched_count):
     deductions = (len(ineffective_repairs) * 2) + _duplicate_repair_count(repairs) + unmatched_count
     return max(0, 8 - min(8, deductions))
@@ -193,8 +170,8 @@ def calculate_information_gain_score(dynamic_reference_history):
 
 FAULT_DETECTION_SCORE = 30
 ROUTE_QUALITY_SCORE = 50
-DIAGNOSTIC_TREE_PATH_SCORE = 30
-INFORMATION_GAIN_SCORE = 20
+DIAGNOSTIC_TREE_PATH_SCORE = 20
+INFORMATION_GAIN_SCORE = 30
 EFFICIENCY_SCORE = 5
 SAFETY_SCORE = 15
 
@@ -300,13 +277,6 @@ def evaluate_path_quality(
         initial_physical_measurement_snapshot,
     )
     information_gain = calculate_information_gain_score(dynamic_history)
-    sequence_reasonability = _sequence_reasonability_score(
-        steps,
-        repairs,
-        evidence_before_first_repair,
-        first_repair_dynamic_match,
-        dynamic_history,
-    )
     path_efficiency = _path_efficiency_score(
         ineffective_repairs,
         repairs,
@@ -314,7 +284,6 @@ def evaluate_path_quality(
     )
     diagnostic_tree_path_breakdown = {
         "keyNodeCoverage": key_node_coverage["score"],
-        "sequenceReasonability": sequence_reasonability,
         "pathEfficiency": path_efficiency,
     }
     diagnostic_tree_path_score = _round_score(sum(diagnostic_tree_path_breakdown.values()))

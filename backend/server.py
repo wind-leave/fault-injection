@@ -10,6 +10,7 @@ from backend.module_registry import ModuleRegistry
 from backend.practice import PracticeSession
 from backend.schemas import SimulationBackendError
 from backend.simulation_engine import SimulationSession, run_simulation
+from backend.troubleshooting import build_troubleshooting_plan
 
 
 MAX_REQUEST_BYTES = 1_000_000
@@ -24,6 +25,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
     endpoint = "/api/simulations/run"
     session_endpoint = "/api/simulations/session"
     practice_endpoint = "/api/practice/session"
+    troubleshooting_plan_endpoint = "/api/troubleshooting/plan"
     registry = ModuleRegistry.from_builtin_manifest()
     sessions = {}
     sessions_lock = threading.Lock()
@@ -159,6 +161,26 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         if steps > self.max_response_samples:
             raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "steps", "steps exceeds the response sample limit")
         return steps
+
+    def _build_troubleshooting_plan(self, run_id, started):
+        payload = self._read_json()
+        d_matrix = payload.get("dMatrix")
+        target_fault_id = payload.get("targetFaultId")
+        if not isinstance(target_fault_id, str) or not target_fault_id.strip():
+            raise SimulationBackendError("INVALID_SCHEMA", "targetFaultId", "targetFaultId is required")
+        max_steps = payload.get("maxSteps", 4)
+        if isinstance(max_steps, bool) or not isinstance(max_steps, int) or not 1 <= max_steps <= 12:
+            raise SimulationBackendError("INVALID_SCHEMA", "maxSteps", "maxSteps must be an integer from 1 to 12")
+        plan = build_troubleshooting_plan(d_matrix, target_fault_id.strip(), max_steps=max_steps)
+        self._send_json(
+            200,
+            {
+                "runId": run_id,
+                "status": "success",
+                "plan": plan,
+                "metrics": {"elapsedMs": round((time.monotonic() - started) * 1000, 3)},
+            },
+        )
 
     def _ensure_simulation_session_capacity(self):
         with self.sessions_lock:
@@ -348,12 +370,15 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         session_id = self._session_step_path(path)
         practice_action_session_id = self._practice_action_path(path)
         practice_submit_session_id = self._practice_submit_path(path)
-        if path != self.endpoint and path != self.session_endpoint and path != self.practice_endpoint and not session_id and not practice_action_session_id and not practice_submit_session_id:
+        if path != self.endpoint and path != self.session_endpoint and path != self.practice_endpoint and path != self.troubleshooting_plan_endpoint and not session_id and not practice_action_session_id and not practice_submit_session_id:
             self._send_not_found(run_id)
             return
 
         started = time.monotonic()
         try:
+            if path == self.troubleshooting_plan_endpoint:
+                self._build_troubleshooting_plan(run_id, started)
+                return
             if path == self.practice_endpoint:
                 self._create_practice_session(run_id, started)
                 return

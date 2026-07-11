@@ -32,7 +32,7 @@ import {
 import faultTypeCatalog from '../../fault-types/fault-type-catalog.json';
 
 let mounted = false;
-const DEFAULT_FLIGHT_MODEL_PACKAGE_PATH = 'model-packages/evtol_closed_loop_fault_demo.json';
+const DEFAULT_FLIGHT_MODEL_PACKAGE_PATH = 'model-packages/evtol-small-flight-control-fault-display.json';
 const WORKBENCH_STORAGE_KEY = 'gz-workbench-system-model';
 
 function normalizeBaseUrl(baseUrl = './') {
@@ -73,12 +73,10 @@ function isPublicDemoDeployment() {
 }
 
 function getDefaultFlightModelLoadOptions() {
-  if (!isPublicDemoDeployment()) {
-    return {};
-  }
-
   return {
-    publicDemo: true
+    force: true,
+    resetStoredWorkbench: true,
+    publicDemo: isPublicDemoDeployment()
   };
 }
 
@@ -168,6 +166,11 @@ function createExportMeta(state = {}) {
       modelId: activeModelPackage.modelId ?? 'workbench-export',
       modelName: activeModelPackage.modelName ?? 'Workbench Export',
       description: activeModelPackage.description ?? '',
+      systemFamily: activeModelPackage.systemFamily ?? null,
+      supportedFaultLibraries: Array.isArray(activeModelPackage.supportedFaultLibraries)
+        ? activeModelPackage.supportedFaultLibraries
+        : [],
+      capabilities: activeModelPackage.capabilities ?? {},
       source: activeModelPackage.source ?? { origin: 'workbench-import' }
     };
   }
@@ -176,6 +179,9 @@ function createExportMeta(state = {}) {
     modelId: 'workbench-export',
     modelName: 'Workbench Export',
     description: '',
+    systemFamily: null,
+    supportedFaultLibraries: [],
+    capabilities: {},
     source: { origin: 'workbench-export' }
   };
 }
@@ -189,6 +195,7 @@ export function mountLegacyRuntime() {
     return;
   }
 
+  window.__GZ_AUTO_LOAD_DEFAULT_MODEL__ = window.__GZ_AUTO_LOAD_DEFAULT_MODEL__ ?? true;
   window.__GZ_WORKBENCH_SNAPSHOT__ = {
     createWorkbenchSnapshot,
     restoreWorkbenchSnapshot

@@ -18,7 +18,9 @@ describe('signalSourceDomainService', () => {
       name: '数字信号源',
       signalDomain: 'digital',
       digitalMode: 'boolean',
-      initialState: '0'
+      initialState: '0',
+      minValue: '0',
+      maxValue: '100'
     });
     expect(createSignalSourceProps('command')).toMatchObject({
       name: '指令信号源',
@@ -80,8 +82,8 @@ describe('signalSourceDomainService', () => {
   });
 
   it('summarizes each signal domain for canvas display', () => {
-    expect(summarizeSignalSource({ props: createSignalSourceProps('digital', { digitalMode: 'pulse', period: '20ms' }) }))
-      .toBe('数字 · pulse · 周期 20ms');
+    expect(summarizeSignalSource({ props: createSignalSourceProps('digital', { digitalMode: 'enum', initialState: '2' }) }))
+      .toBe('数字 · enum · 取值 2');
     expect(summarizeSignalSource({ props: createSignalSourceProps('command', { protocol: 'CAN', messageId: '0x120' }) }))
       .toBe('指令 · CAN · 0x120 · float32');
     expect(summarizeSignalSource({ props: createSignalSourceProps('analog', { waveType: 'sine', amplitude: '1.0', unit: 'V', frequency: '10Hz' }) }))

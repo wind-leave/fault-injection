@@ -143,6 +143,65 @@ describe('backend step simulation runtime', () => {
     expect(target.updateUI).toHaveBeenCalled();
   });
 
+  it('clears stale local samples when creating a backend session from an initialized simulation', async () => {
+    const target = createRuntimeTarget();
+    target.__GZ_SIM__.inited = true;
+    target.__GZ_SIM__.actual.scopeSamples = {
+      'scope-1': { ch1: [{ t: 9.9, actual: 999 }], ch2: [] }
+    };
+    target.__GZ_SIM__.reference.scopeSamples = {
+      'scope-1': { ch1: [{ t: 9.9, actual: 888 }], ch2: [] }
+    };
+    target.__GZ_SIM__.componentOutputs = {
+      time: [9.9],
+      steps: [
+        {
+          time: 9.9,
+          actual: {
+            'node-command-shaper': { output: 0.425779 },
+            'node-imu': { output: 0.095687 },
+            'node-error-sum': { output: 0.002059 }
+          },
+          reference: {}
+        }
+      ]
+    };
+    target.__GZ_BACKEND_SIMULATION__.stepSession.mockResolvedValueOnce({
+      status: 'success',
+      sessionId: 'session-1',
+      curves: {
+        time: [0],
+        channels: {
+          'scope-1.ch1.actual': [0.33],
+          'scope-1.ch1.reference': [0.33]
+        }
+      },
+      componentOutputs: {
+        time: [0],
+        steps: [
+          {
+            time: 0,
+            actual: {
+              'node-command-shaper': { output: 0.425779 },
+              'node-imu': { output: 0.095687 },
+              'node-error-sum': { output: 0.330092 }
+            },
+            reference: {}
+          }
+        ]
+      },
+      metrics: { sampleCount: 1, stepIndex: 1, time: 0.1, done: false }
+    });
+
+    installBackendStepSimulationRuntime(target);
+    await target.simStep();
+
+    expect(target.__GZ_SIM__.actual.scopeSamples['scope-1'].ch1).toEqual([{ t: 0, actual: 0.33 }]);
+    expect(target.__GZ_SIM__.reference.scopeSamples['scope-1'].ch1).toEqual([{ t: 0, actual: 0.33 }]);
+    expect(target.__GZ_SIM__.componentOutputs.time).toEqual([0]);
+    expect(target.__GZ_SIM__.componentOutputs.steps[0].actual['node-error-sum'].output).toBe(0.330092);
+  });
+
   it('deletes the backend session when simulation stops', async () => {
     const target = createRuntimeTarget();
 

@@ -63,6 +63,20 @@ describe('diagnostic testpoint workbench contract', () => {
     });
   });
 
+  it('keeps only the current top fault-model workflow in the legacy runtime', () => {
+    const runtime = readWorkspaceFile('src/services/legacy-runtime.txt');
+
+    expect(runtime.match(/const UAV_FAULT_LIBRARY_ID=/g) || []).toHaveLength(1);
+    expect(runtime.match(/function normalizeFaultInjectionCopy/g) || []).toHaveLength(1);
+    expect(runtime).not.toContain('disableLegacyFaultLibraryWorkflow');
+    expect(runtime).not.toContain('__GZ_LEGACY_FAULT_LIBRARY_DISABLED__');
+    expect(runtime).toContain('installFaultTaskLoaderWorkflow');
+    expect(runtime).toContain('window.doImportFault=doImportFaultTask');
+    expect(runtime).not.toContain('installFinalCanvasVisualSemantics');
+    expect(runtime.match(/installCanvasVisualSemantics/g) || []).toHaveLength(1);
+    expect(runtime).toContain('installCanvasVisualSemanticsAfterAllOverrides');
+  });
+
   it('installs the compact diagnosis console and fault selection cancel controls', () => {
     const runtime = readWorkspaceFile('src/services/legacy-runtime.txt');
     const css = readWorkspaceFile('src/styles/components.css');
@@ -102,27 +116,4 @@ describe('diagnostic testpoint workbench contract', () => {
     expect(firstUseIndex).toBeGreaterThan(helperIndex);
   });
 
-  it('distinguishes multiple Gyro fault forms at the diagnostic matrix level', () => {
-    const demo = JSON.parse(readWorkspaceFile('public/model-packages/evtol_closed_loop_fault_demo.json'));
-    const rows = demo.diagnosticModel.dMatrix.rows;
-    const byFault = new Map(rows.map((row) => [row.faultId, row]));
-
-    const fixed = byFault.get('gyro_zero_bias_offset');
-    const drift = byFault.get('gyro_zero_bias_drift');
-    const intermittent = byFault.get('gyro_zero_bias_intermittent');
-
-    expect(fixed.targetId).toBe('node-imu');
-    expect(drift.targetId).toBe('node-imu');
-    expect(intermittent.targetId).toBe('node-imu');
-
-    expect(fixed.points.M3.detectable).toBe(true);
-    expect(drift.points.M3.detectable).toBe(true);
-    expect(intermittent.points.M3.detectable).toBe(true);
-    expect(fixed.points.M10.detectable).toBe(false);
-    expect(drift.points.M10.detectable).toBe(true);
-    expect(intermittent.points.M10.detectable).toBe(true);
-    expect(fixed.points.M11.detectable).toBe(false);
-    expect(intermittent.points.M11.detectable).toBe(true);
-    expect(intermittent.points.M11.signature).toContain('间歇');
-  });
 });

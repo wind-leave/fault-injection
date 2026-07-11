@@ -1,6 +1,6 @@
 import unittest
 
-from backend.troubleshooting import TroubleshootingSession, build_troubleshooting_path
+from backend.troubleshooting import TroubleshootingSession, build_troubleshooting_path, build_troubleshooting_plan
 
 
 def sample_d_matrix():
@@ -77,6 +77,44 @@ class TroubleshootingAlgorithmTests(unittest.TestCase):
         self.assertEqual(path["faultId"], "target-fault")
         self.assertGreaterEqual(len(path["steps"]), 1)
         self.assertEqual(path["steps"][0]["pointCode"], "M1")
+
+    def test_builds_path_and_key_steps_with_the_backend_algorithm(self):
+        plan = build_troubleshooting_plan(sample_d_matrix(), "target-fault")
+
+        self.assertEqual(plan["source"], "backend-algorithm")
+        self.assertFalse(plan["isCustomized"])
+        self.assertEqual(plan["keySteps"][0]["action"], "measure")
+        self.assertIn("M1", plan["keySteps"][0]["text"])
+        self.assertEqual(plan["keySteps"][-1]["action"], "replaceComponent")
+        self.assertIn("IMU", plan["keySteps"][-1]["text"])
+        self.assertNotIn("确认故障对象", " ".join(item["text"] for item in plan["keySteps"]))
+
+    def test_generates_wire_replacement_for_edge_faults(self):
+        matrix = sample_d_matrix()
+        matrix["rows"][0].update({
+            "targetKind": "edge",
+            "targetEdgeId": "edge-command-controller",
+            "targetLabel": "指令到控制器连线",
+        })
+
+        plan = build_troubleshooting_plan(matrix, "target-fault")
+
+        self.assertEqual(plan["keySteps"][-1]["action"], "replaceWire")
+        self.assertEqual(plan["keySteps"][-1]["targetId"], "edge-command-controller")
+        self.assertIn("更换关键连线", plan["keySteps"][-1]["text"])
+
+    def test_generates_both_wire_and_device_replacement_for_combined_repair_targets(self):
+        matrix = sample_d_matrix()
+        matrix["rows"][0]["repairTargets"] = [
+            {"kind": "edge", "id": "edge-command-controller", "label": "指令到控制器连线"},
+            {"kind": "node", "id": "node-controller", "label": "姿态控制器"},
+        ]
+
+        plan = build_troubleshooting_plan(matrix, "target-fault")
+        actions = [step["action"] for step in plan["keySteps"]]
+
+        self.assertIn("replaceWire", actions)
+        self.assertIn("replaceComponent", actions)
 
     def test_updates_path_from_student_observations(self):
         session = TroubleshootingSession(sample_d_matrix(), "target-fault")

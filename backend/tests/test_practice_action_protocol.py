@@ -84,17 +84,16 @@ class PracticeActionProtocolTests(unittest.TestCase):
         self.assertEqual(context.exception.error_code, "INVALID_ACTION_SCHEMA")
         self.assertEqual(context.exception.field, "target.type")
 
-    def test_rejects_missing_fault_id(self):
-        with self.assertRaises(SimulationBackendError) as context:
-            normalize_practice_action({
-                "protocolVersion": "1.0",
-                "operationId": "op-003",
-                "actionType": "replaceComponent",
-                "target": {"type": "component", "id": "sim-1"},
-            })
+    def test_normalizes_replacement_without_fault_id(self):
+        normalized = normalize_practice_action({
+            "protocolVersion": "1.0",
+            "operationId": "op-003",
+            "actionType": "replaceComponent",
+            "target": {"type": "component", "id": "sim-1"},
+        })
 
-        self.assertEqual(context.exception.error_code, "INVALID_ACTION_SCHEMA")
-        self.assertEqual(context.exception.field, "faultId")
+        self.assertEqual(normalized["targetId"], "sim-1")
+        self.assertNotIn("faultId", normalized)
 
     def test_rejects_wrong_target_type_for_action(self):
         with self.assertRaises(SimulationBackendError) as context:

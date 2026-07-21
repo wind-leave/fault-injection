@@ -56,6 +56,7 @@ function createRuntimeTarget() {
     simStop: vi.fn(),
     updateUI: vi.fn(),
     renderScopeWindows: vi.fn(),
+    renderSpectrumInstrument: vi.fn(),
     publishSimulationRuntimeSummary: vi.fn(),
     setInterval: vi.fn(() => 123),
     clearInterval: vi.fn()
@@ -127,6 +128,145 @@ describe('backend step simulation runtime', () => {
     expect(target.__GZ_SIM__.componentOutputs.steps[1].reference['sim-1'].output).toBe(1);
   });
 
+  it('records backend component outputs for a connected spectrum analyzer', () => {
+    const target = createRuntimeTarget();
+    target.__GZ_STATE__.canvases = {
+      'canvas-root': {
+        nodes: [
+          { id: 'source-1', type: 'signal_source', outputs: [{ name: 'out' }] },
+          { id: 'spectrum-1', type: 'instrument_spectrum' }
+        ],
+        edges: [{
+          id: 'edge-source-spectrum',
+          sourceNodeId: 'source-1',
+          sourcePortIndex: 0,
+          targetNodeId: 'spectrum-1',
+          targetPortIndex: 0
+        }]
+      }
+    };
+
+    appendBackendSimulationChunk(target, {
+      curves: { time: [0, 0.1], channels: {} },
+      componentOutputs: {
+        time: [0, 0.1],
+        steps: [
+          { time: 0, actual: { 'source-1': { out: 1 } }, reference: { 'source-1': { out: 1 } } },
+          { time: 0.1, actual: { 'source-1': { out: 1.5 } }, reference: { 'source-1': { out: 1 } } }
+        ]
+      },
+      metrics: { sampleCount: 2, stepIndex: 2, time: 0.2, done: false }
+    });
+
+    expect(target.__GZ_SIM__.actual.instrumentSamples['spectrum-1']).toEqual([
+      { t: 0, actual: 1 },
+      { t: 0.1, actual: 1.5 }
+    ]);
+    expect(target.__GZ_SIM__.reference.instrumentSamples['spectrum-1']).toBeUndefined();
+  });
+
+  it('measures a component input for voltage, an edge value for current, and 1 ohm for resistance', () => {
+    const target = createRuntimeTarget();
+    target.__GZ_STATE__.canvases = {
+      'canvas-root': {
+        nodes: [
+          { id: 'positive-source', type: 'signal_source', outputs: [{ name: 'out' }] },
+          { id: 'target-component', type: 'simulation_block', inputs: [{ name: 'in' }], outputs: [{ name: 'out' }] },
+          {
+            id: 'meter-1',
+            type: 'instrument_multimeter',
+            props: {
+              measurementMode: '直流电压',
+              positiveLead: { nodeId: 'target-component', direction: 'input', portIndex: 0 },
+              negativeLead: { nodeId: 'target-component', direction: 'output', portIndex: 0 }
+            }
+          }
+        ],
+        edges: [{
+          id: 'edge-positive-component',
+          sourceNodeId: 'positive-source',
+          sourcePortIndex: 0,
+          targetNodeId: 'target-component',
+          targetPortIndex: 0
+        }]
+      }
+    };
+    const chunk = {
+      curves: { time: [0], channels: {} },
+      componentOutputs: {
+        time: [0],
+        steps: [{
+          time: 0,
+          actual: { 'positive-source': { out: 12 } },
+          reference: { 'positive-source': { out: 10 } }
+        }]
+      },
+      metrics: { sampleCount: 1, stepIndex: 1, time: 0.1, done: false }
+    };
+
+    appendBackendSimulationChunk(target, chunk);
+    expect(target.__GZ_SIM__.actual.instrumentSamples['meter-1']).toEqual([
+      { t: 0, actual: 12, reference: 10 }
+    ]);
+
+    target.__GZ_STATE__.canvases['canvas-root'].nodes.find((node) => node.id === 'meter-1').props = {
+      measurementMode: '直流电流',
+      positiveLead: { nodeId: 'positive-source', direction: 'output', portIndex: 0 },
+      negativeLead: { nodeId: 'target-component', direction: 'input', portIndex: 0 }
+    };
+    appendBackendSimulationChunk(target, {
+      ...chunk,
+      curves: { time: [0.1], channels: {} },
+      componentOutputs: {
+        ...chunk.componentOutputs,
+        time: [0.1],
+        steps: [{ ...chunk.componentOutputs.steps[0], time: 0.1 }]
+      },
+      metrics: { sampleCount: 1, stepIndex: 2, time: 0.2, done: false }
+    });
+
+    expect(target.__GZ_SIM__.actual.instrumentSamples['meter-1']).toEqual([
+      { t: 0, actual: 12, reference: 10 },
+      { t: 0.1, actual: 12, reference: 10 }
+    ]);
+
+    target.__GZ_STATE__.canvases['canvas-root'].nodes.find((node) => node.id === 'meter-1').props = {
+      measurementMode: '电阻',
+      positiveLead: { nodeId: 'target-component', direction: 'input', portIndex: 0 },
+      negativeLead: { nodeId: 'target-component', direction: 'output', portIndex: 0 }
+    };
+    appendBackendSimulationChunk(target, {
+      ...chunk,
+      curves: { time: [0.2], channels: {} },
+      componentOutputs: { ...chunk.componentOutputs, time: [0.2], steps: [{ ...chunk.componentOutputs.steps[0], time: 0.2 }] }
+    });
+    expect(target.__GZ_SIM__.actual.instrumentSamples['meter-1'].at(-1)).toEqual({ t: 0.2, actual: 1, reference: 1 });
+
+    target.__GZ_STATE__.canvases['canvas-root'].nodes.find((node) => node.id === 'meter-1').props = {
+      measurementMode: '直流电流',
+      positiveLead: { nodeId: 'target-component', direction: 'input', portIndex: 0 },
+      negativeLead: { nodeId: 'target-component', direction: 'output', portIndex: 0 }
+    };
+    appendBackendSimulationChunk(target, {
+      ...chunk,
+      curves: { time: [0.3], channels: {} },
+      componentOutputs: { ...chunk.componentOutputs, time: [0.3], steps: [{ ...chunk.componentOutputs.steps[0], time: 0.3 }] }
+    });
+    expect(target.__GZ_SIM__.actual.instrumentSamples['meter-1']).toHaveLength(3);
+
+    target.__GZ_STATE__.canvases['canvas-root'].nodes.find((node) => node.id === 'meter-1').props = {
+      measurementMode: '直流电流',
+      positiveLead: { nodeId: 'target-component', direction: 'input', portIndex: 0 },
+      negativeLead: { nodeId: 'positive-source', direction: 'output', portIndex: 0 }
+    };
+    appendBackendSimulationChunk(target, {
+      ...chunk,
+      curves: { time: [0.4], channels: {} },
+      componentOutputs: { ...chunk.componentOutputs, time: [0.4], steps: [{ ...chunk.componentOutputs.steps[0], time: 0.4 }] }
+    });
+    expect(target.__GZ_SIM__.actual.instrumentSamples['meter-1'].at(-1)).toEqual({ t: 0.4, actual: -12, reference: -10 });
+  });
+
   it('overrides simStep to create a backend session and append one step', async () => {
     const target = createRuntimeTarget();
 
@@ -140,6 +280,7 @@ describe('backend step simulation runtime', () => {
     expect(target.__GZ_SIM__.reference.scopeSamples['scope-1'].ch2.at(-1)).toEqual({ t: 0, actual: 2.0 });
     expect(target.__GZ_SIM__.stepIndex).toBe(1);
     expect(target.__GZ_STATE__.step).toBe(3);
+    expect(target.renderSpectrumInstrument).toHaveBeenCalled();
     expect(target.updateUI).toHaveBeenCalled();
   });
 

@@ -10,6 +10,7 @@ import {
 import {
   normalizeModelStoreSnapshot
 } from './modelStore.js';
+import { lockSimulationInterfaces } from './simulationInterfaceLockService.js';
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -83,6 +84,133 @@ function collectSnapshotNodes(snapshot) {
   }
 
   return nodes;
+}
+
+function collectSnapshotEdges(snapshot) {
+  const edges = [];
+  const seenEdgeIds = new Set();
+  const appendEdges = (items) => {
+    if (!Array.isArray(items)) {
+      return;
+    }
+
+    items.forEach((edge) => {
+      if (!isPlainObject(edge)) {
+        return;
+      }
+
+      const edgeId = hasUsableText(edge.id) ? edge.id : null;
+      if (edgeId && seenEdgeIds.has(edgeId)) {
+        return;
+      }
+
+      if (edgeId) {
+        seenEdgeIds.add(edgeId);
+      }
+      edges.push(edge);
+    });
+  };
+
+  appendEdges(snapshot?.modelEdges);
+
+  if (isPlainObject(snapshot?.canvases)) {
+    Object.values(snapshot.canvases).forEach((canvas) => {
+      appendEdges(canvas?.edges);
+    });
+  }
+
+  return edges;
+}
+
+function faultModelIdFromRecord(record = {}) {
+  return record?.modelId
+    || record?.faultModelId
+    || record?.faultTypeId
+    || record?.faultId
+    || '';
+}
+
+function createEmbeddedFaultModel(record = {}) {
+  const payload = isPlainObject(record?.injectedFault) ? record.injectedFault : record;
+  const id = faultModelIdFromRecord(payload) || faultModelIdFromRecord(record);
+  if (!hasUsableText(id)) {
+    return null;
+  }
+
+  return {
+    id,
+    name: payload.name
+      || payload.displayName
+      || record.name
+      || record.displayName
+      || record.faultModelName
+      || id,
+    layer: payload.layer || payload.layerKey || record.layer || record.layerKey || 'electrical',
+    layerKey: payload.layerKey || payload.layer || record.layerKey || record.layer || 'electrical',
+    modelClass: payload.modelClass || payload.faultClass || payload.faultKind
+      || record.modelClass || record.faultClass || record.faultKind || '',
+    runtimeBehavior: payload.runtimeBehavior || record.runtimeBehavior || '',
+    defaultParameters: clone(payload.parameters || record.parameters || {})
+  };
+}
+
+function collectEmbeddedFaultModels(snapshot = {}) {
+  const records = [
+    ...(Array.isArray(snapshot.faultInstances) ? snapshot.faultInstances : []),
+    ...(Array.isArray(snapshot.faultTags) ? snapshot.faultTags : [])
+  ];
+
+  [...collectSnapshotNodes(snapshot), ...collectSnapshotEdges(snapshot)].forEach((target) => {
+    if (isPlainObject(target?.injectedFault)) {
+      records.push(target.injectedFault);
+    }
+    if (Array.isArray(target?.faultBindings)) {
+      records.push(...target.faultBindings);
+    }
+  });
+
+  const models = new Map();
+  records.forEach((record) => {
+    const model = createEmbeddedFaultModel(record);
+    // Later records come from the bound target itself and normally carry the
+    // complete runtime payload, unlike the compact faultInstances entry.
+    if (model) {
+      models.set(model.id, model);
+    }
+  });
+
+  return Array.from(models.values());
+}
+
+function embedReferencedFaultModels(pkg = {}) {
+  const nextPackage = clone(pkg ?? {});
+  const existingLibrary = Array.isArray(nextPackage.faultLibrary) ? nextPackage.faultLibrary : [];
+  const existingIds = new Set();
+
+  const registerIds = (models) => {
+    if (!Array.isArray(models)) {
+      return;
+    }
+    models.forEach((model) => {
+      if (isPlainObject(model) && hasUsableText(model.id)) {
+        existingIds.add(model.id);
+      }
+    });
+  };
+
+  registerIds(existingLibrary);
+  registerIds(nextPackage.diagnosticModel?.faultCases);
+  registerIds(nextPackage.workbenchSnapshot?.importedFaultModels);
+
+  const embeddedModels = collectEmbeddedFaultModels(nextPackage.workbenchSnapshot);
+  const missingModels = embeddedModels.filter((model) => !existingIds.has(model.id));
+  if (missingModels.length > 0) {
+    nextPackage.faultLibrary = [...existingLibrary, ...missingModels];
+  } else if (Array.isArray(nextPackage.faultLibrary)) {
+    nextPackage.faultLibrary = existingLibrary;
+  }
+
+  return nextPackage;
 }
 
 function mapSnapshotNodes(snapshot, transformNode) {
@@ -429,8 +557,12 @@ export function createFlightModelPackageDescriptor(pkg = {}) {
   };
 }
 
-export function applyFlightModelPackage(pkg) {
-  const validation = validateFlightModelPackage(pkg);
+export function applyFlightModelPackage(pkg, { existingSnapshot = null } = {}) {
+  // Older workbench exports stored generated fault instance IDs only in the
+  // snapshot. Rebuild their lightweight model definitions before validation so
+  // those packages remain importable, while new exports are self-contained.
+  const normalizedPackage = embedReferencedFaultModels(pkg);
+  const validation = validateFlightModelPackage(normalizedPackage);
   if (!validation.ok) {
     return {
       ok: false,
@@ -438,12 +570,12 @@ export function applyFlightModelPackage(pkg) {
     };
   }
 
-  const pythonModules = clone(Array.isArray(pkg.pythonModules) ? pkg.pythonModules : []);
-  const packageFaultInstances = Array.isArray(pkg.faultInstances)
-    ? pkg.faultInstances
-    : pkg.workbenchSnapshot?.faultInstances;
+  const pythonModules = clone(Array.isArray(normalizedPackage.pythonModules) ? normalizedPackage.pythonModules : []);
+  const packageFaultInstances = Array.isArray(normalizedPackage.faultInstances)
+    ? normalizedPackage.faultInstances
+    : normalizedPackage.workbenchSnapshot?.faultInstances;
   const restoredSnapshot = restoreWorkbenchSnapshot({
-    ...pkg.workbenchSnapshot,
+    ...normalizedPackage.workbenchSnapshot,
     faultInstances: packageFaultInstances
   });
   const hydratedSnapshot = hydrateSnapshotBindings(restoredSnapshot, pythonModules);
@@ -456,15 +588,16 @@ export function applyFlightModelPackage(pkg) {
   }
 
   const normalizedSnapshot = normalizeModelStoreSnapshot(hydratedSnapshot.snapshot, {
-    faultCapabilityMap: pkg.faultCapabilityMap
+    faultCapabilityMap: normalizedPackage.faultCapabilityMap
   });
+  const lockedSnapshot = lockSimulationInterfaces(normalizedSnapshot, { existingSnapshot });
 
   return {
     ok: true,
-    snapshot: normalizedSnapshot,
-    descriptor: createFlightModelPackageDescriptor(pkg),
-    faultLibrary: clone(Array.isArray(pkg.faultLibrary) ? pkg.faultLibrary : []),
-    diagnosticModel: isPlainObject(pkg.diagnosticModel) ? clone(pkg.diagnosticModel) : null,
+    snapshot: lockedSnapshot,
+    descriptor: createFlightModelPackageDescriptor(normalizedPackage),
+    faultLibrary: clone(Array.isArray(normalizedPackage.faultLibrary) ? normalizedPackage.faultLibrary : []),
+    diagnosticModel: isPlainObject(normalizedPackage.diagnosticModel) ? clone(normalizedPackage.diagnosticModel) : null,
     pythonModules
   };
 }
@@ -476,7 +609,7 @@ export function buildFlightModelPackage({ meta = {}, snapshot = {}, faultLibrary
   const exportedSnapshot = mapSnapshotNodes(normalizedSnapshot, exportSimulationNode);
   const pythonModulesById = collectPythonModulesFromSnapshot(normalizedSnapshot);
 
-  return {
+  return embedReferencedFaultModels({
     schemaVersion: FLIGHT_MODEL_SCHEMA_VERSION,
     packageType: FLIGHT_MODEL_PACKAGE_TYPE,
     modelId: meta.modelId ?? null,
@@ -492,7 +625,7 @@ export function buildFlightModelPackage({ meta = {}, snapshot = {}, faultLibrary
     faultLibrary: clone(faultLibrary ?? []),
     faultInstances: clone(Array.isArray(normalizedSnapshot.faultInstances) ? normalizedSnapshot.faultInstances : []),
     workbenchSnapshot: exportedSnapshot
-  };
+  });
 }
 
 export function exportFlightModelPackage({ meta = {}, state = {}, faultLibrary = [] } = {}) {

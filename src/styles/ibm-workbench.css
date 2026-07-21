@@ -2111,6 +2111,22 @@ header{
   font-weight:600;
 }
 
+.props-fault-card--name-only{
+  display:flex;
+  align-items:center;
+  min-height:52px;
+  padding:0 16px;
+  border-left:3px solid var(--red);
+  background:#fff7f7;
+}
+
+.props-fault-card--name-only strong{
+  color:#9f2020;
+  font-size:14px;
+  font-weight:700;
+  line-height:1.4;
+}
+
 .props-fault-card span{
   color:var(--text2);
   font-size:11px;

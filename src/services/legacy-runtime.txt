@@ -24,6 +24,7 @@ const S={
   nodeSeq:0,
   edgeSeq:0,
   dragType:null,
+  dragPaletteKey:null,
   activeLineType:'normal',
   canvasScale:1,
   canvasOffsetX:0,
@@ -53,6 +54,8 @@ S.canvasTrail=['canvas-root'];
 S.canvases={};
 
 const CANVAS_STAGE={width:2400,height:1500,minScale:0.3,maxScale:1.8,nodePadding:24,nodeMinY:24};
+const CANVAS_STAGE_DEFAULT_SIZE={width:2400,height:1500};
+const CANVAS_STAGE_EXPANSION={step:480,edgeThreshold:144,trailingSpace:320};
 const POINTER_DRAG_THRESHOLD=6;
 const SCOPE_WINDOW_LAYOUT={defaultWidth:560,estimatedHeight:356,gutter:16,reservedTop:96,cascadeX:36,cascadeY:32};
 const SCOPE_WINDOW_DEFAULT_SECONDS=4;
@@ -1554,6 +1557,51 @@ function getCanvasStage(){
   return document.getElementById('canvas-stage');
 }
 
+function syncCanvasStageDimensions(){
+  const stage=getCanvasStage();
+  if(stage){
+    stage.style.width=`${CANVAS_STAGE.width}px`;
+    stage.style.height=`${CANVAS_STAGE.height}px`;
+  }
+  document.getElementById('edge-layer')?.setAttribute('viewBox',`0 0 ${CANVAS_STAGE.width} ${CANVAS_STAGE.height}`);
+  document.getElementById('canvas-edge-control-layer')?.setAttribute('viewBox',`0 0 ${CANVAS_STAGE.width} ${CANVAS_STAGE.height}`);
+}
+
+function resetCanvasStageSize(){
+  CANVAS_STAGE.width=CANVAS_STAGE_DEFAULT_SIZE.width;
+  CANVAS_STAGE.height=CANVAS_STAGE_DEFAULT_SIZE.height;
+  syncCanvasStageDimensions();
+}
+
+function expandCanvasStageForNode(node,nextX,nextY){
+  if(!node){return false;}
+  const right=nextX+(node.w||0)+CANVAS_STAGE.nodePadding;
+  const bottom=nextY+(node.h||0)+CANVAS_STAGE.nodePadding;
+  let changed=false;
+  if(right>=CANVAS_STAGE.width-CANVAS_STAGE_EXPANSION.edgeThreshold){
+    const required=right+CANVAS_STAGE_EXPANSION.trailingSpace;
+    CANVAS_STAGE.width=Math.max(
+      CANVAS_STAGE.width+CANVAS_STAGE_EXPANSION.step,
+      Math.ceil(required/CANVAS_STAGE_EXPANSION.step)*CANVAS_STAGE_EXPANSION.step
+    );
+    changed=true;
+  }
+  if(bottom>=CANVAS_STAGE.height-CANVAS_STAGE_EXPANSION.edgeThreshold){
+    const required=bottom+CANVAS_STAGE_EXPANSION.trailingSpace;
+    CANVAS_STAGE.height=Math.max(
+      CANVAS_STAGE.height+CANVAS_STAGE_EXPANSION.step,
+      Math.ceil(required/CANVAS_STAGE_EXPANSION.step)*CANVAS_STAGE_EXPANSION.step
+    );
+    changed=true;
+  }
+  if(changed){
+    syncCanvasStageDimensions();
+    clampCanvasOffset();
+    applyCanvasTransform();
+  }
+  return changed;
+}
+
 function getEdgeLabel(edge){
   if(edge.lineType==='can'&&edge.injectedFault?.faultKind){
     return `CAN · ${edge.injectedFault.faultKind}`;
@@ -2262,8 +2310,19 @@ function renderEdges(){
   });
 
   if(S.pendingConnection){
-    const sourceNode=getNode(S.pendingConnection.sourceNodeId);
-    const sourcePort=sourceNode?getPortInfo(sourceNode,'output',S.pendingConnection.sourcePortIndex||0):null;
+    const measurementTarget=S.pendingConnection.measurementTargetNodeId
+      ?{
+        nodeId:S.pendingConnection.measurementTargetNodeId,
+        portIndex:S.pendingConnection.measurementTargetPortIndex||0,
+        direction:'input'
+      }
+      :{
+        nodeId:S.pendingConnection.sourceNodeId,
+        portIndex:S.pendingConnection.sourcePortIndex||0,
+        direction:'output'
+      };
+    const sourceNode=getNode(measurementTarget.nodeId);
+    const sourcePort=sourceNode?getPortInfo(sourceNode,measurementTarget.direction,measurementTarget.portIndex):null;
     if(sourcePort){
       preview.style.display='block';
       preview.setAttribute('d',buildEdgePath(sourcePort,{
@@ -2318,6 +2377,25 @@ function handlePortClick(event,nodeId,direction,index){
   const port=getPortInfo(node,direction,index);
   if(!port){return;}
 
+  const pendingLead=S.pendingConnection?.measurementMeterId
+    ?S.pendingConnection
+    :null;
+  if(pendingLead){
+    const meter=getNode(pendingLead.measurementMeterId);
+    if(!meter||meter.type!=='instrument_multimeter'||meter.id===nodeId){
+      clearPendingConnection();
+      return;
+    }
+    meter.props[pendingLead.measurementLead]={nodeId,direction,portIndex:index};
+    clearPendingConnection();
+    markTopologyDirty('system');
+    renderModelNodes();
+    if(S.selBlk===meter.id){renderPropertyPanel(meter);}
+    updateUI();
+    toast(pendingLead.measurementLead==='positiveLead'?'正表笔已连接':'负表笔已连接','s');
+    return;
+  }
+
   if(direction==='output'){
     S.pendingConnection={
       sourceNodeId:nodeId,
@@ -2331,6 +2409,17 @@ function handlePortClick(event,nodeId,direction,index){
   }
 
   if(!S.pendingConnection){
+    if(node.type==='instrument_multimeter'){
+      S.pendingConnection={
+        measurementMeterId:nodeId,
+        measurementLead:index===0?'positiveLead':'negativeLead',
+        lineType:S.activeLineType,
+        x:port.x,
+        y:port.y
+      };
+      renderEdges();
+      return;
+    }
     toast('请先从输出端口开始连线','w');
     return;
   }
@@ -2619,7 +2708,16 @@ function deleteSelectedNode(){
   renderPropertyPanel(null);
   syncConfigTargets();
   updateUI();
+  restoreSimulationPaletteComponent(node);
   toast(`模块“${removedName}”已删除${removedEdges?`，并移除 ${removedEdges} 条连线`:''}`,'s');
+}
+
+function restoreSimulationPaletteComponent(node){
+  if(node?.type!=='simulation_block'){return;}
+  const paletteKey=node.paletteKey||node.templateId||node.type;
+  if(paletteKey){
+    window.dispatchEvent(new CustomEvent('gz:palette-component-deleted',{detail:{paletteKey}}));
+  }
 }
 
 function deleteSelectedEdge(){
@@ -2754,6 +2852,7 @@ function initPaletteDrag(){
     item.addEventListener('dragstart',event=>{
       const type=item.dataset.component||'';
       S.dragType=type;
+      S.dragPaletteKey=item.dataset.paletteKey||type;
       item.classList.add('citem-dragging');
       const faultProfile=getFaultInjectorDragProfile(type);
       if(faultProfile&&window.showCompatibleFaultDropTargets){
@@ -2761,9 +2860,11 @@ function initPaletteDrag(){
       }
       event.dataTransfer.effectAllowed='copy';
       event.dataTransfer.setData('text/plain',type);
+      event.dataTransfer.setData('application/x-gz-palette-key',S.dragPaletteKey);
     });
     item.addEventListener('dragend',()=>{
       S.dragType=null;
+      S.dragPaletteKey=null;
       item.classList.remove('citem-dragging');
       document.getElementById('diagram').classList.remove('dragover');
       if(window.clearCompatibleFaultDropTargets){
@@ -2796,6 +2897,7 @@ function initCanvasDrop(){
     diagram.classList.remove('dragover');
     if(!S.sysLoaded){toast('请先导入系统模型','w');return;}
     const type=event.dataTransfer.getData('text/plain')||S.dragType;
+    const paletteKey=event.dataTransfer.getData('application/x-gz-palette-key')||S.dragPaletteKey||type;
     if(!COMPONENT_LIBRARY[type]){return;}
     const point=clientToStagePoint(event.clientX,event.clientY);
     const faultProfile=getFaultInjectorDragProfile(type);
@@ -2823,7 +2925,11 @@ function initCanvasDrop(){
         return;
       }
     }
-    createNode(type,point.x,point.y);
+    const node=createNode(type,point.x,point.y);
+    if(node?.type==='simulation_block'&&paletteKey){
+      node.paletteKey=paletteKey;
+      window.dispatchEvent(new CustomEvent('gz:palette-component-created',{detail:{paletteKey}}));
+    }
   });
 }
 
@@ -2888,8 +2994,11 @@ function bindCanvasInteractions(){
       }
       const deltaX=(event.clientX-NODE_DRAG.startX)/S.canvasScale;
       const deltaY=(event.clientY-NODE_DRAG.startY)/S.canvasScale;
-      node.x=clamp(Math.round(NODE_DRAG.originX+deltaX),CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-node.w-CANVAS_STAGE.nodePadding);
-      node.y=clamp(Math.round(NODE_DRAG.originY+deltaY),CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-node.h-CANVAS_STAGE.nodePadding);
+      const nextX=Math.round(NODE_DRAG.originX+deltaX);
+      const nextY=Math.round(NODE_DRAG.originY+deltaY);
+      expandCanvasStageForNode(node,nextX,nextY);
+      node.x=clamp(nextX,CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-node.w-CANVAS_STAGE.nodePadding);
+      node.y=clamp(nextY,CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-node.h-CANVAS_STAGE.nodePadding);
       updateNodePositionDOM(node);
       renderEdges();
       return;
@@ -3860,8 +3969,180 @@ function getInstrumentIncomingEdges(node){
   return getIncomingEdgesForNode(node.id);
 }
 
+function getMultimeterMeasurementApi(){
+  return window.__GZ_MULTIMETER_MEASUREMENT__||{};
+}
+
+function getMultimeterTargetKind(node){
+  const storedKind=String(node?.props?.measurementTargetKind||'').trim();
+  if(storedKind==='node'||storedKind==='edge'){return storedKind;}
+  const api=getMultimeterMeasurementApi();
+  return typeof api.getMultimeterTargetKind==='function'
+    ?api.getMultimeterTargetKind(node?.props?.measurementMode)
+    :(String(node?.props?.measurementMode||'').includes('电流')?'edge':'node');
+}
+
+function getMultimeterMeasurementKind(node){
+  const api=getMultimeterMeasurementApi();
+  return typeof api.getMultimeterMeasurementKind==='function'
+    ?api.getMultimeterMeasurementKind(node?.props?.measurementMode)
+    :(String(node?.props?.measurementMode||'').includes('电阻')?'resistance':String(node?.props?.measurementMode||'').includes('电流')?'current':'voltage');
+}
+
+function getMultimeterTarget(node){
+  if(node?.type!=='instrument_multimeter'){return null;}
+  const targetId=String(node.props?.measurementTargetId||'').trim();
+  if(!targetId){return null;}
+  const canvasId=typeof findCanvasIdForNodeId==='function'?findCanvasIdForNodeId(node.id,S.activeCanvasId):S.activeCanvasId;
+  const canvas=getCanvasRecord(canvasId);
+  if(getMultimeterTargetKind(node)==='edge'){
+    return canvas?.edges?.find(edge=>edge.id===targetId)||null;
+  }
+  return canvas?.nodes?.find(item=>item.id===targetId&&item.id!==node.id&&item.type!=='instrument_multimeter')||null;
+}
+
+function getMultimeterTargetEntries(node){
+  const canvasId=typeof findCanvasIdForNodeId==='function'?findCanvasIdForNodeId(node.id,S.activeCanvasId):S.activeCanvasId;
+  const canvas=getCanvasRecord(canvasId)||{nodes:[],edges:[]};
+  const nodes=(canvas.nodes||[])
+    .filter(item=>item.id!==node.id&&!String(item.type||'').startsWith('instrument_'))
+    .map(item=>({id:item.id,targetKind:'node',label:`组件 · ${item.props?.name||item.id}`}));
+  const edges=(canvas.edges||[])
+    .map(edge=>({id:edge.id,targetKind:'edge',label:`连线 · ${edge.label||edge.signalId||edge.id}`}));
+  return [...nodes,...edges];
+}
+
+function buildMultimeterTargetOptions(node){
+  const selected=`${getMultimeterTargetKind(node)}|${String(node.props?.measurementTargetId||'')}`;
+  return `<option value="">请选择测量对象</option>${getMultimeterTargetEntries(node).map(item=>{const value=`${item.targetKind}|${item.id}`;return `<option value="${escapeHtml(value)}" ${value===selected?'selected':''}>${escapeHtml(item.label)}</option>`;}).join('')}`;
+}
+
+function parseMultimeterTargetOption(value){
+  const [targetKind,...idParts]=String(value||'').split('|');
+  const id=idParts.join('|').trim();
+  return targetKind==='node'||targetKind==='edge'?{targetKind,targetId:id}:{targetKind:'',targetId:''};
+}
+
+function getMultimeterLeadPair(node){
+  const api=getMultimeterMeasurementApi();
+  const canvasId=typeof findCanvasIdForNodeId==='function'?findCanvasIdForNodeId(node.id,S.activeCanvasId):S.activeCanvasId;
+  const canvas=getCanvasRecord(canvasId)||{nodes:[],edges:[]};
+  return typeof api.evaluateMultimeterLeads==='function'
+    ?api.evaluateMultimeterLeads({positiveLead:node.props?.positiveLead,negativeLead:node.props?.negativeLead},canvas.nodes||[],canvas.edges||[])
+    :{valid:false,reason:'measurement-api-unavailable'};
+}
+
+function getMultimeterLeadEntries(node){
+  const canvasId=typeof findCanvasIdForNodeId==='function'?findCanvasIdForNodeId(node.id,S.activeCanvasId):S.activeCanvasId;
+  const canvas=getCanvasRecord(canvasId)||{nodes:[]};
+  return (canvas.nodes||[])
+    .filter(item=>item.id!==node.id&&!String(item.type||'').startsWith('instrument_'))
+    .flatMap(item=>{
+      const ports=getNodePorts(item);
+      const name=item.props?.name||item.id;
+      return [
+        ...(ports.inputs||[]).map((port,index)=>({nodeId:item.id,direction:'input',portIndex:index,label:`${name} · 输入 · ${port.label||index+1}`})),
+        ...(ports.outputs||[]).map((port,index)=>({nodeId:item.id,direction:'output',portIndex:index,label:`${name} · 输出 · ${port.label||index+1}`}))
+      ];
+    });
+}
+
+function buildMultimeterLeadOptions(node,lead){
+  const api=getMultimeterMeasurementApi();
+  const selected=typeof api.encodeMultimeterLead==='function'?api.encodeMultimeterLead(lead):'';
+  return `<option value="">请选择连接端点</option>${getMultimeterLeadEntries(node).map(item=>{const value=typeof api.encodeMultimeterLead==='function'?api.encodeMultimeterLead(item):'';return `<option value="${escapeHtml(value)}" ${value===selected?'selected':''}>${escapeHtml(item.label)}</option>`;}).join('')}`;
+}
+
+function parseMultimeterLeadOption(value){
+  const api=getMultimeterMeasurementApi();
+  return typeof api.parseMultimeterLead==='function'
+    ?api.parseMultimeterLead(value)
+    :{nodeId:'',direction:'',portIndex:0};
+}
+
+function getMultimeterLeadBinding(){
+  const binding=window.__GZ_MULTIMETER_LEAD_BINDING__;
+  return binding&&binding.meterId&&['positiveLead','negativeLead'].includes(binding.lead)
+    ?binding
+    :null;
+}
+
+function clearMultimeterLeadBinding(){
+  delete window.__GZ_MULTIMETER_LEAD_BINDING__;
+}
+
+window.beginMultimeterLeadBinding=function(meterId,lead){
+  const meter=getNode(meterId);
+  if(!meter||meter.type!=='instrument_multimeter'||!['positiveLead','negativeLead'].includes(lead)){return;}
+  window.__GZ_MULTIMETER_LEAD_BINDING__={meterId,lead};
+  selectNode(meterId);
+  toast(lead==='positiveLead'?'请选择正表笔要连接的组件端口或连线端点':'请选择负表笔要连接的组件端口或连线端点','s');
+};
+
+function bindMultimeterLeadToPort(nodeId,direction,portIndex){
+  const binding=getMultimeterLeadBinding();
+  if(!binding){return false;}
+  const meter=getNode(binding.meterId);
+  if(!meter||meter.type!=='instrument_multimeter'||meter.id===nodeId){
+    clearMultimeterLeadBinding();
+    return false;
+  }
+  meter.props[binding.lead]={nodeId,direction,portIndex};
+  clearMultimeterLeadBinding();
+  markTopologyDirty('system');
+  renderModelNodes();
+  if(S.selBlk===meter.id){renderPropertyPanel(meter);}
+  updateUI();
+  toast(binding.lead==='positiveLead'?'正表笔已连接':'负表笔已连接','s');
+  return true;
+}
+
+function getMultimeterTargetLabel(node){
+  const target=getMultimeterTarget(node);
+  if(!target){return '未选择测量对象';}
+  return target.sourceNodeId&&target.targetNodeId
+    ?(target.label||target.signalId||target.id)
+    :(target.props?.name||target.id);
+}
+
+function resolveMultimeterTargetReading(node,modeKey,time,dt,cache,visiting){
+  const pair=getMultimeterLeadPair(node);
+  if(!pair.valid){return {value:NaN,dropped:false};}
+  const measurementKind=getMultimeterMeasurementKind(node);
+  const canvasId=typeof findCanvasIdForNodeId==='function'?findCanvasIdForNodeId(node.id,S.activeCanvasId):S.activeCanvasId;
+  const canvas=getCanvasRecord(canvasId)||{edges:[]};
+  if(measurementKind==='current'){
+    if(pair.targetKind!=='edge'){return {value:NaN,dropped:false};}
+    const edge=(canvas.edges||[]).find(item=>item.id===pair.edgeId);
+    if(!edge){return {value:NaN,dropped:false};}
+    const sourceValue=resolveNodeOutput(edge.sourceNodeId,edge.sourcePortIndex||0,modeKey,time,dt,cache,visiting);
+    const value=transmitEdgeSignal(edge,sourceValue,modeKey,time);
+    return {value:Number.isFinite(value)?value*pair.polarity:NaN,dropped:Boolean(SIM[modeKey]?.edgeStates?.[edge.id]?.lastTransmissionDropped)};
+  }
+  if(pair.targetKind!=='component'){return {value:NaN,dropped:false};}
+  if(measurementKind==='resistance'||measurementKind==='continuity'){
+    return {value:pair.polarity,dropped:false};
+  }
+  const edge=(canvas.edges||[])
+    .filter(item=>item.targetNodeId===pair.componentNodeId&&(item.targetPortIndex||0)===pair.inputPortIndex)
+    .sort((left,right)=>String(left.id).localeCompare(String(right.id)))[0];
+  if(!edge){return {value:NaN,dropped:false};}
+  const sourceValue=resolveNodeOutput(edge.sourceNodeId,edge.sourcePortIndex||0,modeKey,time,dt,cache,visiting);
+  const value=transmitEdgeSignal(edge,sourceValue,modeKey,time);
+  return {value:Number.isFinite(value)?value*pair.polarity:NaN,dropped:Boolean(SIM[modeKey]?.edgeStates?.[edge.id]?.lastTransmissionDropped)};
+
+}
+
+function isMultimeterFullyConnected(node){
+  return Boolean(node?.type==='instrument_multimeter'&&getMultimeterLeadPair(node).valid);
+}
+
 function getConnectedMeasurementInstrumentNodes(){
-  return getMeasurementInstrumentNodes().filter(node=>getInstrumentIncomingEdges(node).length>0);
+  return getMeasurementInstrumentNodes().filter(node=>(
+    node.type==='instrument_multimeter'
+      ?isMultimeterFullyConnected(node)||getInstrumentIncomingEdges(node).length>0
+      :getInstrumentIncomingEdges(node).length>0
+  ));
 }
 
 function getIncomingEdgesForNode(nodeId){
@@ -4087,7 +4368,7 @@ function hasSimulationFaults(){
 function canInitializeSimulation(){
   if(!S.sysLoaded){return false;}
   if(!S.modelNodes.some(node=>node.type==='signal_source')){return false;}
-  if(getConnectedScopeNodes().length===0){return false;}
+  if(getConnectedMeasurementInstrumentNodes().length===0){return false;}
   if(findInputCouplingConflicts().length>0){return false;}
   return true;
 }
@@ -4229,6 +4510,112 @@ function computeDigitalSourceSignal(props,time){
   return initial;
 }
 
+function normalizeAnalogWaveType(value){
+  const aliases={正弦:'sine',阶跃:'step',常值:'constant',斜坡:'ramp',噪声:'noise'};
+  return aliases[value]||String(value||'sine').trim().toLowerCase();
+}
+
+function computeAnalogSourceSignal(props,time){
+  const waveType=normalizeAnalogWaveType(props.waveType);
+  const amplitude=parseScalar(props.amplitude,1);
+  const offset=parseScalar(props.offset,0);
+  if(waveType==='constant'){
+    return amplitude;
+  }
+  if(waveType==='step'){
+    const initialValue=parseScalar(props.initialValue,0);
+    const finalValue=parseScalar(props.finalValue,amplitude);
+    const stepTime=Math.max(0,parseScalar(props.stepTime,parseScalar(props.frequency,1)));
+    return time>=stepTime?finalValue:initialValue;
+  }
+  if(waveType==='ramp'){
+    const initialValue=parseScalar(props.initialValue,offset);
+    const slope=parseScalar(props.slope,amplitude);
+    const startTime=Math.max(0,parseScalar(props.startTime,0));
+    return initialValue+(time>=startTime?slope*(time-startTime):0);
+  }
+  if(waveType==='noise'){
+    const phase=parseScalar(props.phase,0);
+    const pseudoRandom=Math.sin((time+phase)*12.9898)*43758.5453;
+    return offset+amplitude*((pseudoRandom-Math.floor(pseudoRandom))*2-1);
+  }
+  const frequency=parseScalar(props.frequency,1);
+  const phase=parseScalar(props.phase,0);
+  return offset+amplitude*Math.sin(2*Math.PI*frequency*time+phase);
+}
+
+function parseRfRate(value,fallback=1){
+  const raw=String(value??'').trim().toLowerCase();
+  const base=parseScalar(raw,fallback);
+  if(/ghz/.test(raw)){return base*1000000000;}
+  if(/mhz/.test(raw)){return base*1000000;}
+  if(/khz/.test(raw)){return base*1000;}
+  return base;
+}
+
+function parseRfDuration(value,fallback=0){
+  const raw=String(value??'').trim().toLowerCase();
+  const base=parseScalar(raw,fallback);
+  if(/ns/.test(raw)){return base/1000000000;}
+  if(/(?:μ|µ|u)s/.test(raw)){return base/1000000;}
+  if(/ms/.test(raw)){return base/1000;}
+  return base;
+}
+
+function rfSeedForNode(node){
+  return Array.from(String(node?.id||'rf')).reduce((total,char)=>total+char.charCodeAt(0),0);
+}
+
+function computeRfSourceSignal(node,time){
+  const props=getRuntimeAdjustedSignalSourceProps(node);
+  const power=parseScalar(props.power,0);
+  const modulation=String(props.modulation||'cw').trim().toLowerCase();
+  const rate=Math.max(parseRfRate(props.modulationRate,1),0.000001);
+  const phase=2*Math.PI*rate*time;
+  const centerFrequencyText=/(?:ghz|mhz|khz|hz)\s*$/i.test(String(props.centerFrequency||''))
+    ?props.centerFrequency
+    :`${props.centerFrequency||''}${props.centerFrequencyUnit||''}`;
+  const centerFrequency=Math.max(parseRfRate(centerFrequencyText,0),0);
+  const carrierPhase=2*Math.PI*centerFrequency*time;
+  const carrier=Math.sin(carrierPhase);
+
+  if(modulation==='am'){
+    const depth=Math.max(0,Math.min(100,parseScalar(props.modulationDepth,0)))/100;
+    return power*(1+depth*Math.sin(phase))*carrier;
+  }
+  if(modulation==='fm'){
+    const deviation=Math.max(0,parseRfRate(props.frequencyDeviation,0));
+    const index=Math.min(deviation/rate,1000);
+    return power*Math.sin(carrierPhase+index*Math.sin(phase));
+  }
+  if(modulation==='pm'){
+    const deviation=parseScalar(props.phaseDeviation,0);
+    return power*Math.sin(carrierPhase+deviation*Math.sin(phase));
+  }
+  if(modulation==='pulse'){
+    const prf=Math.max(parseRfRate(props.prf,1),0.000001);
+    const period=1/prf;
+    const width=Math.max(0,Math.min(parseRfDuration(props.pulseWidth,0),period));
+    return ((time%period)+period)%period<width?power*carrier:0;
+  }
+  if(modulation==='digital'){
+    const bandwidth=Math.max(parseRfRate(props.bandwidth,1),0.000001);
+    const symbolRate=Math.max(parseRfRate(props.symbolRate,bandwidth),0.000001);
+    const sampleRate=parseRfRate(props.sampleRate,symbolRate*2);
+    const effectiveRate=Math.min(symbolRate,Math.max(sampleRate/2,0.000001));
+    const symbolIndex=Math.floor(time*effectiveRate);
+    return power*(noiseAt(rfSeedForNode(node),symbolIndex,time)>=0?1:-1)*carrier;
+  }
+  if(modulation==='noise'){
+    const snr=parseScalar(props.snr,0);
+    const bandwidth=Math.max(parseRfRate(props.bandwidth,1000000),1);
+    const noiseScale=Math.pow(10,-snr/20)*Math.sqrt(bandwidth/1000000);
+    return power*carrier+Math.abs(power)*noiseScale*noiseAt(rfSeedForNode(node),Math.floor(time*1000),time);
+  }
+  // CW 是未调制的射频载波：功率字段作为载波幅度，中心频率决定振荡频率。
+  return power*carrier;
+}
+
 function computeSourceSignal(node,time){
   const props=getRuntimeAdjustedSignalSourceProps(node);
   if(props.signalDomain==='digital'){
@@ -4238,7 +4625,7 @@ function computeSourceSignal(node,time){
     return parseScalar(props.commandValue||props.payloadValue,0);
   }
   if(props.signalDomain==='rf'){
-    return parseScalar(props.power,0);
+    return computeRfSourceSignal(node,time);
   }
   const amplitude=parseScalar(node.props.amplitude,1);
   const frequency=parseScalar(node.props.frequency,1);
@@ -4657,6 +5044,188 @@ function buildSpectrum(values,binCount=24){
   }
   const maxValue=Math.max(...bins,1e-6);
   return bins.map(value=>value/maxValue);
+}
+
+function normalizeSpectrumFftSize(value,fallback=1024){
+  const requested=Math.round(parseScalar(value,fallback));
+  const capped=clamp(Number.isFinite(requested)?requested:fallback,16,4096);
+  let size=16;
+  while(size<capped&&size<4096){size*=2;}
+  return size;
+}
+
+function normalizeSpectrumWindow(value='Hann'){
+  const key=String(value||'Hann').trim().toLowerCase();
+  if(key==='rectangular'||key==='rectangle'||key==='none'){return 'rectangular';}
+  if(key==='hamming'){return 'hamming';}
+  if(key==='blackman'){return 'blackman';}
+  return 'hann';
+}
+
+function getSpectrumWindowCoefficient(kind,index,size){
+  if(size<=1||kind==='rectangular'){return 1;}
+  const ratio=(2*Math.PI*index)/(size-1);
+  if(kind==='hamming'){return 0.54-0.46*Math.cos(ratio);}
+  if(kind==='blackman'){return 0.42-0.5*Math.cos(ratio)+0.08*Math.cos(2*ratio);}
+  return 0.5*(1-Math.cos(ratio));
+}
+
+function parseSpectrumFrequencyRange(value,sampleRate){
+  const nyquist=Math.max(Number(sampleRate)||0,0)/2;
+  const raw=String(value||'').trim();
+  const defaultUnit=/mhz/i.test(raw)?1000000:/khz/i.test(raw)?1000:1;
+  const values=Array.from(raw.replace(/\s*[-~]\s*/g,',').matchAll(/\d+(?:\.\d+)?(?:\s*(?:m|k)?hz)?/gi))
+    .map(match=>{
+      const item=match[0];
+      const unit=/mhz/i.test(item)?1000000:/khz/i.test(item)?1000:/hz/i.test(item)?1:defaultUnit;
+      return parseScalar(item,NaN)*unit;
+    })
+    .filter(Number.isFinite);
+  const min=clamp(values.length>1?Math.min(values[0],values[1]):0,0,nyquist);
+  const max=clamp(values.length>1?Math.max(values[0],values[1]):(values[0]??nyquist),min,nyquist);
+  return {min,max:max>min?max:nyquist};
+}
+
+function getSpectrumFrequencyUnit(value,fallback='Hz'){
+  const match=String(value||'').match(/m(?:hz)?|k(?:hz)?|hz/i);
+  if(!match){return fallback;}
+  const unit=match[0].toLowerCase();
+  return unit.startsWith('m')?'MHz':unit.startsWith('k')?'kHz':'Hz';
+}
+
+function getSpectrumFrequencyMultiplier(unit){
+  return unit==='MHz'?1000000:unit==='kHz'?1000:1;
+}
+
+function splitSpectrumFrequencyValue(value,fallbackValue='0',fallbackUnit='Hz'){
+  const raw=String(value??'').trim();
+  const numberMatch=raw.match(/\d+(?:\.\d+)?/);
+  return {
+    value:numberMatch?.[0]||fallbackValue,
+    unit:getSpectrumFrequencyUnit(raw,fallbackUnit)
+  };
+}
+
+function splitSpectrumFrequencyRange(value){
+  const raw=String(value??'').replace(/\s*[-~]\s*/g,',');
+  const fallbackUnit=getSpectrumFrequencyUnit(raw,'kHz');
+  const matches=Array.from(raw.matchAll(/\d+(?:\.\d+)?(?:\s*(?:m|k)?hz)?/gi));
+  const unit=getSpectrumFrequencyUnit(matches[1]?.[0]||matches[0]?.[0],fallbackUnit);
+  const fallbackMultiplier=getSpectrumFrequencyMultiplier(fallbackUnit);
+  const toDisplayValue=(rawValue,fallbackValue)=>{
+    const value=splitSpectrumFrequencyValue(rawValue,fallbackValue,fallbackUnit);
+    const hertz=parseScalar(value.value,Number(fallbackValue))*getSpectrumFrequencyMultiplier(value.unit||fallbackUnit||fallbackMultiplier);
+    return String(Number((hertz/getSpectrumFrequencyMultiplier(unit)).toFixed(9)));
+  };
+  return {
+    start:{value:toDisplayValue(matches[0]?.[0],'0'),unit},
+    end:{value:toDisplayValue(matches[1]?.[0],'16'),unit}
+  };
+}
+
+function buildSpectrumAnalysis(values,options={}){
+  const source=(values||[]).filter(Number.isFinite);
+  const fftSize=normalizeSpectrumFftSize(options.fftSize,1024);
+  const sampleRate=Math.max(Number(options.sampleRate)||0,1);
+  const windowType=normalizeSpectrumWindow(options.windowFunction);
+  const frequencyRange=parseSpectrumFrequencyRange(options.frequencyRange,sampleRate);
+  const sampleCount=Math.min(source.length,fftSize);
+  const samples=source.slice(-sampleCount);
+  const windowSum=samples.reduce((sum,_value,index)=>sum+getSpectrumWindowCoefficient(windowType,index,sampleCount),0);
+  const startBin=Math.max(1,Math.ceil(frequencyRange.min*fftSize/sampleRate));
+  const endBin=Math.max(startBin,Math.min(Math.floor(frequencyRange.max*fftSize/sampleRate),Math.floor(fftSize/2)));
+  const requestedBins=clamp(Math.round(Number(options.binCount)||32),1,64);
+  const count=Math.min(requestedBins,endBin-startBin+1);
+  const binIndices=[];
+  for(let index=0;index<count;index++){
+    const bin=count===1?startBin:Math.round(startBin+(endBin-startBin)*index/(count-1));
+    if(!binIndices.includes(bin)){binIndices.push(bin);}
+  }
+  const bins=binIndices.map(bin=>{
+    let real=0;
+    let imag=0;
+    samples.forEach((value,index)=>{
+      const weighted=value*getSpectrumWindowCoefficient(windowType,index,sampleCount);
+      const angle=2*Math.PI*bin*index/fftSize;
+      real+=weighted*Math.cos(angle);
+      imag-=weighted*Math.sin(angle);
+    });
+    return {
+      bin,
+      frequency:bin*sampleRate/fftSize,
+      magnitude:sampleCount?2*Math.sqrt(real*real+imag*imag)/Math.max(windowSum,1e-9):0
+    };
+  });
+  const maximum=Math.max(...bins.map(item=>item.magnitude),0);
+  bins.forEach(item=>{item.normalized=maximum?item.magnitude/maximum:0;});
+  const peak=sampleCount>=4
+    ?bins.reduce((current,item)=>item.magnitude>(current?.magnitude??-1)?item:current,null)
+    :null;
+  return {bins,peak,fftSize,windowType,sampleCount,sampleRate,frequencyRange};
+}
+
+function getSpectrumAnalyzerTraceStore(){
+  if(!SIM.spectrumAnalyzerTraces){SIM.spectrumAnalyzerTraces={};}
+  return SIM.spectrumAnalyzerTraces;
+}
+
+function averageSpectrumLevels(levels,radius){
+  if(radius<=0){return levels.slice();}
+  return levels.map((_level,index)=>{
+    const start=Math.max(0,index-radius);
+    const end=Math.min(levels.length-1,index+radius);
+    let total=0;
+    for(let cursor=start;cursor<=end;cursor+=1){total+=levels[cursor];}
+    return total/(end-start+1);
+  });
+}
+
+function buildSpectrumAnalyzerDisplay(analysis,node){
+  const referenceLevel=parseScalar(node.props.referenceLevel,10);
+  const attenuation=Math.max(0,parseScalar(node.props.attenuation,0));
+  const preamp=String(node.props.preamp||'off')==='on';
+  const preampGain=preamp?20:0;
+  const binWidth=Math.max(analysis.sampleRate/analysis.fftSize,1e-9);
+  const rbw=Math.max(binWidth,parseScalar(node.props.rbw,binWidth));
+  const vbw=Math.max(binWidth,Math.min(rbw,parseScalar(node.props.vbw,rbw)));
+  const rbwRadius=Math.max(0,Math.round(rbw/binWidth)-1);
+  const vbwRadius=Math.max(0,Math.round(rbw/vbw)-1);
+  let levels=analysis.bins.map(item=>20*Math.log10(Math.max(item.magnitude,1e-9))-attenuation+preampGain);
+  levels=averageSpectrumLevels(levels,rbwRadius);
+  levels=averageSpectrumLevels(levels,vbwRadius);
+  const detector=String(node.props.detector||'Sample');
+  if(detector==='Peak'){
+    levels=levels.map((_level,index)=>Math.max(...levels.slice(Math.max(0,index-1),Math.min(levels.length,index+2))));
+  }else if(detector==='RMS'){
+    levels=levels.map(level=>level-3.0103);
+  }
+  const traceStore=getSpectrumAnalyzerTraceStore();
+  const trace=traceStore[node.id]||{};
+  const traceMode=String(node.props.traceMode||'Clear/Write');
+  if(traceMode==='Max Hold'){
+    trace.levels=levels.map((level,index)=>Math.max(level,trace.levels?.[index]??-Infinity));
+  }else if(traceMode==='Average'){
+    const count=(trace.count||0)+1;
+    trace.levels=levels.map((level,index)=>((trace.levels?.[index]??level)*(count-1)+level)/count);
+    trace.count=count;
+  }else{
+    trace.levels=levels.slice();
+    trace.count=1;
+  }
+  traceStore[node.id]=trace;
+  const displayed=trace.levels||levels;
+  const floor=referenceLevel-(preamp?100:80);
+  return {
+    referenceLevel,
+    floor,
+    binWidth,
+    displayed:analysis.bins.map((item,index)=>({
+      ...item,
+      level:displayed[index],
+      normalized:clamp((displayed[index]-floor)/Math.max(referenceLevel-floor,1),0,1),
+      overloaded:displayed[index]>=referenceLevel
+    }))
+  };
 }
 
 function openScope(scopeId=''){
@@ -6200,6 +6769,7 @@ function getSimulationResultSafeName(name){
 
 function isRenderDataDeviceNode(node){
   if(!node?.id||typeof node.type!=='string') return false;
+  if(node.type.startsWith('instrument_')) return false;
   if(node.type.startsWith('fault_')) return false;
   if(node.type==='fault_tag'||node.type==='edge_fault_tag') return false;
   if(node.type==='middle_var_assign') return false;
@@ -6311,8 +6881,19 @@ function buildPracticeFaultSnapshots(dMatrix){
   });
 }
 
-function buildSimulationResultSnapshot(){
+async function ensureSelectedPracticeFaultPlans(){
+  const selectedIds=Array.isArray(S.practiceFaultIds)?S.practiceFaultIds.filter(Boolean):[];
+  if(!selectedIds.length) return;
+  const ensurePlan=window.ensureBackendTroubleshootingPlan;
+  if(typeof ensurePlan!=='function'){
+    throw new Error('后端排故方案服务未就绪');
+  }
+  await Promise.all(selectedIds.map(faultId=>ensurePlan(faultId)));
+}
+
+async function buildSimulationResultSnapshot(){
   const exportedAt=new Date().toISOString();
+  const exportSequence=Date.now();
   const actualScopeSamples=cloneDefaults(SIM.actual?.scopeSamples||{});
   const referenceScopeSamples=cloneDefaults(SIM.reference?.scopeSamples||{});
   const actualInstrumentSamples=cloneDefaults(SIM.actual?.instrumentSamples||{});
@@ -6321,62 +6902,53 @@ function buildSimulationResultSnapshot(){
   const dMatrix=typeof window.buildDetectionMatrixModel==='function'
     ?cloneDefaults(window.buildDetectionMatrixModel())
     :null;
+  await ensureSelectedPracticeFaultPlans();
   const practiceFaults=buildPracticeFaultSnapshots(dMatrix);
-  const modelSnapshot=typeof createSystemModelSnapshot==='function'?createSystemModelSnapshot():null;
   const status=getSimulationResultStatus();
+  const meta={
+    resultId:`sim-${exportSequence}`,
+    datasetName:SIM.datasetName||'test',
+    duration:SIM.duration,
+    stepSize:SIM.stepSize,
+    status,
+    modelId:S.activeModelPackage?.modelId||null,
+    modelName:S.activeModelPackage?.modelName||null
+  };
+  const renderData=buildSimulationRenderDataSnapshot(actualScopeSamples,actualInstrumentSamples);
+  const summary={
+    nodeCount:(S.modelNodes||[]).length,
+    edgeCount:(S.modelEdges||[]).length,
+    faultCount:countConfiguredFaults(),
+    actualScopeSampleCount:countResultSamples(actualScopeSamples),
+    referenceScopeSampleCount:countResultSamples(referenceScopeSamples),
+    actualInstrumentSampleCount:countResultSamples(actualInstrumentSamples),
+    referenceInstrumentSampleCount:countResultSamples(referenceInstrumentSamples)
+  };
+  const executableBuilder=window.__GZ_BACKEND_SIMULATION__?.buildExecutablePackage;
+  const packageBuilder=window.__GZ_PRACTICE_TASK_PACKAGE__?.buildPracticeTaskPackage;
+  if(typeof executableBuilder!=='function'||typeof packageBuilder!=='function'){
+    throw new Error('三维实践任务包导出服务未就绪');
+  }
+  const executableModel=executableBuilder({
+    packageId:S.activeModelPackage?.modelId||`practice-${exportSequence}`,
+    simulationConfig:{duration:SIM.duration,stepSize:SIM.stepSize},
+    modelNodes:S.modelNodes||[],
+    modelEdges:S.modelEdges||[],
+    faultInstances:S.faultInstances||[],
+    measurementPoints:S.measurementPoints||[]
+  });
 
-  return {
-    schemaVersion:1,
-    kind:'simulation-result',
+  return packageBuilder({
     exportedAt,
-    meta:{
-      resultId:`sim-${Date.now()}`,
-      datasetName:SIM.datasetName||'test',
-      duration:SIM.duration,
-      stepSize:SIM.stepSize,
-      stepIndex:SIM.stepIndex,
-      elapsedTime:SIM.time,
-      realtime:Boolean(SIM.realtime),
-      hasSamples:Boolean(SIM.hasSamples),
-      status,
-      modelId:S.activeModelPackage?.modelId||null,
-      modelName:S.activeModelPackage?.modelName||null
-    },
-    model:{
-      nodes:cloneDefaults(S.modelNodes||[]),
-      edges:cloneDefaults(S.modelEdges||[]),
-      canvases:cloneDefaults(S.canvases||{}),
-      rootCanvasId:S.rootCanvasId||null,
-      activeCanvasId:S.activeCanvasId||null,
-      faultInstances:cloneDefaults(S.faultInstances||[]),
-      importedFaultModels:cloneDefaults(S.importedFaultModels||[]),
-      snapshot:modelSnapshot
-    },
-    samples:{
-      actual:{
-        scopeSamples:actualScopeSamples,
-        instrumentSamples:actualInstrumentSamples
-      },
-      reference:{
-        scopeSamples:referenceScopeSamples,
-        instrumentSamples:referenceInstrumentSamples
-      }
-    },
+    taskId:`practice-${exportSequence}`,
+    meta,
     componentOutputs,
     dMatrix,
     practiceFaults,
-    renderData:buildSimulationRenderDataSnapshot(actualScopeSamples,actualInstrumentSamples),
-    summary:{
-      nodeCount:(S.modelNodes||[]).length,
-      edgeCount:(S.modelEdges||[]).length,
-      faultCount:countConfiguredFaults(),
-      actualScopeSampleCount:countResultSamples(actualScopeSamples),
-      referenceScopeSampleCount:countResultSamples(referenceScopeSamples),
-      actualInstrumentSampleCount:countResultSamples(actualInstrumentSamples),
-      referenceInstrumentSampleCount:countResultSamples(referenceInstrumentSamples)
-    },
-    logs:collectStatusLogRows()
-  };
+    renderData,
+    summary,
+    executableModel
+  });
 }
 
 function downloadSimulationResultJson(result){
@@ -6399,10 +6971,10 @@ function downloadSimulationResultJson(result){
   return {filename,json};
 }
 
-doSaveRes = function(){
+doSaveRes = async function(){
   if(!S.simDone){toast('请先完成仿真后再保存结果','w');return {ok:false,reason:'simulation-not-done'};}
   try{
-    const result=buildSimulationResultSnapshot();
+    const result=await buildSimulationResultSnapshot();
     const exportInfo=downloadSimulationResultJson(result);
     toast(`仿真结果已导出：${exportInfo.filename}`,'s');
     return {ok:true,...exportInfo,result};
@@ -6642,7 +7214,7 @@ computeSourceSignal = function(node,time){
     return parseScalar(props.commandValue||props.payloadValue,0);
   }
   if(props.signalDomain==='rf'){
-    return parseScalar(props.power,0);
+    return computeRfSourceSignal(node,time);
   }
   const amplitude=parseScalar(node.props.amplitude,1);
   const frequency=parseScalar(node.props.frequency,1);
@@ -8687,21 +9259,65 @@ recordScopeSamples = function(time,dt){
     });
   });
   getAuxInstrumentNodes().forEach(instrumentNode=>{
-    const incoming=getInstrumentIncomingEdges(instrumentNode)[0];
-    if(!incoming){return;}
+    const incomingEdges=getInstrumentIncomingEdges(instrumentNode);
+    const incoming=incomingEdges[0];
+    if(!incoming&&!(instrumentNode.type==='instrument_multimeter'&&isMultimeterFullyConnected(instrumentNode))){return;}
     if(!SIM.actual.instrumentSamples){SIM.actual.instrumentSamples={};}
-    if(!SIM.reference.instrumentSamples){SIM.reference.instrumentSamples={};}
     if(!Array.isArray(SIM.actual.instrumentSamples[instrumentNode.id])){
       SIM.actual.instrumentSamples[instrumentNode.id]=[];
     }
+    if(instrumentNode.type==='instrument_multimeter'&&isMultimeterFullyConnected(instrumentNode)){
+      if(!SIM.reference.instrumentSamples){SIM.reference.instrumentSamples={};}
+      if(!Array.isArray(SIM.reference.instrumentSamples[instrumentNode.id])){
+        SIM.reference.instrumentSamples[instrumentNode.id]=[];
+      }
+      const actualMeasurement=resolveMultimeterTargetReading(instrumentNode,'actual',time,dt,actualCache,actualVisiting);
+      const referenceMeasurement=resolveMultimeterTargetReading(instrumentNode,'reference',time,dt,referenceCache,referenceVisiting);
+      const referenceValue=referenceMeasurement.value;
+      pushLimitedSample(
+        SIM.actual.instrumentSamples[instrumentNode.id],
+        actualMeasurement.dropped
+          ?{t:time,actual:null,reference:referenceValue,dropped:true}
+          :{t:time,actual:actualMeasurement.value,reference:referenceValue}
+      );
+      pushLimitedSample(SIM.reference.instrumentSamples[instrumentNode.id],{t:time,actual:referenceValue,reference:referenceValue});
+      return;
+    }
+    const actualSourceValue=resolveNodeOutput(incoming.sourceNodeId,incoming.sourcePortIndex||0,'actual',time,dt,actualCache,actualVisiting);
+    const actualValue=transmitEdgeSignal(incoming,actualSourceValue,'actual',time);
+    const actualEdgeState=SIM.actual.edgeStates?.[incoming.id]||{};
+    if(instrumentNode.type==='instrument_spectrum'){
+      // 频谱分析仪只观察接入连线的实际信号，不计算或保存参考通道。
+      if(SIM.reference.instrumentSamples){
+        delete SIM.reference.instrumentSamples[instrumentNode.id];
+      }
+      if(!SIM.spectrumSampling){SIM.spectrumSampling={};}
+      const sampleState=SIM.spectrumSampling[instrumentNode.id]||{lastTime:null};
+      const sampleRateRaw=String(instrumentNode.props?.sampleRate||'10Hz');
+      const sampleRateBase=parseScalar(sampleRateRaw,10);
+      const requestedSampleRate=/mhz/i.test(sampleRateRaw)
+        ?sampleRateBase*1000000
+        :/khz/i.test(sampleRateRaw)
+          ?sampleRateBase*1000
+          :sampleRateBase;
+      const sampleInterval=1/Math.max(requestedSampleRate,1);
+      if(sampleState.lastTime!==null&&time>=sampleState.lastTime&&time-sampleState.lastTime<sampleInterval-1e-9){return;}
+      sampleState.lastTime=time;
+      SIM.spectrumSampling[instrumentNode.id]=sampleState;
+      pushLimitedSample(
+        SIM.actual.instrumentSamples[instrumentNode.id],
+        actualEdgeState.lastTransmissionDropped
+          ?{t:time,actual:null,dropped:true}
+          :{t:time,actual:actualValue}
+      );
+      return;
+    }
+    if(!SIM.reference.instrumentSamples){SIM.reference.instrumentSamples={};}
     if(!Array.isArray(SIM.reference.instrumentSamples[instrumentNode.id])){
       SIM.reference.instrumentSamples[instrumentNode.id]=[];
     }
-    const actualSourceValue=resolveNodeOutput(incoming.sourceNodeId,incoming.sourcePortIndex||0,'actual',time,dt,actualCache,actualVisiting);
     const referenceSourceValue=resolveNodeOutput(incoming.sourceNodeId,incoming.sourcePortIndex||0,'reference',time,dt,referenceCache,referenceVisiting);
-    const actualValue=transmitEdgeSignal(incoming,actualSourceValue,'actual',time);
     const referenceValue=transmitEdgeSignal(incoming,referenceSourceValue,'reference',time);
-    const actualEdgeState=SIM.actual.edgeStates?.[incoming.id]||{};
     pushLimitedSample(
       SIM.actual.instrumentSamples[instrumentNode.id],
       actualEdgeState.lastTransmissionDropped
@@ -9407,6 +10023,7 @@ function deleteSelectedNodeGroup(){
   renderPropertyPanel(null);
   syncConfigTargets();
   updateUI();
+  nodes.forEach(restoreSimulationPaletteComponent);
   toast(`已删除 ${nodes.length} 个模块`,'s');
 }
 
@@ -9743,6 +10360,14 @@ function resetSimulationRuntimeForBlankWorkspace(){
   SIM.reference=createRuntimeBucket();
   SIM.scopeWindows={};
   SIM.scopeWindowZ=10;
+  if(SIM.spectrumWindow?.timer){clearTimeout(SIM.spectrumWindow.timer);}
+  SIM.spectrumWindow={open:false,nodeId:'',x:null,y:null,timer:null};
+  SIM.multimeterWindow={open:false,nodeId:'',x:null,y:null};
+  SIM.spectrumAnalyzerTraces={};
+  SIM.spectrumSampling={};
+  document.getElementById('spectrum-window-layer')?.replaceChildren();
+  document.getElementById('multimeter-window-layer')?.replaceChildren();
+  document.getElementById('scope-window-layer')?.replaceChildren();
 }
 
 function clearModelTransientStateForBlankWorkspace(){
@@ -9765,6 +10390,7 @@ function clearModelTransientStateForBlankWorkspace(){
   S.diagnosticModel=null;
   S.diagnosticTestPoints=[];
   S.testPoints=[];
+  S.manualDiagnosticTestPoints=[];
   S.installedDiagnosticTestPointIds=[];
   S.selectedDiagnosticTestPointId='';
   S.diagnosticTestPointModelSignature='';
@@ -9816,6 +10442,7 @@ function applyBlankWorkspaceState(toastMessage=''){
   S.simDone=false;
   S.step=1;
   S.workspaceSource='blank';
+  resetCanvasStageSize();
   initializeFaultCatalog();
   resetSimulationRuntimeForBlankWorkspace();
   document.getElementById('empty')?.style?.setProperty('display','none');
@@ -10532,9 +11159,35 @@ Object.assign(window,{
       edgeGroup.appendChild(label);
     });
 
+    S.modelNodes.filter(node=>node.type==='instrument_multimeter').forEach(meter=>{
+      [['positiveLead',0],['negativeLead',1]].forEach(([key,index])=>{
+        const lead=meter.props?.[key];
+        const targetNode=getNode(lead?.nodeId);
+        const meterPort=getPortInfo(meter,'input',index);
+        const targetPort=targetNode?getPortInfo(targetNode,lead?.direction,lead?.portIndex||0):null;
+        if(!meterPort||!targetPort){return;}
+        const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+        path.setAttribute('d',buildRoutedEdgePath(meterPort,targetPort,index===0?-12:12));
+        path.setAttribute('class',`multimeter-measurement-lead multimeter-measurement-lead--${index===0?'positive':'negative'}`);
+        path.setAttribute('data-multimeter-lead',`${meter.id}:${key}`);
+        edgeGroup.appendChild(path);
+      });
+    });
+
     if(S.pendingConnection){
-      const sourceNode=getNode(S.pendingConnection.sourceNodeId);
-      const sourcePort=sourceNode?getPortInfo(sourceNode,'output',S.pendingConnection.sourcePortIndex||0):null;
+      const measurementOrigin=S.pendingConnection.measurementMeterId
+        ?{
+          nodeId:S.pendingConnection.measurementMeterId,
+          direction:'input',
+          portIndex:S.pendingConnection.measurementLead==='negativeLead'?1:0
+        }
+        :{
+          nodeId:S.pendingConnection.sourceNodeId,
+          direction:'output',
+          portIndex:S.pendingConnection.sourcePortIndex||0
+        };
+      const sourceNode=getNode(measurementOrigin.nodeId);
+      const sourcePort=sourceNode?getPortInfo(sourceNode,measurementOrigin.direction,measurementOrigin.portIndex):null;
       if(sourcePort){
         preview.style.display='block';
         preview.setAttribute('d',buildRoutedEdgePath(sourcePort,{
@@ -10876,7 +11529,27 @@ Object.assign(window,{
   }
 
   function getInstrumentSignalName(node){
-    const incoming=getIncomingEdgesForNode(node.id)[0];
+    const incomingEdges=getInstrumentIncomingEdges(node);
+    if(node?.type==='instrument_multimeter'){
+      const kind=getMultimeterMeasurementKind(node);
+      const pair=getMultimeterLeadPair(node);
+      if(!pair.valid) return '正负表笔未形成有效测量连接';
+      const direction=pair.polarity<0?'反接':'正接';
+      if(kind==='current') return `${direction} · 连线电流`;
+      if(kind==='resistance'||kind==='continuity') return `${direction} · 组件电阻`;
+      return `${direction} · 组件输入信号`;
+      const describeTerminal=portIndex=>{
+        const incoming=incomingEdges.find(edge=>Number(edge.targetPortIndex||0)===portIndex);
+        if(!incoming){return portIndex===0?'正端未接入':'负端未接入';}
+        const sourceNode=getNode(incoming.sourceNodeId);
+        const outputPort=sourceNode&&getNodePorts(sourceNode).outputs[incoming.sourcePortIndex||0];
+        return outputPort
+          ?`${sourceNode.props?.name||'信号'} · ${outputPort.label}`
+          :(sourceNode?.props?.name||'未知信号');
+      };
+      return `${describeTerminal(0)} − ${describeTerminal(1)}`;
+    }
+    const incoming=incomingEdges[0];
     if(!incoming){return '未接入信号';}
     const sourceNode=getNode(incoming.sourceNodeId);
     if(!sourceNode){return '未知信号';}
@@ -10930,8 +11603,33 @@ Object.assign(window,{
     return base;
   }
 
+  function getEffectiveSpectrumSampleRate(samples,node){
+    const requested=Math.max(parseInstrumentSampleRateHz(node),1);
+    const times=(samples||[])
+      .map(sample=>Number(sample?.t))
+      .filter(Number.isFinite);
+    if(times.length<2){return requested;}
+    const intervals=[];
+    for(let index=1;index<times.length;index+=1){
+      const interval=times[index]-times[index-1];
+      if(interval>1e-9){intervals.push(interval);}
+    }
+    if(!intervals.length){return requested;}
+    intervals.sort((left,right)=>left-right);
+    const median=intervals[Math.floor(intervals.length/2)];
+    return Math.min(requested,1/median);
+  }
+
   function createInstrumentCsv(node){
     const rows=getInstrumentSamples(node);
+    if(node?.type==='instrument_spectrum'){
+      const lines=['time,actual'];
+      rows.forEach(sample=>{
+        const actual=Number(sample.actual);
+        lines.push([sample.t,actual].map(value=>Number.isFinite(Number(value))?Number(value).toFixed(6):'').join(','));
+      });
+      return lines.join('\n');
+    }
     const lines=['time,actual,reference,residual'];
     rows.forEach(sample=>{
       const actual=Number(sample.actual);
@@ -10965,6 +11663,8 @@ Object.assign(window,{
   function clearInstrumentSamples(node){
     if(SIM.actual.instrumentSamples){SIM.actual.instrumentSamples[node.id]=[];}
     if(SIM.reference.instrumentSamples){SIM.reference.instrumentSamples[node.id]=[];}
+    if(SIM.spectrumAnalyzerTraces){delete SIM.spectrumAnalyzerTraces[node.id];}
+    if(SIM.spectrumSampling){delete SIM.spectrumSampling[node.id];}
     renderPropertyPanel(node);
     updateUI();
     toast('仪器采样记录已清空','s');
@@ -11052,8 +11752,38 @@ Object.assign(window,{
   }
 
   function buildSpectrumFieldsClean(node){
+    const samples=getInstrumentSamples(node);
+    const values=samples.map(getSampleValue).filter(Number.isFinite);
+    const analysis=buildSpectrumAnalysis(values,{
+      sampleRate:getEffectiveSpectrumSampleRate(samples,node),
+      fftSize:node.props.fftSize,
+      windowFunction:node.props.windowFunction,
+      frequencyRange:node.props.frequencyRange,
+      binCount:24
+    });
+    const peak=analysis.peak;
     return `
       <div class="instrument-props instrument-props--spectrum" data-instrument-panel="spectrum">
+        <div class="instrument-hero">
+          <div>
+            <div class="instrument-kicker">Spectrum Analyzer</div>
+            <div class="instrument-title">频谱分析仪</div>
+            <div class="instrument-copy">${escapeHtml(getInstrumentSignalName(node))}</div>
+          </div>
+          <div class="instrument-count">
+            <strong>${samples.length}</strong>
+            <span>采样数量</span>
+          </div>
+        </div>
+        <div class="instrument-metrics">
+          <span><b>${escapeHtml(peak?`${formatScopeMetric(peak.frequency)}Hz`:'--')}</b><em>峰值频点</em></span>
+          <span><b>${escapeHtml(peak?formatScopeMetric(peak.magnitude):'--')}</b><em>幅值峰值</em></span>
+          <span><b>${analysis.bins.length}</b><em>分析频段</em></span>
+        </div>
+        <div class="instrument-spectrum-bars" aria-label="频谱分析结果">
+          ${analysis.bins.map(item=>`<span data-spectrum-bin data-spectrum-frequency="${escapeHtml(item.frequency)}" title="${escapeHtml(formatScopeMetric(item.frequency))}Hz · ${escapeHtml(formatScopeMetric(item.magnitude))}" style="height:${Math.max(4,Math.round(item.normalized*48))}px"></span>`).join('')}
+        </div>
+        ${analysis.sampleCount<4?'<div class="props-help" data-spectrum-empty>已接入信号，运行仿真并积累至少 4 个采样点后即可显示频谱数据。</div>':''}
         <div class="instrument-actions">
           <button type="button" class="instrument-primary" data-spectrum-action="open">显示频谱</button>
           <button type="button" class="instrument-primary" data-instrument-action="export">导出数据</button>
@@ -11062,8 +11792,21 @@ Object.assign(window,{
   }
 
   function buildMultimeterFieldsClean(node){
+    const samples=getInstrumentSamples(node);
+    const summary=summarizeInstrumentSamples(samples);
     return `
       <div class="instrument-props instrument-props--multimeter" data-instrument-panel="multimeter">
+        <div class="instrument-hero">
+          <div>
+            <div class="instrument-kicker">Digital Multimeter</div>
+            <div class="instrument-title">数字万用表</div>
+            <div class="instrument-copy">${escapeHtml(getInstrumentSignalName(node))}</div>
+          </div>
+          <div class="instrument-count">
+            <strong>${summary.count}</strong>
+            <span>采样读数</span>
+          </div>
+        </div>
         <div class="instrument-actions">
           <button type="button" class="instrument-primary" data-multimeter-action="open">显示仪表</button>
           <button type="button" class="instrument-primary" data-instrument-action="export">导出数据</button>
@@ -11188,6 +11931,8 @@ Object.assign(window,{
       const key=input.dataset.multimeterConfig;
       if(key==='measurementMode'){
         node.props.measurementMode=normalizeMultimeterMeasurementMode(input.value);
+      }else if(key==='positiveLead'||key==='negativeLead'){
+        node.props[key]=parseMultimeterLeadOption(input.value);
       }else if(key==='range'){
         node.props.range=input.value.trim()||'Auto';
       }else if(key==='refreshRate'){
@@ -11210,14 +11955,19 @@ Object.assign(window,{
       return;
     }
     const state=getMultimeterWindowState();
+    const shouldReposition=!state.open||state.nodeId!==node.id;
     state.open=true;
     state.nodeId=node.id;
+    if(shouldReposition){
+      state.x=null;
+      state.y=null;
+    }
     renderMultimeterWindow();
   };
 
   function getSpectrumWindowState(){
     if(!SIM.spectrumWindow||typeof SIM.spectrumWindow!=='object'){
-      SIM.spectrumWindow={open:false,nodeId:'',x:null,y:null};
+      SIM.spectrumWindow={open:false,nodeId:'',x:null,y:null,timer:null};
     }
     return SIM.spectrumWindow;
   }
@@ -11227,7 +11977,10 @@ Object.assign(window,{
     if(!host){return;}
     host.querySelector('[data-spectrum-window]')?.remove();
     const state=getSpectrumWindowState();
-    if(!state.open){return;}
+    if(!state.open){
+      if(state.timer){clearTimeout(state.timer);state.timer=null;}
+      return;
+    }
     const node=getNode(state.nodeId);
     if(!node||node.type!=='instrument_spectrum'){
       state.open=false;
@@ -11235,11 +11988,22 @@ Object.assign(window,{
     }
     const samples=getInstrumentSamples(node);
     const values=samples.map(getSampleValue).filter(Number.isFinite);
-    const bins=buildSpectrum(values,32);
-    const peakValue=Math.max(...bins,0);
-    const peakIndex=Math.max(0,bins.indexOf(peakValue));
-    const sampleRate=parseInstrumentSampleRateHz(node);
-    const peakFrequency=values.length?(peakIndex+1)*sampleRate/(bins.length*2):null;
+    const sampleRate=getEffectiveSpectrumSampleRate(samples,node);
+    const analysis=buildSpectrumAnalysis(values,{
+      sampleRate,
+      fftSize:node.props.fftSize,
+      windowFunction:node.props.windowFunction,
+      frequencyRange:node.props.frequencyRange,
+      binCount:32
+    });
+    const display=buildSpectrumAnalyzerDisplay(analysis,node);
+    const bins=display.displayed;
+    const peakValue=analysis.peak?.magnitude??0;
+    const peakFrequency=analysis.peak?.frequency??null;
+    const markerFrequency=parseScalar(node.props.markerFrequency,NaN);
+    const markerBin=Number.isFinite(markerFrequency)
+      ?bins.reduce((closest,item)=>Math.abs(item.frequency-markerFrequency)<Math.abs(closest.frequency-markerFrequency)?item:closest,bins[0]||null)
+      :null;
     const defaultX=Math.max(18,Math.min((node.x||0)+(node.w||172)+16,(host.clientWidth||860)-520));
     const defaultY=Math.max(48,node.y||76);
     if(!Number.isFinite(state.x)){state.x=defaultX;}
@@ -11247,8 +12011,19 @@ Object.assign(window,{
     const windowEl=document.createElement('section');
     windowEl.className='spectrum-window';
     windowEl.dataset.spectrumWindow='true';
+    windowEl.dataset.spectrumFftSize=String(analysis.fftSize);
+    windowEl.dataset.spectrumWindowFunction=analysis.windowType;
+    windowEl.dataset.spectrumRange=`${analysis.frequencyRange.min}-${analysis.frequencyRange.max}`;
     windowEl.style.left=`${state.x}px`;
     windowEl.style.top=`${state.y}px`;
+    const sampleRateDisplay=splitSpectrumFrequencyValue(node.props.sampleRate,'32','kHz');
+    const frequencyRange=splitSpectrumFrequencyRange(node.props.frequencyRange||'0-16kHz');
+    const frequencyUnitOptions=['Hz','kHz','MHz'];
+    const frequencyRangeMax=analysis.sampleRate/(2*getSpectrumFrequencyMultiplier(frequencyRange.end.unit));
+    ['start','end'].forEach(key=>{
+      const value=Math.max(0,Math.min(parseScalar(frequencyRange[key].value,0),frequencyRangeMax));
+      frequencyRange[key].value=String(Number(value.toFixed(9)));
+    });
     windowEl.innerHTML=`
       <header class="spectrum-window__header">
         <div>
@@ -11259,22 +12034,63 @@ Object.assign(window,{
       </header>
       <div class="spectrum-window__body">
         <div class="spectrum-window__summary">
-          <span><em>峰值频点</em><b>${escapeHtml(peakFrequency===null?'--':`${formatScopeMetric(peakFrequency)}Hz`)}</b></span>
-          <span><em>幅值峰值</em><b>${escapeHtml(values.length?formatScopeMetric(peakValue):'--')}</b></span>
-          <span><em>采样数量</em><b>${samples.length}</b></span>
+          <span><em>峰值频点</em><b data-spectrum-peak-frequency>${escapeHtml(peakFrequency===null?'--':`${formatScopeMetric(peakFrequency)}Hz`)}</b></span>
+          <span><em>峰值电平</em><b data-spectrum-peak-amplitude>${escapeHtml(values.length?`${formatScopeMetric(Math.max(...bins.map(item=>item.level),display.floor))} dB`:'--')}</b></span>
+          <span><em>Marker</em><b data-spectrum-marker>${escapeHtml(markerBin?`${formatScopeMetric(markerBin.frequency)}Hz / ${formatScopeMetric(markerBin.level)}dB`:'--')}</b></span>
         </div>
+        <div class="spectrum-window__workspace">
+        <div class="spectrum-window__left-column">
         <div class="spectrum-window__chart" aria-label="频谱能量分布">
-          ${bins.map((value,index)=>`<span class="spectrum-window__bar" title="${escapeHtml(formatScopeMetric((index+1)*sampleRate/(bins.length*2)))}Hz · ${escapeHtml(formatScopeMetric(value))}" style="height:${Math.max(4,Math.round(value*150))}px"></span>`).join('')}
+          <span class="spectrum-window__axis-title spectrum-window__axis-title--y">电平（dB）</span>
+          <div class="spectrum-window__axis spectrum-window__axis--y" data-spectrum-axis="y" aria-hidden="true">
+            <span>${escapeHtml(formatScopeMetric(display.referenceLevel))}</span><span>${escapeHtml(formatScopeMetric(display.floor))}</span>
+          </div>
+          <div class="spectrum-window__plot">
+            ${bins.map(item=>`<span class="spectrum-window__bar${markerBin===item?' is-marker':''}${item.overloaded?' is-overloaded':''}" data-spectrum-bin data-spectrum-frequency="${escapeHtml(item.frequency)}" title="${escapeHtml(formatScopeMetric(item.frequency))}Hz · ${escapeHtml(formatScopeMetric(item.level))}dB" style="height:${Math.max(4,Math.round(item.normalized*150))}px"></span>`).join('')}
+          </div>
+          <div class="spectrum-window__axis spectrum-window__axis--x" data-spectrum-axis="x" aria-hidden="true">
+            <span>${escapeHtml(formatScopeMetric(analysis.frequencyRange.min))}Hz</span><span>${escapeHtml(formatScopeMetric(analysis.frequencyRange.max))}Hz</span>
+          </div>
+          <span class="spectrum-window__axis-title spectrum-window__axis-title--x">频率（Hz）</span>
         </div>
-        <div class="spectrum-window__config">
+        <div class="spectrum-window__config spectrum-window__config--analysis">
           <div class="spectrum-window__config-title">分析设置</div>
-          <label>采样率<input data-spectrum-config="sampleRate" value="${escapeHtml(node.props.sampleRate||'32kHz')}"></label>
-          <label>频率范围<input data-spectrum-config="frequencyRange" value="${escapeHtml(node.props.frequencyRange||'0-16kHz')}"></label>
+          <label>采样率
+            <span class="spectrum-window__measurement">
+              <input type="text" inputmode="decimal" aria-label="采样率数值" data-spectrum-config="sampleRateValue" value="${escapeHtml(sampleRateDisplay.value)}">
+              <select aria-label="采样率单位" data-spectrum-config="sampleRateUnit">${buildSelectOptions(frequencyUnitOptions,sampleRateDisplay.unit)}</select>
+            </span>
+          </label>
+          <label class="spectrum-window__config-range">频率范围
+            <span class="spectrum-window__measurement spectrum-window__measurement--range">
+              <input type="text" inputmode="decimal" aria-label="频率范围起始数值" data-spectrum-config="frequencyRangeStart" value="${escapeHtml(frequencyRange.start.value)}">
+              <span aria-hidden="true">~</span>
+              <input type="text" inputmode="decimal" aria-label="频率范围结束数值" data-spectrum-config="frequencyRangeEnd" value="${escapeHtml(frequencyRange.end.value)}">
+              <select aria-label="频率范围单位" data-spectrum-config="frequencyRangeUnit">${buildSelectOptions(frequencyUnitOptions,frequencyRange.end.unit)}</select>
+            </span>
+          </label>
           <label>FFT 点数<input data-spectrum-config="fftSize" value="${escapeHtml(node.props.fftSize||'1024')}"></label>
           <label>窗函数<input data-spectrum-config="windowFunction" value="${escapeHtml(node.props.windowFunction||'Hann')}"></label>
         </div>
+        </div>
+        <div class="spectrum-window__config spectrum-window__config--controls">
+          <div class="spectrum-window__config-title">输入与量程</div>
+          <label>参考电平 (dB)<input data-spectrum-config="referenceLevel" value="${escapeHtml(node.props.referenceLevel??'10')}"></label>
+          <label>输入衰减 (dB)<select data-spectrum-config="attenuation">${buildSelectOptions(['0','10','20','30','40'],String(node.props.attenuation??'0'))}</select></label>
+          <label>前置放大<select data-spectrum-config="preamp">${buildSelectOptions([{value:'off',label:'关闭'},{value:'on',label:'开启 (+20 dB)'}],node.props.preamp||'off')}</select></label>
+          <div class="spectrum-window__config-title">带宽与扫描</div>
+          <label>RBW (Hz)<input type="number" min="0.001" step="any" data-spectrum-config="rbw" value="${escapeHtml(node.props.rbw||'0.1')}"></label>
+          <label>VBW (Hz)<input type="number" min="0.001" step="any" data-spectrum-config="vbw" value="${escapeHtml(node.props.vbw||'0.1')}"></label>
+          <label>扫描时间 (ms)<input data-spectrum-config="sweepTime" value="${escapeHtml(node.props.sweepTime||'100')}"></label>
+          <div class="spectrum-window__config-title">检波、迹线与 Marker</div>
+          <label>检波器<select data-spectrum-config="detector">${buildSelectOptions(['Sample','Peak','RMS'],node.props.detector||'Sample')}</select></label>
+          <label>迹线模式<select data-spectrum-config="traceMode">${buildSelectOptions(['Clear/Write','Max Hold','Average'],node.props.traceMode||'Clear/Write')}</select></label>
+          <label>Marker 频率 (Hz)<input data-spectrum-config="markerFrequency" value="${escapeHtml(node.props.markerFrequency||'')}"></label>
+        </div>
+        </div>
         <div class="spectrum-window__actions">
           <span>${escapeHtml(getInstrumentSignalName(node))}</span>
+          <button type="button" data-spectrum-peak-search>峰值搜索</button>
           <button type="button" data-spectrum-clear>清空记录</button>
         </div>
       </div>
@@ -11314,18 +12130,62 @@ Object.assign(window,{
       state.open=false;
       renderSpectrumWindow();
     });
-    windowEl.querySelectorAll('[data-spectrum-config]').forEach(input=>input.addEventListener('change',()=>{
-      const key=input.dataset.spectrumConfig;
-      node.props[key]=input.value.trim()||node.props[key];
+    windowEl.querySelectorAll('[data-spectrum-config]').forEach(input=>{
+      input.addEventListener('keydown',event=>event.stopPropagation());
+      input.addEventListener('change',()=>{
+        const key=input.dataset.spectrumConfig;
+        if(key==='sampleRateValue'||key==='sampleRateUnit'){
+          const value=windowEl.querySelector('[data-spectrum-config="sampleRateValue"]')?.value.trim();
+          const unit=windowEl.querySelector('[data-spectrum-config="sampleRateUnit"]')?.value||'Hz';
+          node.props.sampleRate=value?`${value}${unit}`:node.props.sampleRate;
+        }else if(key.startsWith('frequencyRange')){
+          const start=windowEl.querySelector('[data-spectrum-config="frequencyRangeStart"]')?.value.trim();
+          const end=windowEl.querySelector('[data-spectrum-config="frequencyRangeEnd"]')?.value.trim();
+          const unit=windowEl.querySelector('[data-spectrum-config="frequencyRangeUnit"]')?.value||'Hz';
+          if(start&&end){node.props.frequencyRange=`${start}-${end}${unit}`;}
+        }else{
+          node.props[key]=input.value.trim()||node.props[key];
+        }
+        if(typeof setDirtyState==='function'){setDirtyState();}
+        renderSpectrumWindow();
+        if(S.selBlk===node.id){renderPropertyPanel(node);}
+      });
+    });
+    const selectSpectrumMarker=frequency=>{
+      if(!Number.isFinite(frequency)){return;}
+      node.props.markerFrequency=String(frequency);
       if(typeof setDirtyState==='function'){setDirtyState();}
       renderSpectrumWindow();
-      if(S.selBlk===node.id){renderPropertyPanel(node);}
+    };
+    windowEl.querySelectorAll('[data-spectrum-bin]').forEach(bin=>bin.addEventListener('click',event=>{
+      event.stopPropagation();
+      selectSpectrumMarker(Number(bin.dataset.spectrumFrequency));
     }));
+    windowEl.querySelector('.spectrum-window__plot')?.addEventListener('click',event=>{
+      const plot=event.currentTarget;
+      const bounds=plot.getBoundingClientRect();
+      if(!bounds.width||!bins.length){return;}
+      const ratio=clamp((event.clientX-bounds.left)/bounds.width,0,1);
+      const index=Math.round(ratio*(bins.length-1));
+      selectSpectrumMarker(bins[index]?.frequency);
+    });
+    windowEl.querySelector('[data-spectrum-peak-search]')?.addEventListener('click',()=>{
+      if(analysis.peak){node.props.markerFrequency=String(analysis.peak.frequency);}
+      if(typeof setDirtyState==='function'){setDirtyState();}
+      renderSpectrumWindow();
+    });
     windowEl.querySelector('[data-spectrum-clear]')?.addEventListener('click',()=>{
       clearInstrumentSamples(node);
       renderSpectrumWindow();
     });
+    if(state.timer){clearTimeout(state.timer);state.timer=null;}
+    if(SIM.running){
+      const sweepTime=clamp(parseScalar(node.props.sweepTime,100),50,10000);
+      state.timer=setTimeout(()=>renderSpectrumWindow(),sweepTime);
+    }
   }
+
+  window.renderSpectrumInstrument=renderSpectrumWindow;
 
   window.openSpectrumInstrument=function(nodeId=''){
     const node=getNode(nodeId||S.selBlk);
@@ -11334,9 +12194,57 @@ Object.assign(window,{
       return;
     }
     const state=getSpectrumWindowState();
+    const shouldReposition=!state.open||state.nodeId!==node.id;
     state.open=true;
     state.nodeId=node.id;
+    if(shouldReposition){
+      state.x=null;
+      state.y=null;
+    }
     renderSpectrumWindow();
+  };
+
+  function ensureSpectrumInstrumentSamplesForCurrentStep(){
+    if(!SIM.inited||SIM.time<=0){return;}
+    const time=Number((SIM.time-SIM.stepSize).toFixed(6));
+    const dt=SIM.stepSize;
+    const actualCache=new Map();
+    const actualVisiting=new Set();
+    getAuxInstrumentNodes()
+      .filter(node=>node.type==='instrument_spectrum')
+      .forEach(node=>{
+        const incoming=getInstrumentIncomingEdges(node)[0];
+        if(!incoming){return;}
+        SIM.actual.instrumentSamples=SIM.actual.instrumentSamples||{};
+        const actualSamples=SIM.actual.instrumentSamples[node.id]||(SIM.actual.instrumentSamples[node.id]=[]);
+        if(SIM.reference.instrumentSamples){
+          delete SIM.reference.instrumentSamples[node.id];
+        }
+        if(actualSamples.at(-1)?.t===time){return;}
+        const actualSourceValue=resolveNodeOutput(incoming.sourceNodeId,incoming.sourcePortIndex||0,'actual',time,dt,actualCache,actualVisiting);
+        const actualValue=transmitEdgeSignal(incoming,actualSourceValue,'actual',time);
+        const actualEdgeState=SIM.actual.edgeStates?.[incoming.id]||{};
+        pushLimitedSample(actualSamples,actualEdgeState.lastTransmissionDropped
+          ?{t:time,actual:null,dropped:true}
+          :{t:time,actual:actualValue});
+      });
+  }
+
+  const __spectrumRunSimulationTick=runSimulationTick;
+  runSimulationTick=function(){
+    const result=__spectrumRunSimulationTick();
+    ensureSpectrumInstrumentSamplesForCurrentStep();
+    const selectedNode=getNode(S.selBlk);
+    if(selectedNode?.type==='instrument_spectrum'&&S.propertyPanelTab==='overview'){
+      renderPropertyPanel(selectedNode);
+    }
+    if(getSpectrumWindowState().open){
+      renderSpectrumWindow();
+    }
+    if(getMultimeterWindowState().open){
+      renderMultimeterWindow();
+    }
+    return result;
   };
 
   function buildInstrumentFieldsClean(node){
@@ -11378,6 +12286,12 @@ Object.assign(window,{
   function bindInstrumentPropertyPanelActions(node,host){
     bindScopePropertyPanelActions(node,host);
     if(!node.type?.startsWith('instrument_')){return;}
+    if(node.type==='instrument_multimeter'){
+      host.querySelector('#prop-measurementMode')?.addEventListener('change',event=>{
+        node.props.measurementMode=normalizeMultimeterMeasurementMode(event.target.value);
+        renderPropertyPanel(node);
+      });
+    }
     host.querySelector('[data-multimeter-action="open"]')?.addEventListener('click',event=>{
       event.preventDefault();
       event.stopPropagation();
@@ -11507,6 +12421,18 @@ Object.assign(window,{
         ${actionButtons?`<div class="props-actions">${actionButtons}</div>`:''}
       </div>`;
     bindInstrumentPropertyPanelActions(node,pd);
+    if(node.type==='signal_source'){
+      pd.querySelector('#prop-waveType')?.addEventListener('change',event=>{
+        node.props.waveType=event.target.value;
+        if(typeof setDirtyState==='function'){setDirtyState();}
+        renderPropertyPanel(node);
+      });
+      pd.querySelector('#prop-modulation')?.addEventListener('change',event=>{
+        node.props.modulation=event.target.value;
+        if(typeof setDirtyState==='function'){setDirtyState();}
+        renderPropertyPanel(node);
+      });
+    }
     if(node.type==='simulation_block'){
       updateModelPackageStatus(node);
     }
@@ -11517,6 +12443,13 @@ Object.assign(window,{
     const node=getNode(S.selBlk);
     if(!node){return;}
     if(applySchemaPropertyValues(node)){
+      if(node.type==='instrument_multimeter'){
+        const selectedTarget=parseMultimeterTargetOption(document.getElementById('prop-measurementTargetId')?.value||'');
+        const compatibleTargetIds=new Set(getMultimeterTargetEntries(node).map(item=>`${item.targetKind}|${item.id}`));
+        const targetKey=`${selectedTarget.targetKind}|${selectedTarget.targetId}`;
+        node.props.measurementTargetKind=compatibleTargetIds.has(targetKey)?selectedTarget.targetKind:'';
+        node.props.measurementTargetId=compatibleTargetIds.has(targetKey)?selectedTarget.targetId:'';
+      }
       // Saved through the extracted field schema.
     }else if(node.type==='signal_source'){
       node.props.name=document.getElementById('prop-name')?.value.trim()||node.props.name;
@@ -11557,6 +12490,11 @@ Object.assign(window,{
       }
       if(node.type==='instrument_multimeter'){
         node.props.measurementMode=normalizeMultimeterMeasurementMode(document.getElementById('prop-measurementMode')?.value||node.props.measurementMode);
+        const selectedTarget=parseMultimeterTargetOption(document.getElementById('prop-measurementTargetId')?.value||'');
+        const compatibleTargetIds=new Set(getMultimeterTargetEntries(node).map(item=>`${item.targetKind}|${item.id}`));
+        const targetKey=`${selectedTarget.targetKind}|${selectedTarget.targetId}`;
+        node.props.measurementTargetKind=compatibleTargetIds.has(targetKey)?selectedTarget.targetKind:'';
+        node.props.measurementTargetId=compatibleTargetIds.has(targetKey)?selectedTarget.targetId:'';
         node.props.range=document.getElementById('prop-range')?.value.trim()||node.props.range||'Auto';
         node.props.refreshRate=document.getElementById('prop-refreshRate')?.value.trim()||node.props.refreshRate||node.props.sampleRate||'5Hz';
       }
@@ -11643,6 +12581,7 @@ Object.assign(window,{
     renderEdges,
     renderModelNodes,
     renderPropertyPanel,
+    renderMultimeterWindow,
     saveSelectedNode,
     getPortDisplayName,
     buildPythonPortTooltip,
@@ -11709,7 +12648,7 @@ Object.assign(window,{
   }
 
   function getAvailablePropertyTabs(kind,target=getSelectedPropertyTarget()){
-    if(kind==='edge'){return ['overview','parameters','faults','testpoints','outputs'];}
+    if(kind==='edge'){return ['overview','faults','testpoints'];}
     if(kind==='fault-tag'){return ['overview','parameters'];}
     if(kind==='fault-injector'){return ['overview'];}
     if(kind==='scope'){return ['overview','parameters','outputs'];}
@@ -12036,7 +12975,7 @@ Object.assign(window,{
       ?buildSimulationBlockPackageRows(node)
       :'';
     const signalDefinitionRows=renderSignalSourceDefinitionOverview(node);
-    const canvasPositionRows=node.type==='signal_source'?'':`
+    const canvasPositionRows=(node.type==='signal_source'||node.type==='simulation_block')?'':`
       <div class="pgroup">
         <div class="pglbl">画布位置</div>
         ${renderRows([
@@ -12103,10 +13042,7 @@ Object.assign(window,{
         </div>
         ${renderEdgeInternalMapping(semanticContext.mapping)}
       </div>
-      <div class="pgroup">
-        <div class="pglbl">通道摘要</div>
-        <div class="props-channel-list">${signals.map((signal,index)=>renderEdgeChannelSummary(signal,index)).join('')}</div>
-      </div>`;
+      `;
     return `
       ${renderTargetHeader(edge)}
       <div class="pgroup">
@@ -12384,6 +13320,14 @@ Object.assign(window,{
   }
 
   function renderFaultBinding(binding,target,targetKind,index){
+    const bindingId=binding.bindingId||`legacy-${binding.faultModelId||index}`;
+    const faultName=text(binding.name||binding.injectedFault?.name||binding.faultModelId||'Fault');
+    if(targetKind==='node'&&target?.type==='simulation_block'){
+      return `
+        <div class="props-fault-card props-fault-card--name-only" data-fault-binding-id="${text(bindingId)}">
+          <strong>${faultName}</strong>
+        </div>`;
+    }
     const params=binding.parameters||binding.injectedFault?.parameters||{};
     const paramRows=Object.keys(params).length
       ?Object.entries(params).map(([key,value])=>`
@@ -12392,7 +13336,6 @@ Object.assign(window,{
           <b>${text(value)}</b>
         </span>`).join('')
       :'<div class="props-empty-state props-empty-state--compact">No parameters</div>';
-    const bindingId=binding.bindingId||`legacy-${binding.faultModelId||index}`;
     const layer=getFaultBindingLayer(binding)||'layer';
     const mode=getFaultBindingMode(binding);
     const behavior=getFaultBindingRuntimeBehavior(binding);
@@ -12400,7 +13343,7 @@ Object.assign(window,{
       <div class="props-fault-card" data-fault-binding-id="${text(bindingId)}">
         <div class="props-fault-card__top">
           <div>
-            <strong>${text(binding.name||binding.injectedFault?.name||binding.faultModelId||'Fault')}</strong>
+            <strong>${faultName}</strong>
             <span>${text(getLayerLabel(layer))} · ${text(mode)} · ${text(behavior)}</span>
           </div>
           <button type="button" class="props-secondary props-fault-remove" onclick="removeFaultBinding('${targetKind}','${jsString(target.id)}','${jsString(bindingId)}')">取消</button>
@@ -18296,11 +19239,9 @@ function decorateDataflowEdges(){
 
   const __diagnosticsComputeSourceSignal=computeSourceSignal;
   computeSourceSignal=function(node,time){
-    if(node?.props?.waveType==='阶跃'){
-      const amplitude=parseScalar(node.props.amplitude,1);
-      const frequency=parseScalar(node.props.frequency,1);
-      const stepTime=Math.max(0.2,frequency);
-      return time>=stepTime?amplitude:0;
+    const props=getRuntimeAdjustedSignalSourceProps(node);
+    if(props?.signalDomain==='analog'){
+      return computeAnalogSourceSignal(props,time);
     }
     return __diagnosticsComputeSourceSignal(node,time);
   };
@@ -20017,6 +20958,49 @@ function decorateDataflowEdges(){
     markTopologyDirty('fault');
   }
 
+  function syncFaultTagEnabledToRuntimeTarget(tag,enabled){
+    if(!tag){return;}
+    tag.runtimeEnabled=enabled;
+    if(tag.injectedFault){
+      tag.injectedFault={...tag.injectedFault,active:enabled,enabled};
+    }
+    const runtimeTarget=getFaultTagTarget(tag);
+    if(runtimeTarget?.injectedFault&&faultTagRefMatches(runtimeTarget.injectedFault,tag.faultModelId)){
+      runtimeTarget.injectedFault={...runtimeTarget.injectedFault,active:enabled,enabled};
+    }
+    if(Array.isArray(runtimeTarget?.faultBindings)){
+      runtimeTarget.faultBindings=runtimeTarget.faultBindings.map(binding=>{
+        if(!faultTagRefMatches(binding,tag.faultModelId)){return binding;}
+        return {
+          ...binding,
+          active:enabled,
+          injectedFault:{...(binding.injectedFault||{}),active:enabled,enabled}
+        };
+      });
+    }
+    ['injectedFaults','activeFaults','faultInstances','selectedFaults','appliedFaults'].forEach(key=>{
+      if(!Array.isArray(S[key])){return;}
+      S[key]=S[key].map(item=>{
+        if(!faultTagRefMatches(item,tag.faultModelId)){return item;}
+        return {
+          ...item,
+          active:enabled,
+          enabled,
+          injectedFault:item.injectedFault?{...item.injectedFault,active:enabled,enabled}:item.injectedFault
+        };
+      });
+    });
+    if(S.injectedFaultMap&&typeof S.injectedFaultMap==='object'&&S.injectedFaultMap[tag.faultModelId]){
+      S.injectedFaultMap[tag.faultModelId]={
+        ...S.injectedFaultMap[tag.faultModelId],
+        active:enabled,
+        enabled,
+        status:enabled?'active':'disabled'
+      };
+    }
+    markTopologyDirty('fault');
+  }
+
   function syncFaultTagNameToRuntimeTarget(tag,nextName){
     if(!tag){return;}
     const fallback=tag.name||tag.faultModelName||tag.faultModelId||tag.id||'Fault';
@@ -20244,6 +21228,13 @@ function decorateDataflowEdges(){
       }):`
         <div class="pgroup fault-tag-param-panel" data-fault-tag-param-panel="${escapeHtml(tag.id)}">
           <div class="pglbl">\u6545\u969c\u53c2\u6570</div>
+          <label class="fault-tag-param-row">
+            <span>\u662f\u5426\u542f\u7528</span>
+            <select data-fault-tag-enabled>
+              <option value="true"${tag.runtimeEnabled??tag.injectedFault?.active??tag.injectedFault?.enabled??true?' selected':''}>\u542f\u7528</option>
+              <option value="false"${tag.runtimeEnabled??tag.injectedFault?.active??tag.injectedFault?.enabled??true?'':' selected'}>\u7981\u7528</option>
+            </select>
+          </label>
           ${paramEditor}
           ${params.length?`
             <div class="fault-tag-param-actions">
@@ -20321,6 +21312,15 @@ function decorateDataflowEdges(){
       if(!nameInput){return;}
       nameInput.value=committedName;
       setNameDirtyState();
+    });
+    const enabledControl=pd.querySelector('[data-fault-tag-enabled]');
+    enabledControl?.addEventListener('change',()=>{
+      syncFaultTagEnabledToRuntimeTarget(tag,enabledControl.value==='true');
+      renderModelNodes();
+      renderEdges();
+      updateUI();
+      renderFaultTagPropertyPanel(tag);
+      toast(enabledControl.value==='true'?'故障已启用，可参与仿真':'故障已禁用，不参与仿真','s');
     });
     const inputs=Array.from(pd.querySelectorAll('[data-fault-tag-param]'));
     const applyButton=pd.querySelector('[data-fault-tag-apply]');
@@ -20615,7 +21615,7 @@ function decorateDataflowEdges(){
       layer=stage.ownerDocument.createElementNS('http://www.w3.org/2000/svg','svg');
       layer.id='canvas-edge-control-layer';
       layer.setAttribute('class','canvas-edge-control-layer');
-      layer.setAttribute('viewBox','0 0 2400 1500');
+      layer.setAttribute('viewBox',`0 0 ${CANVAS_STAGE.width} ${CANVAS_STAGE.height}`);
       layer.setAttribute('preserveAspectRatio','none');
       layer.setAttribute('aria-hidden','true');
     }
@@ -20961,8 +21961,12 @@ function decorateDataflowEdges(){
   const __bridgeApplyElectricalFault=applyElectricalFault;
   applyElectricalFault=function(node,inputValue,outputValue,time){
     const api=getFaultRuntimeApi();
-    if(!api||(!node?.injectedFault&&!api.hasActiveFaultBinding?.(node))){
+    const hasConfiguredFault=Boolean(node?.injectedFault||node?.faultBindings?.length);
+    if(!api){
       return __bridgeApplyElectricalFault(node,inputValue,outputValue,time);
+    }
+    if(!api.hasActiveFaultBinding?.(node)){
+      return hasConfiguredFault?outputValue:__bridgeApplyElectricalFault(node,inputValue,outputValue,time);
     }
     const allExecutableBindings=getExecutableFaultBindings(node,api);
     const executableBindings=allExecutableBindings.filter(binding=>!isParameterFaultBinding(binding));
@@ -21008,8 +22012,17 @@ function decorateDataflowEdges(){
     runtimeEdgeState.lastTransmissionDropTime=null;
     const activeBindings=api?.getFaultBindings?.(edge,{activeOnly:true})||[];
     const executableBindings=getExecutableFaultBindings(edge,api);
-    const hasProtocolFault=edge?.injectedFault?.layer==='protocol'||activeBindings.some(binding=>binding.layer==='protocol'||binding.propagationMode==='protocolEdge');
-    if(api&&modeKey==='actual'&&hasProtocolFault&&!Array.isArray(value)){
+    const hasConfiguredFault=Boolean(edge?.injectedFault||edge?.faultBindings?.length);
+    const hasSignalTransformFault=activeBindings.some(binding=>(
+      binding.layer==='protocol'
+      ||binding.layer==='electrical'
+      ||binding.propagationMode==='protocolEdge'
+      ||binding.propagationMode==='signalTransform'
+    ));
+    if(api&&modeKey==='actual'&&hasConfiguredFault&&!activeBindings.length){
+      return value;
+    }
+    if(api&&modeKey==='actual'&&hasSignalTransformFault&&!Array.isArray(value)){
       const bucket=SIM.actual;
       const edgeState=ensureEdgeRuntime(bucket,edge);
       const base=Number.isFinite(value)?value:0;
@@ -23323,12 +24336,14 @@ function decorateDataflowEdges(){
     const explicitSignature=configured.map(point=>[
       point.pointId||point.id||'',
       point.edgeId||point.edgeID||point.targetEdgeId||point.targetId||'',
-      normalizeDiagnosticTestPointType(point.pointType)
+      normalizeDiagnosticTestPointType(point.pointType),
+      arr(point.detects).join('|')
     ].join(':')).join('|');
     const manualSignature=manualConfigured.map(point=>[
       point.pointId||point.id||'',
       point.edgeId||point.edgeID||point.targetEdgeId||point.targetId||'',
-      normalizeDiagnosticTestPointType(point.pointType)
+      normalizeDiagnosticTestPointType(point.pointType),
+      arr(point.detects).join('|')
     ].join(':')).join('|');
     const edgeSignature=[activeCanvasId,runtimeEdges.map(edge=>edge.id).join('|'),runtimeNodes.map(node=>node.id).join('|'),explicitSignature,manualSignature].join('::');
     if(Array.isArray(state.compactDiagnosticFixedPoints)&&state.compactDiagnosticFixedPointSignature===edgeSignature){
@@ -23461,16 +24476,12 @@ function decorateDataflowEdges(){
 
   function pointDetectsFault(point,fault){
     if(!point||!fault) return false;
-    const explicitCell=getExplicitDetectionMatrixCell(point,fault);
-    if(explicitCell) return explicitCell.detectable;
     const id=getFaultKey(fault);
-    if(arr(point.detects).includes(id)) return true;
-    const configuredModel=getRuntimeFaultLibrary().find(item=>item.id===id);
-    if(!configuredModel&&!arr(fault.affectedEdges).length&&!arr(fault.affectedTestPointEdges).length){
-      return false;
-    }
-    const model={...(configuredModel||{}),...fault};
-    return getFaultAffectedEdges(model).has(point.edgeId);
+    // Virtual-point detectability is configured in the test-point editor.
+    // D-matrix cells must not be inferred from fault propagation or an
+    // imported historical matrix, otherwise an unselected fault can appear
+    // as detectable.
+    return arr(point.detects).includes(id);
   }
 
   function getDiagnosticPointSearchText(point){
@@ -23818,6 +24829,10 @@ function decorateDataflowEdges(){
 
   function getDetectionCellReason(point,fault){
     const id=getFaultKey(fault);
+    if(normalizeDiagnosticTestPointType(point?.pointType)==='virtual'){
+      if(arr(point.detects).includes(id)) return '虚拟测点根据配置的诊断规则判定为可观测';
+      return '虚拟测点未配置为可观测';
+    }
     if(arr(point.detects).includes(id)) return '测点直接配置为可观测';
     return '测点未配置为可观测';
   }
@@ -23928,7 +24943,9 @@ function decorateDataflowEdges(){
     const rows=faults.map(fault=>{
       const display=getDMatrixFaultDisplay(fault);
       const cells=points.map(point=>{
-        const detectable=arr(point.detects).includes(getFaultKey(fault));
+        const detectable=normalizeDiagnosticTestPointType(point?.pointType)==='virtual'
+          ?pointDetectsFault(point,fault)
+          :arr(point.detects).includes(getFaultKey(fault));
         return {
           pointId:point.pointId,
           pointCode:point.shortName,
@@ -24099,6 +25116,11 @@ function decorateDataflowEdges(){
     return plan;
   }
 
+  window.ensureBackendTroubleshootingPlan=async function(faultId,options={}){
+    const cached=getBackendTroubleshootingPlan(faultId);
+    return cached.ok?cached:requestBackendTroubleshootingPlan(faultId,options);
+  };
+
   function getTroubleshootingPlanOverrides(){
     if(!S.dMatrixTroubleshootingPlanOverrides||typeof S.dMatrixTroubleshootingPlanOverrides!=='object'){
       S.dMatrixTroubleshootingPlanOverrides={};
@@ -24202,11 +25224,14 @@ function decorateDataflowEdges(){
       <p>${html(path.summary)}</p>
       ${editing?`<div class="troubleshooting-path__edit-note">修改将自动保存到当前方案。</div>`:''}
       <ol class="troubleshooting-path__steps">
-        ${arr(path.steps).map(step=>`
-          <li>
-            <b>${html(step.pointCode)}</b>
+        ${arr(path.steps).map(step=>{
+          const isRepair=step.action==='replaceComponent'||step.action==='replaceWire';
+          const actionLabel=step.action==='replaceWire'?'更换线路':'更换组件';
+          return `
+          <li class="${isRepair?'is-repair':''}">
+            <b>${html(isRepair?'处置':step.pointCode)}</b>
             <div>
-              ${editing?`
+              ${editing&&!isRepair?`
                 <label>测点<select data-troubleshooting-path-point data-step-index="${step.index-1}">${renderTroubleshootingPointOptions(step.pointId)}</select></label>
                 <label>检查要求<textarea data-troubleshooting-path-expected data-step-index="${step.index-1}">${html(step.expected)}</textarea></label>
                 <div class="troubleshooting-path__edit-actions">
@@ -24215,13 +25240,14 @@ function decorateDataflowEdges(){
                   <button type="button" data-troubleshooting-path-remove="${step.index-1}">删除</button>
                 </div>
               `:`
-                <strong>${html(step.pointName)}</strong>
-                <span>${html(step.expected)}</span>
-                <small>剩余候选：${html(step.remainingFaultNames.join('、')||'无')}</small>
+                <strong>${html(isRepair?`${actionLabel}：${step.targetLabel}`:step.pointName)}</strong>
+                <span>${html(isRepair?step.text:step.expected)}</span>
+                ${isRepair?'':`<small>剩余候选：${html(arr(step.remainingFaultNames).join('、')||'无')}</small>`}
               `}
             </div>
           </li>
-        `).join('')}
+        `;
+        }).join('')}
       </ol>
       ${editing?`<button type="button" class="troubleshooting-path__add" data-add-troubleshooting-path-step>添加测点步骤</button>`:''}
       <section class="troubleshooting-key-steps">
@@ -25868,6 +26894,10 @@ function decorateDataflowEdges(){
       node,
       {
         parameterKey:param?.key||param?.id||param?.name||'',
+        targetField:plainText(
+          param?.targetField,
+          `params.${stableVariableKey(param?.key||param?.id||param?.varName||param?.name,`parameter_${index+1}`)}`
+        ),
         variableKey:stableVariableKey(param?.key||param?.id||param?.varName||param?.name,`parameter_${index+1}`),
         variableRole:'parameter',
         bindingObject:rawSlotBindingName(param,index),
@@ -26122,13 +27152,16 @@ function decorateDataflowEdges(){
       return {step:0.1,start:0,duration:''};
     }
     if(mathModel==='freeze'||mathModel==='stale'){
-      return {mode:'hold',value:'',start:0,duration:''};
+      return {start:0};
     }
     if(mathModel==='delay'){
       return {delay_steps:3,start:0,duration:''};
     }
     if(mathModel==='dropout'){
       return {drop_rate:0.08,seed:1,start:0,duration:''};
+    }
+    if(mathModel==='bias'){
+      return {bias:0.1,start:0,duration:''};
     }
     if(mathModel==='noise'||layer==='electrical'){
       return {std:0.08,start:0,duration:'',noise_type:'gaussian'};
@@ -26214,6 +27247,7 @@ function decorateDataflowEdges(){
       slotId:payload.slotId||slot?.id||'',
       slotName:payload.slotName||slot?.name||'',
       layer:payload.layer,
+      runtimeBehavior:payload.runtimeBehavior||model.runtimeBehavior||'',
       injectionForm:payload.injectionForm||getLayeredInjectionForm(target,payload.layer),
       bindingObject:payload.bindingObject||'',
       targetVariable:payload.targetVariable||payload.bindingObject||'',
@@ -27565,6 +28599,67 @@ function decorateDataflowEdges(){
   setTimeout(clearLegacyFaultLibraryPanel,20);
 })();
 
+// --- Refresh RF parameter fields when the modulation mode changes ---
+;(function installRfModulationFieldRefresh(){
+  const previousRenderPropertyPanel=window.renderPropertyPanel||(typeof renderPropertyPanel!=='undefined'?renderPropertyPanel:null);
+  if(!previousRenderPropertyPanel||window.__rfModulationFieldRefreshInstalled){return;}
+  window.__rfModulationFieldRefreshInstalled=true;
+  document.addEventListener('change',event=>{
+    if(event.target?.id!=='prop-modulation'){return;}
+    const target=getNode(S.selBlk);
+    if(target?.type!=='signal_source'||target.props?.signalDomain!=='rf'){return;}
+    target.props.modulation=event.target.value||'cw';
+    if(typeof setDirtyState==='function'){setDirtyState();}
+    window.renderPropertyPanel(target);
+  },true);
+  window.renderPropertyPanel=function(node){
+    const result=previousRenderPropertyPanel.apply(this,arguments);
+    const target=node||getNode(S.selBlk);
+    if(target?.type!=='signal_source'||target.props?.signalDomain!=='rf'){return result;}
+    const modulation=document.getElementById('prop-modulation');
+    if(!modulation||modulation.dataset.rfModulationRefreshBound){return result;}
+    modulation.dataset.rfModulationRefreshBound='true';
+    modulation.addEventListener('change',event=>{
+      target.props.modulation=event.target.value||'cw';
+      if(typeof setDirtyState==='function'){setDirtyState();}
+      window.renderPropertyPanel(target);
+    });
+    return result;
+  };
+  if(typeof renderPropertyPanel!=='undefined'){renderPropertyPanel=window.renderPropertyPanel;}
+})();
+
+;(function installMultimeterCanvasLeadControls(){
+  const previousRenderModelNodes=window.renderModelNodes||(typeof renderModelNodes!=='undefined'?renderModelNodes:null);
+  if(!previousRenderModelNodes||window.__multimeterCanvasLeadControlsWrapped||!window.__GZ_MULTIMETER_LEAD_BINDING_ENABLED__){return;}
+  window.__multimeterCanvasLeadControlsWrapped=true;
+  window.renderModelNodes=function(){
+    const result=previousRenderModelNodes.apply(this,arguments);
+    document.querySelectorAll('.blk[id^="b-"]').forEach(el=>{
+      const node=getNode(el.id.replace(/^b-/,''));
+      if(node?.type!=='instrument_multimeter'||el.querySelector('[data-multimeter-canvas-leads]')){return;}
+      const binding=getMultimeterLeadBinding();
+      const controls=document.createElement('div');
+      controls.className='multimeter-leads';
+      controls.dataset.multimeterCanvasLeads='true';
+      controls.innerHTML=`
+        <button type="button" class="multimeter-lead multimeter-lead--positive${binding?.meterId===node.id&&binding?.lead==='positiveLead'?' is-binding':''}" data-multimeter-canvas-lead="positiveLead" title="连接正表笔">＋</button>
+        <button type="button" class="multimeter-lead multimeter-lead--negative${binding?.meterId===node.id&&binding?.lead==='negativeLead'?' is-binding':''}" data-multimeter-canvas-lead="negativeLead" title="连接负表笔">－</button>`;
+      controls.querySelectorAll('[data-multimeter-canvas-lead]').forEach(button=>{
+        button.addEventListener('pointerdown',event=>event.stopPropagation());
+        button.addEventListener('click',event=>{
+          event.preventDefault();
+          event.stopPropagation();
+          window.beginMultimeterLeadBinding(node.id,button.dataset.multimeterCanvasLead);
+        });
+      });
+      el.appendChild(controls);
+    });
+    return result;
+  };
+  if(typeof renderModelNodes!=='undefined'){renderModelNodes=window.renderModelNodes;}
+})();
+
 // --- Editable labels for signal-source and instrument ports ---
 (function installEditablePeripheralPortLabels(){
   const previousGetNodePorts=getNodePorts;
@@ -27576,6 +28671,8 @@ function decorateDataflowEdges(){
       name=index===0?props.outputPortName:'';
     }else if(node?.type==='instrument_scope'){
       name=index===0?props.inputPortNameCh1:props.inputPortNameCh2;
+    }else if(node?.type==='instrument_multimeter'){
+      name=index===0?props.inputPortNameHigh:props.inputPortNameLow;
     }else{
       name=index===0?props.inputPortName:'';
     }
@@ -27583,6 +28680,15 @@ function decorateDataflowEdges(){
   }
 
   getNodePorts=function(node){
+    if(node?.type==='instrument_multimeter'){
+      return {
+        inputs:[
+          {key:'positive',label:configuredPortLabel(node,'input',0,'正端（VΩ）'),kind:'input',side:'left'},
+          {key:'negative',label:configuredPortLabel(node,'input',1,'负端（COM）'),kind:'input',side:'right'}
+        ],
+        outputs:[]
+      };
+    }
     const ports=previousGetNodePorts(node);
     if(node?.type==='signal_source'){
       return {
@@ -28576,6 +29682,32 @@ function decorateDataflowEdges(){
     }
     return previousExecuteBoundFlowBlock(node,nodeState,inputValues,modeKey,time,dt);
   };
+})();
+
+;(function installMultimeterCanvasLeadControlsFinal(){
+  const previousRenderModelNodes=window.renderModelNodes||(typeof renderModelNodes!=='undefined'?renderModelNodes:null);
+  if(!previousRenderModelNodes||window.__multimeterCanvasLeadControlsFinalWrapped||!window.__GZ_MULTIMETER_LEAD_BINDING_ENABLED__){return;}
+  window.__multimeterCanvasLeadControlsFinalWrapped=true;
+  window.renderModelNodes=function(){
+    const result=previousRenderModelNodes.apply(this,arguments);
+    document.querySelectorAll('.blk[id^="b-"]').forEach(el=>{
+      const node=getNode(el.id.replace(/^b-/,''));
+      if(node?.type!=='instrument_multimeter'||el.querySelector('[data-multimeter-canvas-leads]')){return;}
+      const binding=getMultimeterLeadBinding();
+      const controls=document.createElement('div');
+      controls.className='multimeter-leads';
+      controls.dataset.multimeterCanvasLeads='true';
+      controls.innerHTML=`<button type="button" class="multimeter-lead multimeter-lead--positive${binding?.meterId===node.id&&binding?.lead==='positiveLead'?' is-binding':''}" data-multimeter-canvas-lead="positiveLead">＋</button><button type="button" class="multimeter-lead multimeter-lead--negative${binding?.meterId===node.id&&binding?.lead==='negativeLead'?' is-binding':''}" data-multimeter-canvas-lead="negativeLead">－</button>`;
+      controls.querySelectorAll('[data-multimeter-canvas-lead]').forEach(button=>button.addEventListener('click',event=>{
+        event.preventDefault();
+        event.stopPropagation();
+        window.beginMultimeterLeadBinding(node.id,button.dataset.multimeterCanvasLead);
+      }));
+      el.appendChild(controls);
+    });
+    return result;
+  };
+  if(typeof renderModelNodes!=='undefined'){renderModelNodes=window.renderModelNodes;}
 })();
 
 // --- Parameter faults for Python-bound simulation blocks ---

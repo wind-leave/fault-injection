@@ -1,4 +1,5 @@
 import { createDefaultPythonBinding } from '../composables/useWorkbenchState.js';
+import { initializeSimulationInterfaceLock } from './simulationInterfaceLockService.js';
 
 const ROOT_CANVAS_ID = 'canvas-root';
 const ROOT_CANVAS_NAME = '顶层';
@@ -76,13 +77,16 @@ function inferLayeredSequence(canvases, key, prefix) {
 
 function normalizeNode(node) {
   const safeNode = isPlainObject(node) ? clone(node) : {};
-
-  return {
+  const normalizedNode = {
     ...safeNode,
     pythonBinding: safeNode.type === 'simulation_block'
       ? normalizePythonBinding(safeNode.pythonBinding)
       : safeNode.pythonBinding ?? null
   };
+
+  return normalizedNode.type === 'simulation_block'
+    ? initializeSimulationInterfaceLock(normalizedNode)
+    : normalizedNode;
 }
 
 function normalizeEdge(edge) {

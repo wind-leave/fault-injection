@@ -5,6 +5,31 @@ import {
 } from '../src/services/workbenchSnapshotService.js';
 
 describe('workbenchSnapshotService', () => {
+  it('restores the persisted immutable simulation interface definition', () => {
+    const restored = restoreWorkbenchSnapshot({
+      modelNodes: [{
+        id: 'node-1',
+        type: 'simulation_block',
+        props: { name: 'changed', inputs: [], outputs: [], middleVars: [] },
+        simulationInterfaceDefinition: {
+          name: 'controller',
+          ports: {
+            inputs: [{ name: 'error', type: 'scalar' }],
+            outputs: [{ name: 'command', type: 'scalar' }],
+            middleVars: []
+          },
+          pythonPortMapping: { inputs: [], outputs: [], middleVars: [] }
+        }
+      }],
+      modelEdges: []
+    });
+
+    expect(restored.modelNodes[0].props).toMatchObject({
+      name: 'controller',
+      inputs: [{ name: 'error', type: 'scalar' }]
+    });
+  });
+
   it('serializes python bindings and port metadata into a restorable snapshot', () => {
     const snapshot = createWorkbenchSnapshot({
       modelNodes: [

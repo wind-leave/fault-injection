@@ -123,6 +123,14 @@ def get_point_priority_bonus(point, cell):
     return bonus
 
 
+def _is_virtual_point(point):
+    point_type = _text((point or {}).get("pointType")).lower()
+    # Existing task packages predating point types used active measurements as
+    # path steps. Treat the omitted legacy value as virtual; current exports
+    # always send an explicit physical or virtual type.
+    return point_type in {"", "virtual"}
+
+
 def rank_troubleshooting_cells(d_matrix, target_row, remaining_rows, used_point_codes=None):
     used = set(used_point_codes or [])
     points_by_code = {_text(point.get("shortName")): point for point in _arr(d_matrix.get("points"))}
@@ -130,6 +138,11 @@ def rank_troubleshooting_cells(d_matrix, target_row, remaining_rows, used_point_
     for cell in _arr(target_row.get("cells")):
         point_code = _text(cell.get("pointCode"))
         if not cell.get("detectable") or not point_code or point_code in used:
+            continue
+        point = points_by_code.get(point_code)
+        # Physical measurements are already available on the console. They
+        # inform diagnosis but are not operations in the troubleshooting path.
+        if not _is_virtual_point(point):
             continue
         other_detecting_rows = [
             row
@@ -141,7 +154,6 @@ def rank_troubleshooting_cells(d_matrix, target_row, remaining_rows, used_point_
             for row in _arr(remaining_rows)
             if bool((get_matrix_cell_for_point(row, point_code) or {}).get("detectable")) != bool(cell.get("detectable"))
         ]
-        point = points_by_code.get(point_code)
         ranked.append(
             {
                 "cell": cell,
@@ -188,16 +200,41 @@ def build_troubleshooting_path(d_matrix, target_fault_id, remaining_rows=None, u
         if len(remaining) <= 1:
             break
 
+    repair_targets = _repair_targets(target_row)
+    repair_steps = [
+        {
+            "index": len(steps) + index,
+            "action": "replaceWire",
+            "targetId": target["id"],
+            "targetLabel": target["label"],
+            "text": f"更换线路：{target['label']}。",
+        }
+        for index, target in enumerate(
+            (target for target in repair_targets if target["kind"] == "edge"),
+            start=1,
+        )
+    ]
+    repair_steps.extend(
+        {
+            "index": len(steps) + len(repair_steps) + 1,
+            "action": "replaceComponent",
+            "targetId": target["id"],
+            "targetLabel": target["label"],
+            "text": f"更换组件：{target['label']}。",
+        }
+        for target in repair_targets
+        if target["kind"] == "node"
+    )
+
     path = {
         "ok": True,
         "faultId": _fault_id(target_row),
         "faultName": target_row.get("faultName") or _fault_id(target_row),
         "targetLabel": target_row.get("targetLabel") or "",
         "layer": target_row.get("layer") or "",
-        "steps": steps,
+        "steps": [*steps, *repair_steps],
         "summary": f"优先检查 {steps[0]['pointCode']} {steps[0]['pointName']}，再按剩余候选继续确认。" if steps else "该故障暂无可检测测点。",
     }
-    repair_targets = _repair_targets(target_row)
     path["keySteps"] = [
         *[
             {
@@ -226,7 +263,7 @@ def build_troubleshooting_path(d_matrix, target_fault_id, remaining_rows=None, u
                 "action": "replaceComponent",
                 "targetId": target["id"],
                 "targetLabel": target["label"],
-                "text": f"更换关键设备：{target['label']}。",
+                "text": f"更换组件：{target['label']}。",
             }
             for target in repair_targets
             if target["kind"] == "node"

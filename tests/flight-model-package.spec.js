@@ -71,6 +71,46 @@ function loadPublicPackage(fileName) {
 }
 
 describe('flightModelPackageService', () => {
+  it('preserves an existing simulation interface when importing the same node id', () => {
+    const existingSnapshot = {
+      ...VALID_PACKAGE.workbenchSnapshot,
+      modelNodes: [{
+        id: 'node-controller',
+        type: 'simulation_block',
+        props: {
+          name: 'original-controller',
+          inputs: [{ name: 'error', type: 'scalar' }],
+          outputs: [{ name: 'command', type: 'scalar' }],
+          middleVars: []
+        }
+      }]
+    };
+    const importedPackage = {
+      ...VALID_PACKAGE,
+      workbenchSnapshot: {
+        ...VALID_PACKAGE.workbenchSnapshot,
+        modelNodes: [{
+          id: 'node-controller',
+          type: 'simulation_block',
+          props: {
+            name: 'imported-controller',
+            inputs: [{ name: 'changed-input', type: 'matrix' }],
+            outputs: [],
+            middleVars: []
+          }
+        }]
+      }
+    };
+
+    const result = applyFlightModelPackage(importedPackage, { existingSnapshot });
+
+    expect(result.ok).toBe(true);
+    expect(result.snapshot.modelNodes[0].props).toMatchObject({
+      name: 'original-controller',
+      inputs: [{ name: 'error', type: 'scalar' }]
+    });
+  });
+
   it('validates a well-formed flight model package and rejects malformed packages', () => {
     const valid = validateFlightModelPackage(VALID_PACKAGE);
     const invalid = validateFlightModelPackage({
@@ -132,6 +172,70 @@ describe('flightModelPackageService', () => {
     expect(result.errors).toContain(
       'workbenchSnapshot.modelNodes node "node-faulty-1" references unknown fault modelId "missing_fault_model".'
     );
+  });
+
+  it('exports generated fault models with their snapshot references and imports legacy generated faults', () => {
+    const generatedFaultId = 'layered-node-25-node-control-allocation-physical-allocation_gain';
+    const generatedFault = {
+      instanceId: generatedFaultId,
+      modelId: generatedFaultId,
+      faultTypeId: generatedFaultId,
+      name: 'Control allocation gain injection',
+      layer: 'physical',
+      runtimeBehavior: 'bias',
+      parameters: { bias: 0.1, start: 0 }
+    };
+    const legacyPackage = {
+      ...VALID_PACKAGE,
+      faultLibrary: [],
+      workbenchSnapshot: {
+        ...VALID_PACKAGE.workbenchSnapshot,
+        modelNodes: [
+          {
+            id: 'node-control-allocation',
+            type: 'simulation_block',
+            injectedFault: generatedFault,
+            faultBindings: [{
+              faultModelId: generatedFaultId,
+              injectedFault: generatedFault,
+              active: true
+            }]
+          }
+        ],
+        faultInstances: [{
+          instanceId: generatedFaultId,
+          faultTypeId: generatedFaultId,
+          targetKind: 'node',
+          targetId: 'node-control-allocation',
+          layer: 'physical',
+          parameters: { bias: 0.1, start: 0 }
+        }]
+      }
+    };
+
+    const importedLegacyPackage = applyFlightModelPackage(legacyPackage);
+    expect(importedLegacyPackage.ok).toBe(true);
+    expect(importedLegacyPackage.faultLibrary).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: generatedFaultId,
+        layer: 'physical',
+        runtimeBehavior: 'bias'
+      })
+    ]));
+
+    const exportedPackage = buildFlightModelPackage({
+      meta: {
+        modelId: 'generated-fault-export',
+        modelName: 'Generated Fault Export'
+      },
+      snapshot: legacyPackage.workbenchSnapshot,
+      faultLibrary: []
+    });
+
+    expect(validateFlightModelPackage(exportedPackage)).toEqual({ ok: true, errors: [] });
+    expect(exportedPackage.faultLibrary).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: generatedFaultId })
+    ]));
   });
 
   it('rejects whitespace-only module fields and missing entry functions', () => {
@@ -952,6 +1056,29 @@ describe('flightModelPackageService', () => {
     ]);
   });
 
+  it('preserves executable physical parameter targets for default fault slots', () => {
+    const node = normalizeModelNode({
+      id: 'node-allocation',
+      type: 'simulation_block',
+      props: {
+        modelParameters: [
+          {
+            key: 'allocation_gain',
+            name: 'Allocation gain',
+            targetField: 'params.allocationGain'
+          }
+        ]
+      }
+    });
+
+    expect(node.faultSlots).toContainEqual(expect.objectContaining({
+      slotId: 'physical:parameter:allocation_gain',
+      layer: 'physical',
+      targetField: 'params.allocationGain',
+      parameterKey: 'allocation_gain'
+    }));
+  });
+
   it('does not infer undeclared component variables once a layer declaration exists', () => {
     const node = normalizeModelNode({
       id: 'node-controller',
@@ -1065,6 +1192,7 @@ describe('flightModelPackageService', () => {
     ]);
     expect(byId.bias.formula).toBe('p_fault = p + bias');
     expect(byId.drift.formula).toBe('p_fault = p + rate * max(t - start, 0)');
+    expect(byId.freeze.defaultParameters).toEqual({ start: 0 });
     expect(byId.random.defaultParameters).toMatchObject({ seed: 1, std: 0.08 });
   });
 

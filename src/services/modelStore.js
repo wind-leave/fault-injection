@@ -30,7 +30,7 @@ export const FAULT_MATH_MODEL_DEFINITIONS = Object.freeze({
       id: 'freeze',
       name: '卡死模型',
       formula: 'p_fault = hold(p, start)',
-      defaultParameters: { start: 0, duration: '' }
+      defaultParameters: { start: 0 }
     },
     {
       id: 'random',
@@ -167,7 +167,7 @@ function createPortSlot(layer, role, item = {}, index = 0) {
     slotId: `${layer}:${role}:${key}`,
     slotName: text(item.name ?? item.label ?? item.varName, `${role} ${index + 1}`),
     layer,
-    targetField: `${role}.${key}`,
+    targetField: text(item.targetField, `${role}.${key}`),
     allowedModels: layer === 'physical'
       ? FAULT_MATH_MODEL_DEFINITIONS.physical.map((model) => model.id)
       : EDGE_ELECTRICAL_MODELS.slice(),

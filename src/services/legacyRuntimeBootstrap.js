@@ -11,9 +11,12 @@ import * as faultSlotPanelSchema from './faultSlotPanelSchema.js';
 import * as faultTagPanelSchema from './faultTagPanelSchema.js';
 import * as propertyPanelSchema from './propertyPanelSchema.js';
 import * as simulationPropertyPanelSchema from './simulationPropertyPanelSchema.js';
+import * as simulationInterfaceLockService from './simulationInterfaceLockService.js';
 import * as signalComponentRuntime from './signalComponentRuntime.js';
 import * as signalSourceDomainService from './signalSourceDomainService.js';
+import * as multimeterMeasurementService from './multimeterMeasurementService.js';
 import * as subsystemPropertyPanelSchema from './subsystemPropertyPanelSchema.js';
+import * as practiceTaskPackageService from './practiceTaskPackageService.js';
 import { installBackendStepSimulationRuntime } from './backendStepSimulationRuntime.js';
 import {
   COMPONENT_GROUPS,
@@ -216,15 +219,20 @@ export function mountLegacyRuntime() {
   window.__GZ_COMPONENT_LIBRARY__ = buildComponentLibraryFromRegistry(COMPONENT_REGISTRY);
   window.__GZ_PROPERTY_PANEL_SCHEMA__ = propertyPanelSchema;
   window.__GZ_SIMULATION_PROPERTY_PANEL_SCHEMA__ = simulationPropertyPanelSchema;
+  window.__GZ_SIMULATION_INTERFACE_LOCK__ = simulationInterfaceLockService;
   window.__GZ_SUBSYSTEM_PROPERTY_PANEL_SCHEMA__ = subsystemPropertyPanelSchema;
   window.__GZ_SIGNAL_COMPONENT_RUNTIME__ = signalComponentRuntime;
   window.__GZ_SIGNAL_SOURCE_DOMAIN__ = signalSourceDomainService;
+  window.__GZ_MULTIMETER_MEASUREMENT__ = multimeterMeasurementService;
+  window.__GZ_PRACTICE_TASK_PACKAGE__ = practiceTaskPackageService;
   window.__GZ_FLIGHT_MODEL_PACKAGE__ = {
     validate(pkg) {
       return validateFlightModelPackage(pkg);
     },
     importObject(pkg) {
-      const result = applyFlightModelPackage(pkg);
+      const result = applyFlightModelPackage(pkg, {
+        existingSnapshot: createWorkbenchSnapshot(window.__GZ_STATE__ ?? {})
+      });
       if (!result.ok) {
         return result;
       }
@@ -371,9 +379,16 @@ export function __resetLegacyRuntimeForTests() {
   delete window.__GZ_COMPONENT_LIBRARY__;
   delete window.__GZ_PROPERTY_PANEL_SCHEMA__;
   delete window.__GZ_SIMULATION_PROPERTY_PANEL_SCHEMA__;
+  delete window.__GZ_SIMULATION_INTERFACE_LOCK__;
   delete window.__GZ_SUBSYSTEM_PROPERTY_PANEL_SCHEMA__;
   delete window.__GZ_SIGNAL_COMPONENT_RUNTIME__;
   delete window.__GZ_SIGNAL_SOURCE_DOMAIN__;
+  delete window.__GZ_MULTIMETER_MEASUREMENT__;
+  delete window.__GZ_PRACTICE_TASK_PACKAGE__;
+  delete window.__GZ_MULTIMETER_LEAD_BINDING__;
+  delete window.beginMultimeterLeadBinding;
+  delete window.__multimeterCanvasLeadControlsWrapped;
+  delete window.__multimeterCanvasLeadControlsFinalWrapped;
   delete window.__GZ_FLIGHT_MODEL_PACKAGE__;
   delete window.__GZ_LOAD_DEFAULT_FLIGHT_MODEL__;
   delete window.__GZ_DEFAULT_FLIGHT_MODEL_LOADING__;

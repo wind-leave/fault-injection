@@ -88,7 +88,9 @@
       "entryFunction": "process",
       "inputs": ["moment_command", "speed_command", "altitude_command"],
       "outputs": ["actuator_command"],
-      "parameters": {}
+      "parameters": {
+        "allocationGain": {"type": "number", "min": 0, "max": 10, "default": 1}
+      }
     },
     {
       "moduleId": "voltage_drop",
@@ -155,6 +157,27 @@
       "inputs": ["attitude", "body_rate", "altitude"],
       "outputs": ["attitude_feedback", "rate_feedback", "altitude_feedback"],
       "parameters": {}
+    },
+    {
+      "moduleId": "barometer_sensor",
+      "importPath": "backend.builtin_modules.barometer_sensor",
+      "entryFunction": "process",
+      "inputs": ["true_altitude"],
+      "outputs": ["measured_altitude"],
+      "parameters": {
+        "bias": {
+          "type": "number",
+         "min": -1000,
+          "max": 1000,
+          "default": 0
+        },
+       "scale": {
+         "type": "number",
+         "min": 0,
+         "max": 10,
+         "default": 1
+        }
+      } 
     }
   ]
 }

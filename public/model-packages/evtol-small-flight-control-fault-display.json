@@ -1365,17 +1365,169 @@
       "recommendedModule": "fault_link_interrupt",
       "pythonFunction": "blocking_interrupt",
       "runtimeBehavior": "catalog_only"
+    },
+    {
+      "id": "layered-node-25-node-control-allocation-physical-allocation_gain",
+      "name": "物理层注入 - 控制分配",
+      "layer": "physical",
+      "layerKey": "physical",
+      "modelClass": "模型参数故障",
+      "runtimeBehavior": "bias",
+      "defaultParameters": {
+        "bias": 0.1,
+        "start": 0,
+        "duration": ""
+      }
+    },
+    {
+      "id": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+      "name": "物理层注入 - 电压跌落",
+      "layer": "physical",
+      "layerKey": "physical",
+      "modelClass": "模型参数故障",
+      "runtimeBehavior": "bias",
+      "defaultParameters": {
+        "bias": 0.1,
+        "start": 0,
+        "duration": ""
+      }
+    },
+    {
+      "id": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+      "name": "电气层注入 - 电压限幅后指令",
+      "layer": "electrical",
+      "layerKey": "electrical",
+      "modelClass": "连续信号故障",
+      "runtimeBehavior": "noise",
+      "defaultParameters": {
+        "std": 0.08,
+        "start": 0,
+        "duration": "",
+        "noise_type": "gaussian"
+      }
+    },
+    {
+      "id": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+      "name": "电气层注入 - 4号电机 CAN 指令",
+      "layer": "electrical",
+      "layerKey": "electrical",
+      "modelClass": "连续信号故障",
+      "runtimeBehavior": "noise",
+      "defaultParameters": {
+        "std": 0.08,
+        "start": 0,
+        "duration": "",
+        "noise_type": "gaussian"
+      }
     }
   ],
-  "faultInstances": [],
+  "faultInstances": [
+    {
+      "instanceId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+      "faultTypeId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+      "targetKind": "node",
+      "targetId": "node-control-allocation",
+      "slotId": "physical:allocation_gain",
+      "slotName": "控制分配增益",
+      "layer": "physical",
+      "injectionForm": "module-variable",
+      "bindingObject": "allocation_gain",
+      "targetVariable": "allocation_gain",
+      "targetField": "params.allocationGain",
+      "displayName": "物理层注入 - 控制分配",
+      "parameters": {
+        "bias": 0.1,
+        "start": 0,
+        "duration": ""
+      },
+      "active": true,
+      "visual": {
+        "expanded": false
+      }
+    },
+    {
+      "instanceId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+      "faultTypeId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+      "targetKind": "node",
+      "targetId": "node-voltage-drop",
+      "slotId": "physical:bus_voltage_drop",
+      "slotName": "母线电压跌落",
+      "layer": "physical",
+      "injectionForm": "module-variable",
+      "bindingObject": "bus_voltage_drop",
+      "targetVariable": "bus_voltage_drop",
+      "targetField": "params.busVoltage",
+      "displayName": "物理层注入 - 电压跌落",
+      "parameters": {
+        "bias": 0.1,
+        "start": 0,
+        "duration": ""
+      },
+      "active": false,
+      "visual": {
+        "expanded": false
+      },
+      "enabled": false
+    },
+    {
+      "instanceId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+      "faultTypeId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+      "targetKind": "edge",
+      "targetId": "edge-voltage-actuator",
+      "slotId": "electrical:signal_value",
+      "slotName": "signal_value",
+      "layer": "electrical",
+      "injectionForm": "signal-edge",
+      "bindingObject": "signal_value",
+      "targetVariable": "signal_value",
+      "targetField": "signal.value",
+      "displayName": "电气层注入 - 电压限幅后指令",
+      "parameters": {
+        "std": 0.08,
+        "start": 0,
+        "duration": "",
+        "noise_type": "gaussian"
+      },
+      "active": false,
+      "visual": {
+        "expanded": false
+      },
+      "enabled": false
+    },
+    {
+      "instanceId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+      "faultTypeId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+      "targetKind": "edge",
+      "targetId": "edge-actuator-rotor-4",
+      "slotId": "electrical:signal_value",
+      "slotName": "signal_value",
+      "layer": "electrical",
+      "injectionForm": "signal-edge",
+      "bindingObject": "signal_value",
+      "targetVariable": "signal_value",
+      "targetField": "signal.value",
+      "displayName": "电气层注入 - 4号电机 CAN 指令",
+      "parameters": {
+        "std": 0.08,
+        "start": 0,
+        "duration": "",
+        "noise_type": "gaussian"
+      },
+      "active": false,
+      "visual": {
+        "expanded": false
+      },
+      "enabled": false
+    }
+  ],
   "workbenchSnapshot": {
     "version": 1,
     "modelNodes": [
       {
         "id": "node-attitude-command",
         "type": "signal_source",
-        "x": 60,
-        "y": 180,
+        "x": 54,
+        "y": 636,
         "w": 164,
         "h": 84,
         "props": {
@@ -1383,6 +1535,7 @@
           "signalId": "",
           "unit": "",
           "description": "",
+          "outputPortName": "输出",
           "name": "姿态指令源",
           "signalDomain": "analog",
           "analogKind": "generic",
@@ -1402,8 +1555,8 @@
       {
         "id": "node-speed-command",
         "type": "signal_source",
-        "x": 60,
-        "y": 310,
+        "x": 49,
+        "y": 830,
         "w": 164,
         "h": 84,
         "props": {
@@ -1411,6 +1564,7 @@
           "signalId": "",
           "unit": "",
           "description": "",
+          "outputPortName": "输出",
           "name": "速度指令源",
           "signalDomain": "analog",
           "analogKind": "generic",
@@ -1430,8 +1584,8 @@
       {
         "id": "node-altitude-command",
         "type": "signal_source",
-        "x": 60,
-        "y": 440,
+        "x": 58,
+        "y": 1011,
         "w": 164,
         "h": 84,
         "props": {
@@ -1439,6 +1593,7 @@
           "signalId": "",
           "unit": "",
           "description": "",
+          "outputPortName": "输出",
           "name": "高度指令源",
           "signalDomain": "analog",
           "analogKind": "generic",
@@ -1458,12 +1613,12 @@
       {
         "id": "node-pid-controller",
         "type": "simulation_block",
-        "x": 333,
-        "y": 149,
+        "x": 337,
+        "y": 659,
         "w": 196,
         "h": 134,
         "props": {
-          "name": "PID—AttHighControlLaw / PID控制器",
+          "name": "PID控制器",
           "moduleType": "control",
           "inputs": [
             {
@@ -1802,12 +1957,12 @@
       {
         "id": "node-control-allocation",
         "type": "simulation_block",
-        "x": 565,
-        "y": 220,
+        "x": 633,
+        "y": 726,
         "w": 196,
         "h": 156,
         "props": {
-          "name": "ControlAllocation / 控制分配",
+          "name": "控制分配",
           "moduleType": "control_allocation",
           "inputs": [
             {
@@ -2097,17 +2252,90 @@
             "unit": "",
             "parameterKey": ""
           }
+        ],
+        "injectedFault": {
+          "instanceId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+          "modelId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+          "faultTypeId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+          "name": "物理层注入 - 控制分配",
+          "layer": "physical",
+          "layerKey": "physical",
+          "modelClass": "模型参数故障",
+          "runtimeBehavior": "bias",
+          "slotId": "physical:allocation_gain",
+          "slotName": "控制分配增益",
+          "bindingObject": "allocation_gain",
+          "targetVariable": "allocation_gain",
+          "targetField": "params.allocationGain",
+          "targetKind": "node",
+          "targetId": "node-control-allocation",
+          "injectionForm": "module-variable",
+          "parameters": {
+            "bias": 0.1,
+            "start": 0,
+            "duration": ""
+          }
+        },
+        "faultBindings": [
+          {
+            "bindingId": "layered-node-25-node-control-allocation-physical-allocation_gain::node-control-allocation",
+            "faultModelId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+            "name": "物理层注入 - 控制分配",
+            "layer": "physical",
+            "layerKey": "physical",
+            "runtimeBehavior": "bias",
+            "parameters": {
+              "bias": 0.1,
+              "start": 0,
+              "duration": ""
+            },
+            "targetKind": "node",
+            "targetId": "node-control-allocation",
+            "slotId": "physical:allocation_gain",
+            "slotName": "控制分配增益",
+            "bindingObject": "allocation_gain",
+            "targetVariable": "allocation_gain",
+            "targetField": "params.allocationGain",
+            "injectionForm": "module-variable",
+            "visualRole": "fault-source",
+            "propagationMode": "localParameter",
+            "canPropagate": false,
+            "active": true,
+            "injectedFault": {
+              "instanceId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+              "modelId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+              "faultTypeId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+              "name": "物理层注入 - 控制分配",
+              "layer": "physical",
+              "layerKey": "physical",
+              "modelClass": "模型参数故障",
+              "runtimeBehavior": "bias",
+              "slotId": "physical:allocation_gain",
+              "slotName": "控制分配增益",
+              "bindingObject": "allocation_gain",
+              "targetVariable": "allocation_gain",
+              "targetField": "params.allocationGain",
+              "targetKind": "node",
+              "targetId": "node-control-allocation",
+              "injectionForm": "module-variable",
+              "parameters": {
+                "bias": 0.1,
+                "start": 0,
+                "duration": ""
+              }
+            }
+          }
         ]
       },
       {
         "id": "node-voltage-drop",
         "type": "simulation_block",
-        "x": 844,
-        "y": 261,
+        "x": 919,
+        "y": 743,
         "w": 196,
         "h": 134,
         "props": {
-          "name": "Voltage_drop / 电压跌落",
+          "name": "电压跌落",
           "moduleType": "power",
           "inputs": [
             {
@@ -2352,17 +2580,94 @@
             "unit": "",
             "parameterKey": ""
           }
+        ],
+        "injectedFault": {
+          "instanceId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+          "modelId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+          "faultTypeId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+          "name": "物理层注入 - 电压跌落",
+          "layer": "physical",
+          "layerKey": "physical",
+          "modelClass": "模型参数故障",
+          "runtimeBehavior": "bias",
+          "slotId": "physical:bus_voltage_drop",
+          "slotName": "母线电压跌落",
+          "bindingObject": "bus_voltage_drop",
+          "targetVariable": "bus_voltage_drop",
+          "targetField": "params.busVoltage",
+          "targetKind": "node",
+          "targetId": "node-voltage-drop",
+          "injectionForm": "module-variable",
+          "parameters": {
+            "bias": 0.1,
+            "start": 0,
+            "duration": ""
+          },
+          "active": false,
+          "enabled": false
+        },
+        "faultBindings": [
+          {
+            "bindingId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop::node-voltage-drop",
+            "faultModelId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+            "name": "物理层注入 - 电压跌落",
+            "layer": "physical",
+            "layerKey": "physical",
+            "runtimeBehavior": "bias",
+            "parameters": {
+              "bias": 0.1,
+              "start": 0,
+              "duration": ""
+            },
+            "targetKind": "node",
+            "targetId": "node-voltage-drop",
+            "slotId": "physical:bus_voltage_drop",
+            "slotName": "母线电压跌落",
+            "bindingObject": "bus_voltage_drop",
+            "targetVariable": "bus_voltage_drop",
+            "targetField": "params.busVoltage",
+            "injectionForm": "module-variable",
+            "visualRole": "fault-source",
+            "propagationMode": "localParameter",
+            "canPropagate": false,
+            "active": false,
+            "injectedFault": {
+              "instanceId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+              "modelId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+              "faultTypeId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+              "name": "物理层注入 - 电压跌落",
+              "layer": "physical",
+              "layerKey": "physical",
+              "modelClass": "模型参数故障",
+              "runtimeBehavior": "bias",
+              "slotId": "physical:bus_voltage_drop",
+              "slotName": "母线电压跌落",
+              "bindingObject": "bus_voltage_drop",
+              "targetVariable": "bus_voltage_drop",
+              "targetField": "params.busVoltage",
+              "targetKind": "node",
+              "targetId": "node-voltage-drop",
+              "injectionForm": "module-variable",
+              "parameters": {
+                "bias": 0.1,
+                "start": 0,
+                "duration": ""
+              },
+              "active": false,
+              "enabled": false
+            }
+          }
         ]
       },
       {
         "id": "node-motor-actuator",
         "type": "simulation_block",
-        "x": 1075,
-        "y": 215,
+        "x": 1193,
+        "y": 674,
         "w": 196,
         "h": 266,
         "props": {
-          "name": "ControlAllocation / 电机执行器",
+          "name": "电机执行器",
           "moduleType": "motor_actuator",
           "inputs": [
             {
@@ -2830,8 +3135,8 @@
       {
         "id": "node-rotor-1",
         "type": "simulation_block",
-        "x": 1360,
-        "y": 35,
+        "x": 1535,
+        "y": 192,
         "w": 196,
         "h": 134,
         "props": {
@@ -3093,8 +3398,8 @@
       {
         "id": "node-rotor-2",
         "type": "simulation_block",
-        "x": 1360,
-        "y": 127,
+        "x": 1533,
+        "y": 363,
         "w": 196,
         "h": 134,
         "props": {
@@ -3356,8 +3661,8 @@
       {
         "id": "node-rotor-3",
         "type": "simulation_block",
-        "x": 1360,
-        "y": 219,
+        "x": 1530,
+        "y": 525,
         "w": 196,
         "h": 134,
         "props": {
@@ -3619,8 +3924,8 @@
       {
         "id": "node-rotor-4",
         "type": "simulation_block",
-        "x": 1360,
-        "y": 311,
+        "x": 1528,
+        "y": 691,
         "w": 196,
         "h": 134,
         "props": {
@@ -3882,8 +4187,8 @@
       {
         "id": "node-rotor-5",
         "type": "simulation_block",
-        "x": 1360,
-        "y": 403,
+        "x": 1529,
+        "y": 861,
         "w": 196,
         "h": 134,
         "props": {
@@ -4145,8 +4450,8 @@
       {
         "id": "node-rotor-6",
         "type": "simulation_block",
-        "x": 1360,
-        "y": 495,
+        "x": 1527,
+        "y": 1022,
         "w": 196,
         "h": 134,
         "props": {
@@ -4408,8 +4713,8 @@
       {
         "id": "node-rotor-7",
         "type": "simulation_block",
-        "x": 1360,
-        "y": 587,
+        "x": 1533,
+        "y": 1193,
         "w": 196,
         "h": 134,
         "props": {
@@ -4671,8 +4976,8 @@
       {
         "id": "node-rotor-8",
         "type": "simulation_block",
-        "x": 1360,
-        "y": 679,
+        "x": 1533,
+        "y": 1342,
         "w": 196,
         "h": 134,
         "props": {
@@ -4934,8 +5239,8 @@
       {
         "id": "node-aero-moment",
         "type": "simulation_block",
-        "x": 1645,
-        "y": 245,
+        "x": 1902,
+        "y": 694,
         "w": 196,
         "h": 266,
         "props": {
@@ -5460,12 +5765,12 @@
       {
         "id": "node-six-dof",
         "type": "simulation_block",
-        "x": 1905,
-        "y": 245,
+        "x": 2212,
+        "y": 756,
         "w": 196,
         "h": 156,
         "props": {
-          "name": "6DOF (Euler Angles) / 机体动力学",
+          "name": "机体动力学",
           "moduleType": "six_dof",
           "inputs": [
             {
@@ -5826,8 +6131,8 @@
       {
         "id": "node-sensor-fault-injection",
         "type": "simulation_block",
-        "x": 1765,
-        "y": 520,
+        "x": 2573,
+        "y": 760,
         "w": 196,
         "h": 156,
         "props": {
@@ -6153,8 +6458,8 @@
       {
         "id": "node-scope",
         "type": "instrument_scope",
-        "x": 769,
-        "y": 637,
+        "x": 1093,
+        "y": 1250,
         "w": 150,
         "h": 74,
         "props": {
@@ -6355,7 +6660,89 @@
             "unit": "",
             "parameterKey": ""
           }
-        ]
+        ],
+        "injectedFault": {
+          "instanceId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+          "modelId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+          "faultTypeId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+          "name": "电气层注入 - 电压限幅后指令",
+          "layer": "electrical",
+          "layerKey": "electrical",
+          "modelClass": "连续信号故障",
+          "runtimeBehavior": "noise",
+          "slotId": "electrical:signal_value",
+          "slotName": "signal_value",
+          "bindingObject": "signal_value",
+          "targetVariable": "signal_value",
+          "targetField": "signal.value",
+          "targetKind": "edge",
+          "targetId": "edge-voltage-actuator",
+          "injectionForm": "signal-edge",
+          "parameters": {
+            "std": 0.08,
+            "start": 0,
+            "duration": "",
+            "noise_type": "gaussian"
+          },
+          "active": false,
+          "enabled": false
+        },
+        "faultBindings": [
+          {
+            "bindingId": "layered-node-27-edge-voltage-actuator-electrical-signal_value::edge-voltage-actuator",
+            "faultModelId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+            "name": "电气层注入 - 电压限幅后指令",
+            "layer": "electrical",
+            "layerKey": "electrical",
+            "runtimeBehavior": "noise",
+            "parameters": {
+              "std": 0.08,
+              "start": 0,
+              "duration": "",
+              "noise_type": "gaussian"
+            },
+            "targetKind": "edge",
+            "targetId": "edge-voltage-actuator",
+            "slotId": "electrical:signal_value",
+            "slotName": "signal_value",
+            "bindingObject": "signal_value",
+            "targetVariable": "signal_value",
+            "targetField": "signal.value",
+            "injectionForm": "signal-edge",
+            "visualRole": "fault-source",
+            "propagationMode": "signalTransform",
+            "canPropagate": true,
+            "active": false,
+            "injectedFault": {
+              "instanceId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+              "modelId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+              "faultTypeId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+              "name": "电气层注入 - 电压限幅后指令",
+              "layer": "electrical",
+              "layerKey": "electrical",
+              "modelClass": "连续信号故障",
+              "runtimeBehavior": "noise",
+              "slotId": "electrical:signal_value",
+              "slotName": "signal_value",
+              "bindingObject": "signal_value",
+              "targetVariable": "signal_value",
+              "targetField": "signal.value",
+              "targetKind": "edge",
+              "targetId": "edge-voltage-actuator",
+              "injectionForm": "signal-edge",
+              "parameters": {
+                "std": 0.08,
+                "start": 0,
+                "duration": "",
+                "noise_type": "gaussian"
+              },
+              "active": false,
+              "enabled": false
+            }
+          }
+        ],
+        "status": "faulted",
+        "faultSource": "电气层注入 - 电压限幅后指令"
       },
       {
         "id": "edge-actuator-rotor-1",
@@ -6764,7 +7151,89 @@
             "signalUnit": "norm",
             "faultPropagationPolicy": "propagates"
           }
-        ]
+        ],
+        "injectedFault": {
+          "instanceId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+          "modelId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+          "faultTypeId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+          "name": "电气层注入 - 4号电机 CAN 指令",
+          "layer": "electrical",
+          "layerKey": "electrical",
+          "modelClass": "连续信号故障",
+          "runtimeBehavior": "noise",
+          "slotId": "electrical:signal_value",
+          "slotName": "signal_value",
+          "bindingObject": "signal_value",
+          "targetVariable": "signal_value",
+          "targetField": "signal.value",
+          "targetKind": "edge",
+          "targetId": "edge-actuator-rotor-4",
+          "injectionForm": "signal-edge",
+          "parameters": {
+            "std": 0.08,
+            "start": 0,
+            "duration": "",
+            "noise_type": "gaussian"
+          },
+          "active": false,
+          "enabled": false
+        },
+        "faultBindings": [
+          {
+            "bindingId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value::edge-actuator-rotor-4",
+            "faultModelId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+            "name": "电气层注入 - 4号电机 CAN 指令",
+            "layer": "electrical",
+            "layerKey": "electrical",
+            "runtimeBehavior": "noise",
+            "parameters": {
+              "std": 0.08,
+              "start": 0,
+              "duration": "",
+              "noise_type": "gaussian"
+            },
+            "targetKind": "edge",
+            "targetId": "edge-actuator-rotor-4",
+            "slotId": "electrical:signal_value",
+            "slotName": "signal_value",
+            "bindingObject": "signal_value",
+            "targetVariable": "signal_value",
+            "targetField": "signal.value",
+            "injectionForm": "signal-edge",
+            "visualRole": "fault-source",
+            "propagationMode": "signalTransform",
+            "canPropagate": true,
+            "active": false,
+            "injectedFault": {
+              "instanceId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+              "modelId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+              "faultTypeId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+              "name": "电气层注入 - 4号电机 CAN 指令",
+              "layer": "electrical",
+              "layerKey": "electrical",
+              "modelClass": "连续信号故障",
+              "runtimeBehavior": "noise",
+              "slotId": "electrical:signal_value",
+              "slotName": "signal_value",
+              "bindingObject": "signal_value",
+              "targetVariable": "signal_value",
+              "targetField": "signal.value",
+              "targetKind": "edge",
+              "targetId": "edge-actuator-rotor-4",
+              "injectionForm": "signal-edge",
+              "parameters": {
+                "std": 0.08,
+                "start": 0,
+                "duration": "",
+                "noise_type": "gaussian"
+              },
+              "active": false,
+              "enabled": false
+            }
+          }
+        ],
+        "status": "faulted",
+        "faultSource": "电气层注入 - 4号电机 CAN 指令"
       },
       {
         "id": "edge-rotor-4-aero",
@@ -7565,7 +8034,7 @@
         ]
       }
     ],
-    "nodeSeq": 21,
+    "nodeSeq": 28,
     "edgeSeq": 33,
     "rootCanvasId": "canvas-root",
     "activeCanvasId": "canvas-root",
@@ -7579,15 +8048,15 @@
         "parentSubsystemNodeId": null,
         "viewport": {
           "scale": 1,
-          "offsetX": -713,
-          "offsetY": -113.17391304347814
+          "offsetX": -1548,
+          "offsetY": -602
         },
         "nodes": [
           {
             "id": "node-attitude-command",
             "type": "signal_source",
-            "x": 60,
-            "y": 180,
+            "x": 54,
+            "y": 636,
             "w": 164,
             "h": 84,
             "props": {
@@ -7595,6 +8064,7 @@
               "signalId": "",
               "unit": "",
               "description": "",
+              "outputPortName": "输出",
               "name": "姿态指令源",
               "signalDomain": "analog",
               "analogKind": "generic",
@@ -7614,8 +8084,8 @@
           {
             "id": "node-speed-command",
             "type": "signal_source",
-            "x": 60,
-            "y": 310,
+            "x": 49,
+            "y": 830,
             "w": 164,
             "h": 84,
             "props": {
@@ -7623,6 +8093,7 @@
               "signalId": "",
               "unit": "",
               "description": "",
+              "outputPortName": "输出",
               "name": "速度指令源",
               "signalDomain": "analog",
               "analogKind": "generic",
@@ -7642,8 +8113,8 @@
           {
             "id": "node-altitude-command",
             "type": "signal_source",
-            "x": 60,
-            "y": 440,
+            "x": 58,
+            "y": 1011,
             "w": 164,
             "h": 84,
             "props": {
@@ -7651,6 +8122,7 @@
               "signalId": "",
               "unit": "",
               "description": "",
+              "outputPortName": "输出",
               "name": "高度指令源",
               "signalDomain": "analog",
               "analogKind": "generic",
@@ -7670,12 +8142,12 @@
           {
             "id": "node-pid-controller",
             "type": "simulation_block",
-            "x": 333,
-            "y": 149,
+            "x": 337,
+            "y": 659,
             "w": 196,
             "h": 134,
             "props": {
-              "name": "PID—AttHighControlLaw / PID控制器",
+              "name": "PID控制器",
               "moduleType": "control",
               "inputs": [
                 {
@@ -8014,12 +8486,12 @@
           {
             "id": "node-control-allocation",
             "type": "simulation_block",
-            "x": 565,
-            "y": 220,
+            "x": 633,
+            "y": 726,
             "w": 196,
             "h": 156,
             "props": {
-              "name": "ControlAllocation / 控制分配",
+              "name": "控制分配",
               "moduleType": "control_allocation",
               "inputs": [
                 {
@@ -8309,17 +8781,90 @@
                 "unit": "",
                 "parameterKey": ""
               }
+            ],
+            "injectedFault": {
+              "instanceId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+              "modelId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+              "faultTypeId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+              "name": "物理层注入 - 控制分配",
+              "layer": "physical",
+              "layerKey": "physical",
+              "modelClass": "模型参数故障",
+              "runtimeBehavior": "bias",
+              "slotId": "physical:allocation_gain",
+              "slotName": "控制分配增益",
+              "bindingObject": "allocation_gain",
+              "targetVariable": "allocation_gain",
+              "targetField": "params.allocationGain",
+              "targetKind": "node",
+              "targetId": "node-control-allocation",
+              "injectionForm": "module-variable",
+              "parameters": {
+                "bias": 0.1,
+                "start": 0,
+                "duration": ""
+              }
+            },
+            "faultBindings": [
+              {
+                "bindingId": "layered-node-25-node-control-allocation-physical-allocation_gain::node-control-allocation",
+                "faultModelId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+                "name": "物理层注入 - 控制分配",
+                "layer": "physical",
+                "layerKey": "physical",
+                "runtimeBehavior": "bias",
+                "parameters": {
+                  "bias": 0.1,
+                  "start": 0,
+                  "duration": ""
+                },
+                "targetKind": "node",
+                "targetId": "node-control-allocation",
+                "slotId": "physical:allocation_gain",
+                "slotName": "控制分配增益",
+                "bindingObject": "allocation_gain",
+                "targetVariable": "allocation_gain",
+                "targetField": "params.allocationGain",
+                "injectionForm": "module-variable",
+                "visualRole": "fault-source",
+                "propagationMode": "localParameter",
+                "canPropagate": false,
+                "active": true,
+                "injectedFault": {
+                  "instanceId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+                  "modelId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+                  "faultTypeId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+                  "name": "物理层注入 - 控制分配",
+                  "layer": "physical",
+                  "layerKey": "physical",
+                  "modelClass": "模型参数故障",
+                  "runtimeBehavior": "bias",
+                  "slotId": "physical:allocation_gain",
+                  "slotName": "控制分配增益",
+                  "bindingObject": "allocation_gain",
+                  "targetVariable": "allocation_gain",
+                  "targetField": "params.allocationGain",
+                  "targetKind": "node",
+                  "targetId": "node-control-allocation",
+                  "injectionForm": "module-variable",
+                  "parameters": {
+                    "bias": 0.1,
+                    "start": 0,
+                    "duration": ""
+                  }
+                }
+              }
             ]
           },
           {
             "id": "node-voltage-drop",
             "type": "simulation_block",
-            "x": 844,
-            "y": 261,
+            "x": 919,
+            "y": 743,
             "w": 196,
             "h": 134,
             "props": {
-              "name": "Voltage_drop / 电压跌落",
+              "name": "电压跌落",
               "moduleType": "power",
               "inputs": [
                 {
@@ -8564,17 +9109,94 @@
                 "unit": "",
                 "parameterKey": ""
               }
+            ],
+            "injectedFault": {
+              "instanceId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+              "modelId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+              "faultTypeId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+              "name": "物理层注入 - 电压跌落",
+              "layer": "physical",
+              "layerKey": "physical",
+              "modelClass": "模型参数故障",
+              "runtimeBehavior": "bias",
+              "slotId": "physical:bus_voltage_drop",
+              "slotName": "母线电压跌落",
+              "bindingObject": "bus_voltage_drop",
+              "targetVariable": "bus_voltage_drop",
+              "targetField": "params.busVoltage",
+              "targetKind": "node",
+              "targetId": "node-voltage-drop",
+              "injectionForm": "module-variable",
+              "parameters": {
+                "bias": 0.1,
+                "start": 0,
+                "duration": ""
+              },
+              "active": false,
+              "enabled": false
+            },
+            "faultBindings": [
+              {
+                "bindingId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop::node-voltage-drop",
+                "faultModelId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+                "name": "物理层注入 - 电压跌落",
+                "layer": "physical",
+                "layerKey": "physical",
+                "runtimeBehavior": "bias",
+                "parameters": {
+                  "bias": 0.1,
+                  "start": 0,
+                  "duration": ""
+                },
+                "targetKind": "node",
+                "targetId": "node-voltage-drop",
+                "slotId": "physical:bus_voltage_drop",
+                "slotName": "母线电压跌落",
+                "bindingObject": "bus_voltage_drop",
+                "targetVariable": "bus_voltage_drop",
+                "targetField": "params.busVoltage",
+                "injectionForm": "module-variable",
+                "visualRole": "fault-source",
+                "propagationMode": "localParameter",
+                "canPropagate": false,
+                "active": false,
+                "injectedFault": {
+                  "instanceId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+                  "modelId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+                  "faultTypeId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+                  "name": "物理层注入 - 电压跌落",
+                  "layer": "physical",
+                  "layerKey": "physical",
+                  "modelClass": "模型参数故障",
+                  "runtimeBehavior": "bias",
+                  "slotId": "physical:bus_voltage_drop",
+                  "slotName": "母线电压跌落",
+                  "bindingObject": "bus_voltage_drop",
+                  "targetVariable": "bus_voltage_drop",
+                  "targetField": "params.busVoltage",
+                  "targetKind": "node",
+                  "targetId": "node-voltage-drop",
+                  "injectionForm": "module-variable",
+                  "parameters": {
+                    "bias": 0.1,
+                    "start": 0,
+                    "duration": ""
+                  },
+                  "active": false,
+                  "enabled": false
+                }
+              }
             ]
           },
           {
             "id": "node-motor-actuator",
             "type": "simulation_block",
-            "x": 1075,
-            "y": 215,
+            "x": 1193,
+            "y": 674,
             "w": 196,
             "h": 266,
             "props": {
-              "name": "ControlAllocation / 电机执行器",
+              "name": "电机执行器",
               "moduleType": "motor_actuator",
               "inputs": [
                 {
@@ -9042,8 +9664,8 @@
           {
             "id": "node-rotor-1",
             "type": "simulation_block",
-            "x": 1360,
-            "y": 35,
+            "x": 1535,
+            "y": 192,
             "w": 196,
             "h": 134,
             "props": {
@@ -9305,8 +9927,8 @@
           {
             "id": "node-rotor-2",
             "type": "simulation_block",
-            "x": 1360,
-            "y": 127,
+            "x": 1533,
+            "y": 363,
             "w": 196,
             "h": 134,
             "props": {
@@ -9568,8 +10190,8 @@
           {
             "id": "node-rotor-3",
             "type": "simulation_block",
-            "x": 1360,
-            "y": 219,
+            "x": 1530,
+            "y": 525,
             "w": 196,
             "h": 134,
             "props": {
@@ -9831,8 +10453,8 @@
           {
             "id": "node-rotor-4",
             "type": "simulation_block",
-            "x": 1360,
-            "y": 311,
+            "x": 1528,
+            "y": 691,
             "w": 196,
             "h": 134,
             "props": {
@@ -10094,8 +10716,8 @@
           {
             "id": "node-rotor-5",
             "type": "simulation_block",
-            "x": 1360,
-            "y": 403,
+            "x": 1529,
+            "y": 861,
             "w": 196,
             "h": 134,
             "props": {
@@ -10357,8 +10979,8 @@
           {
             "id": "node-rotor-6",
             "type": "simulation_block",
-            "x": 1360,
-            "y": 495,
+            "x": 1527,
+            "y": 1022,
             "w": 196,
             "h": 134,
             "props": {
@@ -10620,8 +11242,8 @@
           {
             "id": "node-rotor-7",
             "type": "simulation_block",
-            "x": 1360,
-            "y": 587,
+            "x": 1533,
+            "y": 1193,
             "w": 196,
             "h": 134,
             "props": {
@@ -10883,8 +11505,8 @@
           {
             "id": "node-rotor-8",
             "type": "simulation_block",
-            "x": 1360,
-            "y": 679,
+            "x": 1533,
+            "y": 1342,
             "w": 196,
             "h": 134,
             "props": {
@@ -11146,8 +11768,8 @@
           {
             "id": "node-aero-moment",
             "type": "simulation_block",
-            "x": 1645,
-            "y": 245,
+            "x": 1902,
+            "y": 694,
             "w": 196,
             "h": 266,
             "props": {
@@ -11672,12 +12294,12 @@
           {
             "id": "node-six-dof",
             "type": "simulation_block",
-            "x": 1905,
-            "y": 245,
+            "x": 2212,
+            "y": 756,
             "w": 196,
             "h": 156,
             "props": {
-              "name": "6DOF (Euler Angles) / 机体动力学",
+              "name": "机体动力学",
               "moduleType": "six_dof",
               "inputs": [
                 {
@@ -12038,8 +12660,8 @@
           {
             "id": "node-sensor-fault-injection",
             "type": "simulation_block",
-            "x": 1765,
-            "y": 520,
+            "x": 2573,
+            "y": 760,
             "w": 196,
             "h": 156,
             "props": {
@@ -12365,8 +12987,8 @@
           {
             "id": "node-scope",
             "type": "instrument_scope",
-            "x": 769,
-            "y": 637,
+            "x": 1093,
+            "y": 1250,
             "w": 150,
             "h": 74,
             "props": {
@@ -12567,7 +13189,89 @@
                 "unit": "",
                 "parameterKey": ""
               }
-            ]
+            ],
+            "injectedFault": {
+              "instanceId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+              "modelId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+              "faultTypeId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+              "name": "电气层注入 - 电压限幅后指令",
+              "layer": "electrical",
+              "layerKey": "electrical",
+              "modelClass": "连续信号故障",
+              "runtimeBehavior": "noise",
+              "slotId": "electrical:signal_value",
+              "slotName": "signal_value",
+              "bindingObject": "signal_value",
+              "targetVariable": "signal_value",
+              "targetField": "signal.value",
+              "targetKind": "edge",
+              "targetId": "edge-voltage-actuator",
+              "injectionForm": "signal-edge",
+              "parameters": {
+                "std": 0.08,
+                "start": 0,
+                "duration": "",
+                "noise_type": "gaussian"
+              },
+              "active": false,
+              "enabled": false
+            },
+            "faultBindings": [
+              {
+                "bindingId": "layered-node-27-edge-voltage-actuator-electrical-signal_value::edge-voltage-actuator",
+                "faultModelId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+                "name": "电气层注入 - 电压限幅后指令",
+                "layer": "electrical",
+                "layerKey": "electrical",
+                "runtimeBehavior": "noise",
+                "parameters": {
+                  "std": 0.08,
+                  "start": 0,
+                  "duration": "",
+                  "noise_type": "gaussian"
+                },
+                "targetKind": "edge",
+                "targetId": "edge-voltage-actuator",
+                "slotId": "electrical:signal_value",
+                "slotName": "signal_value",
+                "bindingObject": "signal_value",
+                "targetVariable": "signal_value",
+                "targetField": "signal.value",
+                "injectionForm": "signal-edge",
+                "visualRole": "fault-source",
+                "propagationMode": "signalTransform",
+                "canPropagate": true,
+                "active": false,
+                "injectedFault": {
+                  "instanceId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+                  "modelId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+                  "faultTypeId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+                  "name": "电气层注入 - 电压限幅后指令",
+                  "layer": "electrical",
+                  "layerKey": "electrical",
+                  "modelClass": "连续信号故障",
+                  "runtimeBehavior": "noise",
+                  "slotId": "electrical:signal_value",
+                  "slotName": "signal_value",
+                  "bindingObject": "signal_value",
+                  "targetVariable": "signal_value",
+                  "targetField": "signal.value",
+                  "targetKind": "edge",
+                  "targetId": "edge-voltage-actuator",
+                  "injectionForm": "signal-edge",
+                  "parameters": {
+                    "std": 0.08,
+                    "start": 0,
+                    "duration": "",
+                    "noise_type": "gaussian"
+                  },
+                  "active": false,
+                  "enabled": false
+                }
+              }
+            ],
+            "status": "faulted",
+            "faultSource": "电气层注入 - 电压限幅后指令"
           },
           {
             "id": "edge-actuator-rotor-1",
@@ -12976,7 +13680,89 @@
                 "signalUnit": "norm",
                 "faultPropagationPolicy": "propagates"
               }
-            ]
+            ],
+            "injectedFault": {
+              "instanceId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+              "modelId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+              "faultTypeId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+              "name": "电气层注入 - 4号电机 CAN 指令",
+              "layer": "electrical",
+              "layerKey": "electrical",
+              "modelClass": "连续信号故障",
+              "runtimeBehavior": "noise",
+              "slotId": "electrical:signal_value",
+              "slotName": "signal_value",
+              "bindingObject": "signal_value",
+              "targetVariable": "signal_value",
+              "targetField": "signal.value",
+              "targetKind": "edge",
+              "targetId": "edge-actuator-rotor-4",
+              "injectionForm": "signal-edge",
+              "parameters": {
+                "std": 0.08,
+                "start": 0,
+                "duration": "",
+                "noise_type": "gaussian"
+              },
+              "active": false,
+              "enabled": false
+            },
+            "faultBindings": [
+              {
+                "bindingId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value::edge-actuator-rotor-4",
+                "faultModelId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+                "name": "电气层注入 - 4号电机 CAN 指令",
+                "layer": "electrical",
+                "layerKey": "electrical",
+                "runtimeBehavior": "noise",
+                "parameters": {
+                  "std": 0.08,
+                  "start": 0,
+                  "duration": "",
+                  "noise_type": "gaussian"
+                },
+                "targetKind": "edge",
+                "targetId": "edge-actuator-rotor-4",
+                "slotId": "electrical:signal_value",
+                "slotName": "signal_value",
+                "bindingObject": "signal_value",
+                "targetVariable": "signal_value",
+                "targetField": "signal.value",
+                "injectionForm": "signal-edge",
+                "visualRole": "fault-source",
+                "propagationMode": "signalTransform",
+                "canPropagate": true,
+                "active": false,
+                "injectedFault": {
+                  "instanceId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+                  "modelId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+                  "faultTypeId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+                  "name": "电气层注入 - 4号电机 CAN 指令",
+                  "layer": "electrical",
+                  "layerKey": "electrical",
+                  "modelClass": "连续信号故障",
+                  "runtimeBehavior": "noise",
+                  "slotId": "electrical:signal_value",
+                  "slotName": "signal_value",
+                  "bindingObject": "signal_value",
+                  "targetVariable": "signal_value",
+                  "targetField": "signal.value",
+                  "targetKind": "edge",
+                  "targetId": "edge-actuator-rotor-4",
+                  "injectionForm": "signal-edge",
+                  "parameters": {
+                    "std": 0.08,
+                    "start": 0,
+                    "duration": "",
+                    "noise_type": "gaussian"
+                  },
+                  "active": false,
+                  "enabled": false
+                }
+              }
+            ],
+            "status": "faulted",
+            "faultSource": "电气层注入 - 4号电机 CAN 指令"
           },
           {
             "id": "edge-rotor-4-aero",
@@ -13781,11 +14567,391 @@
     },
     "activeLineType": "normal",
     "workspaceSource": "imported",
-    "faultedBlks": [],
+    "faultedBlks": [
+      "node-control-allocation",
+      "node-voltage-drop"
+    ],
     "importedFaultModels": [],
-    "faultInstances": [],
-    "faultTags": [],
-    "faultInjectionLinks": [],
+    "faultInstances": [
+      {
+        "instanceId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+        "faultTypeId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+        "targetKind": "node",
+        "targetId": "node-control-allocation",
+        "slotId": "physical:allocation_gain",
+        "slotName": "控制分配增益",
+        "layer": "physical",
+        "injectionForm": "module-variable",
+        "bindingObject": "allocation_gain",
+        "targetVariable": "allocation_gain",
+        "targetField": "params.allocationGain",
+        "displayName": "物理层注入 - 控制分配",
+        "parameters": {
+          "bias": 0.1,
+          "start": 0,
+          "duration": ""
+        },
+        "active": true,
+        "visual": {
+          "expanded": false
+        }
+      },
+      {
+        "instanceId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+        "faultTypeId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+        "targetKind": "node",
+        "targetId": "node-voltage-drop",
+        "slotId": "physical:bus_voltage_drop",
+        "slotName": "母线电压跌落",
+        "layer": "physical",
+        "injectionForm": "module-variable",
+        "bindingObject": "bus_voltage_drop",
+        "targetVariable": "bus_voltage_drop",
+        "targetField": "params.busVoltage",
+        "displayName": "物理层注入 - 电压跌落",
+        "parameters": {
+          "bias": 0.1,
+          "start": 0,
+          "duration": ""
+        },
+        "active": false,
+        "visual": {
+          "expanded": false
+        },
+        "enabled": false
+      },
+      {
+        "instanceId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+        "faultTypeId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+        "targetKind": "edge",
+        "targetId": "edge-voltage-actuator",
+        "slotId": "electrical:signal_value",
+        "slotName": "signal_value",
+        "layer": "electrical",
+        "injectionForm": "signal-edge",
+        "bindingObject": "signal_value",
+        "targetVariable": "signal_value",
+        "targetField": "signal.value",
+        "displayName": "电气层注入 - 电压限幅后指令",
+        "parameters": {
+          "std": 0.08,
+          "start": 0,
+          "duration": "",
+          "noise_type": "gaussian"
+        },
+        "active": false,
+        "visual": {
+          "expanded": false
+        },
+        "enabled": false
+      },
+      {
+        "instanceId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+        "faultTypeId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+        "targetKind": "edge",
+        "targetId": "edge-actuator-rotor-4",
+        "slotId": "electrical:signal_value",
+        "slotName": "signal_value",
+        "layer": "electrical",
+        "injectionForm": "signal-edge",
+        "bindingObject": "signal_value",
+        "targetVariable": "signal_value",
+        "targetField": "signal.value",
+        "displayName": "电气层注入 - 4号电机 CAN 指令",
+        "parameters": {
+          "std": 0.08,
+          "start": 0,
+          "duration": "",
+          "noise_type": "gaussian"
+        },
+        "active": false,
+        "visual": {
+          "expanded": false
+        },
+        "enabled": false
+      }
+    ],
+    "faultTags": [
+      {
+        "id": "fault-tag-layered-node-25-node-control-allocation-physical-allocation_gain",
+        "type": "fault_tag",
+        "faultModelId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+        "faultModelName": "物理层注入 - 控制分配",
+        "name": "物理层注入 - 控制分配",
+        "layer": "physical",
+        "layerKey": "physical",
+        "modelClass": "模型参数故障",
+        "runtimeBehavior": "bias",
+        "targetKind": "node",
+        "targetId": "node-control-allocation",
+        "hostNodeId": "node-control-allocation",
+        "targetName": "控制分配",
+        "active": true,
+        "positionMode": "manual",
+        "expanded": false,
+        "collapsed": true,
+        "slotId": "physical:allocation_gain",
+        "slotName": "控制分配增益",
+        "bindingObject": "allocation_gain",
+        "targetVariable": "allocation_gain",
+        "targetField": "params.allocationGain",
+        "injectionForm": "module-variable",
+        "parameters": {
+          "bias": 0.1,
+          "start": 0,
+          "duration": ""
+        },
+        "injectedFault": {
+          "instanceId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+          "modelId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+          "faultTypeId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+          "name": "物理层注入 - 控制分配",
+          "layer": "physical",
+          "layerKey": "physical",
+          "modelClass": "模型参数故障",
+          "runtimeBehavior": "bias",
+          "slotId": "physical:allocation_gain",
+          "slotName": "控制分配增益",
+          "bindingObject": "allocation_gain",
+          "targetVariable": "allocation_gain",
+          "targetField": "params.allocationGain",
+          "targetKind": "node",
+          "targetId": "node-control-allocation",
+          "injectionForm": "module-variable",
+          "parameters": {
+            "bias": 0.1,
+            "start": 0,
+            "duration": ""
+          }
+        },
+        "x": 703,
+        "y": 633,
+        "w": 204,
+        "h": 76
+      },
+      {
+        "id": "fault-tag-layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+        "type": "fault_tag",
+        "faultModelId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+        "faultModelName": "物理层注入 - 电压跌落",
+        "name": "物理层注入 - 电压跌落",
+        "layer": "physical",
+        "layerKey": "physical",
+        "modelClass": "模型参数故障",
+        "runtimeBehavior": "bias",
+        "targetKind": "node",
+        "targetId": "node-voltage-drop",
+        "hostNodeId": "node-voltage-drop",
+        "targetName": "电压跌落",
+        "active": true,
+        "positionMode": "manual",
+        "expanded": false,
+        "collapsed": true,
+        "slotId": "physical:bus_voltage_drop",
+        "slotName": "母线电压跌落",
+        "bindingObject": "bus_voltage_drop",
+        "targetVariable": "bus_voltage_drop",
+        "targetField": "params.busVoltage",
+        "injectionForm": "module-variable",
+        "parameters": {
+          "bias": 0.1,
+          "start": 0,
+          "duration": ""
+        },
+        "injectedFault": {
+          "instanceId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+          "modelId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+          "faultTypeId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+          "name": "物理层注入 - 电压跌落",
+          "layer": "physical",
+          "layerKey": "physical",
+          "modelClass": "模型参数故障",
+          "runtimeBehavior": "bias",
+          "slotId": "physical:bus_voltage_drop",
+          "slotName": "母线电压跌落",
+          "bindingObject": "bus_voltage_drop",
+          "targetVariable": "bus_voltage_drop",
+          "targetField": "params.busVoltage",
+          "targetKind": "node",
+          "targetId": "node-voltage-drop",
+          "injectionForm": "module-variable",
+          "parameters": {
+            "bias": 0.1,
+            "start": 0,
+            "duration": ""
+          },
+          "active": false,
+          "enabled": false
+        },
+        "x": 921,
+        "y": 517,
+        "w": 204,
+        "h": 76,
+        "runtimeEnabled": false
+      },
+      {
+        "id": "fault-tag-layered-node-27-edge-voltage-actuator-electrical-signal_value",
+        "type": "fault_tag",
+        "faultModelId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+        "faultModelName": "电气层注入 - 电压限幅后指令",
+        "name": "电气层注入 - 电压限幅后指令",
+        "layer": "electrical",
+        "layerKey": "electrical",
+        "modelClass": "连续信号故障",
+        "runtimeBehavior": "noise",
+        "targetKind": "edge",
+        "targetId": "edge-voltage-actuator",
+        "hostNodeId": "node-voltage-drop",
+        "targetName": "电压限幅后指令",
+        "active": true,
+        "positionMode": "manual",
+        "expanded": false,
+        "collapsed": true,
+        "slotId": "electrical:signal_value",
+        "slotName": "signal_value",
+        "bindingObject": "signal_value",
+        "targetVariable": "signal_value",
+        "targetField": "signal.value",
+        "injectionForm": "signal-edge",
+        "parameters": {
+          "std": 0.08,
+          "start": 0,
+          "duration": "",
+          "noise_type": "gaussian"
+        },
+        "injectedFault": {
+          "instanceId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+          "modelId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+          "faultTypeId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+          "name": "电气层注入 - 电压限幅后指令",
+          "layer": "electrical",
+          "layerKey": "electrical",
+          "modelClass": "连续信号故障",
+          "runtimeBehavior": "noise",
+          "slotId": "electrical:signal_value",
+          "slotName": "signal_value",
+          "bindingObject": "signal_value",
+          "targetVariable": "signal_value",
+          "targetField": "signal.value",
+          "targetKind": "edge",
+          "targetId": "edge-voltage-actuator",
+          "injectionForm": "signal-edge",
+          "parameters": {
+            "std": 0.08,
+            "start": 0,
+            "duration": "",
+            "noise_type": "gaussian"
+          },
+          "active": false,
+          "enabled": false
+        },
+        "x": 318,
+        "y": 202,
+        "w": 204,
+        "h": 76,
+        "runtimeEnabled": false
+      },
+      {
+        "id": "fault-tag-layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+        "type": "fault_tag",
+        "faultModelId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+        "faultModelName": "电气层注入 - 4号电机 CAN 指令",
+        "name": "电气层注入 - 4号电机 CAN 指令",
+        "layer": "electrical",
+        "layerKey": "electrical",
+        "modelClass": "连续信号故障",
+        "runtimeBehavior": "noise",
+        "targetKind": "edge",
+        "targetId": "edge-actuator-rotor-4",
+        "hostNodeId": "node-motor-actuator",
+        "targetName": "4号电机 CAN 指令",
+        "active": true,
+        "positionMode": "manual",
+        "expanded": false,
+        "collapsed": true,
+        "slotId": "electrical:signal_value",
+        "slotName": "signal_value",
+        "bindingObject": "signal_value",
+        "targetVariable": "signal_value",
+        "targetField": "signal.value",
+        "injectionForm": "signal-edge",
+        "parameters": {
+          "std": 0.08,
+          "start": 0,
+          "duration": "",
+          "noise_type": "gaussian"
+        },
+        "injectedFault": {
+          "instanceId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+          "modelId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+          "faultTypeId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+          "name": "电气层注入 - 4号电机 CAN 指令",
+          "layer": "electrical",
+          "layerKey": "electrical",
+          "modelClass": "连续信号故障",
+          "runtimeBehavior": "noise",
+          "slotId": "electrical:signal_value",
+          "slotName": "signal_value",
+          "bindingObject": "signal_value",
+          "targetVariable": "signal_value",
+          "targetField": "signal.value",
+          "targetKind": "edge",
+          "targetId": "edge-actuator-rotor-4",
+          "injectionForm": "signal-edge",
+          "parameters": {
+            "std": 0.08,
+            "start": 0,
+            "duration": "",
+            "noise_type": "gaussian"
+          },
+          "active": false,
+          "enabled": false
+        },
+        "x": 634,
+        "y": 261,
+        "w": 204,
+        "h": 76,
+        "runtimeEnabled": false
+      }
+    ],
+    "faultInjectionLinks": [
+      {
+        "id": "fault-link-layered-node-25-node-control-allocation-physical-allocation_gain-target",
+        "faultModelId": "layered-node-25-node-control-allocation-physical-allocation_gain",
+        "sourceTagId": "fault-tag-layered-node-25-node-control-allocation-physical-allocation_gain",
+        "targetNodeId": "node-control-allocation",
+        "targetEdgeId": null,
+        "role": "fault-tag-attachment",
+        "label": "故障注入"
+      },
+      {
+        "id": "fault-link-layered-node-26-node-voltage-drop-physical-bus_voltage_drop-target",
+        "faultModelId": "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+        "sourceTagId": "fault-tag-layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+        "targetNodeId": "node-voltage-drop",
+        "targetEdgeId": null,
+        "role": "fault-tag-attachment",
+        "label": "故障注入"
+      },
+      {
+        "id": "fault-link-layered-node-27-edge-voltage-actuator-electrical-signal_value-target",
+        "faultModelId": "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+        "sourceTagId": "fault-tag-layered-node-27-edge-voltage-actuator-electrical-signal_value",
+        "targetNodeId": null,
+        "targetEdgeId": "edge-voltage-actuator",
+        "role": "fault-tag-attachment",
+        "label": "故障注入"
+      },
+      {
+        "id": "fault-link-layered-node-28-edge-actuator-rotor-4-electrical-signal_value-target",
+        "faultModelId": "layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+        "sourceTagId": "fault-tag-layered-node-28-edge-actuator-rotor-4-electrical-signal_value",
+        "targetNodeId": null,
+        "targetEdgeId": "edge-actuator-rotor-4",
+        "role": "fault-tag-attachment",
+        "label": "故障注入"
+      }
+    ],
     "diagnosticTestPoints": [],
     "testPoints": [],
     "manualDiagnosticTestPoints": [
@@ -13798,8 +14964,11 @@
         "signalId": "cmd.attitude",
         "channelId": "",
         "sourceName": "姿态指令源",
-        "targetName": "PID—AttHighControlLaw / PID控制器",
-        "detects": [],
+        "targetName": "PID控制器",
+        "detects": [
+          "layered-node-25-node-control-allocation-physical-allocation_gain",
+          "layered-node-27-edge-voltage-actuator-electrical-signal_value"
+        ],
         "manuallyAdded": true,
         "nameZh": "姿态指令",
         "labelZh": "姿态指令",
@@ -13815,8 +14984,11 @@
         "signalId": "cmd.speed",
         "channelId": "",
         "sourceName": "速度指令源",
-        "targetName": "ControlAllocation / 控制分配",
-        "detects": [],
+        "targetName": "控制分配",
+        "detects": [
+          "layered-node-25-node-control-allocation-physical-allocation_gain",
+          "layered-node-26-node-voltage-drop-physical-bus_voltage_drop"
+        ],
         "manuallyAdded": true,
         "nameZh": "速度指令",
         "labelZh": "速度指令",
@@ -13832,8 +15004,11 @@
         "signalId": "cmd.altitude",
         "channelId": "",
         "sourceName": "高度指令源",
-        "targetName": "ControlAllocation / 控制分配",
-        "detects": [],
+        "targetName": "控制分配",
+        "detects": [
+          "layered-node-25-node-control-allocation-physical-allocation_gain",
+          "layered-node-28-edge-actuator-rotor-4-electrical-signal_value"
+        ],
         "manuallyAdded": true,
         "nameZh": "高度指令",
         "labelZh": "高度指令",
@@ -13848,14 +15023,17 @@
         "edgeId": "edge-six-dof-attitude-sensor",
         "signalId": "vehicle.attitude",
         "channelId": "",
-        "sourceName": "6DOF (Euler Angles) / 机体动力学",
+        "sourceName": "机体动力学",
         "targetName": "传感器故障注入",
-        "detects": [],
+        "detects": [
+          "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+          "layered-node-27-edge-voltage-actuator-electrical-signal_value"
+        ],
         "manuallyAdded": true,
         "nameZh": "姿态角",
         "labelZh": "姿态角",
         "positionNameZh": "姿态角",
-        "pointType": "physical"
+        "pointType": "virtual"
       },
       {
         "pointId": "tp-edge-six-dof-altitude-sensor-1",
@@ -13865,9 +15043,12 @@
         "edgeId": "edge-six-dof-altitude-sensor",
         "signalId": "vehicle.altitude",
         "channelId": "",
-        "sourceName": "6DOF (Euler Angles) / 机体动力学",
+        "sourceName": "机体动力学",
         "targetName": "传感器故障注入",
-        "detects": [],
+        "detects": [
+          "layered-node-26-node-voltage-drop-physical-bus_voltage_drop",
+          "layered-node-28-edge-actuator-rotor-4-electrical-signal_value"
+        ],
         "manuallyAdded": true,
         "nameZh": "高度",
         "labelZh": "高度",
@@ -13882,17 +15063,27 @@
         "edgeId": "edge-six-dof-rate-sensor",
         "signalId": "vehicle.body_rate",
         "channelId": "",
-        "sourceName": "6DOF (Euler Angles) / 机体动力学",
+        "sourceName": "机体动力学",
         "targetName": "传感器故障注入",
-        "detects": [],
+        "detects": [
+          "layered-node-27-edge-voltage-actuator-electrical-signal_value",
+          "layered-node-28-edge-actuator-rotor-4-electrical-signal_value"
+        ],
         "manuallyAdded": true,
         "nameZh": "机体角速度",
         "labelZh": "机体角速度",
         "positionNameZh": "机体角速度",
-        "pointType": "physical"
+        "pointType": "virtual"
       }
     ],
-    "installedDiagnosticTestPointIds": [],
+    "installedDiagnosticTestPointIds": [
+      "tp-edge-attitude-command-pid-1",
+      "tp-edge-speed-command-allocation-1",
+      "tp-edge-altitude-command-allocation-1",
+      "tp-edge-six-dof-attitude-sensor-1",
+      "tp-edge-six-dof-altitude-sensor-1",
+      "tp-edge-six-dof-rate-sensor-1"
+    ],
     "diagnosticTestPointManualCleared": false
   }
 }

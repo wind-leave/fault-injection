@@ -213,17 +213,42 @@ function renderBoundSimulationFields(node, binding, helpers = {}) {
       </div>`;
 }
 
+function renderReadOnlySimulationInterface(html) {
+  return html
+    .replace(/(<input id="prop-name"[^>]*)(>)/g, '$1 disabled$2')
+    .replace(/(<input id="sim-(?:input|output|middle)-count"[^>]*)(>)/g, '$1 disabled$2')
+    .replace(/(<(?:input|select) data-sim-field="(?:name|type)"[^>]*)(>)/g, '$1 disabled$2')
+    .replace(/(<input data-python-port-display-name[^>]*)(>)/g, '$1 disabled$2')
+    .replace(/<button class="props-secondary" type="button" onclick="syncSimulationInterfaceCounts\(\)">[\s\S]*?<\/button>/, '');
+}
+
 export function renderSimulationBlockFieldsFromSchema(node, helpers = {}) {
   const binding = helpers.binding || null;
   if (binding?.bound) {
-    return renderBoundSimulationFields(node, binding, helpers);
+    return renderReadOnlySimulationInterface(renderBoundSimulationFields(node, binding, helpers));
   }
-  return renderUnboundSimulationFields(node, helpers);
+  return renderReadOnlySimulationInterface(renderUnboundSimulationFields(node, helpers));
 }
 
 export function readSimulationBlockValuesFromPanel(node, documentLike, helpers = {}) {
   const props = node?.props || {};
   const binding = helpers.binding || null;
+
+  if (binding?.bound) {
+    return {
+      values: {},
+      shouldPruneInvalidEdges: false
+    };
+  }
+
+  return {
+    values: {
+      moduleType: documentLike?.getElementById?.('prop-moduleType')?.value || props.moduleType,
+      ffunctionNote: textValue(documentLike?.getElementById?.('prop-ffunctionNote')?.value, props.ffunctionNote || '')
+    },
+    shouldPruneInvalidEdges: false
+  };
+
   const name = textValue(documentLike?.getElementById?.('prop-name')?.value, props.name || '');
 
   if (binding?.bound) {

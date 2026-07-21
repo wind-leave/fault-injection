@@ -105,6 +105,36 @@ class SimulationBackendServerTests(unittest.TestCase):
         connection.close()
         return response.status, json.loads(response_body)
 
+    def test_create_practice_session_retains_supplied_private_task_data(self):
+        initial_recommended_path = {
+            "ok": True,
+            "faultId": "target-fault",
+            "steps": [{"index": 1, "actionType": "measurePoint", "pointCode": "M1"}],
+            "keySteps": [1],
+            "summary": "custom initial path",
+        }
+        key_nodes = [
+            {"nodeId": "key-node-1", "nodeType": "measurement", "pointCode": "M1"},
+        ]
+
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+                "initialRecommendedPath": initial_recommended_path,
+                "keyNodes": key_nodes,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("initialRecommendedPath", created)
+        self.assertNotIn("keyNodes", created)
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+        self.assertEqual(session.initial_best_path, initial_recommended_path)
+        self.assertEqual(session.fault_tree_key_nodes, key_nodes)
+
     def test_runs_valid_simulation_request(self):
         status, body = self._post("/api/simulations/run", valid_package())
 
@@ -245,17 +275,22 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(updated["normalizedAction"]["actionType"], "replaceComponent")
         self.assertEqual(updated["normalizedAction"]["target"], {"type": "component", "id": "sim-1"})
         self.assertEqual(updated["normalizedAction"]["faultId"], "fault-bias")
-        self.assertEqual(updated["ruleResult"], {
-            "allowed": True,
-            "ruleCode": "ACTION_ALLOWED",
-            "durationSeconds": 120,
-            "riskLevel": "medium",
-            "repeatAction": False,
-            "warnings": [],
-        })
-        self.assertEqual(updated["appliedAction"]["changes"][0]["type"], "fault_disabled")
+        self.assertNotIn("ruleResult", updated)
+        self.assertNotIn("appliedAction", updated)
         self.assertIn("simulationResult", updated)
-        self.assertEqual(updated["simulationResult"]["curves"]["time"], [0.1])
+        self.assertEqual(updated["simulationResult"]["status"], "completed")
+        self.assertEqual(updated["simulationResult"]["simulationConfig"], {"duration": 0.3, "stepSize": 0.1})
+        self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["pointCode"], "M1")
+        self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["sourceDeviceId"], "sim-1")
+        self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["sourcePort"], "output")
+        self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["samples"], [
+            {"time": 0.0, "actual": 1.0},
+            {"time": 0.1, "actual": 1.0},
+            {"time": 0.2, "actual": 1.0},
+        ])
+        self.assertIn("virtualMeasurements", updated["simulationResult"])
+        self.assertNotIn("curves", updated["simulationResult"])
+        self.assertNotIn("componentOutputs", updated["simulationResult"])
         self.assertNotIn("observationResult", updated)
         self.assertNotIn("troubleshooting", updated)
         self.assertNotIn("currentPath", updated)
@@ -273,7 +308,8 @@ class SimulationBackendServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 200)
-        self.assertEqual(measured["virtualMeasurement"]["pointCode"], "V1")
+        self.assertNotIn("virtualMeasurement", measured)
+        self.assertNotIn("troubleshootingState", measured)
 
         status, submitted = self._post(
             f"/api/practice/session/{session_id}/submit",
@@ -282,40 +318,19 @@ class SimulationBackendServerTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(submitted["status"], "success")
-        path_evaluation = submitted["record"]["pathEvaluation"]
-        self.assertEqual(submitted["scoreBreakdown"]["faultLocalization"], 30)
-        self.assertEqual(
-            submitted["scoreBreakdown"]["diagnosticTreePath"],
-            submitted["record"]["pathEvaluation"]["diagnosticTreePathScore"],
-        )
-        self.assertEqual(
-            submitted["scoreBreakdown"]["informationGain"],
-            path_evaluation["informationGainScore"],
-        )
-        self.assertIn("informationGain", path_evaluation)
-        self.assertEqual(path_evaluation["informationGain"]["score"], path_evaluation["informationGainScore"])
-        self.assertEqual(submitted["scoreBreakdown"]["efficiency"], 5)
-        self.assertEqual(submitted["scoreBreakdown"]["safetyCompliance"], 15)
+        report = submitted["evaluationReport"]
+        score_details = {item["item"]: item["score"] for item in report["scoreDetails"]}
+        self.assertEqual(score_details["faultLocalization"], 30)
+        self.assertEqual(score_details["efficiency"], 5)
+        self.assertEqual(score_details["safetyCompliance"], 15)
         self.assertNotIn("initialBestPath", submitted)
-        self.assertEqual(submitted["initialRecommendedPath"]["faultId"], "target-fault")
-        self.assertEqual(submitted["initialRecommendedPath"]["steps"][0]["actionType"], "measurePoint")
-        self.assertEqual(submitted["initialRecommendedPath"]["steps"][0]["pointCode"], "M1")
-        self.assertIn("replaceComponent", [step["actionType"] for step in submitted["initialRecommendedPath"]["steps"]])
-        self.assertEqual(submitted["record"]["targetFaultId"], "target-fault")
-        self.assertEqual(submitted["record"]["targetFaultName"], "Target fault")
-        self.assertEqual(submitted["record"]["finalFaultId"], "target-fault")
-        self.assertEqual(submitted["record"]["finalFaultName"], "Target fault")
-        self.assertEqual(submitted["record"]["studentActions"][0]["faultId"], "fault-bias")
-        self.assertEqual(submitted["record"]["recommendedPathHistory"], [])
-        self.assertIn("initialPhysicalMeasurementSnapshot", submitted["record"])
-        self.assertIn("physicalMeasurementSnapshots", submitted["record"])
-        self.assertIn("virtualMeasurements", submitted["record"])
-        self.assertIn("repairAttempts", submitted["record"])
-        self.assertGreaterEqual(len(submitted["record"]["physicalMeasurementSnapshots"]), 2)
-        self.assertEqual(submitted["record"]["repairAttempts"][0]["faultId"], "fault-bias")
-        self.assertIn("repairEffect", submitted["record"]["repairAttempts"][0])
-        self.assertEqual(submitted["record"]["troubleshootingState"]["repairAttempts"], submitted["record"]["repairAttempts"])
-        self.assertNotIn("simulationResults", submitted["record"])
+        self.assertEqual(report["initialOptimalPath"]["faultId"], "target-fault")
+        self.assertEqual(report["initialOptimalPath"]["steps"][0]["actionType"], "measurePoint")
+        self.assertEqual(report["initialOptimalPath"]["steps"][0]["pointCode"], "M2")
+        self.assertIn("replaceComponent", [step["actionType"] for step in report["initialOptimalPath"]["steps"]])
+        for field in ("score", "grade", "scoreBreakdown", "deductions", "initialRecommendedPath"):
+            self.assertNotIn(field, submitted)
+        self.assertNotIn("record", submitted)
 
     def test_submit_returns_internal_action_path_for_measurement_and_wire_repair(self):
         package = valid_package()
@@ -367,7 +382,7 @@ class SimulationBackendServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 200)
-        self.assertEqual(repaired["ruleResult"]["ruleCode"], "ACTION_ALLOWED")
+        self.assertNotIn("ruleResult", repaired)
         self.assertNotIn("recommendedPath", repaired)
         self.assertNotIn("nextRecommendedAction", repaired)
         self.assertNotIn("actualTroubleshootingPath", repaired)
@@ -378,9 +393,9 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
 
         self.assertEqual(status, 200)
-        self.assertIn("initialRecommendedPath", submitted)
+        self.assertNotIn("initialRecommendedPath", submitted)
         self.assertNotIn("initialBestPath", submitted)
-        initial_steps = submitted["initialRecommendedPath"]["steps"]
+        initial_steps = submitted["evaluationReport"]["initialOptimalPath"]["steps"]
         self.assertEqual(initial_steps[0]["actionType"], "measurePoint")
         self.assertTrue(
             any(
@@ -391,58 +406,17 @@ class SimulationBackendServerTests(unittest.TestCase):
                 for step in initial_steps
             )
         )
-        actual_path = submitted["record"]["actualTroubleshootingPath"]
-        self.assertEqual(actual_path["basis"], "studentActions")
-        self.assertEqual([step["actionType"] for step in actual_path["steps"]], ["measurePoint", "replaceWire"])
-        self.assertEqual(actual_path["steps"][0]["routeRole"], "evidenceCollection")
-        self.assertEqual(actual_path["steps"][0]["pointCode"], "V1")
-        self.assertEqual(actual_path["steps"][1]["routeRole"], "repairAttempt")
-        self.assertEqual(actual_path["steps"][1]["target"], {"type": "wire", "id": "edge-sim-scope"})
-        self.assertEqual(actual_path["steps"][1]["faultId"], "fault-wire")
-        self.assertIn("repairEffect", actual_path["steps"][1])
-        self.assertEqual(submitted["record"]["pathEvaluation"]["measuredVirtualPointCount"], 1)
-        self.assertEqual(submitted["record"]["pathEvaluation"]["wireRepairAttemptCount"], 1)
-        self.assertEqual(submitted["record"]["pathEvaluation"]["componentRepairAttemptCount"], 0)
-        self.assertEqual(submitted["record"]["pathEvaluation"]["totalStepCount"], 2)
-        breakdown = submitted["record"]["pathEvaluation"]["routeQualityBreakdown"]
-        self.assertEqual(
-            set(breakdown.keys()),
-            {
-                "evidenceCollection",
-                "pathOrder",
-                "repairLocalization",
-                "recoveryVerification",
-                "operationControl",
-            },
-        )
-        self.assertEqual(sum(breakdown.values()), submitted["record"]["pathEvaluation"]["routeQualityScore"])
-        path_evaluation = submitted["record"]["pathEvaluation"]
-        self.assertIn("faultTreeKeyNodes", path_evaluation)
-        self.assertIn("keyNodeCoverage", path_evaluation)
-        self.assertIn("diagnosticTreePathBreakdown", path_evaluation)
-        key_nodes = path_evaluation["faultTreeKeyNodes"]
-        self.assertEqual({node["type"] for node in key_nodes}, {"measurePoint", "repairTarget"})
-        self.assertEqual(path_evaluation["keyNodeCoverage"]["score"], 12)
-        self.assertEqual(path_evaluation["keyNodeCoverage"]["maxScore"], 12)
-        self.assertEqual(path_evaluation["keyNodeCoverage"]["missedNodeIds"], [])
-        self.assertEqual(
-            path_evaluation["diagnosticTreePathBreakdown"],
-            {
-                "keyNodeCoverage": 12,
-                "pathEfficiency": 6,
-            },
-        )
-        self.assertEqual(path_evaluation["diagnosticTreePathScore"], 18)
-        self.assertEqual(
-            submitted["scoreBreakdown"]["diagnosticTreePath"],
-            path_evaluation["diagnosticTreePathScore"],
-        )
-        self.assertEqual(
-            submitted["scoreBreakdown"]["informationGain"],
-            path_evaluation["informationGainScore"],
-        )
-        self.assertIn("informationGain", path_evaluation)
-        self.assertEqual(path_evaluation["informationGain"]["score"], path_evaluation["informationGainScore"])
+        self.assertNotIn("record", submitted)
+        evaluations = submitted["evaluationReport"]["stepEvaluations"]
+        self.assertEqual([item["studentAction"]["actionType"] for item in evaluations], ["measurePoint", "replaceWire"])
+        self.assertEqual(evaluations[0]["studentAction"]["pointCode"], "V1")
+        self.assertEqual(evaluations[1]["studentAction"]["target"], {"type": "wire", "id": "edge-sim-scope"})
+        self.assertEqual(evaluations[1]["studentAction"]["faultId"], "fault-wire")
+        self.assertEqual(submitted["evaluationReport"]["keyNodeCoverage"]["score"], 12)
+        self.assertEqual(submitted["evaluationReport"]["keyNodeCoverage"]["maxScore"], 12)
+        self.assertEqual(submitted["evaluationReport"]["keyNodeCoverage"]["missedNodeIds"], [])
+        score_details = {item["item"]: item["score"] for item in submitted["evaluationReport"]["scoreDetails"]}
+        self.assertEqual(score_details["diagnosticTreePath"], 18)
 
     def test_dynamic_reference_scores_direct_repair_from_physical_evidence(self):
         package = valid_package()
@@ -492,24 +466,11 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
 
         self.assertEqual(status, 200)
-        history = submitted["record"]["dynamicReferenceHistory"]
-        self.assertEqual(len(history), 1)
-        reference_actions = history[0]["referenceBeforeAction"]["recommendedActionSet"]
-        self.assertTrue(
-            any(
-                action.get("actionType") == "replaceComponent"
-                and action.get("target") == {"type": "component", "id": "sim-1"}
-                and action.get("faultId") == "fault-bias"
-                and action.get("routeRole") == "repairAttempt"
-                for action in reference_actions
-            )
-        )
-        self.assertTrue(history[0]["matchResult"]["matched"])
-        self.assertEqual(history[0]["matchResult"]["matchType"], "exactRepair")
-        evaluation = submitted["record"]["pathEvaluation"]
-        self.assertEqual(evaluation["dynamicReferenceMatchedCount"], 1)
-        self.assertEqual(evaluation["dynamicReferenceUnmatchedCount"], 0)
-        self.assertEqual(evaluation["routeQualityBreakdown"]["pathOrder"], 10)
+        self.assertNotIn("record", submitted)
+        step = submitted["evaluationReport"]["stepEvaluations"][0]
+        self.assertTrue(step["matchResult"]["matched"])
+        self.assertEqual(step["matchResult"]["matchType"], "exactRepair")
+        self.assertEqual(step["systemRecommendedAction"]["target"], {"type": "component", "id": "sim-1"})
 
     def test_recommended_actions_are_ranked_without_adding_recovery_verification_step(self):
         package = valid_package()
@@ -551,17 +512,15 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
 
         self.assertEqual(status, 200)
-        history = submitted["record"]["dynamicReferenceHistory"]
-        actions = history[0]["referenceBeforeAction"]["recommendedActionSet"]
-        self.assertEqual(actions[0]["actionType"], "measurePoint")
-        self.assertEqual(actions[0]["pointCode"], "V1")
-        self.assertEqual(actions[0]["rank"], 1)
-        self.assertEqual(actions[0]["recommendationTier"], "optimal")
-        self.assertGreater(actions[0]["expectedInformationGain"], actions[1]["expectedInformationGain"])
-        self.assertGreater(actions[0]["priority"], actions[-1]["priority"])
-        self.assertIn("confidence", actions[0])
+        self.assertNotIn("record", submitted)
+        recommended = submitted["evaluationReport"]["stepEvaluations"][0]["systemRecommendedAction"]
+        self.assertEqual(recommended["actionType"], "measurePoint")
+        self.assertEqual(recommended["pointCode"], "V1")
+        self.assertEqual(recommended["rank"], 1)
+        self.assertEqual(recommended["recommendationTier"], "optimal")
+        self.assertIn("confidence", recommended)
 
-        initial_steps = submitted["initialRecommendedPath"]["steps"]
+        initial_steps = submitted["evaluationReport"]["initialOptimalPath"]["steps"]
         self.assertNotIn("verifyRecovery", [step["actionType"] for step in initial_steps])
         self.assertEqual(initial_steps[-1]["actionType"], "replaceComponent")
         self.assertEqual(initial_steps[-1]["routeRole"], "repairAttempt")
@@ -614,7 +573,7 @@ class SimulationBackendServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 200)
-        self.assertEqual(repaired["ruleResult"]["ruleCode"], "POWER_NOT_OFF")
+        self.assertNotIn("ruleResult", repaired)
 
         status, submitted = self._post(
             f"/api/practice/session/{session_id}/submit",
@@ -622,33 +581,20 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
 
         self.assertEqual(status, 200)
-        history = submitted["record"]["dynamicReferenceHistory"]
-        measurement_match = history[0]["matchResult"]
+        self.assertNotIn("record", submitted)
+        evaluations = submitted["evaluationReport"]["stepEvaluations"]
+        measurement_match = evaluations[0]["matchResult"]
         self.assertTrue(measurement_match["matched"])
         self.assertEqual(measurement_match["matchQuality"], "acceptable")
         self.assertGreater(measurement_match["score"], 0)
         self.assertLess(measurement_match["score"], 1.0)
         self.assertGreater(measurement_match["matchedAction"]["rank"], 1)
 
-        repair_reference = history[1]["referenceBeforeAction"]["recommendedActionSet"]
-        repair_candidate = next(
-            action
-            for action in repair_reference
-            if action.get("actionType") == "replaceComponent" and action.get("faultId") == "fault-bias"
-        )
-        self.assertEqual(repair_candidate["safetyPrerequisites"], [{"type": "powerOff", "required": True}])
-
-        repair_match = history[1]["matchResult"]
+        repair_match = evaluations[1]["matchResult"]
         self.assertTrue(repair_match["matched"])
         self.assertEqual(repair_match["matchQuality"], "unsafe")
         self.assertEqual(repair_match["score"], 0.0)
         self.assertFalse(repair_match["safetyPrerequisiteSatisfied"])
-
-        evaluation = submitted["record"]["pathEvaluation"]
-        self.assertEqual(evaluation["dynamicReferenceAcceptableCount"], 1)
-        self.assertEqual(evaluation["dynamicReferenceUnsafeCount"], 1)
-        self.assertIn("dynamicReferenceAverageScore", evaluation)
-        self.assertLess(evaluation["dynamicReferenceAverageScore"], 1.0)
 
     def test_initial_repair_actions_are_sorted_by_weight_and_include_safety_prerequisites(self):
         package = valid_package()
@@ -696,7 +642,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         repair_steps = [
             step
-            for step in submitted["initialRecommendedPath"]["steps"]
+            for step in submitted["evaluationReport"]["initialOptimalPath"]["steps"]
             if step.get("routeRole") == "repairAttempt"
         ]
         self.assertEqual([step["actionType"] for step in repair_steps], ["replaceWire", "replaceComponent"])
@@ -705,7 +651,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(repair_steps[1]["riskCost"], 3)
         self.assertEqual(repair_steps[1]["safetyPrerequisites"], [{"type": "powerOff", "required": True}])
 
-    def test_practice_session_creation_returns_physical_measurement_snapshot(self):
+    def test_practice_session_creation_keeps_physical_measurement_snapshot_internal(self):
         package = valid_package()
         package["simulationConfig"]["duration"] = 0.3
         package["faultInstances"] = [{
@@ -728,13 +674,13 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
 
         self.assertEqual(status, 200)
-        snapshot = created["physicalMeasurementSnapshot"]
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+        snapshot = session.latest_physical_measurement_snapshot
         self.assertEqual([point["pointCode"] for point in snapshot["points"]], ["M1", "M2", "M3"])
         self.assertIn("M1", snapshot["abnormalPointCodes"])
         self.assertNotIn("V1", [point["pointCode"] for point in snapshot["points"]])
-        self.assertEqual(created["troubleshootingState"]["physicalMeasurementSnapshot"], snapshot)
-        self.assertEqual(created["troubleshootingState"]["virtualMeasurements"], [])
-        self.assertEqual(created["troubleshootingState"]["repairAttempts"], [])
+        self.assertNotIn("physicalMeasurementSnapshot", created)
+        self.assertNotIn("troubleshootingState", created)
 
     def test_practice_action_rejects_unsupported_action_type(self):
         status, created = self._post(
@@ -792,13 +738,9 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(body["normalizedAction"]["actionType"], "measurePoint")
         self.assertNotIn("ruleResult", body)
         self.assertNotIn("appliedAction", body)
-        self.assertEqual(body["virtualMeasurement"]["pointCode"], "V1")
-        self.assertEqual(body["virtualMeasurement"]["pointType"], "virtual")
-        self.assertEqual(body["virtualMeasurement"]["source"], "backend")
-        self.assertEqual(body["simulationResult"]["metrics"]["stepIndex"], 1)
-        self.assertEqual(body["simulationResult"]["curves"]["time"], [0.0])
-        self.assertEqual(body["troubleshootingState"]["virtualMeasurements"][0]["pointCode"], "V1")
-        self.assertEqual(body["troubleshootingState"]["repairAttempts"], [])
+        self.assertNotIn("virtualMeasurement", body)
+        self.assertNotIn("simulationResult", body)
+        self.assertNotIn("troubleshootingState", body)
 
     def test_measure_point_rejects_physical_console_point(self):
         status, created = self._post(
@@ -827,7 +769,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(body["errorCode"], "INVALID_ACTION_SCHEMA")
         self.assertEqual(body["field"], "pointCode")
 
-    def test_practice_action_repeated_repair_is_recorded_and_skipped(self):
+    def test_practice_action_repeated_replacement_is_recorded_and_applied(self):
         package = valid_package()
         package["simulationConfig"]["duration"] = 0.4
         package["faultInstances"] = [{
@@ -859,22 +801,14 @@ class SimulationBackendServerTests(unittest.TestCase):
 
         first_status, first = self._post(f"/api/practice/session/{session_id}/action", payload)
         self.assertEqual(first_status, 200)
-        self.assertEqual(first["ruleResult"]["ruleCode"], "ACTION_ALLOWED")
+        self.assertNotIn("ruleResult", first)
 
         payload["operationId"] = "op-repeat"
         second_status, second = self._post(f"/api/practice/session/{session_id}/action", payload)
 
         self.assertEqual(second_status, 200)
-        self.assertEqual(second["ruleResult"], {
-            "allowed": False,
-            "ruleCode": "REPEAT_REPAIR",
-            "durationSeconds": 0,
-            "riskLevel": "none",
-            "repeatAction": True,
-            "warnings": ["fault is already repaired"],
-        })
-        self.assertEqual(second["appliedAction"]["status"], "skipped")
-        self.assertEqual(second["appliedAction"]["changes"], [])
+        self.assertNotIn("ruleResult", second)
+        self.assertNotIn("appliedAction", second)
 
     def test_repair_action_returns_physical_snapshot_and_repair_effect(self):
         package = valid_package()
@@ -897,7 +831,8 @@ class SimulationBackendServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 200)
-        self.assertIn("M1", created["physicalMeasurementSnapshot"]["abnormalPointCodes"])
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+        self.assertIn("M1", session.latest_physical_measurement_snapshot["abnormalPointCodes"])
         session_id = created["sessionId"]
 
         status, updated = self._post(
@@ -912,15 +847,12 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
 
         self.assertEqual(status, 200)
-        self.assertEqual(updated["ruleResult"]["ruleCode"], "ACTION_ALLOWED")
-        self.assertIn("physicalMeasurementSnapshot", updated)
-        self.assertIn("repairEffect", updated)
-        self.assertIn(updated["repairEffect"]["status"], {"recovered", "improved"})
-        self.assertIn("M1", updated["repairEffect"]["recoveredPointCodes"])
-        self.assertEqual(updated["troubleshootingState"]["repairAttempts"][0]["operationId"], "op-repair")
-        self.assertEqual(updated["troubleshootingState"]["repairAttempts"][0]["repairEffect"], updated["repairEffect"])
+        self.assertNotIn("ruleResult", updated)
+        self.assertNotIn("physicalMeasurementSnapshot", updated)
+        self.assertNotIn("repairEffect", updated)
+        self.assertNotIn("troubleshootingState", updated)
 
-    def test_skipped_repeated_repair_reports_unchanged_repair_effect(self):
+    def test_repeated_replacement_reports_unchanged_repair_effect(self):
         package = valid_package()
         package["simulationConfig"]["duration"] = 0.5
         package["faultInstances"] = [{
@@ -958,12 +890,11 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
 
         self.assertEqual(status, 200)
-        self.assertEqual(second["ruleResult"]["ruleCode"], "REPEAT_REPAIR")
-        self.assertFalse(second["repairEffect"]["effective"])
-        self.assertEqual(second["repairEffect"]["status"], "unchanged")
-        self.assertEqual(len(second["troubleshootingState"]["repairAttempts"]), 2)
+        self.assertNotIn("ruleResult", second)
+        self.assertNotIn("repairEffect", second)
+        self.assertNotIn("troubleshootingState", second)
 
-    def test_practice_action_target_mismatch_returns_error(self):
+    def test_practice_action_unknown_target_returns_error(self):
         package = valid_package()
         package["faultInstances"] = [{
             "faultId": "fault-bias",
@@ -988,17 +919,16 @@ class SimulationBackendServerTests(unittest.TestCase):
         status, body = self._post(
             f"/api/practice/session/{session_id}/action",
             {
-                "operationId": "op-mismatch",
+                "operationId": "op-missing-target",
                 "actionType": "replaceComponent",
-                "target": {"type": "component", "id": "source-1"},
-                "faultId": "fault-bias",
+                "target": {"type": "component", "id": "missing-component"},
                 "steps": 1,
             },
         )
 
         self.assertEqual(status, 400)
         self.assertEqual(body["status"], "error")
-        self.assertEqual(body["errorCode"], "TARGET_MISMATCH")
+        self.assertEqual(body["errorCode"], "TARGET_NOT_FOUND")
         self.assertEqual(body["field"], "target.id")
 
     def test_practice_repair_persists_simulation_state_across_steps(self):
@@ -1017,7 +947,7 @@ class SimulationBackendServerTests(unittest.TestCase):
             "/api/practice/session",
             {
                 "simulationPackage": package,
-                "dMatrix": sample_d_matrix(),
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
                 "targetFaultId": "target-fault",
             },
         )
@@ -1035,7 +965,10 @@ class SimulationBackendServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 200)
-        self.assertEqual(adjusted["simulationResult"]["curves"]["channels"]["scope-1.ch1.actual"], [1.0])
+        self.assertEqual(
+            [sample["actual"] for sample in adjusted["simulationResult"]["physicalMeasurements"][0]["samples"]],
+            [1.0, 1.0, 1.0, 1.0],
+        )
 
         status, measured = self._post(
             f"/api/practice/session/{session_id}/action",
@@ -1048,7 +981,131 @@ class SimulationBackendServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 200)
-        self.assertEqual(measured["simulationResult"]["curves"]["channels"]["scope-1.ch1.actual"], [1.0])
+        self.assertEqual(
+            [sample["actual"] for sample in measured["simulationResult"]["physicalMeasurements"][0]["samples"]],
+            [1.0, 1.0, 1.0, 1.0],
+        )
+
+    def test_replacements_without_faults_rerun_the_full_model_from_zero(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 0.3
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        status, component_result = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-replace-healthy-component",
+                "actionType": "replaceComponent",
+                "target": {"type": "component", "id": "sim-1"},
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertNotIn("faultId", component_result["normalizedAction"])
+        self.assertNotIn("appliedAction", component_result)
+        self.assertEqual(
+            [sample["time"] for sample in component_result["simulationResult"]["physicalMeasurements"][0]["samples"]],
+            [0.0, 0.1, 0.2],
+        )
+        self.assertTrue(component_result["simulationResult"]["summary"]["done"])
+
+        status, wire_result = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-replace-healthy-wire",
+                "actionType": "replaceWire",
+                "target": {"type": "wire", "id": "edge-source-sim"},
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertNotIn("appliedAction", wire_result)
+        self.assertEqual(
+            [sample["time"] for sample in wire_result["simulationResult"]["physicalMeasurements"][0]["samples"]],
+            [0.0, 0.1, 0.2],
+        )
+        self.assertTrue(wire_result["simulationResult"]["summary"]["done"])
+
+    def test_submit_returns_complete_practice_evaluation_report(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 0.3
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.3,
+            "parameters": {"bias": 0.5},
+        }]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        status, _ = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-report-measure",
+                "actionType": "measurePoint",
+                "target": {"type": "testPoint", "id": "scope-2.ch1"},
+                "pointCode": "V1",
+            },
+        )
+        self.assertEqual(status, 200)
+        status, _ = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-report-replace",
+                "actionType": "replaceComponent",
+                "target": {"type": "component", "id": "sim-1"},
+            },
+        )
+        self.assertEqual(status, 200)
+
+        status, submitted = self._post(
+            f"/api/practice/session/{session_id}/submit",
+            {"finalFaultId": "target-fault", "finalFaultName": "Target fault"},
+        )
+
+        self.assertEqual(status, 200, submitted)
+        report = submitted["evaluationReport"]
+        self.assertEqual(report["faultConclusion"]["target"]["faultId"], "target-fault")
+        self.assertEqual(report["faultConclusion"]["student"]["faultId"], "target-fault")
+        self.assertTrue(report["faultConclusion"]["correct"])
+        self.assertEqual(len(report["scoreDetails"]), 5)
+        self.assertEqual(sum(item["score"] for item in report["scoreDetails"]), report["totalScore"])
+        self.assertNotIn("initialRecommendedPath", submitted)
+        self.assertEqual(len(report["stepEvaluations"]), 2)
+        self.assertTrue(all("studentRating" in step for step in report["stepEvaluations"]))
+        self.assertTrue(all("systemRecommendedAction" in step for step in report["stepEvaluations"]))
+        replacement_step = report["stepEvaluations"][1]
+        self.assertEqual(replacement_step["studentRating"]["level"], "optimal")
+        self.assertEqual(
+            replacement_step["systemRecommendedAction"]["target"],
+            {"type": "component", "id": "sim-1"},
+        )
+        coverage = report["keyNodeCoverage"]
+        self.assertTrue(coverage["nodes"])
+        self.assertTrue(all("covered" in node for node in coverage["nodes"]))
+        self.assertEqual(
+            sum(item["deductedPoints"] for item in report["deductionAnalysis"]),
+            round(100 - report["totalScore"], 3),
+        )
+        self.assertIsInstance(report["improvementSuggestions"], list)
 
     def test_submit_ends_practice_and_bound_simulation_session(self):
         status, created = self._post(
@@ -1122,7 +1179,8 @@ class SimulationBackendServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 200)
-        self.assertEqual(first["virtualMeasurement"]["pointCode"], "V1")
+        self.assertNotIn("virtualMeasurement", first)
+        self.assertNotIn("troubleshootingState", first)
 
         status, rejected = self._post(
             f"/api/practice/session/{session_id}/action",
@@ -1179,10 +1237,18 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
 
         self.assertEqual(status, 200)
-        self.assertEqual(blocked["ruleResult"]["allowed"], False)
-        self.assertEqual(blocked["ruleResult"]["ruleCode"], "POWER_NOT_OFF")
-        self.assertTrue(blocked["normalizedAction"]["safetyViolation"])
-        self.assertEqual(blocked["appliedAction"]["status"], "skipped")
+        self.assertNotIn("ruleResult", blocked)
+        self.assertNotIn("safetyViolation", blocked["normalizedAction"])
+        self.assertNotIn("appliedAction", blocked)
+
+        status, submitted = self._post(
+            f"/api/practice/session/{session_id}/submit",
+            {"finalFaultId": "target-fault"},
+        )
+        self.assertEqual(status, 200)
+        safety_detail = next(item for item in submitted["evaluationReport"]["scoreDetails"] if item["item"] == "safetyCompliance")
+        self.assertEqual(safety_detail["score"], 10)
+        self.assertNotIn("record", submitted)
 
     def test_get_practice_session_status_reports_lifecycle_state(self):
         status, created = self._post(
@@ -1204,6 +1270,8 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(body["simulationSessionId"], created["simulationSessionId"])
         self.assertEqual(body["lifecycle"]["state"], "active")
         self.assertEqual(body["lifecycle"]["actionCount"], 0)
+        self.assertEqual(body["lifecycle"]["maxLifetimeSeconds"], 3600.0)
+        self.assertEqual(body["lifecycle"]["idleTimeoutSeconds"], 900.0)
         self.assertIn("createdAt", body["lifecycle"])
         self.assertIn("lastActivityAt", body["lifecycle"])
         self.assertIn("troubleshootingState", body)

@@ -323,29 +323,25 @@ describe('Oscilloscope app integration', () => {
     const meterPanel = document.querySelector('[data-instrument-panel="multimeter"]');
     expect(meterPanel).not.toBeNull();
     expect(meterPanel?.textContent).toContain('数字万用表');
-    expect(meterPanel?.textContent).toContain('当前读数');
-    expect(meterPanel?.textContent).toContain('12.5');
+    expect(meterPanel?.querySelector('.instrument-metrics')).toBeNull();
     expect(meterPanel?.querySelector('[data-instrument-action="export"]')).not.toBeNull();
+
+    document.querySelector('[data-multimeter-action="open"]')?.click();
+    await flushRuntime();
+    expect(document.querySelector('[data-multimeter-window]')?.textContent).toContain('12.5');
+    source.props.amplitude = '6.5';
+    window.runSimulationTick();
+    await flushRuntime();
+    expect(document.querySelector('[data-multimeter-window]')?.textContent).toContain('6.5');
 
     expect(document.querySelector('[data-props-tab="parameters"]')?.hidden).toBe(false);
     expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
     window.setPropertyPanelTab('parameters');
     await flushRuntime();
     expect(document.querySelector('[data-props-tab="parameters"]')?.classList.contains('is-active')).toBe(true);
-    expect(document.getElementById('prop-measurementMode')).not.toBeNull();
-    expect([...document.getElementById('prop-measurementMode').options].map((option) => option.textContent)).toEqual([
-      '直流电压',
-      '交流电压',
-      '直流电流',
-      '交流电流',
-      '电阻',
-      '通断'
-    ]);
-    expect(document.getElementById('prop-range')).not.toBeNull();
-    document.getElementById('prop-measurementMode').value = '交流电压';
-    document.querySelector('[data-property-save-node]')?.click();
-    await flushRuntime();
-    expect(meter.props.measurementMode).toBe('交流电压');
+    expect(document.getElementById('prop-measurementMode')).toBeNull();
+    expect(document.getElementById('prop-range')).toBeNull();
+    expect(document.getElementById('prop-refreshRate')).toBeNull();
     expect(document.querySelector('.props-save')).not.toBeNull();
     expect(document.querySelector('.props-danger')).not.toBeNull();
 

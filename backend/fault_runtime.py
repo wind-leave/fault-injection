@@ -1,7 +1,12 @@
+import hashlib
+
+
 class FaultRuntime:
     def __init__(self, fault_instances):
         self.fault_instances = list(fault_instances or [])
         self.edge_state = {}
+        self.frozen_parameters = {}
+        self.frozen_signals = {}
         self.started_fault_ids = set()
         self.ended_fault_ids = set()
         self.disconnected_edge_ids = set()
@@ -20,30 +25,174 @@ class FaultRuntime:
         end = start + max(duration, 0.0)
         return time >= start and (duration == 0.0 or time <= end)
 
-    def apply_node_output(self, node_id, value, time):
+    @staticmethod
+    def _parameter_key(fault):
+        key = str(fault.get("parameterKey") or fault.get("targetParameter") or "").strip()
+        if key:
+            return key
+        target_field = str(fault.get("targetField") or "").strip()
+        normalized_target_field = target_field.lower()
+        for prefix in ("params.", "parameter.", "parameters."):
+            if normalized_target_field.startswith(prefix):
+                return target_field[len(prefix):]
+        return ""
+
+    def _is_module_parameter_fault(self, fault):
+        return bool(self._parameter_key(fault)) and fault.get("injectionForm") == "module-variable"
+
+    @staticmethod
+    def _signal_binding_name(fault):
+        return str(
+            fault.get("bindingObject")
+            or fault.get("targetVariable")
+            or ""
+        ).strip().lower()
+
+    def _matches_node_signal(self, fault, node_id, direction, signal_name, is_primary):
+        if fault.get("targetId") != node_id or self._is_module_parameter_fault(fault):
+            return False
+        target_field = str(fault.get("targetField") or "").strip().lower()
+        normalized_name = str(signal_name or "").strip().lower()
+        if not target_field:
+            return bool(is_primary)
+        return target_field == f"{direction}.{normalized_name}" or (
+            self._signal_binding_name(fault) == normalized_name
+        )
+
+    def _frozen_signal_value(self, fault, target_id, target_field, value, cycle=None):
+        key = (str(fault.get("faultId", "")), str(target_id), str(target_field), cycle)
+        return self.frozen_signals.setdefault(key, float(value))
+
+    def _apply_signal_fault(self, fault, target_id, target_field, value, time):
+        params = fault.get("parameters") or {}
+        fault_type = fault.get("faultType")
         result = float(value)
+        # Keep the original output-level physical fault behaviour for legacy
+        # packages that do not name a concrete signal field.
+        if fault_type == "motor_efficiency_loss":
+            return result * float(params.get("efficiency", 1.0))
+        if fault_type == "parameter_bias":
+            return (result + float(params.get("bias", params.get("delta_p", 0.0)))) * float(
+                params.get("scale", 1.0)
+            )
+        if fault_type == "parameter_step":
+            return result + float(params.get("stepValue", params.get("step_value", 0.0)))
+        if fault_type == "parameter_drift":
+            start = float(fault.get("startTime", params.get("start", 0.0)))
+            return result + float(params.get("rate", 0.0)) * max(0.0, time - start)
+        if fault_type == "sensor_bias":
+            return result + float(params.get("bias", 0.0))
+        if fault_type == "noise_increase":
+            amplitude = float(params.get("amplitude", params.get("std", 0.1)))
+            return result + self._bounded_noise(
+                params.get("seed", 1),
+                fault.get("faultId", ""),
+                time,
+            ) * abs(amplitude)
+        if fault_type == "signal_stuck":
+            if "value" in params:
+                return float(params["value"])
+            return self._frozen_signal_value(fault, target_id, target_field, result)
+        if fault_type == "intermittent":
+            start = float(fault.get("startTime", params.get("start", 0.0)))
+            period = max(float(params.get("period", 1.0)), 1e-9)
+            duty = min(1.0, max(0.0, float(params.get("duty", 0.5))))
+            elapsed = max(0.0, time - start)
+            if (elapsed % period) / period >= duty:
+                return result
+            mode = str(params.get("mode", "hold")).strip().lower()
+            if mode in {"bias", "add"}:
+                return result + float(params.get("bias", 0.0))
+            if mode in {"noise", "random"}:
+                amplitude = float(params.get("amplitude", params.get("std", 0.1)))
+                return result + self._bounded_noise(
+                    params.get("seed", 1),
+                    fault.get("faultId", ""),
+                    time,
+                ) * abs(amplitude)
+            if mode == "zero":
+                return 0.0
+            if mode in {"multiply", "scale"}:
+                return result * float(params.get("scale", 1.0))
+            cycle = int(elapsed / period)
+            return self._frozen_signal_value(fault, target_id, target_field, result, cycle)
+        return result
+
+    def apply_node_input(self, node_id, input_name, value, time):
+        result = float(value)
+        for fault in self.fault_instances:
+            if not self._is_active(fault, time):
+                continue
+            if self._matches_node_signal(fault, node_id, "inputs", input_name, False):
+                result = self._apply_signal_fault(
+                    fault,
+                    node_id,
+                    f"inputs.{input_name}",
+                    result,
+                    time,
+                )
+        return result
+
+    @staticmethod
+    def _bounded_noise(seed, fault_id, time):
+        value = f"{seed}:{fault_id}:{float(time):.10f}".encode("utf-8")
+        raw = int.from_bytes(hashlib.sha256(value).digest()[:8], "big")
+        return (raw / ((1 << 64) - 1)) * 2.0 - 1.0
+
+    def apply_node_parameters(self, node_id, parameters, time):
+        result = dict(parameters or {})
         for fault in self.fault_instances:
             if fault.get("targetId") != node_id or not self._is_active(fault, time):
                 continue
+            if not self._is_module_parameter_fault(fault):
+                continue
+            parameter_key = self._parameter_key(fault)
             params = fault.get("parameters") or {}
+            value = float(result.get(parameter_key, 1.0))
             fault_type = fault.get("faultType")
-            if fault_type == "sensor_bias":
-                result += float(params.get("bias", 0.0))
-            elif fault_type == "noise_increase":
-                amplitude = float(params.get("amplitude", 0.1))
-                result += amplitude
-            elif fault_type == "signal_stuck":
-                result = float(params.get("value", result))
-            elif fault_type == "motor_efficiency_loss":
-                result *= float(params.get("efficiency", 0.5))
-            elif fault_type == "parameter_bias":
-                result += float(params.get("bias", params.get("delta_p", 0.1)))
-                result *= float(params.get("scale", 1.0))
+            if fault_type == "parameter_bias":
+                value += float(params.get("bias", params.get("delta_p", 0.0)))
+            elif fault_type == "parameter_degradation":
+                value *= float(params.get("scale", 1.0))
             elif fault_type == "parameter_step":
-                result += float(params.get("stepValue", params.get("step_value", 0.1)))
+                value += float(params.get("stepValue", params.get("step_value", params.get("step", 0.0))))
             elif fault_type == "parameter_drift":
                 start = float(fault.get("startTime", params.get("start", 0.0)))
-                result += float(params.get("rate", 0.01)) * max(0.0, time - start)
+                value += float(params.get("rate", 0.0)) * max(0.0, time - start)
+            elif fault_type == "parameter_freeze":
+                freeze_key = (str(fault.get("faultId", "")), parameter_key)
+                value = self.frozen_parameters.setdefault(freeze_key, value)
+            elif fault_type == "parameter_random":
+                value += self._bounded_noise(
+                    params.get("seed", 1),
+                    fault.get("faultId", ""),
+                    time,
+                ) * abs(float(params.get("std", 0.0)))
+            else:
+                continue
+            result[parameter_key] = value
+        return result
+
+    def apply_node_output(self, node_id, value, time, output_name=None, is_primary=True):
+        result = float(value)
+        for fault in self.fault_instances:
+            if not self._is_active(fault, time):
+                continue
+            if not self._matches_node_signal(
+                fault,
+                node_id,
+                "outputs",
+                output_name or "",
+                is_primary,
+            ):
+                continue
+            result = self._apply_signal_fault(
+                fault,
+                node_id,
+                f"outputs.{output_name or ''}",
+                result,
+                time,
+            )
         return result
 
     def apply_edge_value(self, edge_id, value, time):
@@ -63,6 +212,8 @@ class FaultRuntime:
                 queue.append(result)
                 delay_steps = int((fault.get("parameters") or {}).get("delaySteps", 1))
                 result = queue.pop(0) if len(queue) > delay_steps else float(state.get("last", result))
+            else:
+                result = self._apply_signal_fault(fault, edge_id, "edge", result, time)
         state["last"] = result
         return result
 

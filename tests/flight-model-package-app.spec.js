@@ -723,7 +723,7 @@ describe('Flight model package app integration', () => {
       await flushRuntime();
 
       expect(importResult).toMatchObject({ ok: true });
-      expect(window.fetch).not.toHaveBeenCalled();
+      expect(window.fetch).toHaveBeenCalledWith('http://localhost:3000/model-packages/evtol-small-flight-control-fault-display.json');
       expect(window.__GZ_STATE__.sysLoaded).toBe(true);
       expect(window.__GZ_STATE__.modelNodes).toHaveLength(selectedPackage.workbenchSnapshot.modelNodes.length);
       expect(window.__GZ_STATE__.activeModelPackage).toMatchObject({

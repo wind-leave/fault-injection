@@ -39,8 +39,10 @@ class PracticeActionRuntime:
             raise SimulationBackendError("INVALID_SCHEMA", "action", "action must be an object")
 
         action_type = _normalized_action_type(action)
-        if action_type in {"replacecomponent", "repaircomponent", "replacewire"}:
-            changes = self._disable_faults(action)
+        if action_type in {"replacecomponent", "repaircomponent"}:
+            changes = self._replace_component(action)
+        elif action_type == "replacewire":
+            changes = self._replace_wire(action)
         elif action_type == "disconnectline":
             changes = self._disconnect_line(action)
         elif action_type == "reconnectline":
@@ -82,38 +84,42 @@ class PracticeActionRuntime:
             raise SimulationBackendError("TARGET_NOT_FOUND", field, f"edge not found: {edge_id}")
         return edge
 
-    def _disable_faults(self, action):
-        target_id = _target_id(action)
-        fault_id = _text(action.get("faultId") or action.get("relatedFaultId"))
-        if not target_id and not fault_id:
-            raise SimulationBackendError("INVALID_SCHEMA", "targetId", "targetId or faultId is required")
-
+    def _disable_target_faults(self, target_id):
         changes = []
-        found_fault_id = False
         for fault in self.simulation_session.fault_runtime.fault_instances:
-            if fault_id and _text(fault.get("faultId")) != fault_id:
+            if _text(fault.get("targetId")) != target_id or not bool(fault.get("enabled", True)):
                 continue
-            if fault_id:
-                found_fault_id = True
-                if target_id and _text(fault.get("targetId")) != target_id:
-                    raise SimulationBackendError(
-                        "TARGET_MISMATCH",
-                        "target.id",
-                        f"faultId {fault_id} does not match target {target_id}",
-                    )
-            if target_id and not fault_id and _text(fault.get("targetId")) != target_id:
-                continue
-            old_enabled = bool(fault.get("enabled", True))
             fault["enabled"] = False
             changes.append({
                 "type": "fault_disabled",
                 "faultId": fault.get("faultId") or "",
                 "targetId": fault.get("targetId") or "",
-                "previousEnabled": old_enabled,
+                "previousEnabled": True,
                 "newEnabled": False,
             })
-        if fault_id and not found_fault_id:
-            raise SimulationBackendError("TARGET_NOT_FOUND", "faultId", f"fault not found: {fault_id}")
+        return changes
+
+    def _replace_component(self, action):
+        node_id = self._require_target(action, "targetId")
+        self._require_node(node_id, "target.id")
+        changes = self._disable_target_faults(node_id)
+        changes.append({
+            "type": "component_replaced",
+            "componentId": node_id,
+            "clearedFaultIds": [change["faultId"] for change in changes],
+        })
+        return changes
+
+    def _replace_wire(self, action):
+        edge_id = self._require_target(action, "targetId")
+        self._require_edge(edge_id, "target.id")
+        changes = self._disable_target_faults(edge_id)
+        self.simulation_session.fault_runtime.reconnect_edge(edge_id)
+        changes.append({
+            "type": "wire_replaced",
+            "wireId": edge_id,
+            "clearedFaultIds": [change["faultId"] for change in changes],
+        })
         return changes
 
     def _disconnect_line(self, action):

@@ -72,7 +72,7 @@ class PracticeActionRuntimeTests(unittest.TestCase):
         self.assertEqual(result["changes"][0]["type"], "fault_disabled")
         self.assertFalse(session.fault_runtime.fault_instances[0]["enabled"])
 
-    def test_repair_rejects_fault_target_mismatch(self):
+    def test_replacement_uses_target_and_ignores_optional_mismatched_fault_id(self):
         package = valid_package()
         package["faultInstances"] = [{
             "faultId": "fault-bias",
@@ -86,12 +86,18 @@ class PracticeActionRuntimeTests(unittest.TestCase):
         session = self._session(package)
         runtime = PracticeActionRuntime(session)
 
-        with self.assertRaisesRegex(Exception, "does not match target"):
-            runtime.apply({
-                "actionType": "replaceComponent",
-                "targetId": "source-1",
-                "faultId": "fault-bias",
-            })
+        result = runtime.apply({
+            "actionType": "replaceComponent",
+            "targetId": "source-1",
+            "faultId": "fault-bias",
+        })
+
+        self.assertEqual(result["changes"], [{
+            "type": "component_replaced",
+            "componentId": "source-1",
+            "clearedFaultIds": [],
+        }])
+        self.assertTrue(session.fault_runtime.fault_instances[0]["enabled"])
 
     def test_disconnect_and_reconnect_line_persist_on_session(self):
         session = self._session()

@@ -110,6 +110,68 @@ describe('property panel schema service', () => {
     expect(html).not.toContain('id="prop-messageId"');
   });
 
+  it('renders command protocol and payload type as selects without a payload schema field', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    const html = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'command', protocol: 'CAN FD', payloadKind: 'uint16' }
+    }, schema);
+
+    expect(html).toContain('id="prop-protocol"');
+    expect(html).toContain('<option value="CAN FD" selected>CAN FD</option>');
+    expect(html).toContain('id="prop-payloadKind"');
+    expect(html).toContain('<option value="uint16" selected>uint16</option>');
+    expect(html).not.toContain('id="prop-payloadSchema"');
+  });
+
+  it('renders waveform-specific analog configuration fields', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    const stepHtml = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'analog', waveType: 'step' }
+    }, schema);
+    const rampHtml = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'analog', waveType: 'ramp' }
+    }, schema);
+
+    expect(stepHtml).toContain('id="prop-initialValue"');
+    expect(stepHtml).toContain('id="prop-finalValue"');
+    expect(stepHtml).toContain('id="prop-stepTime"');
+    expect(stepHtml).not.toContain('id="prop-frequency"');
+    expect(rampHtml).toContain('id="prop-slope"');
+    expect(rampHtml).toContain('id="prop-startTime"');
+    expect(rampHtml).not.toContain('id="prop-finalValue"');
+  });
+
+  it('renders only RF fields applicable to the selected modulation mode', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    const cwHtml = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'rf', modulation: 'cw' }
+    }, schema);
+    const pulseHtml = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'rf', modulation: 'pulse' }
+    }, schema);
+    const digitalHtml = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'rf', modulation: 'digital' }
+    }, schema);
+
+    expect(cwHtml).toContain('id="prop-centerFrequency"');
+    expect(cwHtml).toContain('id="prop-centerFrequencyUnit"');
+    expect(cwHtml).not.toContain('id="prop-rfOutputEnabled"');
+    expect(cwHtml).not.toContain('id="prop-bandwidth"');
+    expect(cwHtml).not.toContain('id="prop-pulseWidth"');
+    expect(pulseHtml).toContain('id="prop-pulseWidth"');
+    expect(pulseHtml).toContain('id="prop-prf"');
+    expect(pulseHtml).not.toContain('id="prop-snr"');
+    expect(digitalHtml).toContain('id="prop-bandwidth"');
+    expect(digitalHtml).toContain('id="prop-sampleRate"');
+    expect(digitalHtml).not.toContain('id="prop-pulseWidth"');
+  });
+
   it('does not render signal definition as editable signal source parameter fields', () => {
     const schema = getComponentPropertySchema('signal_source');
     const html = renderPropertyFieldsFromSchema({
@@ -344,7 +406,7 @@ describe('property panel schema service', () => {
         signalDomain: 'rf',
         centerFrequency: '2.4GHz',
         bandwidth: '20MHz',
-        modulation: 'QPSK'
+        modulation: 'digital'
       }
     }, schema);
 
@@ -353,6 +415,21 @@ describe('property panel schema service', () => {
     expect(html).toContain('id="prop-modulation"');
     expect(html).not.toContain('id="prop-waveType"');
     expect(html).not.toContain('id="prop-digitalMode"');
+  });
+
+  it('labels analog and PM phase inputs in radians', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    const analogHtml = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'analog', waveType: 'sine' }
+    }, schema);
+    const pmHtml = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'rf', modulation: 'pm' }
+    }, schema);
+
+    expect(analogHtml).toContain('相位 (rad)');
+    expect(pmHtml).toContain('相偏 (rad)');
   });
 
   it('reads rendered signal source values with normalized domain defaults', () => {
@@ -365,7 +442,7 @@ describe('property panel schema service', () => {
         centerFrequency: '2.4GHz',
         bandwidth: '20MHz',
         power: '10',
-        modulation: 'QPSK'
+        modulation: 'digital'
       }
     }, schema);
 
@@ -375,7 +452,7 @@ describe('property panel schema service', () => {
       centerFrequency: '5.8GHz',
       bandwidth: '20MHz',
       power: '10',
-      modulation: 'QPSK'
+      modulation: 'digital'
     }));
     expect(readPropertyValuesFromSchema(schema, document)).not.toHaveProperty('name');
   });

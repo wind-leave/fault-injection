@@ -79,7 +79,10 @@ describe('left palette taxonomy', () => {
       'sum_block',
       'mux_block'
     ]);
-    expect(groupComponents(wrapper, 'simulation')).toEqual(['simulation_block', 'airspeed_sensor']);
+    expect(groupComponents(wrapper, 'simulation')).toEqual([
+      'airspeed_sensor',
+      'barometer_sensor'
+    ]);
     expect(groupBody(wrapper, 'simulation').text()).toContain('空速传感器');
     expect(groupBody(wrapper, 'simulation').find('[data-open-component-authoring]').exists()).toBe(false);
     expect(groupComponents(wrapper, 'subsystem')).toEqual(['subsystem_block']);
@@ -118,6 +121,40 @@ describe('left palette taxonomy', () => {
     );
     expect(wrapper.find('[data-component="instrument_spectrum"] .citem-icon-badge').text()).toBe('谱');
     expect(wrapper.find('[data-component="instrument_multimeter"] .citem-icon-badge').text()).toBe('VΩ');
+
+    wrapper.unmount();
+  });
+
+  it('removes only the created component entry from the palette', async () => {
+    const wrapper = mountPalette();
+
+    window.dispatchEvent(new CustomEvent('gz:palette-component-created', {
+      detail: { paletteKey: 'airspeed_sensor' }
+    }));
+    await wrapper.vm.$nextTick();
+
+    expect(groupComponents(wrapper, 'simulation')).toEqual(['barometer_sensor']);
+    expect(groupComponents(wrapper, 'signal-ops')).toEqual([
+      'flow_block',
+      'gain_block',
+      'sum_block',
+      'mux_block'
+    ]);
+
+    window.dispatchEvent(new CustomEvent('gz:palette-component-created', {
+      detail: { paletteKey: 'signal_source' }
+    }));
+    await wrapper.vm.$nextTick();
+    expect(groupComponents(wrapper, 'signals')).toContain('signal_source');
+
+    window.dispatchEvent(new CustomEvent('gz:palette-component-deleted', {
+      detail: { paletteKey: 'airspeed_sensor' }
+    }));
+    await wrapper.vm.$nextTick();
+    expect(groupComponents(wrapper, 'simulation')).toEqual([
+      'airspeed_sensor',
+      'barometer_sensor'
+    ]);
 
     wrapper.unmount();
   });

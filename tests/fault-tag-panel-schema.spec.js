@@ -45,6 +45,8 @@ describe('fault tag panel schema service', () => {
 
     expect(html).toContain('data-fault-tag-param-panel="fault-tag-1"');
     expect(html).toContain('data-fault-tag-param="bias"');
+    expect(html).toContain('data-fault-tag-enabled');
+    expect(html).toContain('是否启用');
     expect(html).toContain('value="5"');
     expect(html).toContain('data-fault-tag-reset disabled');
     expect(html).toContain('data-fault-tag-apply disabled');
@@ -57,6 +59,7 @@ describe('fault tag panel schema service', () => {
 
     expect(emptyHtml).toContain('该故障没有额外参数。');
     expect(emptyHtml).not.toContain('data-fault-tag-apply');
+    expect(emptyHtml).toContain('data-fault-tag-enabled');
 
     document.body.innerHTML = `
       <div data-fault-tag-param-panel="fault-tag-1">

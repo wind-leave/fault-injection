@@ -1,11 +1,44 @@
 <script setup>
-import { reactive } from 'vue';
+import { onBeforeUnmount, onMounted, reactive } from 'vue';
 import { getPaletteGroups } from '../../services/componentRegistry.js';
 
 const paletteGroups = getPaletteGroups();
 const groupOpen = reactive(Object.fromEntries(
   paletteGroups.map((group) => [group.id, group.defaultOpen !== false])
 ));
+const consumedPaletteKeys = reactive(new Set());
+
+function paletteKey(component) {
+  return component.paletteKey || component.templateId || component.type;
+}
+
+function isPaletteComponentAvailable(component) {
+  return component.group !== 'simulation' || !consumedPaletteKeys.has(paletteKey(component));
+}
+
+function handlePaletteComponentCreated(event) {
+  const key = event.detail?.paletteKey;
+  if (key) {
+    consumedPaletteKeys.add(key);
+  }
+}
+
+function handlePaletteComponentDeleted(event) {
+  const key = event.detail?.paletteKey;
+  if (key) {
+    consumedPaletteKeys.delete(key);
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('gz:palette-component-created', handlePaletteComponentCreated);
+  window.addEventListener('gz:palette-component-deleted', handlePaletteComponentDeleted);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('gz:palette-component-created', handlePaletteComponentCreated);
+  window.removeEventListener('gz:palette-component-deleted', handlePaletteComponentDeleted);
+});
 
 function groupDomId(groupId) {
   return `g-${groupId}`;
@@ -102,7 +135,7 @@ function handleLineToolClick(component) {
           :id="groupDomId(group.id)"
           :data-palette-body="group.id"
         >
-          <template v-for="component in group.components" :key="component.type">
+          <template v-for="component in group.components" :key="paletteKey(component)">
             <div
               v-if="component.paletteKind === 'line-tool'"
               :class="lineToolClasses(component)"
@@ -113,10 +146,11 @@ function handleLineToolClick(component) {
               {{ component.label }}
             </div>
             <div
-              v-else
+              v-else-if="isPaletteComponentAvailable(component)"
               :class="componentClasses(component)"
               draggable="true"
               :data-component="component.type"
+              :data-palette-key="paletteKey(component)"
               :title="component.title"
             >
               <span :class="badgeClass(component)">{{ badgeIcon(component) }}</span>

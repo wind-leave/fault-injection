@@ -1,3 +1,10 @@
+import {
+  getMultimeterMeasurementKind,
+  getMultimeterTargetKind,
+  normalizeMultimeterBinding,
+  evaluateMultimeterLeads
+} from './multimeterMeasurementService.js';
+
 const DEFAULT_SAMPLE_LIMIT = 720;
 
 function getBackendApi(target) {
@@ -17,6 +24,197 @@ function pushLimitedSample(list, sample, limit = DEFAULT_SAMPLE_LIMIT) {
   if (list.length > limit) {
     list.splice(0, list.length - limit);
   }
+}
+
+function workbenchItems(state, key) {
+  const fallbackKey = key === 'modelNodes' ? 'nodes' : key === 'modelEdges' ? 'edges' : key;
+  const canvasKey = key === 'modelNodes' ? 'nodes' : key === 'modelEdges' ? 'edges' : key;
+  const items = [
+    ...(Array.isArray(state?.[key]) ? state[key] : []),
+    ...(Array.isArray(state?.[fallbackKey]) ? state[fallbackKey] : []),
+    ...Object.values(state?.canvases ?? {}).flatMap((canvas) => (
+      Array.isArray(canvas?.[canvasKey]) ? canvas[canvasKey] : []
+    ))
+  ];
+  return Array.from(new Map(items.filter((item) => item?.id).map((item) => [item.id, item])).values());
+}
+
+function outputValueForPort(outputs, node, portIndex = 0) {
+  if (Number.isFinite(Number(outputs))) {
+    return Number(outputs);
+  }
+  if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) {
+    return NaN;
+  }
+
+  const ports = node?.outputs ?? node?.props?.outputs ?? [];
+  const port = Array.isArray(ports) ? ports[Number(portIndex) || 0] : null;
+  const candidates = [
+    port?.name,
+    port?.key,
+    port?.varName,
+    port?.id,
+    'output',
+    'out',
+    'value'
+  ].filter(Boolean);
+
+  for (const key of candidates) {
+    if (Number.isFinite(Number(outputs[key]))) {
+      return Number(outputs[key]);
+    }
+  }
+
+  const scalarValues = Object.values(outputs).filter((value) => Number.isFinite(Number(value)));
+  return scalarValues.length === 1 ? Number(scalarValues[0]) : NaN;
+}
+
+function multimeterTargetFor(node, nodesById, edgesById) {
+  const binding = normalizeMultimeterBinding(node?.props);
+  if (!binding.measurementTargetId) return null;
+  return binding.measurementTargetKind === 'edge'
+    ? edgesById.get(binding.measurementTargetId) ?? null
+    : nodesById.get(binding.measurementTargetId) ?? null;
+}
+
+function multimeterNodeReading(stepOutputs, node, mode, incomingEdges = [], nodesById) {
+  const kind = getMultimeterMeasurementKind(mode);
+  if (kind === 'resistance' || kind === 'continuity') {
+    return 1;
+  }
+  const incoming = incomingEdges
+    .filter((edge) => edge.targetNodeId === node?.id)
+    .sort((left, right) => (left.targetPortIndex ?? 0) - (right.targetPortIndex ?? 0))[0];
+  if (!incoming) return NaN;
+  return outputValueForPort(
+    stepOutputs?.[incoming.sourceNodeId],
+    nodesById.get(incoming.sourceNodeId),
+    incoming.sourcePortIndex
+  );
+}
+
+function multimeterLeadPairFor(node, nodes, edges) {
+  return evaluateMultimeterLeads({
+    positiveLead: node?.props?.positiveLead,
+    negativeLead: node?.props?.negativeLead
+  }, nodes, edges);
+}
+
+function multimeterLeadReading(stepOutputs, pair, mode, nodesById, edges) {
+  if (!pair?.valid) return NaN;
+  const kind = getMultimeterMeasurementKind(mode);
+  if (kind === 'current') {
+    if (pair.targetKind !== 'edge') return NaN;
+    const edge = edges.find((item) => item.id === pair.edgeId);
+    const value = outputValueForPort(stepOutputs?.[edge?.sourceNodeId], nodesById.get(edge?.sourceNodeId), edge?.sourcePortIndex);
+    return Number.isFinite(value) ? value * pair.polarity : NaN;
+  }
+  if (pair.targetKind !== 'component') return NaN;
+  if (kind === 'resistance' || kind === 'continuity') return pair.polarity;
+  const incoming = edges
+    .filter((edge) => edge.targetNodeId === pair.componentNodeId && Number(edge.targetPortIndex ?? 0) === pair.inputPortIndex)
+    .sort((left, right) => (left.id || '').localeCompare(right.id || ''))[0];
+  if (!incoming) return NaN;
+  const value = outputValueForPort(stepOutputs?.[incoming.sourceNodeId], nodesById.get(incoming.sourceNodeId), incoming.sourcePortIndex);
+  return Number.isFinite(value) ? value * pair.polarity : NaN;
+}
+
+function appendBackendInstrumentSamples(target, componentSteps, componentTimes, curveTimes, sampleLimit) {
+  const sim = getSimulationState(target);
+  const state = getWorkbenchState(target);
+  if (!sim || !componentSteps.length) {
+    return;
+  }
+
+  const nodes = workbenchItems(state, 'modelNodes');
+  const edges = workbenchItems(state, 'modelEdges');
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const edgesById = new Map(edges.map((edge) => [edge.id, edge]));
+  const instruments = nodes
+    .filter((node) => ['instrument_logger', 'instrument_spectrum', 'instrument_multimeter'].includes(node.type))
+    .map((node) => ({
+      node,
+      incoming: edges
+        .filter((edge) => edge.targetNodeId === node.id)
+        .sort((left, right) => (left.targetPortIndex ?? 0) - (right.targetPortIndex ?? 0)),
+      target: node.type === 'instrument_multimeter' ? multimeterLeadPairFor(node, nodes, edges) : null
+    }))
+    .filter(({ node, incoming, target }) => {
+      const activeEdges = incoming.filter((edge) => nodesById.has(edge.sourceNodeId));
+      return node.type === 'instrument_multimeter'
+        ? activeEdges.length > 0 || Boolean(target?.valid)
+        : activeEdges.length > 0;
+    });
+
+  if (!instruments.length) {
+    return;
+  }
+
+  sim.actual.instrumentSamples ??= {};
+  sim.reference.instrumentSamples ??= {};
+
+  instruments.forEach(({ node, incoming: incomingEdges, target }) => {
+    const incoming = incomingEdges[0];
+    const sourceNode = incoming ? nodesById.get(incoming.sourceNodeId) : null;
+    const actualSamples = sim.actual.instrumentSamples[node.id] ??= [];
+    const spectrumOnly = node.type === 'instrument_spectrum';
+    const referenceSamples = spectrumOnly
+      ? null
+      : (sim.reference.instrumentSamples[node.id] ??= []);
+
+    if (spectrumOnly) {
+      delete sim.reference.instrumentSamples[node.id];
+    }
+
+    componentSteps.forEach((step, index) => {
+      const time = Number.isFinite(Number(step?.time))
+        ? Number(step.time)
+        : Number.isFinite(Number(componentTimes[index]))
+          ? Number(componentTimes[index])
+          : Number.isFinite(Number(curveTimes[index]))
+            ? Number(curveTimes[index])
+            : Number(sim.time || 0);
+      if (actualSamples.at(-1)?.t === time) {
+        return;
+      }
+
+      if (node.type === 'instrument_multimeter') {
+        const hasStandardConnection = incomingEdges.some((edge) => nodesById.has(edge.sourceNodeId));
+        const actual = hasStandardConnection
+          ? multimeterNodeReading(step?.actual, node, node.props?.measurementMode, incomingEdges, nodesById)
+          : multimeterLeadReading(step?.actual, target, node.props?.measurementMode, nodesById, edges);
+        const reference = hasStandardConnection
+          ? multimeterNodeReading(step?.reference, node, node.props?.measurementMode, incomingEdges, nodesById)
+          : multimeterLeadReading(step?.reference, target, node.props?.measurementMode, nodesById, edges);
+        if (!Number.isFinite(actual)) return;
+        pushLimitedSample(actualSamples, Number.isFinite(reference)
+          ? { t: time, actual, reference }
+          : { t: time, actual }, sampleLimit);
+        if (Number.isFinite(reference)) {
+          pushLimitedSample(referenceSamples, { t: time, actual: reference, reference }, sampleLimit);
+        }
+        return;
+      }
+
+      const actual = outputValueForPort(step?.actual?.[incoming.sourceNodeId], sourceNode, incoming.sourcePortIndex);
+      if (!Number.isFinite(actual)) {
+        return;
+      }
+
+      if (spectrumOnly) {
+        pushLimitedSample(actualSamples, { t: time, actual }, sampleLimit);
+        return;
+      }
+
+      const reference = outputValueForPort(step?.reference?.[incoming.sourceNodeId], sourceNode, incoming.sourcePortIndex);
+      pushLimitedSample(actualSamples, Number.isFinite(reference)
+        ? { t: time, actual, reference }
+        : { t: time, actual }, sampleLimit);
+      if (Number.isFinite(reference)) {
+        pushLimitedSample(referenceSamples, { t: time, actual: reference, reference }, sampleLimit);
+      }
+    });
+  });
 }
 
 function cloneComponentOutputStep(step) {
@@ -75,6 +273,8 @@ function parseChannelKey(key) {
 function refreshRuntimeViews(target, status = 'stepped') {
   syncSimulationControls(target);
   target.renderScopeWindows?.();
+  target.renderMultimeterWindow?.();
+  target.renderSpectrumInstrument?.();
   target.renderSimulationViewPanel?.();
   target.updateUI?.();
   target.publishSimulationRuntimeSummary?.(status);
@@ -177,6 +377,8 @@ export function appendBackendSimulationChunk(target, chunk, { sampleLimit = DEFA
       time
     });
   });
+
+  appendBackendInstrumentSamples(target, componentSteps, componentTimes, times, sampleLimit);
 
   const metrics = chunk?.metrics ?? {};
   if (Number.isFinite(Number(metrics.time))) {

@@ -27,6 +27,7 @@ describe('component registry', () => {
   it('registers the existing draggable component types', () => {
     expect(Object.keys(COMPONENT_REGISTRY).sort()).toEqual([
       'airspeed_sensor',
+      'barometer_sensor',
       'electrical_fault_injector',
       'flow_block',
       'gain_block',
@@ -175,6 +176,19 @@ describe('component registry', () => {
       }
     });
 
+    expect(library.barometer_sensor.faultSlots).toEqual([
+      expect.objectContaining({
+        slotId: 'physical:barometer_bias',
+        layer: 'physical',
+        targetField: 'params.bias'
+      }),
+      expect.objectContaining({
+        slotId: 'physical:barometer_scale',
+        layer: 'physical',
+        targetField: 'params.scale'
+      })
+    ]);
+
     expect(library.instrument_spectrum).toMatchObject({
       label: '频谱分析仪',
       badge: '频谱',
@@ -245,7 +259,8 @@ describe('component registry', () => {
     ]);
     expect(paletteGroups.find((group) => group.id === 'simulation').components.map((item) => item.type)).toEqual([
       'simulation_block',
-      'airspeed_sensor'
+      'airspeed_sensor',
+      'barometer_sensor'
     ]);
     expect(faults.components.map((item) => item.type)).toEqual([
       'physical_fault_injector',

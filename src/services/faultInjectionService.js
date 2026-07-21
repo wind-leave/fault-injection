@@ -647,7 +647,7 @@ function normalizeFaultBinding(binding = {}, target = {}) {
     visualRole: binding.visualRole || 'fault-source',
     propagationMode,
     canPropagate: binding.canPropagate ?? propagationMode !== FAULT_PROPAGATION_MODES.localOnly,
-    active: binding.active ?? true,
+    active: binding.active ?? payload.active ?? payload.enabled ?? true,
     injectedFault: payload
   };
   normalized.injectedFault = {
@@ -661,7 +661,9 @@ function normalizeFaultBinding(binding = {}, target = {}) {
     bindingObject: normalized.bindingObject,
     targetVariable: normalized.targetVariable,
     targetField: normalized.targetField,
-    parameters: clone(normalized.parameters)
+    parameters: clone(normalized.parameters),
+    active: normalized.active,
+    enabled: normalized.active
   };
   return normalized;
 }

@@ -14,8 +14,13 @@ from backend.practice_scoring import (
     evaluate_practice_submission_score,
     grade_for_score,
 )
+from backend.practice_report import build_practice_evaluation_report
 from backend.schemas import SimulationBackendError
 from backend.troubleshooting import TroubleshootingSession, _fault_id
+
+
+DEFAULT_MAX_LIFETIME_SECONDS = 3600.0
+DEFAULT_IDLE_TIMEOUT_SECONDS = 900.0
 
 
 def _clone(value):
@@ -71,10 +76,10 @@ def _round_score(value):
     return round(float(value), 3)
 
 
-def _lifecycle_seconds(config, field):
+def _lifecycle_seconds(config, field, default):
     value = config.get(field)
     if value is None:
-        return None
+        return default
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise SimulationBackendError("INVALID_SCHEMA", f"lifecycle.{field}", f"lifecycle.{field} must be a number")
     if value < 0:
@@ -101,6 +106,8 @@ class PracticeSession:
         simulation_session,
         d_matrix,
         target_fault_id,
+        initial_recommended_path=None,
+        key_nodes=None,
         scoring_rules=None,
         lifecycle=None,
         action_rules=None,
@@ -128,11 +135,25 @@ class PracticeSession:
         self.repair_attempts = []
         self.latest_physical_measurement_snapshot = None
         self.initial_physical_measurement_snapshot = None
-        self.initial_best_path = self._build_initial_recommended_path(self.troubleshooting.initial_response()["currentPath"])
-        self.fault_tree_key_nodes = self._build_fault_tree_key_nodes()
+        generated_initial_path = self._build_initial_recommended_path(self.troubleshooting.initial_response()["currentPath"])
+        generated_key_nodes = self._build_fault_tree_key_nodes()
+        self.initial_best_path = (
+            _clone(initial_recommended_path)
+            if isinstance(initial_recommended_path, dict)
+            else generated_initial_path
+        )
+        self.fault_tree_key_nodes = (
+            _clone(key_nodes)
+            if isinstance(key_nodes, list)
+            else generated_key_nodes
+        )
         lifecycle_config = lifecycle if isinstance(lifecycle, dict) else {}
-        self.max_lifetime_seconds = _lifecycle_seconds(lifecycle_config, "maxLifetimeSeconds")
-        self.idle_timeout_seconds = _lifecycle_seconds(lifecycle_config, "idleTimeoutSeconds")
+        self.max_lifetime_seconds = _lifecycle_seconds(
+            lifecycle_config, "maxLifetimeSeconds", DEFAULT_MAX_LIFETIME_SECONDS
+        )
+        self.idle_timeout_seconds = _lifecycle_seconds(
+            lifecycle_config, "idleTimeoutSeconds", DEFAULT_IDLE_TIMEOUT_SECONDS
+        )
         self.lifecycle_state = "active"
         self.created_at = self.started_at
         self.last_activity_at = self.started_at
@@ -187,11 +208,106 @@ class PracticeSession:
 
     def _build_troubleshooting_state(self):
         return {
-            "physicalMeasurementSnapshot": _clone(self.latest_physical_measurement_snapshot or {}),
             "virtualMeasurements": _clone(self.virtual_measurements),
             "repairAttempts": _clone(self.repair_attempts),
             "faultCandidates": _clone(self.troubleshooting.remaining_fault_ids),
             "status": "resolved" if not _arr((self.latest_physical_measurement_snapshot or {}).get("abnormalPointCodes")) else "inProgress",
+        }
+
+    def _measurement_source_for_point(self, point):
+        graph = self.simulation_session.graph
+        edge_id = _text(point.get("edgeId") or point.get("edgeID") or point.get("targetEdgeId") or point.get("targetId"))
+        channel = _text(point.get("channel"), edge_id)
+        edge = next((item for item in graph.edges if item.id == edge_id), None)
+
+        if edge is None and channel:
+            binding = next((item for item in graph.measurements if item.id == channel), None)
+            if binding is not None:
+                edge = next(
+                    (
+                        item
+                        for item in graph.edges
+                        if item.target_node_id == binding.scope_node_id and item.target_port_index == binding.target_port_index
+                    ),
+                    None,
+                )
+
+        source_device_id = _text(point.get("sourceDeviceId") or point.get("sourceNodeId") or point.get("nodeId"))
+        if not source_device_id and edge is not None:
+            source_device_id = edge.source_node_id
+        source_port = _text(point.get("sourcePort"))
+        if not source_port and edge is not None:
+            node = graph.nodes.get(edge.source_node_id)
+            if node is not None and edge.source_port_index < len(node.outputs):
+                source_port = node.outputs[edge.source_port_index]
+            else:
+                source_port = "output" if edge.source_port_index == 0 else f"output-{edge.source_port_index + 1}"
+        return source_device_id, source_port, channel, edge
+
+    def _measurement_actual_value(self, simulation_result, sample_index, channel, source_device_id, source_port, edge):
+        channels = ((simulation_result or {}).get("curves") or {}).get("channels") or {}
+        curve_values = channels.get(f"{channel}.actual")
+        if isinstance(curve_values, list) and sample_index < len(curve_values):
+            value = curve_values[sample_index]
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return value
+
+        steps = ((simulation_result or {}).get("componentOutputs") or {}).get("steps") or []
+        if sample_index >= len(steps) or not source_device_id:
+            return None
+        outputs = ((steps[sample_index].get("actual") or {}).get(source_device_id) or {})
+        keys = [source_port]
+        if edge is not None:
+            keys.extend([
+                "output" if edge.source_port_index == 0 else f"output-{edge.source_port_index + 1}",
+                f"output-{edge.source_port_index}",
+            ])
+        for key in keys:
+            value = outputs.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return value
+        return next(
+            (value for value in outputs.values() if isinstance(value, (int, float)) and not isinstance(value, bool)),
+            None,
+        )
+
+    def _build_measurement_result(self, simulation_result):
+        times = _arr(((simulation_result or {}).get("curves") or {}).get("time"))
+        points_by_type = {"physical": [], "virtual": []}
+        for point in _arr((self.troubleshooting.d_matrix or {}).get("points")):
+            point_code = _point_code(point)
+            source_device_id, source_port, channel, edge = self._measurement_source_for_point(point)
+            samples = [
+                {
+                    "time": time_value,
+                    "actual": self._measurement_actual_value(
+                        simulation_result, index, channel, source_device_id, source_port, edge
+                    ),
+                }
+                for index, time_value in enumerate(times)
+            ]
+            points_by_type[point_type(self.troubleshooting.d_matrix, point_code)].append({
+                "pointCode": point_code,
+                "pointId": _text(point.get("pointId")),
+                "pointName": _text(point.get("name")),
+                "channel": channel,
+                "sourceDeviceId": source_device_id,
+                "sourcePort": source_port,
+                "samples": samples,
+            })
+        metrics = (simulation_result or {}).get("metrics") or {}
+        return {
+            "status": "completed" if metrics.get("done") else _text((simulation_result or {}).get("status"), "completed"),
+            "simulationConfig": {
+                "duration": self.simulation_session.graph.duration,
+                "stepSize": self.simulation_session.graph.step_size,
+            },
+            "physicalMeasurements": points_by_type["physical"],
+            "virtualMeasurements": points_by_type["virtual"],
+            "summary": {
+                "sampleCount": metrics.get("sampleCount", len(times)),
+                "done": bool(metrics.get("done")),
+            },
         }
 
     def _append_measurement_path_step(self, action_record, virtual_measurement):
@@ -207,7 +323,7 @@ class PracticeSession:
             "candidateFaultsAfterAction": _clone(self.troubleshooting.remaining_fault_ids),
         })
 
-    def _append_repair_path_step(self, action_record, rule_result, action_application, repair_effect):
+    def _append_repair_path_step(self, action_record, action_application, repair_effect):
         action_type = action_record.get("actionType") or ""
         self.actual_troubleshooting_steps.append({
             "stepIndex": len(self.actual_troubleshooting_steps) + 1,
@@ -216,7 +332,6 @@ class PracticeSession:
             "target": _clone(action_record.get("target") or {}),
             "faultId": action_record.get("faultId") or "",
             "routeRole": "repairAttempt",
-            "ruleResult": _clone(rule_result),
             "appliedAction": _clone(action_application),
             "repairEffect": _clone(repair_effect),
             "candidateFaultsAfterAction": _clone(self.troubleshooting.remaining_fault_ids),
@@ -234,6 +349,8 @@ class PracticeSession:
         path = _clone(base_path)
         steps = []
         for step in _arr(path.get("steps")):
+            if step.get("action") in {"replaceComponent", "replaceWire"}:
+                continue
             point_code = _text(step.get("pointCode"))
             point = _point_by_code(self.troubleshooting.d_matrix, point_code)
             target_id = _text(point.get("channel") or step.get("pointId") or point.get("pointId") or point_code)
@@ -584,8 +701,7 @@ class PracticeSession:
                 }
             if candidate.get("actionType") in {"replaceComponent", "replaceWire"}:
                 if (
-                    candidate.get("faultId") == action_record.get("faultId")
-                    and (candidate.get("target") or {}).get("id") == (action_record.get("target") or {}).get("id")
+                    (candidate.get("target") or {}).get("id") == (action_record.get("target") or {}).get("id")
                 ):
                     safety_satisfied = self._safety_prerequisites_satisfied(action_record, candidate)
                     if not safety_satisfied:
@@ -664,8 +780,6 @@ class PracticeSession:
             "sessionId": self.practice_session_id,
             "practiceSessionId": self.practice_session_id,
             "simulationSessionId": self.simulation_session_id,
-            "physicalMeasurementSnapshot": snapshot,
-            "troubleshootingState": self._build_troubleshooting_state(),
             "lifecycle": self.lifecycle_summary(),
         }
 
@@ -685,16 +799,11 @@ class PracticeSession:
         if action_record.get("actionType") == "measurePoint":
             return self._record_measure_point_action(action_record, normalized_action, steps, reference_before)
 
-        rule_result = self.rule_engine.evaluate(action_record)
-        if rule_result.get("allowed"):
-            action_application = self.action_runtime.apply(action_record)
-        else:
-            action_application = self.action_runtime.skipped(action_record)
-        action_record["ruleResult"] = _clone(rule_result)
+        safety_check = self.rule_engine.evaluate(action_record)
+        action_application = self.action_runtime.apply(action_record)
         action_record["simulationActionResult"] = _clone(action_application)
-        if rule_result.get("safetyViolation"):
+        if safety_check.get("safetyViolation"):
             action_record["safetyViolation"] = True
-            normalized_action["safetyViolation"] = True
         self.student_actions.append(action_record)
         self.last_activity_at = action_record["recordedAt"]
         self.simulation_action_history.append({
@@ -704,7 +813,7 @@ class PracticeSession:
             "result": _clone(action_application),
         })
         previous_snapshot = _clone(self.latest_physical_measurement_snapshot or {})
-        simulation_result = self.simulation_session.step(steps)
+        simulation_result = self.simulation_session.run_from_zero()
         simulation_result["sessionId"] = self.simulation_session_id
         snapshot = evaluate_physical_measurement_snapshot(self.troubleshooting.d_matrix, simulation_result)
         repair_effect = compare_physical_snapshots(previous_snapshot, snapshot)
@@ -715,14 +824,15 @@ class PracticeSession:
             "actionType": action_record.get("actionType") or "",
             "target": _clone(action_record.get("target") or {}),
             "faultId": action_record.get("faultId") or "",
-            "ruleResult": _clone(rule_result),
             "appliedAction": _clone(action_application),
             "repairEffect": _clone(repair_effect),
         }
+        if action_record.get("safetyViolation"):
+            repair_attempt["safetyViolation"] = True
         self.repair_attempts.append(repair_attempt)
         action_record["repairEffect"] = _clone(repair_effect)
         action_record["physicalMeasurementSnapshot"] = _clone(snapshot)
-        self._append_repair_path_step(action_record, rule_result, action_application, repair_effect)
+        self._append_repair_path_step(action_record, action_application, repair_effect)
         self._append_dynamic_reference_record(action_record, reference_before)
         self.simulation_results.append(_clone(simulation_result))
         return {
@@ -731,12 +841,7 @@ class PracticeSession:
             "practiceSessionId": self.practice_session_id,
             "simulationSessionId": self.simulation_session_id,
             "normalizedAction": normalized_action,
-            "ruleResult": _clone(rule_result),
-            "appliedAction": action_application,
-            "repairEffect": repair_effect,
-            "physicalMeasurementSnapshot": snapshot,
-            "troubleshootingState": self._build_troubleshooting_state(),
-            "simulationResult": simulation_result,
+            "simulationResult": self._build_measurement_result(simulation_result),
         }
 
     def _record_measure_point_action(self, action_record, normalized_action, steps, reference_before):
@@ -769,9 +874,6 @@ class PracticeSession:
             "practiceSessionId": self.practice_session_id,
             "simulationSessionId": self.simulation_session_id,
             "normalizedAction": normalized_action,
-            "virtualMeasurement": virtual_measurement,
-            "troubleshootingState": self._build_troubleshooting_state(),
-            "simulationResult": simulation_result,
         }
 
     def submit(self, payload):
@@ -807,39 +909,28 @@ class PracticeSession:
             student_actions=self.student_actions,
             path_evaluation=path_evaluation,
         )
+        evaluation_report = build_practice_evaluation_report(
+            score=scoring_result["score"],
+            grade=scoring_result["grade"],
+            score_breakdown=scoring_result["scoreBreakdown"],
+            target_fault_id=self.target_fault_id,
+            target_fault_name=target_fault_name,
+            final_fault_id=final_fault_id,
+            final_fault_name=final_fault_name,
+            correct=correct,
+            initial_optimal_path=self.initial_best_path,
+            actual_steps=self.actual_troubleshooting_steps,
+            dynamic_reference_history=self.dynamic_reference_history,
+            path_evaluation=path_evaluation,
+            elapsed_seconds=elapsed_seconds,
+            scoring_rules=self.scoring_rules,
+        )
         return {
             "status": "success",
             "sessionId": self.practice_session_id,
             "practiceSessionId": self.practice_session_id,
             "simulationSessionId": self.simulation_session_id,
-            "score": scoring_result["score"],
-            "grade": scoring_result["grade"],
-            "scoreBreakdown": scoring_result["scoreBreakdown"],
-            "deductions": scoring_result["deductions"],
-            "initialRecommendedPath": _clone(self.initial_best_path),
-            "record": {
-                "sessionId": self.practice_session_id,
-                "simulationSessionId": self.simulation_session_id,
-                "targetFaultId": self.target_fault_id,
-                "targetFaultName": target_fault_name,
-                "finalFaultId": final_fault_id,
-                "finalFaultName": final_fault_name,
-                "correct": correct,
-                "startedAt": self.started_at,
-                "submittedAt": payload.get("submittedAt") or self.submitted_at,
-                "durationSeconds": elapsed_seconds,
-                "studentActions": _clone(self.student_actions),
-                "simulationActionHistory": _clone(self.simulation_action_history),
-                "initialPhysicalMeasurementSnapshot": _clone(self.initial_physical_measurement_snapshot or {}),
-                "physicalMeasurementSnapshots": _clone(self.physical_measurement_snapshots),
-                "virtualMeasurements": _clone(self.virtual_measurements),
-                "repairAttempts": _clone(self.repair_attempts),
-                "troubleshootingState": self._build_troubleshooting_state(),
-                "actualTroubleshootingPath": self._actual_troubleshooting_path(),
-                "pathEvaluation": _clone(path_evaluation),
-                "recommendedPathHistory": _clone(self.recommended_path_history),
-                "dynamicReferenceHistory": _clone(self.dynamic_reference_history),
-            },
+            "evaluationReport": evaluation_report,
         }
 
     def _build_recommendation_record(self, action_record):

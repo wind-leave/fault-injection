@@ -112,6 +112,84 @@ describe('backendExecutablePackageService', () => {
     }));
   });
 
+  it('maps an RF CW source to a backend sine carrier', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [
+        {
+          id: 'rf-cw-source',
+          type: 'signal_source',
+          props: {
+            signalDomain: 'rf',
+            modulation: 'cw',
+            centerFrequency: '1',
+            centerFrequencyUnit: 'GHz',
+            power: '10'
+          }
+        }
+      ],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].parameters).toEqual(expect.objectContaining({
+      signalDomain: 'rf',
+      rfModulation: 'cw',
+      centerFrequencyHz: 1e9,
+      waveType: 'sine',
+      amplitude: 10,
+      frequency: 1e9,
+      phase: 0,
+      offset: 0,
+      value: 10
+    }));
+  });
+
+  it('exports every RF modulation parameter in backend units', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [
+        {
+          id: 'rf-am',
+          type: 'signal_source',
+          props: {
+            signalDomain: 'rf',
+            modulation: 'am',
+            centerFrequency: '2.4',
+            centerFrequencyUnit: 'GHz',
+            power: '8',
+            modulationDepth: '50',
+            modulationRate: '5kHz',
+            frequencyDeviation: '12kHz',
+            phaseDeviation: `${Math.PI / 2}`,
+            pulseWidth: '250us',
+            prf: '1kHz',
+            bandwidth: '20MHz',
+            symbolRate: '10MHz',
+            sampleRate: '40MHz',
+            snr: '12'
+          }
+        }
+      ],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].parameters).toEqual(expect.objectContaining({
+      rfModulation: 'am',
+      centerFrequencyHz: 2.4e9,
+      amplitude: 8,
+      frequency: 2.4e9,
+      modulationRateHz: 5e3,
+      modulationDepthRatio: 0.5,
+      frequencyDeviationHz: 12e3,
+      phaseDeviationRad: Math.PI / 2,
+      pulseWidthSeconds: 250e-6,
+      prfHz: 1e3,
+      bandwidthHz: 20e6,
+      symbolRateHz: 10e6,
+      sampleRateHz: 40e6,
+      snrDb: 12,
+      waveType: 'rf_am'
+    }));
+  });
+
   it('exports sum block signs for backend execution', () => {
     const pkg = buildBackendExecutablePackage({
       modelNodes: [
@@ -294,6 +372,185 @@ describe('backendExecutablePackageService', () => {
         targetId: 'node-controller',
         startTime: 1,
         parameters: expect.objectContaining({ stepValue: -0.35 })
+      })
+    ]);
+  });
+
+  it('exports degradation, freeze, and random physical models as parameter faults', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [
+        { id: 'sensor-1', type: 'simulation_block', props: {}, pythonBinding: { moduleId: 'barometer_sensor' } }
+      ],
+      modelEdges: [],
+      faultInstances: [
+        {
+          instanceId: 'sensor-degradation',
+          faultTypeId: 'degradation',
+          targetId: 'sensor-1',
+          injectionForm: 'module-variable',
+          targetField: 'params.scale',
+          parameters: { scale: 0.8 }
+        },
+        {
+          instanceId: 'sensor-freeze',
+          faultTypeId: 'freeze',
+          targetId: 'sensor-1',
+          injectionForm: 'module-variable',
+          targetField: 'params.bias',
+          parameters: {}
+        },
+        {
+          instanceId: 'sensor-random',
+          faultTypeId: 'random',
+          targetId: 'sensor-1',
+          injectionForm: 'module-variable',
+          targetField: 'params.bias',
+          parameters: { seed: 7, std: 0.5 }
+        },
+        {
+          instanceId: 'sensor-scale-alias',
+          faultTypeId: 'custom-physical-fault',
+          runtimeBehavior: 'scale',
+          targetId: 'sensor-1',
+          injectionForm: 'module-variable',
+          targetField: 'params.scale',
+          parameters: { scale: 0.8 }
+        },
+        {
+          instanceId: 'sensor-noise-alias',
+          faultTypeId: 'custom-physical-fault',
+          runtimeBehavior: 'noise',
+          targetId: 'sensor-1',
+          injectionForm: 'module-variable',
+          targetField: 'params.bias',
+          parameters: { seed: 7, std: 0.5 }
+        }
+      ]
+    });
+
+    expect(pkg.faultInstances.map((fault) => fault.faultType)).toEqual([
+      'parameter_degradation',
+      'parameter_freeze',
+      'parameter_random',
+      'parameter_degradation',
+      'parameter_random'
+    ]);
+  });
+
+  it('keeps electrical input and output bindings as signal faults', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [
+        { id: 'sensor-1', type: 'simulation_block', props: {}, pythonBinding: { moduleId: 'barometer_sensor' } }
+      ],
+      modelEdges: [],
+      faultInstances: [
+        {
+          instanceId: 'input-bias',
+          faultTypeId: 'bias',
+          targetId: 'sensor-1',
+          injectionForm: 'module-variable',
+          targetField: 'inputs.true_altitude',
+          parameters: { bias: 0.5 }
+        },
+        {
+          instanceId: 'output-noise',
+          faultTypeId: 'noise',
+          targetId: 'sensor-1',
+          injectionForm: 'module-variable',
+          targetField: 'outputs.measured_altitude',
+          parameters: { std: 0.2 }
+        }
+      ]
+    });
+
+    expect(pkg.faultInstances).toEqual([
+      expect.objectContaining({
+        faultType: 'sensor_bias',
+        targetField: 'inputs.true_altitude',
+        parameterKey: ''
+      }),
+      expect.objectContaining({
+        faultType: 'noise_increase',
+        targetField: 'outputs.measured_altitude',
+        parameterKey: ''
+      })
+    ]);
+  });
+
+  it('normalizes legacy parameter targets and step values for physical fault models', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [
+        { id: 'sensor-1', type: 'simulation_block', props: {}, pythonBinding: { moduleId: 'barometer_sensor' } }
+      ],
+      modelEdges: [],
+      faultInstances: [
+        {
+          instanceId: 'bias-step',
+          faultTypeId: 'step',
+          targetId: 'sensor-1',
+          injectionForm: 'module-variable',
+          targetField: 'parameter.bias',
+          parameters: { step: 0.5 }
+        },
+        {
+          instanceId: 'bias-random',
+          faultTypeId: 'random',
+          targetId: 'sensor-1',
+          injectionForm: 'module-variable',
+          targetField: 'parameters.bias',
+          parameters: { seed: 1, std: 1 }
+        }
+      ]
+    });
+
+    expect(pkg.faultInstances).toEqual([
+      expect.objectContaining({
+        faultType: 'parameter_step',
+        targetField: 'params.bias',
+        parameterKey: 'bias',
+        parameters: expect.objectContaining({ stepValue: 0.5 })
+      }),
+      expect.objectContaining({
+        faultType: 'parameter_random',
+        targetField: 'params.bias',
+        parameterKey: 'bias',
+        parameters: expect.objectContaining({ seed: 1, std: 1 })
+      })
+    ]);
+  });
+
+  it('exports layered module-variable bias faults as executable parameter faults', () => {
+    const pkg = buildBackendExecutablePackage({
+      simulationConfig: { duration: 4, stepSize: 0.1 },
+      modelNodes: [
+        {
+          id: 'node-control-allocation',
+          type: 'simulation_block',
+          props: {},
+          pythonBinding: { moduleId: 'control_allocation', entryFunction: 'process' }
+        }
+      ],
+      modelEdges: [],
+      faultInstances: [
+        {
+          instanceId: 'layered-node-control-allocation-physical-allocation_gain',
+          faultTypeId: 'layered-node-control-allocation-physical-allocation_gain',
+          targetKind: 'node',
+          targetId: 'node-control-allocation',
+          injectionForm: 'module-variable',
+          targetField: 'params.allocationGain',
+          active: true,
+          parameters: { bias: 0.1, start: 0 }
+        }
+      ]
+    });
+
+    expect(pkg.faultInstances).toEqual([
+      expect.objectContaining({
+        faultType: 'parameter_bias',
+        parameterKey: 'allocationGain',
+        targetId: 'node-control-allocation',
+        parameters: expect.objectContaining({ bias: 0.1 })
       })
     ]);
   });

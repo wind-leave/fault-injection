@@ -58,7 +58,7 @@ def ensure_number(value, field):
     return float(value)
 
 
-SIGNAL_SOURCE_TEXT_PARAMETERS = {"signalDomain", "waveType", "outputFormat"}
+SIGNAL_SOURCE_TEXT_PARAMETERS = {"signalDomain", "waveType", "outputFormat", "rfModulation"}
 
 
 def ensure_sign_sequence(value, field):

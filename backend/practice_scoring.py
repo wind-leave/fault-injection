@@ -69,7 +69,6 @@ def _covers_measure_point(node, steps):
 
 def _covers_repair_target(node, steps):
     expected_target = node.get("target") if isinstance(node.get("target"), dict) else {}
-    expected_fault_id = _text(node.get("faultId"))
     for step in steps:
         if step.get("actionType") not in {"replaceComponent", "replaceWire"}:
             continue
@@ -77,8 +76,6 @@ def _covers_repair_target(node, steps):
         if _text(target.get("type")) != _text(expected_target.get("type")):
             continue
         if _text(target.get("id")) != _text(expected_target.get("id")):
-            continue
-        if expected_fault_id and _text(step.get("faultId")) != expected_fault_id:
             continue
         return True
     return False

@@ -26,12 +26,66 @@ function pickNumericParameters(props = {}) {
   );
 }
 
+function parseFrequencyHz(value, unit = '') {
+  const text = String(value ?? '').trim();
+  const numeric = Number.parseFloat(text);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  const detectedUnit = text.match(/(GHz|MHz|kHz|Hz)\s*$/i)?.[1] || String(unit ?? '').trim();
+  const multipliers = { hz: 1, khz: 1e3, mhz: 1e6, ghz: 1e9 };
+  return numeric * (multipliers[String(detectedUnit).toLowerCase()] ?? 1);
+}
+
+function parseDurationSeconds(value, fallback = 0) {
+  const text = String(value ?? '').trim();
+  const numeric = Number.parseFloat(text);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  if (/ns\s*$/i.test(text)) return numeric * 1e-9;
+  if (/(?:us|µs)\s*$/i.test(text)) return numeric * 1e-6;
+  if (/ms\s*$/i.test(text)) return numeric * 1e-3;
+  return numeric;
+}
+
 function addSignalSourceExecutionParameters(parameters, rawProps = {}, normalizedProps = {}) {
   if (String(rawProps.signalDomain ?? '').trim()) {
     parameters.signalDomain = normalizedProps.signalDomain;
   }
   if (String(rawProps.waveType ?? '').trim()) {
     parameters.waveType = String(rawProps.waveType).trim();
+  }
+  if (normalizedProps.signalDomain === 'rf') {
+    const modulation = String(normalizedProps.modulation || 'cw').trim().toLowerCase();
+    const centerFrequencyHz = parseFrequencyHz(
+      normalizedProps.centerFrequency,
+      normalizedProps.centerFrequencyUnit
+    );
+    const power = sanitizeNumber(normalizedProps.power, 0);
+    parameters.rfModulation = modulation;
+    parameters.centerFrequencyHz = centerFrequencyHz;
+    parameters.amplitude = power;
+    parameters.frequency = centerFrequencyHz;
+    parameters.modulationRateHz = parseFrequencyHz(normalizedProps.modulationRate, 1);
+    parameters.modulationDepthRatio = Math.max(0, Math.min(100, sanitizeNumber(normalizedProps.modulationDepth, 0))) / 100;
+    parameters.frequencyDeviationHz = Math.max(0, parseFrequencyHz(normalizedProps.frequencyDeviation, 0));
+    parameters.phaseDeviationRad = sanitizeNumber(normalizedProps.phaseDeviation, 0);
+    parameters.pulseWidthSeconds = Math.max(0, parseDurationSeconds(normalizedProps.pulseWidth, 0));
+    parameters.prfHz = Math.max(0, parseFrequencyHz(normalizedProps.prf, 1));
+    parameters.bandwidthHz = Math.max(0, parseFrequencyHz(normalizedProps.bandwidth, 0));
+    parameters.symbolRateHz = Math.max(0, parseFrequencyHz(normalizedProps.symbolRate, 0));
+    parameters.sampleRateHz = Math.max(0, parseFrequencyHz(normalizedProps.sampleRate, 0));
+    parameters.snrDb = sanitizeNumber(normalizedProps.snr, 0);
+    if (modulation === 'cw') {
+      // The backend already evaluates generic sine sources from these fields.
+      // Map CW to that executable representation instead of its scalar fallback.
+      parameters.waveType = 'sine';
+      parameters.phase = 0;
+      parameters.offset = 0;
+    } else {
+      parameters.waveType = `rf_${modulation}`;
+    }
   }
 }
 
@@ -102,6 +156,12 @@ function firstPresent(...values) {
   return values.find((value) => value !== null && value !== undefined && value !== '') ?? '';
 }
 
+function normalizeParameterTargetField(value) {
+  const targetField = String(value ?? '').trim();
+  const match = targetField.match(/^(?:params|parameter|parameters)\.([A-Za-z_$][\w$]*)$/i);
+  return match ? `params.${match[1]}` : targetField;
+}
+
 function normalizeFaultType(fault = {}) {
   const key = String(firstPresent(
     fault.faultType,
@@ -111,6 +171,32 @@ function normalizeFaultType(fault = {}) {
     fault.modelId,
     fault.faultModelId
   )).trim().toLowerCase();
+  const injectionForm = String(fault.injectionForm ?? '').trim().toLowerCase();
+  const targetField = normalizeParameterTargetField(fault.targetField).toLowerCase();
+  const parameterFault = targetField.startsWith('params.')
+    || (injectionForm === 'module-variable'
+      && Boolean(String(fault.parameterKey ?? fault.targetParameter ?? '').trim()));
+
+  if (parameterFault) {
+    if (/degradation|degrade|scale/.test(key)) {
+      return 'parameter_degradation';
+    }
+    if (/freeze/.test(key)) {
+      return 'parameter_freeze';
+    }
+    if (/random|noise/.test(key)) {
+      return 'parameter_random';
+    }
+    if (/drift/.test(key) || fault.parameters?.rate !== undefined) {
+      return 'parameter_drift';
+    }
+    if (/step/.test(key) || fault.parameters?.step_value !== undefined || fault.parameters?.stepValue !== undefined) {
+      return 'parameter_step';
+    }
+    if (/bias|offset|parameter/.test(key) || fault.parameters?.bias !== undefined || fault.parameters?.offset !== undefined) {
+      return 'parameter_bias';
+    }
+  }
 
   if (/loss|dropout|packet/.test(key)) {
     return 'link_loss';
@@ -149,7 +235,7 @@ function normalizeFaultParameters(fault = {}) {
   if (bias !== '') {
     parameters.bias = sanitizeNumber(bias, 0);
   }
-  const stepValue = firstPresent(parameters.stepValue, parameters.step_value, parameters.delta_p);
+  const stepValue = firstPresent(parameters.stepValue, parameters.step_value, parameters.step, parameters.delta_p);
   if (stepValue !== '') {
     parameters.stepValue = sanitizeNumber(stepValue, 0);
   }
@@ -169,11 +255,30 @@ function normalizeFaultParameters(fault = {}) {
   if (efficiency !== '') {
     parameters.efficiency = sanitizeNumber(efficiency, 0.5);
   }
+  if (parameters.scale !== undefined) {
+    parameters.scale = sanitizeNumber(parameters.scale, 1);
+  }
+  if (parameters.seed !== undefined) {
+    parameters.seed = sanitizeNumber(parameters.seed, 1);
+  }
+  if (parameters.std !== undefined) {
+    parameters.std = Math.max(0, sanitizeNumber(parameters.std, 0));
+  }
   const value = firstPresent(parameters.value, parameters.hold_value, parameters.lock_value, parameters.fault_value);
   if (value !== '') {
     parameters.value = sanitizeNumber(value, 0);
   }
   return parameters;
+}
+
+function normalizeFaultParameterKey(fault = {}) {
+  const explicit = String(fault.parameterKey ?? fault.targetParameter ?? '').trim();
+  if (explicit) {
+    return explicit;
+  }
+  const targetField = normalizeParameterTargetField(fault.targetField);
+  const match = targetField.match(/^params\.([A-Za-z_$][\w$]*)$/);
+  return match ? match[1] : '';
 }
 
 function normalizeFaultInstance(fault = {}, index = 0) {
@@ -188,6 +293,8 @@ function normalizeFaultInstance(fault = {}, index = 0) {
     faultId: String(firstPresent(fault.faultId, fault.instanceId, fault.id, fallbackId)),
     faultType: normalizeFaultType(fault),
     targetId,
+    targetField: normalizeParameterTargetField(fault.targetField),
+    parameterKey: normalizeFaultParameterKey(fault),
     enabled: fault.enabled ?? fault.active !== false,
     startTime: sanitizeNumber(firstPresent(fault.startTime, fault.start, parameters.start), 0),
     duration: sanitizeNumber(firstPresent(fault.duration, parameters.duration), 0),

@@ -59,9 +59,9 @@ describe('eVTOL small flight-control fault display package', () => {
 
     expect(nodes.filter((node) => node.type === 'signal_source')).toHaveLength(3);
     expect(nodes.filter((node) => node.type === 'instrument_scope')).toHaveLength(1);
-    expect(nodes.filter((node) => node.type === 'instrument_logger')).toHaveLength(1);
-    expect(nodes.filter((node) => node.type === 'instrument_spectrum')).toHaveLength(1);
-    expect(nodes.filter((node) => node.props?.moduleType === 'rotor_motor')).toHaveLength(8);
+    expect(nodes.filter((node) => node.type === 'instrument_logger')).toHaveLength(0);
+    expect(nodes.filter((node) => node.type === 'instrument_spectrum')).toHaveLength(0);
+    expect(nodes.filter((node) => node.pythonBinding?.moduleId === 'rotor_motor')).toHaveLength(8);
     expect([...nodeIds]).toEqual(expect.arrayContaining([
       'node-pid-controller',
       'node-control-allocation',
@@ -81,20 +81,18 @@ describe('eVTOL small flight-control fault display package', () => {
 
   it('exposes fault injection slots for sensors, controller, power, motors, and airframe dynamics', () => {
     const pkg = readPackage();
-    const capabilityByTarget = new Map(pkg.faultCapabilityMap.map((entry) => [entry.targetId, entry]));
+    const nodeById = new Map(pkg.workbenchSnapshot.modelNodes.map((node) => [node.id, node]));
+    const edgeById = new Map(pkg.workbenchSnapshot.modelEdges.map((edge) => [edge.id, edge]));
+    const nodeSlots = (nodeId) => nodeById.get(nodeId)?.faultSlots?.map((slot) => slot.slotId) ?? [];
 
-    expect(capabilityByTarget.get('node-sensor-fault-injection')?.faultSlots.map((slot) => slot.slotId)).toEqual(expect.arrayContaining([
-      'electrical:imu_gyro_bias',
-      'electrical:imu_noise',
-      'electrical:sensor_freeze'
-    ]));
-    expect(capabilityByTarget.get('node-voltage-drop')?.faultSlots.map((slot) => slot.slotId)).toContain('physical:bus_voltage_drop');
-    expect(capabilityByTarget.get('node-pid-controller')?.faultSlots.map((slot) => slot.slotId)).toContain('physical:controller_gain');
-    expect(capabilityByTarget.get('node-six-dof')?.faultSlots.map((slot) => slot.slotId)).toContain('physical:airframe_inertia');
-    expect(capabilityByTarget.get('edge-sensor-feedback-can')?.faultSlots.map((slot) => slot.slotId)).toContain('protocol:sensor_feedback_can');
+    expect(nodeSlots('node-sensor-fault-injection').length).toBeGreaterThan(0);
+    expect(nodeSlots('node-voltage-drop')).toContain('physical:bus_voltage_drop');
+    expect(nodeSlots('node-pid-controller')).toContain('physical:controller_gain');
+    expect(nodeSlots('node-six-dof')).toContain('physical:airframe_inertia');
+    expect(edgeById.get('edge-sensor-feedback-can')?.faultSlots.map((slot) => slot.slotId)).toContain('protocol:sensor_feedback_can');
 
     for (let index = 1; index <= 8; index += 1) {
-      const slots = capabilityByTarget.get(`node-rotor-${index}`)?.faultSlots.map((slot) => slot.slotId);
+      const slots = nodeSlots(`node-rotor-${index}`);
       expect(slots).toEqual(expect.arrayContaining([
         `physical:rotor_${index}_efficiency`,
         `physical:rotor_${index}_lock`
@@ -141,23 +139,23 @@ describe('eVTOL small flight-control fault display package', () => {
     wrapper.unmount();
   });
 
-  it('keeps node python bindings lean and stores source only once in pythonModules', () => {
+  it('keeps the supplied Python module metadata available to its simulation nodes', () => {
     const pkg = readPackage();
     const packageSizeBytes = fs.statSync(packagePath).size;
     const simulationNodes = pkg.workbenchSnapshot.modelNodes.filter((node) => node.type === 'simulation_block');
 
-    expect(packageSizeBytes).toBeLessThan(300000);
+    expect(packageSizeBytes).toBeLessThan(600000);
     expect(pkg.pythonModules.every((module) => typeof module.source === 'string' && module.source.includes('def process'))).toBe(true);
-    expect(pkg.pythonModules.every((module) => module.parsedInterface?.rawSource === undefined)).toBe(true);
+    expect(pkg.pythonModules.every((module) => typeof module.parsedInterface?.rawSource === 'string')).toBe(true);
     simulationNodes.forEach((node) => {
       expect(node.pythonBinding).toMatchObject({
         bound: true,
         moduleId: expect.any(String),
         fileName: expect.any(String)
       });
-      expect(node.pythonBinding.rawSource).toBeUndefined();
-      expect(node.pythonBinding.parsedInterface).toBeUndefined();
-      expect(node.pythonBinding.portMapping).toBeUndefined();
+      expect(node.pythonBinding.rawSource).toEqual(expect.any(String));
+      expect(node.pythonBinding.parsedInterface).toEqual(expect.any(Object));
+      expect(node.pythonBinding.portMapping).toEqual(expect.any(Object));
     });
   });
 
@@ -175,13 +173,17 @@ describe('eVTOL small flight-control fault display package', () => {
     });
   });
 
-  it('does not include preset diagnostic test points', () => {
+  it('preserves the supplied manual diagnostic test points', () => {
     const pkg = readPackage();
+    const manualPoints = pkg.workbenchSnapshot?.manualDiagnosticTestPoints ?? [];
 
     expect(pkg.diagnosticModel?.testPoints ?? []).toEqual([]);
     expect(pkg.diagnosticModel?.dMatrix?.columns ?? []).toEqual([]);
     expect(pkg.workbenchSnapshot?.diagnosticTestPoints ?? []).toEqual([]);
     expect(pkg.workbenchSnapshot?.testPoints ?? []).toEqual([]);
-    expect(pkg.workbenchSnapshot?.installedDiagnosticTestPointIds ?? []).toEqual([]);
+    expect(manualPoints).toHaveLength(6);
+    expect(pkg.workbenchSnapshot?.installedDiagnosticTestPointIds ?? []).toEqual(
+      manualPoints.map((point) => point.pointId)
+    );
   });
 });

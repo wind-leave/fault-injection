@@ -24,7 +24,9 @@ const WAVE_TYPE_OPTIONS = [
 const WAVE_TYPE_ALIASES = {
   正弦: 'sine',
   阶跃: 'step',
-  常值: 'constant'
+  常值: 'constant',
+  斜坡: 'ramp',
+  噪声: 'noise'
 };
 
 const DIGITAL_MODE_OPTIONS = [
@@ -47,6 +49,16 @@ const RF_KIND_OPTIONS = [
   { value: 'navigation', label: '导航射频' },
   { value: 'jamming', label: '干扰射频' },
   { value: 'generic', label: '通用射频' }
+];
+
+const RF_MODULATION_OPTIONS = [
+  { value: 'cw', label: '连续波（CW）' },
+  { value: 'am', label: '幅度调制（AM）' },
+  { value: 'fm', label: '频率调制（FM）' },
+  { value: 'pm', label: '相位调制（PM）' },
+  { value: 'pulse', label: '脉冲调制' },
+  { value: 'digital', label: '数字调制' },
+  { value: 'noise', label: '噪声/干扰' }
 ];
 
 const MULTIMETER_MODE_OPTIONS = [
@@ -104,11 +116,10 @@ const PROPERTY_SCHEMAS = {
         fields: [
           { key: 'commandType', label: '指令类型', type: 'select', options: ['control', 'bus-message', 'task', 'mode'], fallback: 'control', row: 'command-type' },
           { key: 'commandName', label: '指令名称', type: 'text', fallback: '', row: 'command-type' },
-          { key: 'protocol', label: '协议', type: 'text', fallback: 'CAN', row: 'command-protocol' },
+          { key: 'protocol', label: '协议', type: 'select', options: ['CAN', 'CAN FD', 'UART', 'RS-485', 'Ethernet'], fallback: 'CAN', row: 'command-protocol' },
           { key: 'messageId', label: '报文 ID', type: 'text', fallback: '', row: 'command-protocol' },
-          { key: 'payloadKind', label: '载荷类型', type: 'text', fallback: 'float32', row: 'command-payload' },
+          { key: 'payloadKind', label: '载荷类型', type: 'select', options: ['float32', 'float64', 'int8', 'int16', 'int32', 'uint8', 'uint16', 'uint32', 'boolean'], fallback: 'float32', row: 'command-payload' },
           { key: 'payloadValue', label: '载荷数值', type: 'text', fallback: '', row: 'command-payload' },
-          { key: 'payloadSchema', label: '载荷结构', type: 'text', fallback: '', row: 'command-schema' },
           { key: 'sendPeriod', label: '发送周期', type: 'text', fallback: '', row: 'command-timing' },
           { key: 'triggerCondition', label: '触发条件', type: 'text', fallback: '', row: 'command-timing' }
         ]
@@ -120,10 +131,17 @@ const PROPERTY_SCHEMAS = {
           { key: 'analogKind', label: '模拟类型', type: 'select', options: ['voltage', 'current', 'sensor', 'control', 'generic'], fallback: 'generic', row: 'analog-kind' },
           { key: 'waveType', label: '波形', type: 'select', options: ['正弦', '阶跃', '常值', 'sine', 'step', 'constant', 'ramp', 'noise'], fallback: '正弦', row: 'analog-kind' },
           { key: 'outputFormat', label: '输出格式', type: 'select', options: PORT_FORMATS, fallback: '标量', row: 'analog-format' },
-          { key: 'amplitude', label: '幅值', type: 'text', fallback: '1.0', row: 'analog-basic' },
-          { key: 'frequency', label: '频率 / 周期', type: 'text', fallback: '1.0', row: 'analog-basic' },
-          { key: 'phase', label: '相位', type: 'text', fallback: '0', row: 'analog-phase' },
-          { key: 'offset', label: '偏置', type: 'text', fallback: '0', row: 'analog-phase' },
+          { key: 'amplitude', label: '幅值', type: 'text', fallback: '1.0', row: 'analog-basic', waveTypes: ['sine'] },
+          { key: 'frequency', label: '频率 (Hz)', type: 'text', fallback: '1.0', row: 'analog-basic', waveTypes: ['sine'] },
+          { key: 'phase', label: '相位 (°)', type: 'text', fallback: '0', row: 'analog-phase', waveTypes: ['sine'] },
+          { key: 'offset', label: '偏置', type: 'text', fallback: '0', row: 'analog-phase', waveTypes: ['sine', 'noise'] },
+          { key: 'initialValue', label: '初始值', type: 'text', fallback: '0', row: 'analog-step', waveTypes: ['step', 'ramp'] },
+          { key: 'finalValue', label: '终值', type: 'text', fallback: '1.0', row: 'analog-step', waveTypes: ['step'] },
+          { key: 'stepTime', label: '跃变时刻 (s)', type: 'text', fallback: '1.0', row: 'analog-step-time', waveTypes: ['step'] },
+          { key: 'amplitude', label: '常值', type: 'text', fallback: '1.0', row: 'analog-constant', waveTypes: ['constant'] },
+          { key: 'slope', label: '斜率 (单位/s)', type: 'text', fallback: '1.0', row: 'analog-ramp', waveTypes: ['ramp'] },
+          { key: 'startTime', label: '开始时刻 (s)', type: 'text', fallback: '0', row: 'analog-ramp', waveTypes: ['ramp'] },
+          { key: 'amplitude', label: '噪声标准差', type: 'text', fallback: '1.0', row: 'analog-noise', waveTypes: ['noise'] },
           { key: 'sampleRate', label: '采样率', type: 'text', fallback: '', row: 'analog-rate' },
           { key: 'minValue', label: '下限', type: 'text', fallback: '', row: 'analog-limit' },
           { key: 'maxValue', label: '上限', type: 'text', fallback: '', row: 'analog-limit' }
@@ -133,20 +151,22 @@ const PROPERTY_SCHEMAS = {
         label: '射频信号配置',
         domains: ['rf'],
         fields: [
-          { key: 'rfKind', label: '射频类型', type: 'select', options: ['communication', 'radar', 'navigation', 'jamming', 'generic'], fallback: 'communication', row: 'rf-kind' },
+          { key: 'centerFrequencyUnit', label: '\u9891\u7387\u5355\u4f4d', type: 'select', options: ['Hz', 'kHz', 'MHz', 'GHz'], fallback: 'GHz', row: 'rf-frequency', order: 2 },
+          { key: 'rfKind', label: '射频类型', type: 'select', options: RF_KIND_OPTIONS, fallback: 'communication', row: 'rf-kind' },
           { key: 'centerFrequency', label: '中心频率', type: 'text', fallback: '', row: 'rf-frequency' },
-          { key: 'bandwidth', label: '带宽', type: 'text', fallback: '', row: 'rf-frequency' },
           { key: 'power', label: '功率', type: 'text', fallback: '', row: 'rf-power' },
           { key: 'powerUnit', label: '功率单位', type: 'select', options: ['dBm', 'W', 'mW'], fallback: 'dBm', row: 'rf-power' },
-          { key: 'modulation', label: '调制方式', type: 'text', fallback: '', row: 'rf-modulation' },
-          { key: 'phase', label: '相位', type: 'text', fallback: '', row: 'rf-modulation' },
-          { key: 'snr', label: '信噪比', type: 'text', fallback: '', row: 'rf-quality' },
-          { key: 'sampleRate', label: '采样率', type: 'text', fallback: '', row: 'rf-quality' },
-          { key: 'pulseWidth', label: '脉宽', type: 'text', fallback: '', row: 'rf-pulse' },
-          { key: 'prf', label: 'PRF', type: 'text', fallback: '', row: 'rf-pulse' },
-          { key: 'channel', label: '信道', type: 'text', fallback: '', row: 'rf-extra' },
-          { key: 'polarization', label: '极化', type: 'text', fallback: '', row: 'rf-extra' },
-          { key: 'rfProfile', label: 'RF 配置', type: 'text', fallback: '', row: 'rf-profile' }
+          { key: 'modulation', label: '调制方式', type: 'select', options: RF_MODULATION_OPTIONS, fallback: 'cw', row: 'rf-modulation' },
+          { key: 'modulationDepth', label: '调制度 (%)', type: 'text', fallback: '', row: 'rf-modulation-parameter', rfModulations: ['am'] },
+          { key: 'frequencyDeviation', label: '频偏', type: 'text', fallback: '', row: 'rf-modulation-parameter', rfModulations: ['fm'] },
+          { key: 'phaseDeviation', label: '相偏 (°)', type: 'text', fallback: '', row: 'rf-modulation-parameter', rfModulations: ['pm'] },
+          { key: 'modulationRate', label: '调制频率', type: 'text', fallback: '', row: 'rf-modulation-rate', rfModulations: ['am', 'fm', 'pm'] },
+          { key: 'pulseWidth', label: '脉宽', type: 'text', fallback: '', row: 'rf-pulse', rfModulations: ['pulse'] },
+          { key: 'prf', label: 'PRF', type: 'text', fallback: '', row: 'rf-pulse', rfModulations: ['pulse'] },
+          { key: 'bandwidth', label: '带宽', type: 'text', fallback: '', row: 'rf-digital', rfModulations: ['digital', 'noise'] },
+          { key: 'symbolRate', label: '符号率', type: 'text', fallback: '', row: 'rf-digital', rfModulations: ['digital'] },
+          { key: 'sampleRate', label: '基带采样率', type: 'text', fallback: '', row: 'rf-quality', rfModulations: ['digital'] },
+          { key: 'snr', label: '信噪比', type: 'text', fallback: '', row: 'rf-quality', rfModulations: ['noise'] }
         ]
       }
     ]
@@ -260,8 +280,7 @@ const PROPERTY_SCHEMAS = {
         label: '',
         fields: [
           { key: 'name', label: '模块名称', type: 'text', fallback: '数字万用表' },
-          { key: 'instrumentType', label: '仪器类型', type: 'readonly', fallback: '数字万用表' },
-          { key: 'inputPortName', label: '输入端口名称', type: 'text', fallback: '观测输入' }
+          { key: 'instrumentType', label: '仪器类型', type: 'readonly', fallback: '数字万用表' }
         ]
       }
     ]
@@ -330,6 +349,13 @@ function getFieldValue(node, field) {
   }
   if (field.key === 'measurementMode') {
     return normalizeMultimeterMeasurementMode(raw ?? field.fallback);
+  }
+  if (field.key === 'centerFrequency') {
+    return String(raw ?? field.fallback ?? '').replace(/\s*(?:GHz|MHz|kHz|Hz)\s*$/i, '');
+  }
+  if (field.key === 'centerFrequencyUnit') {
+    const legacyUnit = String(node?.props?.centerFrequency ?? '').match(/(?:GHz|MHz|kHz|Hz)\s*$/i)?.[0]?.trim();
+    return legacyUnit ?? raw ?? field.fallback ?? '';
   }
   return raw ?? field.fallback ?? '';
 }
@@ -476,6 +502,11 @@ function renderField(node, field, helpers = {}) {
   const escape = helpers.escapeHtml || escapeHtml;
   const id = `prop-${field.key}`;
   const value = getFieldValue(node, field);
+  const label = field.key === 'phase'
+    ? '\u76f8\u4f4d (rad)'
+    : field.key === 'phaseDeviation'
+      ? '\u76f8\u504f (rad)'
+      : field.label;
 
   if (field.type === 'digitalCurrentValue') {
     return renderDigitalCurrentValueField(node, field, helpers);
@@ -488,40 +519,47 @@ function renderField(node, field, helpers = {}) {
   if (field.type === 'select') {
     const fieldOptions = SELECT_OPTION_OVERRIDES[field.key] || field.options || [];
     const options = buildSelectOptions(fieldOptions, value, helpers.buildSelectOptions);
-    return `<div class="props-field"><label>${escape(field.label)}</label><select id="${id}">${options}</select></div>`;
+    return `<div class="props-field"><label>${escape(label)}</label><select id="${id}">${options}</select></div>`;
   }
 
   if (field.type === 'number') {
     const min = field.min == null ? '' : ` min="${escape(field.min)}"`;
     const max = field.max == null ? '' : ` max="${escape(field.max)}"`;
-    return `<div class="props-field"><label>${escape(field.label)}</label><input id="${id}" type="number"${min}${max} value="${escape(value)}"></div>`;
+    return `<div class="props-field"><label>${escape(label)}</label><input id="${id}" type="number"${min}${max} value="${escape(value)}"></div>`;
   }
 
   if (field.type === 'readonly') {
-    return `<div class="props-field"><label>${escape(field.label)}</label><input value="${escape(value)}" disabled></div>`;
+    return `<div class="props-field"><label>${escape(label)}</label><input value="${escape(value)}" disabled></div>`;
   }
 
-  return `<div class="props-field"><label>${escape(field.label)}</label><input id="${id}" value="${escape(value)}"></div>`;
+  return `<div class="props-field"><label>${escape(label)}</label><input id="${id}" value="${escape(value)}"></div>`;
 }
 
 function renderFieldsInRows(node, fields, helpers) {
+  const waveType = WAVE_TYPE_ALIASES[node?.props?.waveType] || node?.props?.waveType || 'sine';
+  const rfModulation = node?.props?.modulation || 'cw';
+  const visibleFields = fields.filter((field) => (
+    (!field.waveTypes || field.waveTypes.includes(waveType))
+    && (!field.rfModulations || field.rfModulations.includes(rfModulation))
+  ));
   const rows = [];
   const consumed = new Set();
 
-  fields.forEach((field, index) => {
+  visibleFields.forEach((field, index) => {
     if (!field.row || consumed.has(index)) {
       return;
     }
 
-    const rowFields = fields
+    const rowFields = visibleFields
       .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
-      .filter(({ candidate }) => candidate.row === field.row);
+      .filter(({ candidate }) => candidate.row === field.row)
+      .sort(({ candidate: left }, { candidate: right }) => (left.order ?? 0) - (right.order ?? 0));
 
     rowFields.forEach(({ candidateIndex }) => consumed.add(candidateIndex));
     rows.push(`<div class="props-row">${rowFields.map(({ candidate }) => renderField(node, candidate, helpers)).join('')}</div>`);
   });
 
-  fields.forEach((field, index) => {
+  visibleFields.forEach((field, index) => {
     if (!consumed.has(index)) {
       rows.push(renderField(node, field, helpers));
     }

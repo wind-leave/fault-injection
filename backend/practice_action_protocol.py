@@ -65,7 +65,9 @@ def normalize_practice_action(action):
     if action_type == "measurePoint":
         normalized["pointCode"] = _require_text(action, "pointCode")
     else:
-        normalized["faultId"] = _require_text(action, "faultId")
+        fault_id = _text(action.get("faultId"))
+        if fault_id:
+            normalized["faultId"] = fault_id
     client_time = _text(action.get("clientTime"))
     if client_time:
         normalized["clientTime"] = client_time

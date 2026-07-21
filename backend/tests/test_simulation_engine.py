@@ -1,8 +1,9 @@
+import math
 import unittest
 
 from backend.graph_compiler import compile_graph
 from backend.module_registry import ModuleRegistry, RegisteredModule
-from backend.simulation_engine import SimulationSession, run_simulation
+from backend.simulation_engine import SimulationSession, _source_value, run_simulation
 from backend.tests.fixtures import valid_package
 
 
@@ -60,6 +61,62 @@ class SimulationEngineTests(unittest.TestCase):
             [1.0, 1.0, 1.0],
         )
 
+    def test_electrical_faults_transform_edge_input_and_output_in_order(self):
+        package = valid_package()
+        package["nodes"][1]["pythonBinding"] = {"moduleId": "gain", "entryFunction": "process"}
+        package["nodes"][1]["parameters"] = {"gain": 2.0}
+        package["faultInstances"] = [
+            {
+                "faultId": "edge-bias",
+                "faultType": "sensor_bias",
+                "targetId": "edge-source-sim",
+                "injectionForm": "signal-edge",
+                "parameters": {"bias": 0.25},
+            },
+            {
+                "faultId": "input-bias",
+                "faultType": "sensor_bias",
+                "targetId": "sim-1",
+                "targetField": "inputs.input",
+                "injectionForm": "signal-transform",
+                "parameters": {"bias": 0.5},
+            },
+            {
+                "faultId": "output-bias",
+                "faultType": "sensor_bias",
+                "targetId": "sim-1",
+                "targetField": "outputs.output",
+                "injectionForm": "signal-transform",
+                "parameters": {"bias": 1.0},
+            },
+        ]
+        graph = compile_graph(package, ModuleRegistry.from_builtin_manifest())
+
+        result = run_simulation(graph)
+
+        self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch1.reference"], [2.0, 2.0, 2.0])
+        self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch1.actual"], [4.5, 4.5, 4.5])
+
+    def test_parameter_bias_uses_the_manifest_default_when_node_omits_the_parameter(self):
+        package = valid_package()
+        package["nodes"][1]["pythonBinding"] = {"moduleId": "barometer_sensor", "entryFunction": "process"}
+        package["nodes"][1]["inputs"] = [{"name": "true_altitude"}]
+        package["nodes"][1]["outputs"] = [{"name": "measured_altitude"}]
+        package["nodes"][1]["parameters"] = {}
+        package["faultInstances"] = [{
+            "faultId": "barometer-bias",
+            "faultType": "parameter_bias",
+            "targetId": "sim-1",
+            "targetField": "params.bias",
+            "injectionForm": "module-variable",
+            "parameters": {"bias": 0.1},
+        }]
+
+        result = run_simulation(compile_graph(package, ModuleRegistry.from_builtin_manifest()))
+
+        self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch1.reference"], [1.0, 1.0, 1.0])
+        self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch1.actual"], [1.1, 1.1, 1.1])
+
     def test_component_output_trace_reflects_parameter_step_faults(self):
         package = valid_package()
         package["faultInstances"] = [{
@@ -83,6 +140,51 @@ class SimulationEngineTests(unittest.TestCase):
             [step["reference"]["sim-1"]["output"] for step in result["componentOutputs"]["steps"]],
             [1.0, 1.0, 1.0],
         )
+
+    def test_module_parameter_bias_changes_control_allocation_output_only_in_actual_mode(self):
+        package = {
+            "schemaVersion": 1,
+            "packageId": "control-allocation-parameter-fault",
+            "simulationConfig": {"duration": 0.3, "stepSize": 0.1},
+            "nodes": [
+                {"id": "moment", "type": "signal_source", "parameters": {"value": 0.5}, "outputs": [{"name": "out"}]},
+                {"id": "speed", "type": "signal_source", "parameters": {"value": 0.0}, "outputs": [{"name": "out"}]},
+                {"id": "altitude", "type": "signal_source", "parameters": {"value": 0.0}, "outputs": [{"name": "out"}]},
+                {
+                    "id": "allocation",
+                    "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "control_allocation", "entryFunction": "process"},
+                    "parameters": {},
+                    "inputs": [{"name": "moment_command"}, {"name": "speed_command"}, {"name": "altitude_command"}],
+                    "outputs": [{"name": "actuator_command"}],
+                },
+                {"id": "scope", "type": "instrument_scope", "inputs": [{"name": "CH1"}]},
+            ],
+            "edges": [
+                {"id": "moment-allocation", "sourceNodeId": "moment", "sourcePortIndex": 0, "targetNodeId": "allocation", "targetPortIndex": 0},
+                {"id": "speed-allocation", "sourceNodeId": "speed", "sourcePortIndex": 0, "targetNodeId": "allocation", "targetPortIndex": 1},
+                {"id": "altitude-allocation", "sourceNodeId": "altitude", "sourcePortIndex": 0, "targetNodeId": "allocation", "targetPortIndex": 2},
+                {"id": "allocation-scope", "sourceNodeId": "allocation", "sourcePortIndex": 0, "targetNodeId": "scope", "targetPortIndex": 0},
+            ],
+            "faultInstances": [{
+                "faultId": "allocation-gain-bias",
+                "faultType": "parameter_bias",
+                "targetId": "allocation",
+                "injectionForm": "module-variable",
+                "parameterKey": "allocationGain",
+                "enabled": True,
+                "startTime": 0.0,
+                "duration": 0.0,
+                "parameters": {"bias": 0.1},
+            }],
+            "measurementPoints": [{"id": "scope.ch1", "scopeNodeId": "scope", "channel": "ch1"}],
+        }
+        graph = compile_graph(package, ModuleRegistry.from_builtin_manifest())
+
+        result = run_simulation(graph)
+
+        self.assertFloatSeriesEqual(result["curves"]["channels"]["scope.ch1.reference"], [0.36, 0.36, 0.36])
+        self.assertFloatSeriesEqual(result["curves"]["channels"]["scope.ch1.actual"], [0.396, 0.396, 0.396])
 
     def test_actual_curve_reflects_node_fault_while_reference_stays_baseline(self):
         package = valid_package()
@@ -122,6 +224,28 @@ class SimulationEngineTests(unittest.TestCase):
 
         self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch1.reference"], [0.1, 0.2, 0.3])
         self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch1.actual"], [0.1, 0.2, 0.3])
+
+    def test_run_from_zero_clears_state_and_runs_the_full_duration(self):
+        package = valid_package()
+        package["nodes"][1]["pythonBinding"]["moduleId"] = "stateful_accumulator"
+        registry = ModuleRegistry([
+            RegisteredModule(
+                module_id="stateful_accumulator",
+                import_path="backend.tests.stateful_module",
+                entry_function="process",
+                inputs=("input",),
+                outputs=("output",),
+                parameters={},
+            )
+        ])
+        session = SimulationSession(compile_graph(package, registry))
+        session.step(2)
+
+        result = session.run_from_zero()
+
+        self.assertEqual(result["curves"]["time"], [0.0, 0.1, 0.2])
+        self.assertFloatSeriesEqual(result["curves"]["channels"]["scope-1.ch1.actual"], [0.1, 0.2, 0.3])
+        self.assertTrue(result["metrics"]["done"])
 
     def test_actual_and_reference_module_state_are_isolated(self):
         package = valid_package()
@@ -454,6 +578,62 @@ class SimulationEngineTests(unittest.TestCase):
         self.assertFloatSeriesEqual(
             result["curves"]["channels"]["scope-1.ch1.actual"],
             [0.0, 1.1755705045849463, 1.902113032590307],
+        )
+
+    def test_analog_ramp_noise_and_radian_phase_match_frontend_semantics(self):
+        class AnalogNode:
+            def __init__(self, parameters):
+                self.id = "analog-source"
+                self.parameters = parameters
+
+        self.assertAlmostEqual(
+            _source_value(AnalogNode({"waveType": "sine", "amplitude": 2, "frequency": 1, "phase": math.pi / 2, "offset": 0}), 0),
+            2.0,
+        )
+        self.assertAlmostEqual(
+            _source_value(AnalogNode({"waveType": "ramp", "initialValue": 2, "slope": 3, "startTime": 0.5}), 1),
+            3.5,
+        )
+        noise_node = AnalogNode({"waveType": "noise", "amplitude": 2, "offset": 1, "phase": 0.25})
+        pseudo_random = math.sin((0.1 + 0.25) * 12.9898) * 43758.5453
+        expected_noise = 1 + 2 * ((pseudo_random - math.floor(pseudo_random)) * 2 - 1)
+        self.assertAlmostEqual(_source_value(noise_node, 0.1), expected_noise)
+
+    def test_rf_modulation_modes_generate_carrier_based_outputs(self):
+        class RfNode:
+            def __init__(self, node_id, parameters):
+                self.id = node_id
+                self.parameters = parameters
+
+        base = {"signalDomain": "rf", "amplitude": 10, "centerFrequencyHz": 1}
+        self.assertAlmostEqual(_source_value(RfNode("cw", {**base, "rfModulation": "cw"}), 0.25), 10.0)
+        self.assertAlmostEqual(
+            _source_value(RfNode("am", {**base, "rfModulation": "am", "modulationDepthRatio": 0.5, "modulationRateHz": 1}), 0.25),
+            15.0,
+        )
+        self.assertAlmostEqual(
+            _source_value(RfNode("fm", {**base, "rfModulation": "fm", "frequencyDeviationHz": 1, "modulationRateHz": 1}), 0.25),
+            10.0 * math.sin(math.pi / 2.0 + 1.0),
+        )
+        self.assertAlmostEqual(
+            _source_value(RfNode("pm", {**base, "rfModulation": "pm", "phaseDeviationRad": math.pi / 2.0, "modulationRateHz": 1}), 0.25),
+            0.0,
+        )
+        self.assertAlmostEqual(
+            _source_value(RfNode("pulse", {**base, "rfModulation": "pulse", "pulseWidthSeconds": 0.5, "prfHz": 1}), 0.25),
+            10.0,
+        )
+        self.assertEqual(
+            _source_value(RfNode("pulse", {**base, "rfModulation": "pulse", "pulseWidthSeconds": 0.5, "prfHz": 1}), 0.75),
+            0.0,
+        )
+        self.assertAlmostEqual(
+            abs(_source_value(RfNode("digital", {**base, "rfModulation": "digital", "symbolRateHz": 1, "sampleRateHz": 2}), 0.25)),
+            10.0,
+        )
+        self.assertNotEqual(
+            _source_value(RfNode("noise", {**base, "rfModulation": "noise", "snrDb": 0, "bandwidthHz": 1e6}), 0.25),
+            10.0,
         )
 
     def test_evtol_builtin_modules_compile_and_run(self):

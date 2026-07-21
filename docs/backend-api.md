@@ -212,6 +212,12 @@ POST /api/practice/session
   "simulationPackage": {},
   "dMatrix": {},
   "targetFaultId": "fault-001",
+  "initialRecommendedPath": {
+    "steps": [],
+    "keySteps": [],
+    "summary": ""
+  },
+  "keyNodes": [],
   "scoringRules": {
     "fullEfficiencySeconds": 600
   },
@@ -233,9 +239,11 @@ POST /api/practice/session
 | `simulationPackage` | object | 是 | 可执行模型包 |
 | `dMatrix` | object | 是 | 排故 D 矩阵，包含测点和故障行 |
 | `targetFaultId` | string | 是 | 当前训练任务的真实故障 ID，必须存在于 `dMatrix.rows` |
+| `initialRecommendedPath` | object | 否 | 初始推荐排故路径，作为后端私有评分基准；缺省时由后端根据 D 矩阵生成 |
+| `keyNodes` | array | 否 | 排故关键节点，作为后端私有评分数据；缺省时由后端根据 D 矩阵生成 |
 | `scoringRules.fullEfficiencySeconds` | number | 否 | 效率满分阈值，默认 600 秒 |
-| `lifecycle.maxLifetimeSeconds` | number | 否 | 练习会话最大生命周期 |
-| `lifecycle.idleTimeoutSeconds` | number | 否 | 练习会话空闲超时时间 |
+| `lifecycle.maxLifetimeSeconds` | number | 否 | 练习会话最大生命周期，默认 3600 秒 |
+| `lifecycle.idleTimeoutSeconds` | number | 否 | 练习会话空闲超时时间，默认 900 秒 |
 | `resourceLimits.maxActions` | integer | 否 | 最大动作数，默认由服务端配置决定 |
 | `actionRules` | object | 否 | 维修动作业务规则，例如是否要求断电 |
 
@@ -248,20 +256,6 @@ POST /api/practice/session
   "sessionId": "practice-xxxxxxxxxxxx",
   "practiceSessionId": "practice-xxxxxxxxxxxx",
   "simulationSessionId": "session-xxxxxxxxxxxx",
-  "physicalMeasurementSnapshot": {
-    "source": "backend",
-    "points": [],
-    "abnormalPointCodes": [],
-    "normalPointCodes": [],
-    "unknownPointCodes": []
-  },
-  "troubleshootingState": {
-    "physicalMeasurementSnapshot": {},
-    "virtualMeasurements": [],
-    "repairAttempts": [],
-    "faultCandidates": [],
-    "status": "inProgress"
-  },
   "lifecycle": {
     "state": "active",
     "createdAt": 0.0,
@@ -284,7 +278,8 @@ POST /api/practice/session
 说明：
 
 - 创建会话时会返回初始物理测点快照。
-- 评分用的 `faultTreeKeyNodes` 不在创建响应中返回，只在提交后随 `record.pathEvaluation` 返回。
+- `initialRecommendedPath` 和 `keyNodes` 保存在后端会话中，不在创建响应和状态响应中返回。
+- 评分用的 `faultTreeKeyNodes` 不在创建响应中返回；提交后仅通过 `evaluationReport.keyNodeCoverage` 提供展示所需的覆盖结果。
 
 ### 提交练习动作
 
@@ -302,9 +297,9 @@ POST /api/practice/session/{practiceSessionId}/action
 | `target` | object | 是 | 操作目标 |
 | `target.type` | string | 是 | `measurePoint` 为 `testPoint`，`replaceComponent` 为 `component`，`replaceWire` 为 `wire` |
 | `target.id` | string | 是 | 后端模型中的测点通道、组件 ID 或线路 ID |
-| `faultId` | string | 更换动作必填 | 要修复的故障实例 ID |
+| `faultId` | string | 否 | 旧客户端兼容字段；更换动作以后端 `target.id` 为准，不依赖该字段 |
 | `pointCode` | string | 测量动作必填 | D 矩阵测点编码，仅允许虚拟测点 |
-| `steps` | integer | 否 | 维修动作后推进仿真步数，默认 `1`；`measurePoint` 不推进仿真，后端会忽略该字段 |
+| `steps` | integer | 否 | 兼容字段；测量和更换动作均不使用该值控制仿真步数 |
 | `safetyState` | object | 否 | 安全状态，例如 `{ "powerOff": true }` |
 | `clientTime` | string | 否 | 客户端动作时间 |
 | `rawAction` | object | 否 | 三维端原始交互信息 |
@@ -346,7 +341,6 @@ POST /api/practice/session/{practiceSessionId}/action
     "metricValue": 0.0,
     "reason": "metric-below-normal-threshold"
   },
-  "troubleshootingState": {},
   "simulationResult": {},
   "metrics": {
     "elapsedMs": 1.23
@@ -365,11 +359,9 @@ POST /api/practice/session/{practiceSessionId}/action
     "type": "component",
     "id": "imu-gyro-001"
   },
-  "faultId": "fault-gyro-bias-001",
   "safetyState": {
     "powerOff": true
-  },
-  "steps": 1
+  }
 }
 ```
 
@@ -384,8 +376,9 @@ POST /api/practice/session/{practiceSessionId}/action
     "type": "wire",
     "id": "edge-sim-scope"
   },
-  "faultId": "fault-wire-001",
-  "steps": 1
+  "safetyState": {
+    "powerOff": true
+  }
 }
 ```
 
@@ -399,30 +392,6 @@ POST /api/practice/session/{practiceSessionId}/action
   "practiceSessionId": "practice-xxxxxxxxxxxx",
   "simulationSessionId": "session-xxxxxxxxxxxx",
   "normalizedAction": {},
-  "ruleResult": {
-    "allowed": true,
-    "ruleCode": "ACTION_ALLOWED",
-    "durationSeconds": 90,
-    "riskLevel": "low",
-    "repeatAction": false,
-    "safetyViolation": false,
-    "warnings": []
-  },
-  "appliedAction": {
-    "status": "applied",
-    "actionType": "replaceWire",
-    "changes": []
-  },
-  "repairEffect": {
-    "effective": true,
-    "status": "recovered",
-    "recoveredPointCodes": [],
-    "newAbnormalPointCodes": [],
-    "remainingAbnormalPointCodes": [],
-    "unchangedAbnormalPointCodes": []
-  },
-  "physicalMeasurementSnapshot": {},
-  "troubleshootingState": {},
   "simulationResult": {},
   "metrics": {
     "elapsedMs": 1.23
@@ -432,11 +401,12 @@ POST /api/practice/session/{practiceSessionId}/action
 
 动作说明：
 
-- `measurePoint` 只能测量 D 矩阵中的虚拟测点；物理测点由创建会话和维修动作后的 `physicalMeasurementSnapshot` 返回。
+- `measurePoint` 只能测量 D 矩阵中的虚拟测点；物理测点的完整时序由导出包或维修响应中的 `simulationResult.physicalMeasurements` 提供。
 - `measurePoint` 不会调用仿真步进，也不会改变绑定仿真会话的 `stepIndex`；返回的 `virtualMeasurement` 基于当前最新仿真结果计算。
-- `replaceComponent` 和 `replaceWire` 会根据 `faultId` 和 `target.id` 校验真实故障实例绑定。
-- 重复维修会被记录，但后端不会重复修改模型状态。
-- 若动作命中安全前置条件但未满足，例如维修前要求断电，`ruleResult.safetyViolation` 会为 `true`，安全合规评分会扣分。
+- `replaceComponent` 和 `replaceWire` 只校验 `target.id` 对应的组件或线路是否存在，不要求目标上存在故障。
+- 更换时会自动清除目标上的全部启用故障；目标无故障或重复更换也会正常执行和记录，最终可按无效操作评分。
+- 每次更换后都会保留最新模型修改，清空运行状态，并从时间 `0` 跑完 `simulationConfig` 指定的完整仿真时长。
+- 若动作命中安全前置条件但未满足，例如维修前要求断电，动作仍会执行；后端仅在内部记录安全违规，并在最终安全合规评分中扣分。更换动作响应不返回该判定。
 
 ### 查询练习状态
 
@@ -496,37 +466,56 @@ POST /api/practice/session/{practiceSessionId}/submit
   "sessionId": "practice-xxxxxxxxxxxx",
   "practiceSessionId": "practice-xxxxxxxxxxxx",
   "simulationSessionId": "session-xxxxxxxxxxxx",
-  "score": 100,
-  "grade": "优秀",
-  "scoreBreakdown": {
-    "faultLocalization": 30,
-    "diagnosticTreePath": 20,
-    "informationGain": 30,
-    "efficiency": 5,
-    "safetyCompliance": 15
-  },
-  "deductions": [],
-  "initialRecommendedPath": {},
-  "record": {
-    "sessionId": "practice-xxxxxxxxxxxx",
-    "simulationSessionId": "session-xxxxxxxxxxxx",
-    "targetFaultId": "fault-001",
-    "targetFaultName": "IMU 偏差",
-    "finalFaultId": "fault-001",
-    "finalFaultName": "IMU 偏差",
-    "correct": true,
-    "durationSeconds": 120.0,
-    "studentActions": [],
-    "simulationActionHistory": [],
-    "initialPhysicalMeasurementSnapshot": {},
-    "physicalMeasurementSnapshots": [],
-    "virtualMeasurements": [],
-    "repairAttempts": [],
-    "troubleshootingState": {},
-    "actualTroubleshootingPath": {},
-    "pathEvaluation": {},
-    "recommendedPathHistory": [],
-    "dynamicReferenceHistory": []
+  "evaluationReport": {
+    "totalScore": 100,
+    "grade": "优秀",
+    "faultConclusion": {
+      "target": {"faultId": "fault-001", "faultName": "IMU 偏差"},
+      "student": {"faultId": "fault-001", "faultName": "IMU 偏差"},
+      "correct": true
+    },
+    "scoreDetails": [
+      {
+        "item": "faultLocalization",
+        "label": "故障定位",
+        "score": 30,
+        "maxScore": 30,
+        "deductedPoints": 0
+      }
+    ],
+    "initialOptimalPath": {},
+    "stepEvaluations": [
+      {
+        "stepIndex": 1,
+        "operationId": "op-001",
+        "studentAction": {},
+        "studentRating": {
+          "level": "optimal",
+          "label": "最优",
+          "score": 1.0,
+          "reason": "学生动作命中当时的系统推荐动作"
+        },
+        "systemRecommendedAction": {},
+        "systemRecommendationRating": {
+          "level": "optimal",
+          "label": "最优",
+          "rank": 1,
+          "priority": 92,
+          "confidence": 0.9,
+          "reason": ""
+        },
+        "matchResult": {}
+      }
+    ],
+    "keyNodeCoverage": {
+      "score": 12,
+      "maxScore": 12,
+      "coveredNodeIds": [],
+      "missedNodeIds": [],
+      "nodes": []
+    },
+    "deductionAnalysis": [],
+    "improvementSuggestions": []
   },
   "metrics": {
     "elapsedMs": 1.23
@@ -536,6 +525,27 @@ POST /api/practice/session/{practiceSessionId}/submit
 
 提交后练习会话和其绑定的仿真会话会被服务端移除，不能继续动作或查询。
 
+#### 实践评估报告
+
+`evaluationReport` 是提交后供三维端直接展示的完整评估报告：
+
+| 字段 | 说明 |
+| --- | --- |
+| `totalScore` / `grade` | 本次实践总分和等级 |
+| `faultConclusion.target` | 后端私有目标故障，只在提交完成后公开 |
+| `faultConclusion.student` | 学员提交的最终故障判断 |
+| `faultConclusion.correct` | 学员判断是否正确 |
+| `scoreDetails` | 五个评分部分的实得分、满分和扣分值 |
+| `initialOptimalPath` | 创建任务时保存或后端生成的初始最优排故路径 |
+| `stepEvaluations` | 学员每一步实际操作、学生动作评级、该步操作前系统计算的最佳推荐动作及其评级 |
+| `keyNodeCoverage.nodes` | 每个关键节点及 `covered`、`coverageStatus` 覆盖结果 |
+| `deductionAnalysis` | 扣分项、扣分值、原因和对应改进建议 |
+| `improvementSuggestions` | 从全部扣分项中汇总并去重的改进建议 |
+
+学生动作评级取值为 `optimal`、`acceptable`、`lowValue`、`unsafe` 或 `unmatched`。`systemRecommendedAction` 始终取该步动作发生前推荐列表中排名第一的动作，因此能够还原当时后端实时计算的最佳步骤。
+
+`deductionAnalysis` 中所有 `deductedPoints` 之和等于 `100 - totalScore`。没有扣分时该数组为空，`improvementSuggestions` 返回保持当前策略的建议。
+
 #### 当前评分结构
 
 总分 100 分：
@@ -543,8 +553,8 @@ POST /api/practice/session/{practiceSessionId}/submit
 | 字段 | 分值 | 计算方式 |
 | --- | ---: | --- |
 | `faultLocalization` | 30 | `finalFaultName` 匹配目标故障名称给 30 分，否则 0 分；旧版 `finalFaultId` 仍兼容 |
-| `diagnosticTreePath` | 20 | 来自 `record.pathEvaluation.diagnosticTreePathScore` |
-| `informationGain` | 30 | 来自 `record.pathEvaluation.informationGainScore`，当前含义为单步决策合理性 |
+| `diagnosticTreePath` | 20 | 由后端内部路径评估计算 |
+| `informationGain` | 30 | 由后端内部单步决策合理性评估计算 |
 | `efficiency` | 5 | 提交耗时不超过 `fullEfficiencySeconds` 给 5 分，否则 2.5 分 |
 | `safetyCompliance` | 15 | 初始 15 分，每个 `safetyViolation` 扣 5 分，最低 0 分 |
 
@@ -612,7 +622,7 @@ POST /api/practice/session/{practiceSessionId}/submit
 
 说明：
 
-- `faultTreeKeyNodes` 在任务初始化时生成，创建会话和动作响应不返回，只在提交后的 `record.pathEvaluation` 中返回。
+- `faultTreeKeyNodes` 在任务初始化时生成，创建会话和动作响应不返回；提交后仅在 `evaluationReport.keyNodeCoverage` 中提供展示所需的覆盖结果。
 - `informationGainScore` 字段名为兼容保留，当前业务含义已经调整为“单步决策合理性”。
 - `routeQualityScore` 和 `routeQualityBreakdown` 仍保留用于兼容和分析，不再作为总分中的独立权重项。
 

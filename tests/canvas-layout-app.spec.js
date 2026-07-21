@@ -575,6 +575,34 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('expands the canvas stage when a dragged node reaches its outer edge', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const node = window.createNode('flow_block', 420, 260);
+    await flushRuntime();
+
+    const nodeEl = document.getElementById(`b-${node.id}`);
+    const viewport = document.getElementById('canvas-viewport');
+    const stage = document.getElementById('canvas-stage');
+    expect(stage.style.width).toBe('2400px');
+    expect(stage.style.height).toBe('1500px');
+
+    dispatchPointer(nodeEl, 'pointerdown', { pointerId: 42, clientX: 420, clientY: 260 });
+    dispatchPointer(viewport, 'pointermove', { pointerId: 42, clientX: 2800, clientY: 2100 });
+    dispatchPointer(viewport, 'pointerup', { pointerId: 42, clientX: 2800, clientY: 2100 });
+    await flushRuntime();
+
+    expect(Number.parseInt(stage.style.width, 10)).toBeGreaterThan(2400);
+    expect(Number.parseInt(stage.style.height, 10)).toBeGreaterThan(1500);
+    expect(document.getElementById('edge-layer')?.getAttribute('viewBox')).toBe(`0 0 ${stage.style.width.replace('px', '')} ${stage.style.height.replace('px', '')}`);
+    expect(node.x + node.w).toBeLessThan(Number.parseInt(stage.style.width, 10));
+    expect(node.y + node.h).toBeLessThan(Number.parseInt(stage.style.height, 10));
+
+    wrapper.unmount();
+  });
+
   it('lets both side panels span through the bottom layer while logs stay under the canvas only', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -1023,6 +1051,23 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('clears manually added edge test points when creating a blank workspace', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    window.__GZ_STATE__.manualDiagnosticTestPoints = [{
+      pointId: 'tp-previous-model-edge',
+      edgeId: 'edge-previous-model',
+      name: 'Previous model measurement point'
+    }];
+
+    window.doCreateBlankWorkspace();
+
+    expect(window.__GZ_STATE__.manualDiagnosticTestPoints).toEqual([]);
+    wrapper.unmount();
+  });
+
   it('removes an injected runtime fault row from the D matrix when the fault is cancelled', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -1365,6 +1410,108 @@ describe('canvas layout cleanup', () => {
     document.querySelector('[data-add-simulation-testpoint]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushRuntime();
     expect(document.querySelector('[data-simulation-testpoint="tp-physical-sim"]')).not.toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('describes virtual test points as diagnostic rules in D-matrix troubleshooting paths', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol-small-flight-control-fault-display.json');
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg)).toMatchObject({ ok: true });
+    await flushRuntime();
+
+    const faultId = 'fault-virtual-observability';
+    window.__GZ_STATE__.importedFaultModels = [{
+      id: faultId,
+      name: '虚拟测点可观测性故障',
+      layer: 'physical'
+    }];
+    window.__GZ_STATE__.diagnosticTestPoints = [{
+      pointId: 'tp-virtual-dmatrix',
+      id: 'tp-virtual-dmatrix',
+      shortName: 'V1',
+      name: '虚拟诊断测点',
+      edgeId: 'edge-voltage-actuator',
+      pointType: 'virtual',
+      detects: [faultId]
+    }];
+    window.__GZ_STATE__.installedDiagnosticTestPointIds = ['tp-virtual-dmatrix'];
+
+    const matrix = window.buildDetectionMatrixModel();
+    const cell = matrix.rows.find((row) => row.faultId === faultId)?.cells[0];
+
+    expect(cell).toMatchObject({ detectable: true });
+    expect(cell.reason).toContain('虚拟测点');
+    expect(cell.reason).not.toContain('直接配置为可观测');
+
+    wrapper.unmount();
+  });
+
+  it('uses a virtual test point\'s saved detectable faults over stale imported D-matrix cells', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol-small-flight-control-fault-display.json');
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg)).toMatchObject({ ok: true });
+    await flushRuntime();
+
+    const faultId = 'fault-virtual-config-sync';
+    window.__GZ_STATE__.importedFaultModels = [{
+      id: faultId,
+      name: 'Virtual point configured fault',
+      layer: 'physical'
+    }];
+    window.__GZ_STATE__.diagnosticTestPoints = [{
+      pointId: 'tp-virtual-config-sync',
+      id: 'tp-virtual-config-sync',
+      shortName: 'V1',
+      name: 'Virtual configured point',
+      edgeId: 'edge-voltage-actuator',
+      pointType: 'virtual',
+      detects: [faultId]
+    }];
+    window.__GZ_STATE__.installedDiagnosticTestPointIds = ['tp-virtual-config-sync'];
+    window.__GZ_STATE__.diagnosticModel = {
+      dMatrix: {
+        rows: [{
+          faultId,
+          points: { 'tp-virtual-config-sync': false }
+        }]
+      }
+    };
+
+    const matrix = window.buildDetectionMatrixModel();
+    const cell = matrix.rows
+      .find((row) => row.faultId === faultId)
+      ?.cells.find((entry) => entry.pointId === 'tp-virtual-config-sync');
+
+    expect(cell).toMatchObject({ detectable: true });
+    expect(cell.reason).toContain('虚拟测点根据配置的诊断规则');
+
+    wrapper.unmount();
+  });
+
+  it('does not infer an unconfigured virtual point as detectable from fault propagation', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const pkg = loadPublicPackage('evtol-small-flight-control-fault-display.json');
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg)).toMatchObject({ ok: true });
+    await flushRuntime();
+
+    const faultId = 'layered-node-25-node-control-allocation-physical-allocation_gain';
+    const pointId = 'tp-edge-six-dof-attitude-sensor-1';
+    window.__GZ_STATE__.installedDiagnosticTestPointIds = [pointId];
+
+    const matrix = window.buildDetectionMatrixModel();
+    const cell = matrix.rows
+      .find((row) => row.faultId === faultId)
+      ?.cells.find((entry) => entry.pointId === pointId);
+
+    expect(cell).toMatchObject({ detectable: false });
+    expect(cell.reason).toContain('虚拟测点未配置为可观测');
 
     wrapper.unmount();
   });

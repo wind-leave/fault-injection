@@ -3,7 +3,6 @@ import unittest
 from backend.graph_compiler import compile_graph
 from backend.module_registry import ModuleRegistry
 from backend.practice_action_rules import PracticeActionRuleEngine
-from backend.schemas import SimulationBackendError
 from backend.simulation_engine import SimulationSession
 from backend.tests.fixtures import valid_package
 
@@ -28,7 +27,7 @@ class PracticeActionRuleEngineTests(unittest.TestCase):
         session = SimulationSession(graph, run_id="rule-engine-test")
         return PracticeActionRuleEngine(session)
 
-    def test_allows_enabled_replace_component_fault(self):
+    def test_reports_satisfied_when_no_safety_prerequisite_is_configured(self):
         engine = self._engine(package_with_fault())
 
         result = engine.evaluate({
@@ -38,16 +37,9 @@ class PracticeActionRuleEngineTests(unittest.TestCase):
             "faultId": "fault-bias",
         })
 
-        self.assertEqual(result, {
-            "allowed": True,
-            "ruleCode": "ACTION_ALLOWED",
-            "durationSeconds": 120,
-            "riskLevel": "medium",
-            "repeatAction": False,
-            "warnings": [],
-        })
+        self.assertEqual(result, {"safetyPrerequisiteSatisfied": True, "safetyViolation": False})
 
-    def test_allows_enabled_replace_wire_fault(self):
+    def test_reports_satisfied_for_wire_replacement_without_safety_prerequisite(self):
         engine = self._engine(package_with_fault(
             fault_id="fault-wire-open",
             target_id="edge-source-sim",
@@ -60,12 +52,9 @@ class PracticeActionRuleEngineTests(unittest.TestCase):
             "faultId": "fault-wire-open",
         })
 
-        self.assertEqual(result["allowed"], True)
-        self.assertEqual(result["ruleCode"], "ACTION_ALLOWED")
-        self.assertEqual(result["durationSeconds"], 90)
-        self.assertEqual(result["riskLevel"], "low")
+        self.assertEqual(result, {"safetyPrerequisiteSatisfied": True, "safetyViolation": False})
 
-    def test_returns_repeat_repair_for_disabled_fault(self):
+    def test_does_not_consider_fault_state_when_checking_safety(self):
         engine = self._engine(package_with_fault(enabled=False))
 
         result = engine.evaluate({
@@ -75,42 +64,34 @@ class PracticeActionRuleEngineTests(unittest.TestCase):
             "faultId": "fault-bias",
         })
 
-        self.assertEqual(result, {
-            "allowed": False,
-            "ruleCode": "REPEAT_REPAIR",
-            "durationSeconds": 0,
-            "riskLevel": "none",
-            "repeatAction": True,
-            "warnings": ["fault is already repaired"],
+        self.assertEqual(result, {"safetyPrerequisiteSatisfied": True, "safetyViolation": False})
+
+    def test_ignores_optional_fault_id_when_checking_safety(self):
+        engine = self._engine(package_with_fault())
+
+        result = engine.evaluate({
+            "actionType": "replaceComponent",
+            "target": {"type": "component", "id": "sim-1"},
+            "targetId": "sim-1",
+            "faultId": "missing-fault",
         })
 
-    def test_rejects_unknown_fault_id(self):
+        self.assertEqual(result, {"safetyPrerequisiteSatisfied": True, "safetyViolation": False})
+
+    def test_reports_safety_violation_without_blocking_action_execution(self):
         engine = self._engine(package_with_fault())
+        engine = PracticeActionRuleEngine(engine.simulation_session, rules={
+            "replaceComponent": {"requiresPowerOff": True},
+        })
 
-        with self.assertRaises(SimulationBackendError) as context:
-            engine.evaluate({
-                "actionType": "replaceComponent",
-                "target": {"type": "component", "id": "sim-1"},
-                "targetId": "sim-1",
-                "faultId": "missing-fault",
-            })
+        result = engine.evaluate({
+            "actionType": "replaceComponent",
+            "target": {"type": "component", "id": "sim-1"},
+            "targetId": "sim-1",
+            "safetyState": {"powerOff": False},
+        })
 
-        self.assertEqual(context.exception.error_code, "TARGET_NOT_FOUND")
-        self.assertEqual(context.exception.field, "faultId")
-
-    def test_rejects_target_mismatch(self):
-        engine = self._engine(package_with_fault())
-
-        with self.assertRaises(SimulationBackendError) as context:
-            engine.evaluate({
-                "actionType": "replaceComponent",
-                "target": {"type": "component", "id": "source-1"},
-                "targetId": "source-1",
-                "faultId": "fault-bias",
-            })
-
-        self.assertEqual(context.exception.error_code, "TARGET_MISMATCH")
-        self.assertEqual(context.exception.field, "target.id")
+        self.assertEqual(result, {"safetyPrerequisiteSatisfied": False, "safetyViolation": True})
 
 
 if __name__ == "__main__":

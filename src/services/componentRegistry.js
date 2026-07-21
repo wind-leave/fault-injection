@@ -183,7 +183,8 @@ export const COMPONENT_REGISTRY = {
     height: 92,
     palette: {
       icon: 'P',
-      iconClass: 'simulation'
+      iconClass: 'simulation',
+      visible: false
     },
     defaults: {
       name: '仿真块',
@@ -326,6 +327,120 @@ export const COMPONENT_REGISTRY = {
         allowedModels: ['drift'],
         allowedFaultTypeIds: ['airspeed_scale_drift']
       }
+    ]
+  },
+  barometer_sensor: {
+    type: 'barometer_sensor',
+    nodeType: 'simulation_block',
+    templateId: 'barometer_sensor',
+    group: 'simulation',
+    label: '气压高度传感器',
+    badge: '仿真',
+    className: 'b-sim',
+    width: 196,
+    height: 116,
+    title: '测量真实高度并输出带零偏和比例系数的高度信号',
+    palette: {
+      icon: '高',
+      iconClass: 'simulation'
+    },
+    defaults: {
+      name: '气压高度传感器',
+      moduleType: '传感器模型',
+      inputs: [{ name: '真实高度', type: '标量', varName: 'true_altitude', unit: 'm' }],
+      outputs: [{ name: '测量高度', type: '标量', varName: 'measured_altitude', unit: 'm' }],
+      middleVars: [],
+      parameters: [
+        { key: 'bias', name: '零偏', layer: 'physical', default: 0, unit: 'm/s' },
+        { key: 'scale', name: '比例系数', layer: 'physical', default: 1 }
+      ],
+      ffunctionNote: '内置气压高度传感器模型：measured_altitude = (true_altitude + bias) * scale'
+    },
+    ports: {
+      inputs: [
+        {
+          id: 'input-0',
+          portId: 'input-0',
+          signalId: 'barometer_sensor.true_altitude',
+          varName: 'true_altitude',
+          name: '真实高度',
+          displayName: '真实高度',
+          type: 'float',
+          unit: 'm/s',
+          direction: 'input'
+        }
+      ],
+      outputs: [
+        {
+          id: 'output-0',
+          portId: 'output-0',
+          signalId: 'barometer_sensor.measured_altitude',
+          varName: 'measured_altitude',
+          name: '测量高度',
+          displayName: '测量高度',
+          type: 'float',
+          unit: 'm/s',
+          direction: 'output'
+        }
+      ]
+    },
+    pythonBinding: {
+      bound: true,
+      moduleId: 'barometer_sensor',
+      fileName: 'barometer_sensor.py',
+      moduleName: 'barometer_sensor',
+      moduleCategory: '传感器模型',
+      description: '气压高度传感器模型',
+      entryFunction: 'process',
+      parsedInterface: {
+        fileName: 'barometer_sensor.py',
+        moduleName: 'barometer_sensor',
+        description: '气压高度传感器模型',
+        entryFunction: 'process',
+        inputs: [
+          { name: 'true_altitude', displayName: '真实高度', type: 'float', comment: '真实高度', default: null },
+          { name: 'bias', displayName: '零偏', type: 'float', comment: '零偏', default: 0 },
+          { name: 'scale', displayName: '比例系数', type: 'float', comment: '比例系数', default: 1 }
+        ],
+        outputs: [
+          { name: 'measured_altitude', displayName: '测量高度', type: 'float', comment: '测量高度' }
+        ],
+        middleVars: [],
+        rawSource: 'def process(true_altitude: float, bias: float = 0.0, scale: float = 1.0):\n    measured_altitude = (true_altitude + bias) * scale\n    return measured_altitude\n'
+      },
+      rawSource: 'def process(true_altitude: float, bias: float = 0.0, scale: float = 1.0):\n    measured_altitude = (true_altitude + bias) * scale\n    return measured_altitude\n',
+      executionMode: 'backend',
+      executionConfig: {
+        endpoint: 'http://127.0.0.1:8765/api/python-flow/execute',
+        timeoutMs: 3000
+      },
+      portMapping: {
+        inputs: [
+          {
+            portId: 'input-0',
+            signalId: 'barometer_sensor.true_altitude',
+            varName: 'true_altitude',
+            displayName: '真实高度',
+            type: 'float',
+            default: null,
+            comment: '真实高度',
+            connected: false
+          }
+        ],
+        outputs: [
+          {
+            portId: 'output-0',
+            signalId: 'barometer_sensor.measured_altitude',
+            varName: 'measured_altitude',
+            displayName: '测量高度',
+            type: 'float',
+            comment: '测量高度'
+          }
+        ],
+        middleVars: []
+      }
+    },
+    faultSlots: [
     ]
   },
   subsystem_block: {
@@ -475,7 +590,16 @@ export const COMPONENT_REGISTRY = {
       frequencyRange: '0-16kHz',
       fftSize: '1024',
       windowFunction: 'Hann',
-      amplitudeUnit: 'dB'
+      amplitudeUnit: 'dB',
+      referenceLevel: '10',
+      attenuation: '0',
+      preamp: 'off',
+      rbw: '0.1',
+      vbw: '0.1',
+      sweepTime: '100',
+      detector: 'Sample',
+      traceMode: 'Clear/Write',
+      markerFrequency: ''
     }
   },
   instrument_logger: {
@@ -496,7 +620,8 @@ export const COMPONENT_REGISTRY = {
       instrumentType: '数据记录',
       sampleRate: '10Hz',
       signal: '系统总线',
-      inputPortName: '观测输入'
+      inputPortNameHigh: '正端（VΩ）',
+      inputPortNameLow: '负端（COM）'
     }
   },
   instrument_multimeter: {
@@ -515,6 +640,8 @@ export const COMPONENT_REGISTRY = {
       name: '数字万用表',
       instrumentType: '数字万用表',
       measurementMode: '直流电压',
+      positiveLead: { nodeId: '', direction: '', portIndex: 0 },
+      negativeLead: { nodeId: '', direction: '', portIndex: 0 },
       range: 'Auto',
       refreshRate: '5Hz',
       sampleRate: '5Hz',

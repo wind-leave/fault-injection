@@ -18,8 +18,57 @@ def _text(value):
     return str(value or "").strip().lower()
 
 
+def _rf_noise(node_id, step_index, time):
+    seed = sum(ord(char) for char in str(node_id or "rf"))
+    raw = math.sin(seed * 12.9898 + step_index * 78.233 + time * 5.173) * 43758.5453
+    return (raw - math.floor(raw)) * 2.0 - 1.0
+
+
+def _rf_source_value(node, time):
+    params = node.parameters
+    power = _first_numeric(params, ("amplitude", "power", "value"), 0.0)
+    modulation = _text(params.get("rfModulation")) or "cw"
+    center_frequency = max(0.0, _first_numeric(params, ("centerFrequencyHz", "frequency"), 0.0))
+    carrier_phase = 2.0 * math.pi * center_frequency * time
+    carrier = math.sin(carrier_phase)
+    modulation_rate = max(1e-6, _first_numeric(params, ("modulationRateHz",), 1.0))
+    modulation_phase = 2.0 * math.pi * modulation_rate * time
+
+    if modulation == "am":
+        depth = min(1.0, max(0.0, _first_numeric(params, ("modulationDepthRatio",), 0.0)))
+        return power * (1.0 + depth * math.sin(modulation_phase)) * carrier
+    if modulation == "fm":
+        deviation = max(0.0, _first_numeric(params, ("frequencyDeviationHz",), 0.0))
+        index = min(deviation / modulation_rate, 1000.0)
+        return power * math.sin(carrier_phase + index * math.sin(modulation_phase))
+    if modulation == "pm":
+        deviation = _first_numeric(params, ("phaseDeviationRad",), 0.0)
+        return power * math.sin(carrier_phase + deviation * math.sin(modulation_phase))
+    if modulation == "pulse":
+        prf = max(1e-6, _first_numeric(params, ("prfHz",), 1.0))
+        period = 1.0 / prf
+        width = min(period, max(0.0, _first_numeric(params, ("pulseWidthSeconds",), 0.0)))
+        return power * carrier if time % period < width else 0.0
+    if modulation == "digital":
+        bandwidth = max(1e-6, _first_numeric(params, ("bandwidthHz",), 1.0))
+        symbol_rate = max(1e-6, _first_numeric(params, ("symbolRateHz",), bandwidth))
+        sample_rate = _first_numeric(params, ("sampleRateHz",), symbol_rate * 2.0)
+        effective_rate = min(symbol_rate, max(sample_rate / 2.0, 1e-6))
+        symbol_index = math.floor(time * effective_rate)
+        symbol = 1.0 if _rf_noise(node.id, symbol_index, time) >= 0.0 else -1.0
+        return power * symbol * carrier
+    if modulation == "noise":
+        snr = _first_numeric(params, ("snrDb",), 0.0)
+        bandwidth = max(1.0, _first_numeric(params, ("bandwidthHz",), 1e6))
+        noise_scale = math.pow(10.0, -snr / 20.0) * math.sqrt(bandwidth / 1e6)
+        return power * carrier + abs(power) * noise_scale * _rf_noise(node.id, math.floor(time * 1000), time)
+    return power * carrier
+
+
 def _source_value(node, time):
     params = node.parameters
+    if _text(params.get("signalDomain")) == "rf":
+        return _rf_source_value(node, time)
     wave_type = _text(params.get("waveType"))
     if wave_type:
         amplitude = _first_numeric(params, ("amplitude", "value"), 0.0)
@@ -27,10 +76,20 @@ def _source_value(node, time):
         phase = _first_numeric(params, ("phase",), 0.0)
         offset = _first_numeric(params, ("offset",), 0.0)
         if wave_type in {"constant", "常值"}:
-            return offset + amplitude
+            return amplitude
         if wave_type in {"step", "阶跃"}:
-            step_time = max(0.2, frequency)
-            return offset + (amplitude if time >= step_time else 0.0)
+            initial_value = _first_numeric(params, ("initialValue",), 0.0)
+            final_value = _first_numeric(params, ("finalValue", "amplitude"), amplitude)
+            step_time = max(0.0, _first_numeric(params, ("stepTime", "frequency"), 1.0))
+            return final_value if time >= step_time else initial_value
+        if wave_type in {"ramp", "slope"}:
+            initial_value = _first_numeric(params, ("initialValue", "offset"), offset)
+            slope = _first_numeric(params, ("slope", "amplitude"), amplitude)
+            start_time = max(0.0, _first_numeric(params, ("startTime",), 0.0))
+            return initial_value + (slope * (time - start_time) if time >= start_time else 0.0)
+        if wave_type in {"noise", "random"}:
+            pseudo_random = math.sin((time + phase) * 12.9898) * 43758.5453
+            return offset + amplitude * ((pseudo_random - math.floor(pseudo_random)) * 2.0 - 1.0)
         if wave_type in {"sine", "sin", "正弦"}:
             return offset + amplitude * math.sin(2.0 * math.pi * frequency * time + phase)
 
@@ -109,11 +168,26 @@ def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_stat
     elif node.type == "simulation_block":
         module_inputs = {}
         for index, input_name in enumerate(node.module.inputs):
-            module_inputs[input_name] = inputs[index] if index < len(inputs) else 0.0
+            input_value = inputs[index] if index < len(inputs) else 0.0
+            module_inputs[input_name] = (
+                fault_runtime.apply_node_input(node_id, input_name, input_value, time)
+                if mode == "actual"
+                else input_value
+            )
+        module_parameters = {
+            name: spec.get("default", 0.0)
+            for name, spec in node.module.parameters.items()
+        }
+        module_parameters.update(node.parameters)
+        module_parameters = (
+            fault_runtime.apply_node_parameters(node_id, module_parameters, time)
+            if mode == "actual"
+            else module_parameters
+        )
         mode_states = module_states.setdefault(mode, {})
         module_result = node.module.call(
             module_inputs,
-            node.parameters,
+            module_parameters,
             time=time,
             dt=dt,
             state=mode_states.get(node_id, {}),
@@ -143,8 +217,15 @@ def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_stat
         outputs = {output_names[0]: float(value)}
 
     if mode == "actual":
-        value = fault_runtime.apply_node_output(node_id, value, time)
-        outputs[output_names[0]] = float(value)
+        for index, output_name in enumerate(output_names):
+            outputs[output_name] = fault_runtime.apply_node_output(
+                node_id,
+                outputs.get(output_name, 0.0),
+                time,
+                output_name=output_name,
+                is_primary=index == 0,
+            )
+        value = float(outputs.get(output_names[0], 0.0))
 
     cache[key] = float(value)
     next_values[key] = cache[key]
@@ -255,6 +336,17 @@ class SimulationSession:
         if self.done:
             return _round_time(self.graph.duration)
         return self.times[self.step_index]
+
+    def restart(self):
+        current_faults = self.fault_runtime.fault_instances
+        self.step_index = 0
+        self.fault_runtime = FaultRuntime(current_faults)
+        self.module_states = {"actual": {}, "reference": {}}
+        self.previous_values = {}
+
+    def run_from_zero(self):
+        self.restart()
+        return self.step(len(self.times))
 
     def step(self, steps=1):
         requested_steps = max(0, int(steps))

@@ -170,10 +170,18 @@ export function renderFaultTagParameterPanel(options = {}) {
   const tag = options.tag || {};
   const parameters = options.parameters || tag.parameters || {};
   const params = getEntries(parameters);
+  const enabled = tag.runtimeEnabled ?? tag.injectedFault?.active ?? tag.injectedFault?.enabled ?? true;
 
   return `
         <div class="pgroup fault-tag-param-panel" data-fault-tag-param-panel="${escapeHtml(tag.id)}">
           <div class="pglbl">${escapeHtml(COPY.parametersTitle)}</div>
+          <label class="fault-tag-param-row">
+            <span>是否启用</span>
+            <select data-fault-tag-enabled aria-label="是否启用">
+              <option value="true"${enabled ? ' selected' : ''}>启用</option>
+              <option value="false"${enabled ? '' : ' selected'}>禁用</option>
+            </select>
+          </label>
           ${renderParameterEditorRows(parameters)}
           ${params.length ? `
             <div class="fault-tag-param-actions">

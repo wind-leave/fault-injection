@@ -86,7 +86,11 @@ class TroubleshootingAlgorithmTests(unittest.TestCase):
         self.assertEqual(plan["keySteps"][0]["action"], "measure")
         self.assertIn("M1", plan["keySteps"][0]["text"])
         self.assertEqual(plan["keySteps"][-1]["action"], "replaceComponent")
+        self.assertEqual(plan["keySteps"][-1]["targetLabel"], "IMU")
+        self.assertIn("更换组件", plan["keySteps"][-1]["text"])
         self.assertIn("IMU", plan["keySteps"][-1]["text"])
+        self.assertEqual(plan["steps"][-1]["action"], "replaceComponent")
+        self.assertEqual(plan["steps"][-1]["targetLabel"], "IMU")
         self.assertNotIn("确认故障对象", " ".join(item["text"] for item in plan["keySteps"]))
 
     def test_generates_wire_replacement_for_edge_faults(self):
@@ -145,6 +149,18 @@ class TroubleshootingAlgorithmTests(unittest.TestCase):
 
         self.assertEqual(second["remainingFaultIds"], ["target-fault"])
         self.assertIsNone(second["nextRecommendedStep"])
+
+    def test_excludes_detectable_physical_points_from_generated_steps(self):
+        matrix = sample_d_matrix()
+        matrix["points"][0]["pointType"] = "physical"
+        matrix["points"][1]["pointType"] = "virtual"
+        matrix["points"][2]["pointType"] = "virtual"
+        path = build_troubleshooting_path(matrix, "target-fault")
+
+        measurement_steps = [step for step in path["steps"] if step.get("action") is None]
+        self.assertEqual([step["pointCode"] for step in measurement_steps], ["M2"])
+        self.assertNotIn("M1", [step["pointCode"] for step in measurement_steps])
+        self.assertEqual(path["steps"][-1]["action"], "replaceComponent")
 
 
 if __name__ == "__main__":

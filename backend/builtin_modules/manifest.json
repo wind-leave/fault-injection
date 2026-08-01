@@ -178,6 +178,113 @@
          "default": 1
         }
       } 
+    },
+    {
+      "moduleId": "cabinet01_module",
+      "importPath": "backend.builtin_modules.cabinet01",
+      "entryFunction": "process",
+      "inputs": ["socket02"],
+      "outputs": ["socket03"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "cabinet02_module",
+      "importPath": "backend.builtin_modules.cabinet02",
+      "entryFunction": "process",
+      "inputs": ["socket02", "socket03"],
+      "outputs": ["socket04"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "cabinet03_module",
+      "importPath": "backend.builtin_modules.cabinet03",
+      "entryFunction": "process",
+      "inputs": ["socket03"],
+      "outputs": ["socket05"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "vector2_passthrough",
+      "importPath": "backend.builtin_modules.vector2_passthrough",
+      "entryFunction": "process",
+      "inputs": ["input_vector"],
+      "outputs": ["output_vector"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "rf_four_channel_source",
+      "importPath": "backend.builtin_modules.rf_four_channel_source",
+      "entryFunction": "process",
+      "inputs": [],
+        "outputs": ["rf_samples"],
+        "parameters": {
+        "sample_1": {"type": "number", "min": -1000000, "max": 1000000, "default": 1.0},
+        "sample_2": {"type": "number", "min": -1000000, "max": 1000000, "default": 0.8},
+        "sample_3": {"type": "number", "min": -1000000, "max": 1000000, "default": 0.6},
+        "sample_4": {"type": "number", "min": -1000000, "max": 1000000, "default": 0.4},
+        "center_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 100},
+        "pulse_width_seconds": {"type": "number", "min": 0, "max": 3600, "default": 0.001},
+        "pulse_period_seconds": {"type": "number", "min": 0.000000001, "max": 3600, "default": 0.001},
+        "phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0}
+      }
+    },
+    {
+      "moduleId": "rf_downconverter",
+      "importPath": "backend.builtin_modules.rf_downconverter",
+      "entryFunction": "process",
+      "inputs": ["rf_input"],
+      "outputs": ["if_i", "if_q"],
+      "parameters": {
+        "lo_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 990000000},
+        "lo_phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0},
+        "conversion_gain": {"type": "number", "min": 0, "max": 1000000, "default": 1},
+        "low_pass_cutoff_hz": {"type": "number", "min": 0, "max": 1000000000, "default": 20000000}
+      }
+    },
+    {
+      "moduleId": "rf_pulse_feature_extractor",
+      "importPath": "backend.builtin_modules.rf_pulse_feature_extractor",
+      "entryFunction": "process",
+      "inputs": ["rf_signal"],
+      "outputs": [
+        "center_frequency_hz",
+        "pulse_period_seconds",
+        "pulse_width_seconds",
+        "pulse_amplitude_adc"
+      ],
+      "parameters": {
+        "fft_size": {"type": "number", "min": 4, "max": 4096, "default": 64},
+        "adc_full_scale": {"type": "number", "min": 0.000000001, "max": 1000000, "default": 1},
+        "envelope_threshold_adc": {"type": "number", "min": 0, "max": 255, "default": 12}
+      }
+    },
+    {
+      "moduleId": "Test",
+      "importPath": "backend.builtin_modules.Test",
+      "entryFunction": "process",
+      "inputs": ["sample_1"],
+      "outputs": ["rf_samples_1", "rf_samples_2", "rf_samples_3", "rf_samples_4"],
+      "parameters": {
+      }
+    },
+    {
+      "moduleId": "rf_limit_amplify_downconvert_split8",
+      "importPath": "backend.builtin_modules.rf_limit_amplify_downconvert_split8",
+      "entryFunction": "process",
+      "inputs": ["rf_input"],
+      "outputs": [
+        "rf_output_1", "rf_output_2", "rf_output_3", "rf_output_4",
+        "rf_output_5", "rf_output_6", "rf_output_7", "rf_output_8"
+      ],
+      "parameters": {
+        "limit_amplitude": {"type": "number", "min": 0, "max": 1000000, "default": 1},
+        "gain_db": {"type": "number", "min": -120, "max": 120, "default": 0},
+        "lo_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 99},
+        "lo_phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0},
+        "conversion_gain": {"type": "number", "min": 0, "max": 1000000, "default": 1},
+        "low_pass_cutoff_hz": {"type": "number", "min": 0, "max": 1000000000, "default": 5},
+        "split_insertion_loss_db": {"type": "number", "min": 0, "max": 120, "default": 0}
+      }
     }
   ]
 }

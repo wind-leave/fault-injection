@@ -1317,9 +1317,8 @@
             ]
           },
           "rawSource": "def process(pitch_command=0.0):\n    value = float(pitch_command)\n    shaped_command = max(min(value, 1.0), -1.0)\n    filtered_command = shaped_command\n    return {\"shaped_command\": shaped_command}, {\"filtered_command\": filtered_command}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -1538,9 +1537,8 @@
             ]
           },
           "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(attitude_error=0.0, dt=0.1, state=None):\n    state = state or {}\n    error = _clamp(attitude_error, -0.3, 0.3)\n    integrator = _clamp(float(state.get(\"integrator\", 0.0)) + error * float(dt), -0.22, 0.22)\n    torque = _clamp(1.18 * error + 0.16 * integrator, -0.26, 0.26)\n    controller_output = _first_order(state.get(\"controller_output\", 0.0), torque, 0.12, dt)\n    return {\n        \"outputs\": {\"torque_command\": controller_output},\n        \"state\": {\"integrator\": integrator, \"controller_output\": controller_output},\n        \"middleVars\": {\"integrator_state\": integrator},\n    }\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -1797,9 +1795,8 @@
             ]
           },
           "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(torque_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    allocated = _clamp(torque_command, -0.24, 0.24)\n    allocation_output = _first_order(state.get(\"allocation_output\", 0.0), allocated, 0.14, dt)\n    return {\n        \"outputs\": {\"motor_total_command\": allocation_output},\n        \"state\": {\"allocation_output\": allocation_output},\n        \"middleVars\": {\"allocation_state\": allocation_output},\n    }\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -2107,9 +2104,8 @@
             ]
           },
           "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_total_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_total_command, -0.22, 0.22)\n    mix_output = _first_order(state.get(\"mix_output\", 0.0), command, 0.1, dt)\n    return {\n        \"outputs\": {\n            \"motor_1_command\": mix_output,\n            \"motor_2_command\": mix_output,\n            \"motor_3_command\": mix_output,\n            \"motor_4_command\": mix_output,\n        },\n        \"state\": {\"mix_output\": mix_output},\n        \"middleVars\": {\"mixer_state\": mix_output},\n    }\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -2450,9 +2446,8 @@
             ]
           },
           "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_command, -0.22, 0.22)\n    motor_response = _first_order(state.get(\"motor_response\", 0.0), command, 0.28, dt)\n    return {\n        \"outputs\": {\"thrust\": motor_response},\n        \"state\": {\"motor_response\": motor_response},\n        \"middleVars\": {\"motor_state\": motor_response},\n    }\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -2732,9 +2727,8 @@
             ]
           },
           "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_command, -0.22, 0.22)\n    motor_response = _first_order(state.get(\"motor_response\", 0.0), command, 0.28, dt)\n    return {\n        \"outputs\": {\"thrust\": motor_response},\n        \"state\": {\"motor_response\": motor_response},\n        \"middleVars\": {\"motor_state\": motor_response},\n    }\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -3010,9 +3004,8 @@
             ]
           },
           "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_command, -0.22, 0.22)\n    motor_response = _first_order(state.get(\"motor_response\", 0.0), command, 0.28, dt)\n    return {\n        \"outputs\": {\"thrust\": motor_response},\n        \"state\": {\"motor_response\": motor_response},\n        \"middleVars\": {\"motor_state\": motor_response},\n    }\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -3288,9 +3281,8 @@
             ]
           },
           "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_command, -0.22, 0.22)\n    motor_response = _first_order(state.get(\"motor_response\", 0.0), command, 0.28, dt)\n    return {\n        \"outputs\": {\"thrust\": motor_response},\n        \"state\": {\"motor_response\": motor_response},\n        \"middleVars\": {\"motor_state\": motor_response},\n    }\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -3599,9 +3591,8 @@
             ]
           },
           "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef process(thrust_1=0.0, thrust_2=0.0, thrust_3=0.0, thrust_4=0.0, dt=0.1, state=None):\n    state = state or {}\n    torque = _clamp((float(thrust_1) + float(thrust_2) + float(thrust_3) + float(thrust_4)) / 4.0, -0.22, 0.22)\n    previous = float(state.get(\"pitch_rate\", 0.0))\n    pitch_rate = _clamp(previous + float(dt) * (1.04 * torque - 1.65 * previous), -0.18, 0.18)\n    return {\n        \"outputs\": {\"pitch_rate\": pitch_rate},\n        \"state\": {\"pitch_rate\": pitch_rate},\n        \"middleVars\": {\"pitch_state\": pitch_rate},\n    }\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -3981,9 +3972,8 @@
             ]
           },
           "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(body_rate=0.0, dt=0.1, state=None):\n    state = state or {}\n    input_rate = _clamp(body_rate, -0.2, 0.2)\n    measured_rate = _first_order(state.get(\"measured_rate\", 0.0), input_rate, 0.08, dt)\n    return {\n        \"outputs\": {\"measured_rate\": measured_rate},\n        \"state\": {\"measured_rate\": measured_rate},\n        \"middleVars\": {\"gyro_bias_state\": measured_rate - input_rate},\n    }\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -5031,9 +5021,8 @@
                 ]
               },
               "rawSource": "def process(pitch_command=0.0):\n    value = float(pitch_command)\n    shaped_command = max(min(value, 1.0), -1.0)\n    filtered_command = shaped_command\n    return {\"shaped_command\": shaped_command}, {\"filtered_command\": filtered_command}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -5252,9 +5241,8 @@
                 ]
               },
               "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(attitude_error=0.0, dt=0.1, state=None):\n    state = state or {}\n    error = _clamp(attitude_error, -0.3, 0.3)\n    integrator = _clamp(float(state.get(\"integrator\", 0.0)) + error * float(dt), -0.22, 0.22)\n    torque = _clamp(1.18 * error + 0.16 * integrator, -0.26, 0.26)\n    controller_output = _first_order(state.get(\"controller_output\", 0.0), torque, 0.12, dt)\n    return {\n        \"outputs\": {\"torque_command\": controller_output},\n        \"state\": {\"integrator\": integrator, \"controller_output\": controller_output},\n        \"middleVars\": {\"integrator_state\": integrator},\n    }\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -5511,9 +5499,8 @@
                 ]
               },
               "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(torque_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    allocated = _clamp(torque_command, -0.24, 0.24)\n    allocation_output = _first_order(state.get(\"allocation_output\", 0.0), allocated, 0.14, dt)\n    return {\n        \"outputs\": {\"motor_total_command\": allocation_output},\n        \"state\": {\"allocation_output\": allocation_output},\n        \"middleVars\": {\"allocation_state\": allocation_output},\n    }\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -5821,9 +5808,8 @@
                 ]
               },
               "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_total_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_total_command, -0.22, 0.22)\n    mix_output = _first_order(state.get(\"mix_output\", 0.0), command, 0.1, dt)\n    return {\n        \"outputs\": {\n            \"motor_1_command\": mix_output,\n            \"motor_2_command\": mix_output,\n            \"motor_3_command\": mix_output,\n            \"motor_4_command\": mix_output,\n        },\n        \"state\": {\"mix_output\": mix_output},\n        \"middleVars\": {\"mixer_state\": mix_output},\n    }\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -6164,9 +6150,8 @@
                 ]
               },
               "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_command, -0.22, 0.22)\n    motor_response = _first_order(state.get(\"motor_response\", 0.0), command, 0.28, dt)\n    return {\n        \"outputs\": {\"thrust\": motor_response},\n        \"state\": {\"motor_response\": motor_response},\n        \"middleVars\": {\"motor_state\": motor_response},\n    }\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -6446,9 +6431,8 @@
                 ]
               },
               "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_command, -0.22, 0.22)\n    motor_response = _first_order(state.get(\"motor_response\", 0.0), command, 0.28, dt)\n    return {\n        \"outputs\": {\"thrust\": motor_response},\n        \"state\": {\"motor_response\": motor_response},\n        \"middleVars\": {\"motor_state\": motor_response},\n    }\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -6724,9 +6708,8 @@
                 ]
               },
               "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_command, -0.22, 0.22)\n    motor_response = _first_order(state.get(\"motor_response\", 0.0), command, 0.28, dt)\n    return {\n        \"outputs\": {\"thrust\": motor_response},\n        \"state\": {\"motor_response\": motor_response},\n        \"middleVars\": {\"motor_state\": motor_response},\n    }\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -7002,9 +6985,8 @@
                 ]
               },
               "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(motor_command=0.0, dt=0.1, state=None):\n    state = state or {}\n    command = _clamp(motor_command, -0.22, 0.22)\n    motor_response = _first_order(state.get(\"motor_response\", 0.0), command, 0.28, dt)\n    return {\n        \"outputs\": {\"thrust\": motor_response},\n        \"state\": {\"motor_response\": motor_response},\n        \"middleVars\": {\"motor_state\": motor_response},\n    }\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -7313,9 +7295,8 @@
                 ]
               },
               "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef process(thrust_1=0.0, thrust_2=0.0, thrust_3=0.0, thrust_4=0.0, dt=0.1, state=None):\n    state = state or {}\n    torque = _clamp((float(thrust_1) + float(thrust_2) + float(thrust_3) + float(thrust_4)) / 4.0, -0.22, 0.22)\n    previous = float(state.get(\"pitch_rate\", 0.0))\n    pitch_rate = _clamp(previous + float(dt) * (1.04 * torque - 1.65 * previous), -0.18, 0.18)\n    return {\n        \"outputs\": {\"pitch_rate\": pitch_rate},\n        \"state\": {\"pitch_rate\": pitch_rate},\n        \"middleVars\": {\"pitch_state\": pitch_rate},\n    }\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -7695,9 +7676,8 @@
                 ]
               },
               "rawSource": "def _clamp(value, minimum, maximum):\n    numeric = float(value)\n    return max(minimum, min(maximum, numeric))\n\n\ndef _first_order(previous, target, tau, dt):\n    alpha = _clamp(float(dt) / (max(float(tau), 0.001) + float(dt)), 0.0, 1.0)\n    return float(previous) + alpha * (float(target) - float(previous))\n\n\ndef process(body_rate=0.0, dt=0.1, state=None):\n    state = state or {}\n    input_rate = _clamp(body_rate, -0.2, 0.2)\n    measured_rate = _first_order(state.get(\"measured_rate\", 0.0), input_rate, 0.08, dt)\n    return {\n        \"outputs\": {\"measured_rate\": measured_rate},\n        \"state\": {\"measured_rate\": measured_rate},\n        \"middleVars\": {\"gyro_bias_state\": measured_rate - input_rate},\n    }\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {

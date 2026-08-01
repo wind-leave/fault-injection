@@ -5,7 +5,6 @@ from backend.practice_action_rules import PracticeActionRuleEngine
 from backend.practice_actions import PracticeActionRuntime
 from backend.practice_observation import (
     compare_physical_snapshots,
-    evaluate_observation,
     evaluate_physical_measurement_snapshot,
     point_type,
 )
@@ -16,7 +15,11 @@ from backend.practice_scoring import (
 )
 from backend.practice_report import build_practice_evaluation_report
 from backend.schemas import SimulationBackendError
-from backend.troubleshooting import TroubleshootingSession, _fault_id
+from backend.troubleshooting import (
+    TroubleshootingSession,
+    _fault_id,
+    is_directly_diagnosable_from_physical_points,
+)
 
 
 DEFAULT_MAX_LIFETIME_SECONDS = 3600.0
@@ -106,6 +109,7 @@ class PracticeSession:
         simulation_session,
         d_matrix,
         target_fault_id,
+        initial_point_states=None,
         initial_recommended_path=None,
         key_nodes=None,
         scoring_rules=None,
@@ -120,6 +124,16 @@ class PracticeSession:
         self.action_runtime = PracticeActionRuntime(simulation_session)
         self.rule_engine = PracticeActionRuleEngine(simulation_session, rules=action_rules)
         self.troubleshooting = TroubleshootingSession(d_matrix, target_fault_id)
+        # Keep the original matrix for final-fault validation and retain a
+        # session-local working matrix for the iterative diagnosis process.
+        # Each virtual measurement consumes one point column and filters rows
+        # whose expected state disagrees with the saved point state.
+        self.active_d_matrix = _clone(self.troubleshooting.d_matrix)
+        self.initial_point_states = (
+            _clone(initial_point_states)
+            if isinstance(initial_point_states, list)
+            else self._initial_point_states_from_d_matrix()
+        )
         self.target_fault_id = _text(target_fault_id)
         self.scoring_rules = scoring_rules if isinstance(scoring_rules, dict) else {}
         self.started_at = time.time()
@@ -235,11 +249,11 @@ class PracticeSession:
         source_device_id = _text(point.get("sourceDeviceId") or point.get("sourceNodeId") or point.get("nodeId"))
         if not source_device_id and edge is not None:
             source_device_id = edge.source_node_id
-        source_port = _text(point.get("sourcePort"))
+        source_port = _text(point.get("sourcePortId") or point.get("portId") or point.get("sourcePort"))
         if not source_port and edge is not None:
             node = graph.nodes.get(edge.source_node_id)
-            if node is not None and edge.source_port_index < len(node.outputs):
-                source_port = node.outputs[edge.source_port_index]
+            if node is not None and edge.source_port_index < len(node.output_port_ids):
+                source_port = node.output_port_ids[edge.source_port_index]
             else:
                 source_port = "output" if edge.source_port_index == 0 else f"output-{edge.source_port_index + 1}"
         return source_device_id, source_port, channel, edge
@@ -258,6 +272,9 @@ class PracticeSession:
         outputs = ((steps[sample_index].get("actual") or {}).get(source_device_id) or {})
         keys = [source_port]
         if edge is not None:
+            source_node = self.simulation_session.graph.nodes.get(edge.source_node_id)
+            if source_node is not None and edge.source_port_index < len(source_node.outputs):
+                keys.append(source_node.outputs[edge.source_port_index])
             keys.extend([
                 "output" if edge.source_port_index == 0 else f"output-{edge.source_port_index + 1}",
                 f"output-{edge.source_port_index}",
@@ -320,7 +337,7 @@ class PracticeSession:
             "observed": virtual_measurement.get("observed") or "unknown",
             "routeRole": "evidenceCollection",
             "virtualMeasurement": _clone(virtual_measurement),
-            "candidateFaultsAfterAction": _clone(self.troubleshooting.remaining_fault_ids),
+            "candidateFaultsAfterAction": self._candidate_fault_ids_from_current_evidence(),
         })
 
     def _append_repair_path_step(self, action_record, action_application, repair_effect):
@@ -454,8 +471,111 @@ class PracticeSession:
                 observations[point_code] = observed
         return observations
 
+    def _initial_point_states_from_d_matrix(self):
+        """Legacy fallback when an older task does not provide saved results."""
+        enabled_fault_ids = {
+            _text(fault.get("faultId"))
+            for fault in self.simulation_session.fault_runtime.fault_instances
+            if bool(fault.get("enabled", True)) and _text(fault.get("faultId"))
+        }
+        rows = [
+            row for row in _arr(self.troubleshooting.d_matrix.get("rows"))
+            if _fault_id(row) in enabled_fault_ids
+        ]
+        if not rows:
+            rows = [self.troubleshooting.target_row]
+
+        def point_state(point):
+            point_code = _point_code(point)
+            states = [
+                bool((_matrix_cell(row, point_code) or {}).get("detectable"))
+                for row in rows
+                if _matrix_cell(row, point_code) is not None
+            ]
+            observed = "abnormal" if any(states) else "normal" if states else "unknown"
+            return {
+                "pointCode": point_code,
+                "observed": observed,
+            }
+
+        points = _arr(self.troubleshooting.d_matrix.get("points"))
+        return [point_state(point) for point in points]
+
+    def _initial_measurement_for_point(self, point_code, measurement_type):
+        measurement = next(
+            (
+                item
+                for item in _arr(self.initial_point_states)
+                if _text(item.get("pointCode") or item.get("pointId")) == _text(point_code)
+            ),
+            None,
+        )
+        if measurement is None:
+            point = _point_by_code(self.troubleshooting.d_matrix, point_code)
+            return {
+                "pointCode": _text(point_code),
+                "pointId": _text(point.get("pointId")),
+                "pointName": _text(point.get("name")),
+                "channel": _text(point.get("channel")),
+                "observed": "unknown",
+                "source": "initial-point-states",
+            }
+        observed = _text(measurement.get("observed")).lower()
+        return {
+            "pointCode": _text(measurement.get("pointCode") or point_code),
+            "pointId": _text(measurement.get("pointId")),
+            "pointName": _text(measurement.get("pointName")),
+            "channel": _text(measurement.get("channel")),
+            "observed": observed if observed in {"normal", "abnormal", "unknown"} else "unknown",
+            "source": "initial-point-states",
+        }
+
+    def _initial_physical_snapshot(self):
+        points = [
+            self._initial_measurement_for_point(_point_code(point), "physical")
+            for point in _arr(self.troubleshooting.d_matrix.get("points"))
+            if point_type(self.troubleshooting.d_matrix, _point_code(point)) == "physical"
+        ]
+        return {
+            "source": "initial-point-states",
+            "points": points,
+            "abnormalPointCodes": [point["pointCode"] for point in points if point["observed"] == "abnormal"],
+            "normalPointCodes": [point["pointCode"] for point in points if point["observed"] == "normal"],
+            "unknownPointCodes": [point["pointCode"] for point in points if point["observed"] == "unknown"],
+        }
+
+    def _apply_virtual_measurement_to_active_d_matrix(self, point_code, observed):
+        """Apply a measured virtual-point state to the working D matrix."""
+        point_code = _text(point_code)
+        if not point_code:
+            return
+
+        normalized_observed = _text(observed).lower()
+        if normalized_observed in {"normal", "abnormal"}:
+            expected_detectable = normalized_observed == "abnormal"
+            self.active_d_matrix["rows"] = [
+                row
+                for row in _arr(self.active_d_matrix.get("rows"))
+                if bool((_matrix_cell(row, point_code) or {}).get("detectable")) == expected_detectable
+            ]
+
+        self.active_d_matrix["points"] = [
+            point
+            for point in _arr(self.active_d_matrix.get("points"))
+            if _point_code(point) != point_code
+        ]
+        for row in _arr(self.active_d_matrix.get("rows")):
+            row["cells"] = [
+                cell
+                for cell in _arr(row.get("cells"))
+                if _text(cell.get("pointCode") or cell.get("pointId")) != point_code
+            ]
+
     def _candidate_rows_from_current_evidence(self):
-        rows = _arr(self.troubleshooting.d_matrix.get("rows"))
+        rows = _arr(self.active_d_matrix.get("rows"))
+        target_row = next((row for row in rows if _fault_id(row) == self.target_fault_id), None)
+        if target_row and is_directly_diagnosable_from_physical_points(self.active_d_matrix, target_row, rows):
+            return [target_row]
         observations = self._known_point_observations()
         if not observations:
             return list(rows)
@@ -549,11 +669,11 @@ class PracticeSession:
         }
         candidate_rows = self._candidate_rows_from_current_evidence()
         actions = []
-        for point in _arr(self.troubleshooting.d_matrix.get("points")):
+        for point in _arr(self.active_d_matrix.get("points")):
             point_code = _point_code(point)
             if not point_code or point_code in measured_codes:
                 continue
-            if point_type(self.troubleshooting.d_matrix, point_code) != "virtual":
+            if point_type(self.active_d_matrix, point_code) != "virtual":
                 continue
             target_id = _text(point.get("channel") or point.get("pointId"))
             information_gain = self._expected_information_gain(point_code, candidate_rows)
@@ -588,8 +708,8 @@ class PracticeSession:
         best_measurement_gain = max(
             (
                 self._expected_information_gain(_point_code(point), candidate_rows)
-                for point in _arr(self.troubleshooting.d_matrix.get("points"))
-                if point_type(self.troubleshooting.d_matrix, _point_code(point)) == "virtual"
+                for point in _arr(self.active_d_matrix.get("points"))
+                if point_type(self.active_d_matrix, _point_code(point)) == "virtual"
             ),
             default=0.0,
         )
@@ -768,10 +888,7 @@ class PracticeSession:
         )
 
     def initial_response(self):
-        simulation_result = self.simulation_session.step(1)
-        simulation_result["sessionId"] = self.simulation_session_id
-        self.simulation_results.append(_clone(simulation_result))
-        snapshot = evaluate_physical_measurement_snapshot(self.troubleshooting.d_matrix, simulation_result)
+        snapshot = self._initial_physical_snapshot()
         self.latest_physical_measurement_snapshot = _clone(snapshot)
         self.initial_physical_measurement_snapshot = _clone(snapshot)
         self.physical_measurement_snapshots.append(_clone(snapshot))
@@ -852,14 +969,16 @@ class PracticeSession:
                 "pointCode",
                 "measurePoint can only be used for virtual measurement points",
             )
-        simulation_result = _clone(self.simulation_results[-1]) if self.simulation_results else self.simulation_session.step(1)
-        simulation_result["sessionId"] = self.simulation_session_id
-        virtual_measurement = evaluate_observation(self.troubleshooting.d_matrix, action_record, simulation_result)
+        virtual_measurement = self._initial_measurement_for_point(action_record.get("pointCode"), "virtual")
         action_record["observed"] = virtual_measurement["observed"]
         action_record["virtualMeasurement"] = _clone(virtual_measurement)
         self.student_actions.append(action_record)
         self.last_activity_at = action_record["recordedAt"]
         self.virtual_measurements.append(_clone(virtual_measurement))
+        self._apply_virtual_measurement_to_active_d_matrix(
+            action_record.get("pointCode"),
+            virtual_measurement.get("observed"),
+        )
         self._append_measurement_path_step(action_record, virtual_measurement)
         self._append_dynamic_reference_record(action_record, reference_before)
         self.simulation_action_history.append({

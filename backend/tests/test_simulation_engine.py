@@ -13,6 +13,45 @@ class SimulationEngineTests(unittest.TestCase):
         for actual_value, expected_value in zip(actual, expected):
             self.assertAlmostEqual(actual_value, expected_value, places=10)
 
+    def test_routes_a_fixed_length_vector_through_component_input_and_output_ports(self):
+        package = {
+            "schemaVersion": 1,
+            "packageId": "vector-port-package",
+            "simulationConfig": {"duration": 0.1, "stepSize": 0.1},
+            "nodes": [
+                {
+                    "id": "vector-source",
+                    "type": "signal_source",
+                    "parameters": {"value": [1, 2, 3, 4]},
+                    "outputs": [{"id": "out", "name": "out", "dataType": "vector", "vectorLength": 4}],
+                },
+                {
+                    "id": "imu",
+                    "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "passthrough", "entryFunction": "process"},
+                    "parameters": {},
+                    "inputs": [{"id": "imu-input", "name": "input", "dataType": "vector", "vectorLength": 4}],
+                    "outputs": [{"id": "imu-output", "name": "output", "dataType": "vector", "vectorLength": 4}],
+                },
+                {
+                    "id": "scope",
+                    "type": "instrument_scope",
+                    "inputs": [{"id": "ch1", "name": "CH1", "dataType": "vector", "vectorLength": 4}],
+                },
+            ],
+            "edges": [
+                {"id": "source-imu", "sourceNodeId": "vector-source", "sourcePortIndex": 0, "targetNodeId": "imu", "targetPortIndex": 0},
+                {"id": "imu-scope", "sourceNodeId": "imu", "sourcePortIndex": 0, "targetNodeId": "scope", "targetPortIndex": 0},
+            ],
+            "faultInstances": [],
+            "measurementPoints": [{"id": "scope.ch1", "scopeNodeId": "scope", "channel": "ch1", "vectorIndex": 2}],
+        }
+
+        result = run_simulation(compile_graph(package, ModuleRegistry.from_builtin_manifest()))
+
+        self.assertEqual(result["componentOutputs"]["steps"][0]["actual"]["imu"]["output"], [1.0, 2.0, 3.0, 4.0])
+        self.assertEqual(result["curves"]["channels"]["scope.ch1.actual"], [3.0])
+
     def test_returns_reference_and_actual_curves(self):
         graph = compile_graph(valid_package(), ModuleRegistry.from_builtin_manifest())
 
@@ -598,6 +637,9 @@ class SimulationEngineTests(unittest.TestCase):
         pseudo_random = math.sin((0.1 + 0.25) * 12.9898) * 43758.5453
         expected_noise = 1 + 2 * ((pseudo_random - math.floor(pseudo_random)) * 2 - 1)
         self.assertAlmostEqual(_source_value(noise_node, 0.1), expected_noise)
+        pulse_node = AnalogNode({"waveType": "pulse", "amplitude": 8, "lowValue": -1, "frequency": 1, "dutyCycle": 25, "phase": 0})
+        self.assertEqual(_source_value(pulse_node, 0.1), 8.0)
+        self.assertEqual(_source_value(pulse_node, 0.5), -1.0)
 
     def test_rf_modulation_modes_generate_carrier_based_outputs(self):
         class RfNode:
@@ -620,11 +662,11 @@ class SimulationEngineTests(unittest.TestCase):
             0.0,
         )
         self.assertAlmostEqual(
-            _source_value(RfNode("pulse", {**base, "rfModulation": "pulse", "pulseWidthSeconds": 0.5, "prfHz": 1}), 0.25),
+            _source_value(RfNode("pulse", {**base, "rfModulation": "pulse", "pulseWidthSeconds": 0.5, "pulsePeriodSeconds": 1}), 0.25),
             10.0,
         )
         self.assertEqual(
-            _source_value(RfNode("pulse", {**base, "rfModulation": "pulse", "pulseWidthSeconds": 0.5, "prfHz": 1}), 0.75),
+            _source_value(RfNode("pulse", {**base, "rfModulation": "pulse", "pulseWidthSeconds": 0.5, "pulsePeriodSeconds": 1}), 0.75),
             0.0,
         )
         self.assertAlmostEqual(
@@ -754,7 +796,10 @@ class SimulationEngineTests(unittest.TestCase):
         self.assertIn("rotor_thrust", first_step["rotor-1"])
         self.assertIn("attitude", first_step["six-dof"])
         self.assertIn("attitude_feedback", first_step["sensor"])
-        self.assertGreater(result["curves"]["channels"]["scope-1.ch1.actual"][-1], 0.0)
+        # The source port index is now honored.  With equal rotor thrust, the
+        # symmetric configuration has zero attitude feedback but positive altitude.
+        self.assertEqual(result["curves"]["channels"]["scope-1.ch1.actual"][-1], 0.0)
+        self.assertGreater(first_step["six-dof"]["altitude"], 0.0)
 
 
 if __name__ == "__main__":

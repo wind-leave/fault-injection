@@ -133,8 +133,8 @@ describe('backend step simulation runtime', () => {
     target.__GZ_STATE__.canvases = {
       'canvas-root': {
         nodes: [
-          { id: 'source-1', type: 'signal_source', outputs: [{ name: 'out' }] },
-          { id: 'spectrum-1', type: 'instrument_spectrum' }
+          { id: 'source-1', type: 'signal_source', outputs: [{ name: 'out', dataType: 'vector', vectorLength: 2 }] },
+          { id: 'spectrum-1', type: 'instrument_spectrum', props: { vectorChannel: 2 } }
         ],
         edges: [{
           id: 'edge-source-spectrum',
@@ -151,16 +151,16 @@ describe('backend step simulation runtime', () => {
       componentOutputs: {
         time: [0, 0.1],
         steps: [
-          { time: 0, actual: { 'source-1': { out: 1 } }, reference: { 'source-1': { out: 1 } } },
-          { time: 0.1, actual: { 'source-1': { out: 1.5 } }, reference: { 'source-1': { out: 1 } } }
+          { time: 0, actual: { 'source-1': { out: [1, 4] } }, reference: { 'source-1': { out: [1, 4] } } },
+          { time: 0.1, actual: { 'source-1': { out: [1.5, 5] } }, reference: { 'source-1': { out: [1, 4] } } }
         ]
       },
       metrics: { sampleCount: 2, stepIndex: 2, time: 0.2, done: false }
     });
 
     expect(target.__GZ_SIM__.actual.instrumentSamples['spectrum-1']).toEqual([
-      { t: 0, actual: 1 },
-      { t: 0.1, actual: 1.5 }
+      { t: 0, actual: 4 },
+      { t: 0.1, actual: 5 }
     ]);
     expect(target.__GZ_SIM__.reference.instrumentSamples['spectrum-1']).toBeUndefined();
   });

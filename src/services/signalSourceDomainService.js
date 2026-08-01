@@ -58,22 +58,19 @@ const DOMAIN_DEFAULTS = {
   analog: {
     name: '模拟信号源',
     signalDomain: 'analog',
-    analogKind: 'generic',
     waveType: '正弦',
     amplitude: '1.0',
     frequency: '1.0',
     phase: '0',
     offset: '0',
-    sampleRate: '',
-    minValue: '',
-    maxValue: '',
+    dutyCycle: '50',
+    lowValue: '0',
     unit: '',
     outputFormat: '标量'
   },
   rf: {
     name: '射频信号源',
     signalDomain: 'rf',
-    rfKind: 'communication',
     centerFrequency: '',
     bandwidth: '',
     power: '',
@@ -88,7 +85,9 @@ const DOMAIN_DEFAULTS = {
     snr: '',
     sampleRate: '',
     pulseWidth: '',
-    prf: '',
+    pulseWidthUnit: 'μs',
+    pulsePeriod: '',
+    pulsePeriodUnit: 'ms',
     channel: '',
     polarization: '',
     rfProfile: '',
@@ -113,11 +112,40 @@ export function createSignalSourceProps(domain = 'analog', overrides = {}) {
 export function normalizeSignalSourceProps(props = {}) {
   const original = clone(props ?? {});
   const signalDomain = normalizeSignalDomain(original.signalDomain);
-  return {
+  const normalized = {
     ...createSignalSourceProps(signalDomain),
     ...original,
     signalDomain
   };
+
+  // 将旧模型中“250us”这类带单位的时长拆分成数值与单位，便于属性面板继续编辑。
+  if (signalDomain === 'rf') {
+    ['pulseWidth', 'pulsePeriod'].forEach((key) => {
+      const unitKey = `${key}Unit`;
+      if (Object.prototype.hasOwnProperty.call(original, unitKey)) return;
+      const match = String(original[key] ?? '').trim().match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)\s*(ns|us|μs|µs|ms|s)\s*$/i);
+      if (!match) return;
+      normalized[key] = match[1];
+      normalized[unitKey] = match[2].toLowerCase().replace(/^us$/, 'μs').replace('µ', 'μ');
+    });
+  }
+
+  // Preserve pulse behavior for models saved before PRF was replaced by
+  // the pulse repetition period (重周).
+  if (signalDomain === 'rf' && !String(normalized.pulsePeriod ?? '').trim() && String(original.prf ?? '').trim()) {
+    const text = String(original.prf).trim().toLowerCase();
+    const value = Number.parseFloat(text);
+    const multiplier = /ghz\s*$/.test(text) ? 1e9
+      : /mhz\s*$/.test(text) ? 1e6
+        : /khz\s*$/.test(text) ? 1e3
+          : 1;
+    if (Number.isFinite(value) && value > 0) {
+      normalized.pulsePeriod = String(1000 / (value * multiplier));
+      normalized.pulsePeriodUnit = 'ms';
+    }
+  }
+
+  return normalized;
 }
 
 export function summarizeSignalSource(node = {}) {

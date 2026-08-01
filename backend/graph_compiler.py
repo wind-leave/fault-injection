@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from backend.schemas import SimulationBackendError, validate_executable_package
+from backend.schemas import SimulationBackendError, normalize_port_data_type, validate_executable_package
 
 
 @dataclass(frozen=True)
@@ -9,6 +9,9 @@ class ExecutableNode:
     type: str
     parameters: dict
     outputs: tuple
+    output_port_ids: tuple
+    input_ports: tuple
+    output_ports: tuple
     module: object = None
 
 
@@ -27,6 +30,7 @@ class MeasurementBinding:
     scope_node_id: str
     channel: str
     target_port_index: int
+    vector_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -61,6 +65,26 @@ def _measurement_port(point):
     return 0
 
 
+def _measurement_vector_index(point):
+    value = point.get("vectorIndex", 0)
+    if isinstance(value, bool):
+        return 0
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _port_definition(port, index, direction):
+    name = str(port.get("name") or port.get("id") or f"{direction}-{index}")
+    return {
+        "id": str(port.get("id") or port.get("portId") or port.get("key") or name),
+        "name": name,
+        "dataType": normalize_port_data_type(port.get("dataType", port.get("type", "scalar"))),
+        "vectorLength": port.get("vectorLength", port.get("length")),
+    }
+
+
 def compile_graph(package, registry):
     validate_executable_package(package)
     raw_nodes = package["nodes"]
@@ -71,15 +95,26 @@ def compile_graph(package, registry):
             binding = node.get("pythonBinding") or {}
             module_id = binding.get("moduleId")
             module = registry.require(module_id, f"nodes[{index}].pythonBinding.moduleId")
+        raw_inputs = [input_port for input_port in node.get("inputs") or [] if isinstance(input_port, dict)]
+        raw_outputs = [output for output in node.get("outputs") or [] if isinstance(output, dict)]
+        input_ports = tuple(_port_definition(port, port_index, "input") for port_index, port in enumerate(raw_inputs))
+        output_ports = tuple(_port_definition(port, port_index, "output") for port_index, port in enumerate(raw_outputs))
+        outputs = tuple(
+            str(output.get("name") or output.get("id") or f"output-{output_index}")
+            for output_index, output in enumerate(raw_outputs)
+        )
+        output_port_ids = tuple(
+            str(output.get("id") or output.get("portId") or output.get("key") or output.get("name") or f"output-{output_index}")
+            for output_index, output in enumerate(raw_outputs)
+        )
         nodes[node["id"]] = ExecutableNode(
             id=node["id"],
             type=node["type"],
             parameters=dict(node.get("parameters") or {}),
-            outputs=tuple(
-                str(output.get("name") or output.get("id") or f"output-{output_index}")
-                for output_index, output in enumerate(node.get("outputs") or [])
-                if isinstance(output, dict)
-            ),
+            outputs=outputs,
+            output_port_ids=output_port_ids,
+            input_ports=input_ports,
+            output_ports=output_ports,
             module=module,
         )
 
@@ -94,6 +129,16 @@ def compile_graph(package, registry):
         if target_id not in nodes:
             raise SimulationBackendError("EDGE_ENDPOINT_NOT_FOUND", f"edges[{index}].targetNodeId", f"target node not found: {target_id}")
         target_port_index = _edge_port(edge, "targetPortIndex")
+        source_port_index = _edge_port(edge, "sourcePortIndex")
+        source_ports = nodes[source_id].output_ports
+        target_ports = nodes[target_id].input_ports
+        if source_port_index < len(source_ports) and target_port_index < len(target_ports):
+            source_port = source_ports[source_port_index]
+            target_port = target_ports[target_port_index]
+            if source_port["dataType"] != target_port["dataType"]:
+                raise SimulationBackendError("PORT_TYPE_MISMATCH", f"edges[{index}]", "source and target port data types do not match")
+            if source_port["dataType"] == "vector" and source_port["vectorLength"] != target_port["vectorLength"]:
+                raise SimulationBackendError("PORT_SHAPE_MISMATCH", f"edges[{index}]", "source and target vector lengths do not match")
         input_key = (target_id, target_port_index)
         if input_key in occupied_inputs:
             raise SimulationBackendError("INPUT_PORT_CONFLICT", f"edges[{index}].targetPortIndex", f"duplicate input connection for {target_id}:{target_port_index}")
@@ -101,7 +146,7 @@ def compile_graph(package, registry):
         compiled = ExecutableEdge(
             id=edge.get("id", f"edge-{index}"),
             source_node_id=source_id,
-            source_port_index=_edge_port(edge, "sourcePortIndex"),
+            source_port_index=source_port_index,
             target_node_id=target_id,
             target_port_index=target_port_index,
         )
@@ -118,6 +163,7 @@ def compile_graph(package, registry):
             scope_node_id=scope_node_id,
             channel=point.get("channel", "ch1"),
             target_port_index=_measurement_port(point),
+            vector_index=_measurement_vector_index(point),
         ))
 
     config = package["simulationConfig"]

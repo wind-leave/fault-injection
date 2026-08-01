@@ -39,8 +39,14 @@ function sourceForPoint(point, edges, connections) {
   const edge = edges.find((item) => item?.id === edgeId) ?? null;
   const connection = connections.find((item) => item?.id === edgeId) ?? null;
   const sourcePort = String(
-    point?.sourcePort
+    point?.sourcePortId
+    ?? point?.portId
     ?? connection?.sourcePort
+    ?? edge?.sourcePortMeta?.portId
+    ?? edge?.sourcePortMeta?.id
+    ?? edge?.sourcePort?.portId
+    ?? edge?.sourcePort?.id
+    ?? point?.sourcePort
     ?? edge?.sourcePort?.name
     ?? edge?.sourcePort?.key
     ?? (Number(edge?.sourcePortIndex) ? `output-${Number(edge.sourcePortIndex) + 1}` : 'output')
@@ -92,6 +98,28 @@ function pointSamples(point, edge, nodeId, componentOutputs) {
     }));
 }
 
+function matrixCell(row, pointCode) {
+  return Array.isArray(row?.cells)
+    ? row.cells.find((cell) => String(cell?.pointCode ?? cell?.pointId ?? '') === pointCode)
+    : null;
+}
+
+function pointObservedState(point, dMatrix, enabledFaultIds) {
+  const pointCode = String(point?.shortName ?? point?.pointCode ?? point?.pointId ?? '');
+  const activeRows = (Array.isArray(dMatrix?.rows) ? dMatrix.rows : [])
+    .filter((row) => enabledFaultIds.has(String(row?.faultId ?? row?.faultTypeId ?? row?.caseId ?? row?.id ?? '')));
+  if (!activeRows.length) {
+    return 'unknown';
+  }
+  const activeCells = activeRows.map((row) => matrixCell(row, pointCode)).filter(Boolean);
+  if (!activeCells.length) {
+    return 'unknown';
+  }
+  return activeCells.some((cell) => cell.detectable)
+    ? 'abnormal'
+    : 'normal';
+}
+
 function buildMeasurementPoint(point, edges, connections, componentOutputs) {
   const { edge, nodeId, channel, sourcePort } = sourceForPoint(point, edges, connections);
   return {
@@ -103,6 +131,18 @@ function buildMeasurementPoint(point, edges, connections, componentOutputs) {
     sourcePort,
     samples: pointSamples(point, edge, nodeId, componentOutputs)
   };
+}
+
+function initialPointStates(dMatrix, executableModel) {
+  const points = Array.isArray(dMatrix?.points) ? dMatrix.points : [];
+  const enabledFaultIds = new Set((Array.isArray(executableModel?.faultInstances) ? executableModel.faultInstances : [])
+    .filter((fault) => fault?.enabled !== false)
+    .map((fault) => String(fault?.faultId ?? ''))
+    .filter(Boolean));
+  return points.map((point) => ({
+    pointCode: String(point?.shortName ?? point?.pointCode ?? point?.pointId ?? ''),
+    observed: pointObservedState(point, dMatrix, enabledFaultIds)
+  }));
 }
 
 function buildInitialMeasurementData(dMatrix, executableModel, renderData, componentOutputs) {
@@ -202,6 +242,7 @@ export function buildPracticeTaskPackage(input = {}) {
       },
       targetFaultId: targetFault?.faultId ?? null,
       dMatrix,
+      initialPointStates: initialPointStates(dMatrix, executableModel),
       initialRecommendedPath
     }
   };

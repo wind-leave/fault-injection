@@ -118,7 +118,7 @@ describe('Python binding app integration', () => {
       type: 'simulation_block',
       templateId: 'airspeed_sensor',
       props: {
-        name: '空速传感器 1',
+        name: '空速传感器',
         moduleType: '传感器模型',
         inputs: [{ name: '真实空速', type: '标量', varName: 'true_airspeed', unit: 'm/s' }],
         outputs: [{ name: '测量空速', type: '标量', varName: 'measured_airspeed', unit: 'm/s' }],
@@ -155,7 +155,7 @@ describe('Python binding app integration', () => {
     const block = document.getElementById(`b-${node.id}`);
     expect(block?.querySelector('.blk-kicker')?.textContent).toBe('仿真');
     expect(block?.querySelector('.node-card__python-chip')).toBeNull();
-    expect(block?.querySelector('.blk-lbl')?.textContent).toBe('空速传感器 1');
+    expect(block?.querySelector('.blk-lbl')?.textContent).toBe('空速传感器');
     expect(block?.querySelector('.blk-lbl')?.textContent).not.toBe('airspeed_sensor.py');
     expect(block?.getAttribute('title')).toContain('airspeed_sensor.py');
 
@@ -192,19 +192,21 @@ describe('Python binding app integration', () => {
     expect(reboundBlock?.querySelector('.blk-lbl')?.textContent).toBe('仿真块 1');
     expect(reboundBlock?.textContent).not.toContain('pid_controller.py');
     expect(reboundBlock?.getAttribute('title')).toContain('pid_controller.py');
-    expect(reboundBlock?.querySelectorAll('.node-port--input').length).toBe(2);
-    expect(reboundBlock?.querySelectorAll('.node-port--output:not(.node-port--top)').length).toBe(1);
+    expect(reboundBlock?.querySelectorAll('.node-port--input').length).toBe(3);
+    expect(reboundBlock?.querySelectorAll('.node-port--output:not(.node-port--top)').length).toBe(2);
     expect(reboundBlock?.querySelectorAll('.node-port--top').length).toBe(1);
+    expect(reboundBlock?.querySelectorAll('.node-port--bottom').length).toBe(1);
     const portLabels = [...reboundBlock.querySelectorAll('.node-port__label')].map((item) => item.textContent);
-    expect(portLabels).toEqual(expect.arrayContaining(['error signal', 'step', 'control', 'integral state']));
-    expect(reboundBlock?.querySelectorAll('button.node-port').length).toBe(4);
+    expect(portLabels).toEqual(expect.arrayContaining(['error signal', 'step', 'control', '电源输入', '电源地']));
+    expect(portLabels).not.toEqual(expect.arrayContaining(['integral state']));
+    expect(reboundBlock?.querySelectorAll('button.node-port').length).toBe(5);
 
     const inputPorts = [...reboundBlock.querySelectorAll('.node-port--input')];
     const outputPorts = [...reboundBlock.querySelectorAll('.node-port--output')];
     expect(inputPorts[0]?.getAttribute('title')).toContain('error');
     expect(inputPorts[1]?.getAttribute('title')).toContain('dt');
     expect(outputPorts[0]?.getAttribute('title')).toContain('output_0');
-    expect(outputPorts[1]?.getAttribute('title')).toContain('integral');
+    expect(outputPorts[1]?.getAttribute('title')).toContain('电源地');
     expect(reboundBlock?.querySelector('.node-port .node-port__inner')).not.toBeNull();
 
     wrapper.unmount();

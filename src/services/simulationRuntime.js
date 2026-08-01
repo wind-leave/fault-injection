@@ -1,4 +1,4 @@
-import { executePythonBinding, executePythonBindingSync } from './pythonExecutionAdapter.js';
+import { executePythonBindingSync } from './pythonExecutionAdapter.js';
 import {
   executeFlowBlockPythonBindingSync,
   executeSimulationBlockPythonBindingSync,
@@ -52,7 +52,6 @@ export function createSimulationRuntimeFacade() {
     stop() {
       window.simStop?.();
     },
-    executePythonBinding,
     executePythonBindingSync,
     executeFlowBlockPythonBindingSync,
     executeSimulationBlockPythonBindingSync,
@@ -92,7 +91,6 @@ export function createSimulationRuntimeFacade() {
 
 if (typeof window !== 'undefined') {
   window.__GZ_PYTHON_RUNTIME__ = {
-    executePythonBinding,
     executePythonBindingSync,
     executeFlowBlockPythonBindingSync,
     executeSimulationBlockPythonBindingSync,

@@ -281,6 +281,27 @@ describe('Flight model package app integration', () => {
     __resetLegacyRuntimeForTests();
   });
 
+  it('hides palette templates that are present in an imported model', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const sensor = window.createNode('airspeed_sensor', 320, 240);
+    const exportedPackage = window.__GZ_FLIGHT_MODEL_PACKAGE__.exportCurrent();
+    expect(sensor).toMatchObject({ type: 'simulation_block', templateId: 'airspeed_sensor' });
+
+    window.doCreateBlankWorkspace();
+    await flushRuntime();
+    expect(document.querySelector('[data-component="airspeed_sensor"]')).not.toBeNull();
+
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(exportedPackage)).toMatchObject({ ok: true });
+    await flushRuntime();
+    expect(window.__GZ_STATE__.modelNodes[0]).toMatchObject({ templateId: 'airspeed_sensor' });
+    expect(document.querySelector('[data-component="airspeed_sensor"]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
   it('imports and exports a flight model package through the legacy runtime bridge', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -359,10 +380,10 @@ describe('Flight model package app integration', () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
-    expect(window.__GZ_COMPONENT_GROUPS__.map((group) => group.id)).toContain('signal-ops');
+    expect(window.__GZ_COMPONENT_GROUPS__.map((group) => group.id)).not.toContain('signal-ops');
     expect(window.__GZ_COMPONENT_REGISTRY__.flow_block).toMatchObject({
       type: 'flow_block',
-      group: 'signal-ops',
+      group: 'legacy-hidden',
       label: '信号适配块'
     });
     expect(window.__GZ_COMPONENT_LIBRARY__.flow_block).toMatchObject({

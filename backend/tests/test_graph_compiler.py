@@ -42,6 +42,17 @@ class GraphCompilerTests(unittest.TestCase):
         self.assertEqual(context.exception.error_code, "INPUT_PORT_CONFLICT")
         self.assertEqual(context.exception.field, "edges[2].targetPortIndex")
 
+    def test_rejects_vector_ports_with_different_fixed_lengths(self):
+        package = valid_package()
+        package["nodes"][0]["outputs"] = [{"name": "out", "dataType": "vector", "vectorLength": 4}]
+        package["nodes"][1]["inputs"] = [{"name": "input", "dataType": "vector", "vectorLength": 3}]
+
+        with self.assertRaises(SimulationBackendError) as context:
+            compile_graph(package, ModuleRegistry.from_builtin_manifest())
+
+        self.assertEqual(context.exception.error_code, "PORT_SHAPE_MISMATCH")
+        self.assertEqual(context.exception.field, "edges[0]")
+
 
 if __name__ == "__main__":
     unittest.main()

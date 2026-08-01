@@ -124,30 +124,3 @@ export function executePythonBindingSync({ adapterMode = 'mock', payload }) {
 
   return buildMockExecutionResult(payload);
 }
-
-export async function executePythonBinding({
-  adapterMode = 'mock',
-  endpoint = '/api/python-flow/execute',
-  payload,
-  fetchImpl = globalThis.fetch
-}) {
-  if (adapterMode === 'backend') {
-    if (typeof fetchImpl !== 'function') {
-      throw new Error('PYTHON_EXECUTION_FAILED: fetch unavailable');
-    }
-
-    const response = await fetchImpl(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-      throw new Error(`PYTHON_EXECUTION_FAILED: ${response.status}`);
-    }
-
-    return response.json();
-  }
-
-  return buildMockExecutionResult(payload);
-}

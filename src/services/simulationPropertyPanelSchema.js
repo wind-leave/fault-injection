@@ -90,6 +90,40 @@ function renderSimulationInterfaceRows(items, prefix, helpers = {}) {
       </div>`).join('');
 }
 
+function powerPorts(props = {}) {
+  return {
+    inputs: list(props.powerInputs).length
+      ? list(props.powerInputs)
+      : [{ name: '电源输入', type: '电源', voltage: '28V' }],
+    outputs: list(props.powerOutputs).length
+      ? list(props.powerOutputs)
+      : [{ name: '电源地', type: '电源', voltage: '0V' }]
+  };
+}
+
+function renderPowerInterfaceGroup(props, helpers = {}) {
+  const escape = helpers.escapeHtml || escapeHtml;
+  const ports = powerPorts(props);
+  const renderPort = (item, position, index) => `
+    <div class="props-port-card">
+      <div class="props-port-card__head">
+        <span class="props-port-card__kind">${escape(position)}电源端口 ${index + 1}</span>
+        <span class="pv pv-ok">已配置</span>
+      </div>
+      <div class="props-port-card__meta"><span>${escape(item?.name || '电源')}</span><span>${escape(item?.voltage || '--')}</span></div>
+    </div>`;
+
+  return `
+    <div class="pgroup">
+      <div class="pglbl">电源接口</div>
+      <div class="props-help">上边为电源输入端口，下边为电源输出（地）端口；中间变量不会显示在画布边缘。</div>
+      <div class="props-port-list">
+        ${ports.inputs.map((item, index) => renderPort(item, '上侧', index)).join('')}
+        ${ports.outputs.map((item, index) => renderPort(item, '下侧', index)).join('')}
+      </div>
+    </div>`;
+}
+
 function renderUnboundSimulationFields(node, helpers = {}) {
   const escape = helpers.escapeHtml || escapeHtml;
   const props = node?.props || {};
@@ -111,7 +145,7 @@ function renderUnboundSimulationFields(node, helpers = {}) {
             <div class="props-field"><label>中间变量数量</label><input id="sim-middle-count" type="number" min="${escape(limits.middleVars?.[0] ?? 0)}" max="${escape(limits.middleVars?.[1] ?? 6)}" value="${middleVars.length}"></div>
           </div>
           <button class="props-secondary" type="button" onclick="syncSimulationInterfaceCounts()">同步接口数量</button>
-          <div class="sim-intf-note">中间变量端口位于模块上方，作为可观测输出；如需写入中间变量，请使用“中间变量赋值块”。</div>
+          <div class="sim-intf-note">中间变量仅作为内部可观测数据，不显示为画布端口；如需写入中间变量，请使用“中间变量赋值块”。</div>
         </div>
       </div>
       <div class="sim-intf-group">
@@ -131,10 +165,11 @@ function renderUnboundSimulationFields(node, helpers = {}) {
       <div class="sim-intf-group">
         <div class="sim-intf-head">
           <div class="sim-intf-title">中间变量</div>
-          <div class="sim-intf-meta">${middleVars.length} 个顶部观测端口</div>
+          <div class="sim-intf-meta">${middleVars.length} 个内部观测量</div>
         </div>
         <div class="sim-intf-list">${middleVars.length ? renderSimulationInterfaceRows(middleVars, '中间变量', helpers) : '<div class="sim-intf-note">当前没有暴露的中间变量端口。</div>'}</div>
       </div>
+      ${renderPowerInterfaceGroup(props, helpers)}
       <div class="props-field"><label>函数说明</label><textarea id="prop-ffunctionNote">${escape(props.ffunctionNote || '')}</textarea></div>
       <div class="pgroup">
         <div class="pglbl">Python 绑定</div>
@@ -202,8 +237,9 @@ function renderBoundSimulationFields(node, binding, helpers = {}) {
       <div class="pgroup">
         <div class="pglbl">中间变量观测端口</div>
         ${renderPythonPortRows(binding, 'middleVars', helpers)}
-        <div class="props-help">中间变量默认作为顶部观测输出存在；如果需要在仿真过程中对其赋值，请拖入“中间变量赋值块”。</div>
+        <div class="props-help">中间变量仅作为内部观测数据，不显示为画布端口；如需在仿真过程中对其赋值，请使用“中间变量赋值块”。</div>
       </div>
+      ${renderPowerInterfaceGroup(props, helpers)}
       <div class="pgroup">
         <div class="pglbl">执行方式</div>
         <div class="prow"><span class="pk">执行模式</span><span class="pv">${escape(binding?.executionMode || 'mock')}</span></div>

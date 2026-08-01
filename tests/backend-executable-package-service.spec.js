@@ -48,7 +48,7 @@ describe('backendExecutablePackageService', () => {
       type: 'signal_source',
       parameters: { value: 1 },
       inputs: [],
-      outputs: [{ name: 'out' }]
+      outputs: [{ id: 'out', name: 'out', dataType: 'scalar' }]
     });
     expect(pkg.nodes[1].pythonBinding).toEqual({ moduleId: 'passthrough', entryFunction: 'process' });
     expect(JSON.stringify(pkg)).not.toContain('rawSource');
@@ -61,6 +61,52 @@ describe('backendExecutablePackageService', () => {
     const pkg = buildBackendExecutablePackage({ modelNodes: [], modelEdges: [] });
 
     expect(pkg.simulationConfig).toEqual({ duration: 10, stepSize: 0.1 });
+  });
+
+  it('preserves fixed-length vector port definitions and constant vector values', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'imu-source',
+        type: 'signal_source',
+        props: { value: [1, 2, 3, 4] },
+        outputs: [{ id: 'imu-vector', name: 'IMU 数据', type: '向量', vectorLength: 4 }]
+      }],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].parameters.value).toEqual([1, 2, 3, 4]);
+    expect(pkg.nodes[0].outputs).toEqual([{
+      id: 'imu-vector',
+      name: 'IMU 数据',
+      dataType: 'vector',
+      vectorLength: 4
+    }]);
+  });
+
+  it('exports the selected vector component for each oscilloscope channel', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [
+        { id: 'source', type: 'signal_source', props: { value: [1, 2, 3] }, outputs: [{ name: 'out', dataType: 'vector', vectorLength: 3 }] },
+        {
+          id: 'scope',
+          type: 'instrument_scope',
+          props: { vectorChannelCh1: 3, vectorChannelCh2: 2 },
+          inputs: [
+            { name: 'CH1', dataType: 'vector', vectorLength: 3 },
+            { name: 'CH2', dataType: 'vector', vectorLength: 3 }
+          ]
+        }
+      ],
+      modelEdges: [
+        { id: 'source-scope-ch1', sourceNodeId: 'source', sourcePortIndex: 0, targetNodeId: 'scope', targetPortIndex: 0 },
+        { id: 'source-scope-ch2', sourceNodeId: 'source', sourcePortIndex: 0, targetNodeId: 'scope', targetPortIndex: 1 }
+      ]
+    });
+
+    expect(pkg.measurementPoints).toEqual([
+      expect.objectContaining({ id: 'scope.ch1', vectorIndex: 2 }),
+      expect.objectContaining({ id: 'scope.ch2', vectorIndex: 1 })
+    ]);
   });
 
   it('exports numeric scalar fallbacks for all signal source domains', () => {
@@ -159,8 +205,10 @@ describe('backendExecutablePackageService', () => {
             modulationRate: '5kHz',
             frequencyDeviation: '12kHz',
             phaseDeviation: `${Math.PI / 2}`,
-            pulseWidth: '250us',
-            prf: '1kHz',
+            pulseWidth: '250',
+            pulseWidthUnit: 'μs',
+            pulsePeriod: '1',
+            pulsePeriodUnit: 'ms',
             bandwidth: '20MHz',
             symbolRate: '10MHz',
             sampleRate: '40MHz',
@@ -174,20 +222,39 @@ describe('backendExecutablePackageService', () => {
     expect(pkg.nodes[0].parameters).toEqual(expect.objectContaining({
       rfModulation: 'am',
       centerFrequencyHz: 2.4e9,
-      amplitude: 8,
+      amplitude: Math.sqrt(2 * 50 * 1e-3 * Math.pow(10, 8 / 10)),
       frequency: 2.4e9,
       modulationRateHz: 5e3,
       modulationDepthRatio: 0.5,
       frequencyDeviationHz: 12e3,
       phaseDeviationRad: Math.PI / 2,
       pulseWidthSeconds: 250e-6,
-      prfHz: 1e3,
+      pulsePeriodSeconds: 1e-3,
       bandwidthHz: 20e6,
       symbolRateHz: 10e6,
       sampleRateHz: 40e6,
       snrDb: 12,
       waveType: 'rf_am'
     }));
+  });
+
+  it('converts 0 dBm RF power to a 50-ohm peak voltage', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'rf-zero-dbm',
+        type: 'signal_source',
+        props: {
+          signalDomain: 'rf',
+          centerFrequency: '1',
+          centerFrequencyUnit: 'GHz',
+          power: '0',
+          powerUnit: 'dBm'
+        }
+      }],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].parameters.amplitude).toBeCloseTo(Math.sqrt(0.1), 12);
   });
 
   it('exports sum block signs for backend execution', () => {

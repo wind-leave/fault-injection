@@ -159,6 +159,32 @@ function normalizeFaultSlot(slot = {}, target = {}, fallback = {}) {
   };
 }
 
+function vectorLengthOf(item = {}) {
+  const shapeLength = Array.isArray(item?.shape) ? Number(item.shape[0]) : NaN;
+  const literal = item?.default ?? item?.value ?? item?.initialValue;
+  let literalLength = NaN;
+  if (Array.isArray(literal)) {
+    literalLength = literal.length;
+  } else if (typeof literal === 'string') {
+    try {
+      const parsed = JSON.parse(literal);
+      literalLength = Array.isArray(parsed) ? parsed.length : NaN;
+    } catch {
+      // A non-JSON default is not a fixed-length vector declaration.
+    }
+  }
+  return [item?.vectorLength, item?.length, shapeLength, literalLength]
+    .map(Number)
+    .find((value) => Number.isInteger(value) && value > 1) ?? 0;
+}
+
+function vectorMetadataOf(item = {}) {
+  const vectorLength = vectorLengthOf(item);
+  return vectorLength > 1
+    ? { dataType: text(item?.dataType ?? item?.type ?? item?.format, 'vector'), vectorLength }
+    : {};
+}
+
 function createPortSlot(layer, role, item = {}, index = 0) {
   const key = text(item.key ?? item.id ?? item.name ?? item.varName, `${role}_${index + 1}`)
     .replace(/\s+/g, '_');
@@ -172,7 +198,8 @@ function createPortSlot(layer, role, item = {}, index = 0) {
       ? FAULT_MATH_MODEL_DEFINITIONS.physical.map((model) => model.id)
       : EDGE_ELECTRICAL_MODELS.slice(),
     parameterKey: text(item.key ?? item.id ?? item.name ?? item.varName),
-    unit: text(item.unit)
+    unit: text(item.unit),
+    ...vectorMetadataOf(item)
   };
 }
 
@@ -228,7 +255,9 @@ function createComponentFaultVariable(role, item = {}, index = 0) {
     signalId: text(source.signalId),
     unit: text(source.unit),
     type: text(source.type ?? source.format),
-    parameterKey: role === 'parameter' ? key : ''
+    parameterKey: role === 'parameter' ? key : '',
+    default: source.default,
+    ...vectorMetadataOf(source)
   };
 }
 
@@ -363,7 +392,8 @@ function createDeclaredComponentSlot(layer, item, variable, index) {
     variableRole,
     signalId: text(extra.signalId, variable?.signalId || ''),
     unit: text(extra.unit, variable?.unit || ''),
-    parameterKey: text(extra.parameterKey, variable?.parameterKey || '')
+    parameterKey: text(extra.parameterKey, variable?.parameterKey || ''),
+    ...vectorMetadataOf({ ...variable, ...extra })
   };
 }
 

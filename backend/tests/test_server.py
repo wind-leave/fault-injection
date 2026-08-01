@@ -34,7 +34,7 @@ def d_matrix_with_physical_and_virtual_points():
         "shortName": "V1",
         "name": "virtual instrument point",
         "pointType": "virtual",
-        "channel": "scope-2.ch1",
+        "channel": "scope-1.ch1",
     })
     return matrix
 
@@ -282,13 +282,14 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(updated["simulationResult"]["simulationConfig"], {"duration": 0.3, "stepSize": 0.1})
         self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["pointCode"], "M1")
         self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["sourceDeviceId"], "sim-1")
-        self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["sourcePort"], "output")
+        self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["sourcePort"], "socket03")
         self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["samples"], [
             {"time": 0.0, "actual": 1.0},
             {"time": 0.1, "actual": 1.0},
             {"time": 0.2, "actual": 1.0},
         ])
         self.assertIn("virtualMeasurements", updated["simulationResult"])
+        self.assertEqual(updated["simulationResult"]["virtualMeasurements"][0]["sourcePort"], "socket03")
         self.assertNotIn("curves", updated["simulationResult"])
         self.assertNotIn("componentOutputs", updated["simulationResult"])
         self.assertNotIn("observationResult", updated)
@@ -302,7 +303,7 @@ class SimulationBackendServerTests(unittest.TestCase):
             {
                 "operationId": "op-virtual-before-submit",
                 "actionType": "measurePoint",
-                "target": {"type": "testPoint", "id": "scope-2.ch1"},
+                "target": {"type": "testPoint", "id": "scope-1.ch1"},
                 "pointCode": "V1",
                 "steps": 1,
             },
@@ -350,6 +351,7 @@ class SimulationBackendServerTests(unittest.TestCase):
                 "simulationPackage": package,
                 "dMatrix": d_matrix_with_rankable_virtual_points(),
                 "targetFaultId": "target-fault",
+                "initialPointStates": [{"pointCode": "V1", "observed": "abnormal"}],
             },
         )
         self.assertEqual(status, 200)
@@ -490,6 +492,10 @@ class SimulationBackendServerTests(unittest.TestCase):
                 "simulationPackage": package,
                 "dMatrix": d_matrix_with_rankable_virtual_points(),
                 "targetFaultId": "target-fault",
+                "initialPointStates": [
+                    {"pointCode": "M1", "observed": "abnormal"},
+                    {"pointCode": "V1", "observed": "abnormal"},
+                ],
             },
         )
         self.assertEqual(status, 200)
@@ -525,6 +531,57 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(initial_steps[-1]["actionType"], "replaceComponent")
         self.assertEqual(initial_steps[-1]["routeRole"], "repairAttempt")
 
+    def test_virtual_measurement_reduces_the_working_d_matrix_and_uses_saved_initial_result(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 0.5
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.5,
+            "parameters": {"bias": 0.5},
+        }]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": d_matrix_with_rankable_virtual_points(),
+                "targetFaultId": "target-fault",
+                "initialPointStates": [
+                    {"pointCode": "M1", "observed": "abnormal"},
+                    {"pointCode": "V1", "observed": "abnormal"},
+                    {"pointCode": "V2", "observed": "abnormal"},
+                ],
+            },
+        )
+        self.assertEqual(status, 200)
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+        self.assertEqual(session.simulation_results, [])
+
+        status, measured = self._post(
+            f"/api/practice/session/{created['sessionId']}/action",
+            {
+                "operationId": "op-v1",
+                "actionType": "measurePoint",
+                "target": {"type": "testPoint", "id": "scope-1.ch1"},
+                "pointCode": "V1",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertNotIn("simulationResult", measured)
+        self.assertNotIn("V1", [point["shortName"] for point in session.active_d_matrix["points"]])
+        self.assertTrue(all(
+            all(cell.get("pointCode") != "V1" for cell in row["cells"])
+            for row in session.active_d_matrix["rows"]
+        ))
+        self.assertEqual([row["faultId"] for row in session.active_d_matrix["rows"]], ["target-fault"])
+        self.assertEqual(
+            session.dynamic_reference_history[-1]["referenceAfterAction"]["recommendedActionSet"][0]["actionType"],
+            "replaceComponent",
+        )
+
     def test_dynamic_reference_uses_tiered_scores_and_safety_prerequisites(self):
         package = valid_package()
         package["simulationConfig"]["duration"] = 0.5
@@ -543,6 +600,11 @@ class SimulationBackendServerTests(unittest.TestCase):
                 "simulationPackage": package,
                 "dMatrix": d_matrix_with_rankable_virtual_points(),
                 "targetFaultId": "target-fault",
+                "initialPointStates": [
+                    {"pointCode": "M1", "observed": "abnormal"},
+                    {"pointCode": "V1", "observed": "abnormal"},
+                    {"pointCode": "V2", "observed": "abnormal"},
+                ],
                 "actionRules": {
                     "replaceComponent": {"requiresPowerOff": True, "durationSeconds": 120, "riskLevel": "high"},
                 },

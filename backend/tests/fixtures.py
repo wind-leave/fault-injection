@@ -16,7 +16,7 @@ def valid_package():
                 "pythonBinding": {"moduleId": "passthrough", "entryFunction": "process"},
                 "parameters": {},
                 "inputs": [{"name": "input"}],
-                "outputs": [{"name": "output"}],
+                "outputs": [{"id": "socket03", "name": "output"}],
             },
             {
                 "id": "scope-1",

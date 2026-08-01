@@ -23,10 +23,6 @@ export function createDefaultPythonBinding() {
     parsedInterface: null,
     rawSource: '',
     executionMode: 'mock',
-    executionConfig: {
-      endpoint: 'http://127.0.0.1:8765/api/python-flow/execute',
-      timeoutMs: 3000
-    },
     portMapping: {
       inputs: [],
       outputs: [],

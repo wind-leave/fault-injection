@@ -39,7 +39,7 @@ function workbenchItems(state, key) {
   return Array.from(new Map(items.filter((item) => item?.id).map((item) => [item.id, item])).values());
 }
 
-function outputValueForPort(outputs, node, portIndex = 0) {
+function outputValueForPort(outputs, node, portIndex = 0, vectorIndex = null) {
   if (Number.isFinite(Number(outputs))) {
     return Number(outputs);
   }
@@ -59,14 +59,28 @@ function outputValueForPort(outputs, node, portIndex = 0) {
     'value'
   ].filter(Boolean);
 
+  const selectValue = (value) => {
+    if (Array.isArray(value)) {
+      const index = Math.max(0, Math.trunc(Number(vectorIndex) || 0));
+      return Number(value[index]);
+    }
+    return Number(value);
+  };
+
   for (const key of candidates) {
-    if (Number.isFinite(Number(outputs[key]))) {
-      return Number(outputs[key]);
+    const value = selectValue(outputs[key]);
+    if (Number.isFinite(value)) {
+      return value;
     }
   }
 
-  const scalarValues = Object.values(outputs).filter((value) => Number.isFinite(Number(value)));
-  return scalarValues.length === 1 ? Number(scalarValues[0]) : NaN;
+  const values = Object.values(outputs).map(selectValue).filter(Number.isFinite);
+  return values.length === 1 ? values[0] : NaN;
+}
+
+function selectedInstrumentVectorIndex(node) {
+  const selectedChannel = Math.trunc(Number(node?.props?.vectorChannel));
+  return Number.isFinite(selectedChannel) && selectedChannel > 0 ? selectedChannel - 1 : 0;
 }
 
 function multimeterTargetFor(node, nodesById, edgesById) {
@@ -196,7 +210,13 @@ function appendBackendInstrumentSamples(target, componentSteps, componentTimes, 
         return;
       }
 
-      const actual = outputValueForPort(step?.actual?.[incoming.sourceNodeId], sourceNode, incoming.sourcePortIndex);
+      const vectorIndex = spectrumOnly ? selectedInstrumentVectorIndex(node) : null;
+      const actual = outputValueForPort(
+        step?.actual?.[incoming.sourceNodeId],
+        sourceNode,
+        incoming.sourcePortIndex,
+        vectorIndex
+      );
       if (!Number.isFinite(actual)) {
         return;
       }
@@ -206,7 +226,12 @@ function appendBackendInstrumentSamples(target, componentSteps, componentTimes, 
         return;
       }
 
-      const reference = outputValueForPort(step?.reference?.[incoming.sourceNodeId], sourceNode, incoming.sourcePortIndex);
+      const reference = outputValueForPort(
+        step?.reference?.[incoming.sourceNodeId],
+        sourceNode,
+        incoming.sourcePortIndex,
+        vectorIndex
+      );
       pushLimitedSample(actualSamples, Number.isFinite(reference)
         ? { t: time, actual, reference }
         : { t: time, actual }, sampleLimit);

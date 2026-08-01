@@ -273,7 +273,7 @@ describe('flightModelPackageService', () => {
     expect(result.errors).toContain('pythonModules[1].entryFunction is required.');
   });
 
-  it('preserves the default execution endpoint when restoring a partial binding config', () => {
+  it('removes deprecated execution endpoint settings when restoring a binding', () => {
     const restored = restoreWorkbenchSnapshot({
       modelNodes: [
         {
@@ -290,10 +290,7 @@ describe('flightModelPackageService', () => {
       modelEdges: []
     });
 
-    expect(restored.modelNodes[0].pythonBinding.executionConfig).toMatchObject({
-      endpoint: 'http://127.0.0.1:8765/api/python-flow/execute',
-      timeoutMs: 5000
-    });
+    expect(restored.modelNodes[0].pythonBinding).not.toHaveProperty('executionConfig');
   });
 
   it('restores and creates snapshots defensively when node and edge collections are invalid', () => {
@@ -1054,6 +1051,26 @@ describe('flightModelPackageService', () => {
       'm1_command',
       'mix_state'
     ]);
+  });
+
+  it('keeps vector parameter length on declared fault slots', () => {
+    const node = normalizeModelNode({
+      id: 'node-controller',
+      type: 'simulation_block',
+      props: {
+        parameters: [
+          { key: 'gains', name: 'Controller gains', default: '[1.0, 0.5, 0.2]' }
+        ],
+        faultInjection: { physical: ['gains'], electrical: [], protocol: [] }
+      }
+    });
+
+    expect(node.faultSlots).toContainEqual(expect.objectContaining({
+      slotId: 'physical:gains',
+      targetField: 'params.gains',
+      dataType: 'vector',
+      vectorLength: 3
+    }));
   });
 
   it('preserves executable physical parameter targets for default fault slots', () => {

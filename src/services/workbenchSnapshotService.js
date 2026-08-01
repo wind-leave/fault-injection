@@ -26,15 +26,6 @@ function normalizePortMapping(bindingPortMapping) {
   };
 }
 
-function normalizeExecutionConfig(bindingExecutionConfig) {
-  const safeExecutionConfig = clone(bindingExecutionConfig ?? {});
-
-  return {
-    ...createDefaultPythonBinding().executionConfig,
-    ...safeExecutionConfig
-  };
-}
-
 function normalizePythonBinding(binding) {
   if (!binding || typeof binding !== 'object') {
     return createDefaultPythonBinding();
@@ -45,7 +36,7 @@ function normalizePythonBinding(binding) {
     ...clone(binding)
   };
 
-  safeBinding.executionConfig = normalizeExecutionConfig(binding.executionConfig);
+  delete safeBinding.executionConfig;
   safeBinding.portMapping = {
     ...createDefaultPythonBinding().portMapping,
     ...normalizePortMapping(binding.portMapping)

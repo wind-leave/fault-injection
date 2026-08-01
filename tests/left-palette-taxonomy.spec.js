@@ -21,6 +21,19 @@ function groupComponents(wrapper, groupId) {
     .map((item) => item.attributes('data-component'));
 }
 
+function createDragDataTransfer() {
+  const values = new Map();
+  return {
+    effectAllowed: '',
+    setData(type, value) {
+      values.set(type, value);
+    },
+    getData(type) {
+      return values.get(type) ?? '';
+    }
+  };
+}
+
 describe('left palette taxonomy', () => {
   it('renders the live palette from the component registry instead of the static fragment', () => {
     const source = readFileSync(
@@ -50,11 +63,11 @@ describe('left palette taxonomy', () => {
 
     expect(groups).toEqual([
       ['signals', '系统信号'],
-      ['signal-ops', '信号运算'],
       ['simulation', '仿真组件'],
       ['subsystem', '子系统'],
       ['faults', '故障组件'],
       ['instruments', '测量仪器'],
+      ['display-control', '显控组件'],
       ['can-lines', '总线与连接']
     ]);
     expect(wrapper.text()).not.toContain('诊断分析');
@@ -64,7 +77,7 @@ describe('left palette taxonomy', () => {
     wrapper.unmount();
   });
 
-  it('puts signal transforms, subsystem, instruments, and CAN tools in separate groups', () => {
+  it('keeps subsystem, instruments, and CAN tools in separate groups', () => {
     const wrapper = mountPalette();
 
     expect(groupComponents(wrapper, 'signals')).toEqual([
@@ -73,12 +86,7 @@ describe('left palette taxonomy', () => {
       'signal_source_command',
       'signal_source_rf'
     ]);
-    expect(groupComponents(wrapper, 'signal-ops')).toEqual([
-      'flow_block',
-      'gain_block',
-      'sum_block',
-      'mux_block'
-    ]);
+    expect(wrapper.find('[data-palette-group="signal-ops"]').exists()).toBe(false);
     expect(groupComponents(wrapper, 'simulation')).toEqual([
       'airspeed_sensor',
       'barometer_sensor'
@@ -101,6 +109,7 @@ describe('left palette taxonomy', () => {
     ]);
     expect(groupBody(wrapper, 'instruments').text()).not.toContain('数据记录仪');
     expect(groupBody(wrapper, 'instruments').text()).toContain('数字万用表');
+    expect(groupComponents(wrapper, 'display-control')).toEqual(['display_console_1', 'display_console_2']);
     expect(groupBody(wrapper, 'can-lines').find('[data-line-type="normal"]').exists()).toBe(true);
     expect(groupBody(wrapper, 'can-lines').find('[data-line-type="can"]').exists()).toBe(true);
 
@@ -114,13 +123,56 @@ describe('left palette taxonomy', () => {
     expect(wrapper.find('[data-component="signal_source_digital"] .citem-icon-badge').text()).toBe('D');
     expect(wrapper.find('[data-component="signal_source_command"] .citem-icon-badge').text()).toBe('C');
     expect(wrapper.find('[data-component="signal_source_rf"] .citem-icon-badge').text()).toBe('RF');
-    expect(wrapper.find('[data-component="sum_block"] .citem-icon-badge').text()).toBe('+');
+    expect(wrapper.find('[data-component="sum_block"]').exists()).toBe(false);
     expect(wrapper.find('[data-component="instrument_scope"] .citem-icon-badge').text()).toBe('波');
     expect(wrapper.find('[data-component="instrument_scope"] .citem-icon-badge').classes()).toContain(
       'citem-icon-badge--scope'
     );
     expect(wrapper.find('[data-component="instrument_spectrum"] .citem-icon-badge').text()).toBe('谱');
     expect(wrapper.find('[data-component="instrument_multimeter"] .citem-icon-badge').text()).toBe('VΩ');
+    expect(wrapper.find('[data-component="display_console_1"] .citem-icon-badge').text()).toBe('显1');
+    expect(wrapper.find('[data-component="display_console_1"] .citem-icon-badge').classes()).toContain(
+      'citem-icon-badge--display-control'
+    );
+
+    wrapper.unmount();
+  });
+
+  it('treats each display-console template as a one-time palette entry', async () => {
+    const wrapper = mountPalette();
+
+    window.dispatchEvent(new CustomEvent('gz:palette-component-created', {
+      detail: { paletteKey: 'display_console_1' }
+    }));
+    await wrapper.vm.$nextTick();
+    expect(groupComponents(wrapper, 'display-control')).toEqual(['display_console_2']);
+
+    window.dispatchEvent(new CustomEvent('gz:palette-component-deleted', {
+      detail: { paletteKey: 'display_console_1' }
+    }));
+    await wrapper.vm.$nextTick();
+    expect(groupComponents(wrapper, 'display-control')).toEqual(['display_console_1', 'display_console_2']);
+
+    wrapper.unmount();
+  });
+
+  it('restores consumed simulation and display-console templates for a new blank workspace', async () => {
+    const wrapper = mountPalette();
+
+    window.dispatchEvent(new CustomEvent('gz:palette-component-created', {
+      detail: { paletteKey: 'airspeed_sensor' }
+    }));
+    window.dispatchEvent(new CustomEvent('gz:palette-component-created', {
+      detail: { paletteKey: 'display_console_1' }
+    }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-component="airspeed_sensor"]').exists()).toBe(false);
+    expect(wrapper.find('[data-component="display_console_1"]').exists()).toBe(false);
+
+    window.dispatchEvent(new CustomEvent('gz:palette-components-reset'));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-component="airspeed_sensor"]').exists()).toBe(true);
+    expect(wrapper.find('[data-component="display_console_1"]').exists()).toBe(true);
 
     wrapper.unmount();
   });
@@ -134,12 +186,8 @@ describe('left palette taxonomy', () => {
     await wrapper.vm.$nextTick();
 
     expect(groupComponents(wrapper, 'simulation')).toEqual(['barometer_sensor']);
-    expect(groupComponents(wrapper, 'signal-ops')).toEqual([
-      'flow_block',
-      'gain_block',
-      'sum_block',
-      'mux_block'
-    ]);
+    expect(groupBody(wrapper, 'simulation').find('.simulation-menu-section__count').text()).toBe('1');
+    expect(wrapper.find('[data-palette-group="signal-ops"]').exists()).toBe(false);
 
     window.dispatchEvent(new CustomEvent('gz:palette-component-created', {
       detail: { paletteKey: 'signal_source' }
@@ -155,6 +203,14 @@ describe('left palette taxonomy', () => {
       'airspeed_sensor',
       'barometer_sensor'
     ]);
+    expect(groupBody(wrapper, 'simulation').find('.simulation-menu-section__count').text()).toBe('2');
+
+    const dataTransfer = createDragDataTransfer();
+    const dragStart = new Event('dragstart', { bubbles: true, cancelable: true });
+    Object.defineProperty(dragStart, 'dataTransfer', { value: dataTransfer });
+    wrapper.find('[data-component="airspeed_sensor"]').element.dispatchEvent(dragStart);
+    expect(dataTransfer.getData('text/plain')).toBe('airspeed_sensor');
+    expect(dataTransfer.getData('application/x-gz-palette-key')).toBe('airspeed_sensor');
 
     wrapper.unmount();
   });

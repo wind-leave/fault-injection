@@ -61,6 +61,17 @@ main{flex:1;display:flex;overflow:hidden;}
 .lgroup-arrow.open{transform:rotate(90deg);}
 .lgroup-body{padding:4px 8px 6px;}
 
+/* 仿真组件分组菜单 */
+.simulation-menu-section{margin:0 -2px 5px;border:1px solid #dceaf2;border-radius:7px;background:#fbfdff;overflow:hidden;}
+.simulation-menu-section__head{display:flex;align-items:center;gap:6px;width:100%;padding:6px 7px;border:0;border-bottom:1px solid transparent;background:#f3f9fc;color:#496276;font:600 10px/1.2 'Noto Sans SC',sans-serif;text-align:left;cursor:pointer;}
+.simulation-menu-section__head:hover{background:#e9f7fb;color:#0f7e91;}
+.simulation-menu-section__icon{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:5px;background:#dff7fb;color:#078197;font-size:10px;}
+.simulation-menu-section__count{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;margin-left:auto;border-radius:999px;background:#e2edf4;color:#6b8294;font:700 9px/1 'JetBrains Mono',monospace;}
+.simulation-menu-section__arrow{font-size:8px;color:var(--textd);transition:transform .18s;}
+.simulation-menu-section__arrow.open{transform:rotate(90deg);}
+.simulation-menu-section__body{padding:3px 4px 4px;}
+.simulation-menu-section__body .citem{margin-bottom:1px;}
+
 /* 元件条目 */
 .citem{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:5px;border:1px solid transparent;cursor:grab;transition:all 0.14s;margin-bottom:2px;font-size:11px;color:var(--text2);}
 .citem:hover{background:var(--blue-bg);border-color:var(--border-mid);color:var(--blue);}
@@ -102,6 +113,7 @@ main{flex:1;display:flex;overflow:hidden;}
 .citem-icon-badge--noise{background:#fff7ed;color:var(--orange);}
 .citem-icon-badge--scope{background:#f0fdf4;color:var(--green);}
 .citem-icon-badge--spectrum{background:#ecfeff;color:var(--teal);}
+.citem-icon-badge--display-control{background:#eef5ff;color:#1554a4;}
 .citem-icon-badge--logger{background:#eff6ff;color:var(--blue);}
 .citem-line-tool{cursor:pointer;}
 .citem-line-tool.active{background:var(--blue-bg);border-color:var(--blue-lt);color:var(--blue);box-shadow:0 0 0 1px rgba(74,158,255,0.12) inset;}
@@ -178,6 +190,22 @@ main{flex:1;display:flex;overflow:hidden;}
 @keyframes multimeter-lead-pulse{50%{transform:scale(1.12)}}
 .spectrum-window-layer{position:absolute;inset:0;z-index:calc(var(--canvas-stage-layer-windows) + 2);pointer-events:none;}
 .spectrum-window-layer .spectrum-window{pointer-events:auto;}
+.display-console-window-layer{position:absolute;inset:0;z-index:calc(var(--canvas-stage-layer-windows) + 3);pointer-events:none;}
+.display-console-window{position:absolute;left:84px;top:72px;width:min(1120px,calc(100% - 168px));padding:16px;border:1px solid #a8c5ea;border-radius:14px;background:#fff;box-shadow:0 20px 42px rgba(30,58,95,.2);pointer-events:auto;}
+.display-console-window__header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:12px;border-bottom:1px solid #dbe8f6;cursor:move;touch-action:none;user-select:none;}
+.display-console-window__kicker{margin-bottom:4px;color:#2f73ff;font-size:10px;font-weight:800;letter-spacing:.08em;}
+.display-console-window h2{margin:0;color:#19334f;font-size:17px;line-height:1.25;}
+.display-console-window__close{height:30px;padding:0 10px;border:1px solid #b9cfe5;border-radius:7px;background:#fff;color:#486985;cursor:pointer;font-size:11px;font-weight:800;}
+.display-console-window__close:hover{border-color:#78a9ff;background:#eef5ff;color:#0043ce;}
+.display-console-window__summary{margin:12px 0;padding:8px 10px;border-left:3px solid #2f73ff;border-radius:6px;background:#f4f8ff;color:#486985;font-size:11px;font-weight:700;}
+.display-console-window__table-wrap{overflow-x:auto;border:1px solid #c9dced;border-radius:9px;}
+.display-console-table{width:100%;min-width:1080px;border-collapse:collapse;table-layout:fixed;background:#fff;}
+.display-console-table th,.display-console-table td{min-width:68px;padding:10px 8px;border-right:1px solid #dbe8f6;text-align:center;white-space:nowrap;}
+.display-console-table th:last-child,.display-console-table td:last-child{border-right:0;}
+.display-console-table th{background:#edf5ff;color:#315878;font-size:10px;font-weight:800;}
+.display-console-table td{color:#19334f;font-family:var(--font-data);font-size:11px;}
+.display-console-table tbody tr{background:#fff;}
+.display-console-table tbody tr:hover{background:#f8fbff;}
 .edge-path{fill:none;stroke-linecap:round;stroke-linejoin:round;pointer-events:none;}
 .edge-path--normal{stroke:#84aee0;stroke-width:2.2;}
 .edge-path--can{stroke:#8c7cf6;stroke-width:3.2;}
@@ -202,7 +230,7 @@ main{flex:1;display:flex;overflow:hidden;}
 .multimeter-measurement-lead--negative{stroke:#1f2937;}
 .node-layer{position:absolute;inset:0;z-index:var(--canvas-stage-layer-nodes);}
 .canvas-floating{position:absolute;right:18px;bottom:18px;z-index:var(--canvas-layer-floating);display:flex;flex-direction:column;align-items:flex-end;gap:10px;}
-.canvas-group-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;width:100%;}
+.canvas-group-actions{display:flex;align-items:center;justify-content:flex-end;align-self:flex-end;gap:8px;width:max-content;}
 .canvas-wrap__button{min-width:132px;height:34px;padding:0 14px;border-radius:12px;border:1px solid rgba(93,133,196,0.28);background:rgba(255,255,255,0.94);color:#2b5fa8;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 12px 24px rgba(30,58,95,0.08);transition:background 0.2s ease,border-color 0.2s ease,color 0.2s ease,transform 0.2s ease;}
 .canvas-wrap__button:hover:not(:disabled){background:#eef5ff;border-color:rgba(79,134,231,0.42);transform:translateY(-1px);}
 .canvas-wrap__button:disabled{cursor:not-allowed;color:#8ea3bf;background:rgba(247,250,253,0.96);border-color:rgba(183,197,220,0.55);box-shadow:none;}
@@ -249,7 +277,7 @@ main{flex:1;display:flex;overflow:hidden;}
 .blk-sub{font-size:10px;color:var(--textm);padding:0 10px;font-family:"Segoe UI","Microsoft YaHei UI",sans-serif;line-height:1.55;}
 .blk-kicker{font-size:9px;font-weight:700;letter-spacing:0.55px;text-transform:uppercase;color:currentColor;opacity:0.82;margin-bottom:2px;}
 .node-port{position:absolute;display:flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:none;background:transparent;box-shadow:none;pointer-events:auto;cursor:crosshair;z-index:2;transform:translate(-50%,-50%);padding:0;appearance:none;outline:none;}
-.node-port--output,.node-port--top{background:transparent;border:none;box-shadow:none;}
+.node-port--output,.node-port--top,.node-port--bottom{background:transparent;border:none;box-shadow:none;}
 .node-port--active .node-port__inner{box-shadow:0 0 0 4px color-mix(in srgb,currentColor 18%,transparent);}
 .node-port__inner{width:6px;height:6px;border-radius:50%;border:1.5px solid currentColor;background:color-mix(in srgb,currentColor 16%,#ffffff);}
 .fbadge{position:absolute;top:-7px;right:-7px;width:15px;height:15px;background:var(--red);border-radius:50%;display:none;align-items:center;justify-content:center;font-size:7px;font-weight:700;color:#fff;box-shadow:0 1px 4px rgba(220,38,38,0.45);}
@@ -738,6 +766,7 @@ main{flex:1;display:flex;overflow:hidden;}
 .b-assign{border-color:#14b8a6;color:#0f766e;}
 .b-fault{border-color:#f87171;color:var(--red);}
 .b-inst{border-color:#4ade80;color:var(--green);}
+.b-display-console{border-color:#60a5fa;color:#1554a4;background:linear-gradient(180deg,#ffffff,#f4f8ff);}
 .b-link{border-color:#a78bfa;color:var(--purple);}
 .b-subsystem{border-color:#94a3b8;color:#475569;background:linear-gradient(180deg,#ffffff,#f8fafc);}
 .b-sensor{border-color:#93c5fd;color:var(--blue);}
@@ -1212,6 +1241,7 @@ body{font-family:var(--font-ui);}
 
 @media (max-width:760px){
   .canvas-floating{right:12px;left:12px;align-items:stretch;}
+  .canvas-group-actions{width:100%;align-self:stretch;}
   .canvas-mode,.canvas-zoom{justify-content:center;}
   .canvas-mode{flex-wrap:wrap;}
   .diagram-guide{left:16px;right:16px;}
@@ -1775,6 +1805,9 @@ main{
 }
 .rpanel[data-props-panel-kind="scope"] .props-tabs{
   grid-template-columns:repeat(3,minmax(0,1fr));
+}
+.rpanel[data-props-tab-count="2"] .props-tabs{
+  grid-template-columns:repeat(2,minmax(0,1fr));
 }
 .rpanel[data-props-tab-count="3"] .props-tabs{
   grid-template-columns:repeat(3,minmax(0,1fr));

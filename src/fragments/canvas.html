@@ -67,7 +67,6 @@
       <button type="button" class="canvas-tool" title="缩小" data-canvas-command="zoom-out">－</button>
       <span class="canvas-tools__divider"></span>
       <button type="button" class="canvas-tool" title="自动整理" data-canvas-command="auto-arrange">⇄</button>
-      <button type="button" class="canvas-tool" title="模型检查" data-canvas-command="model-check">✓</button>
       <div class="canvas-testpoint-tools" data-canvas-testpoint-tools></div>
       <span class="canvas-tools__spacer"></span>
       <button type="button" class="canvas-tool" title="撤销" data-canvas-command="undo" disabled>↶</button>
@@ -114,7 +113,6 @@
       <div class="canvas-group-actions">
         <button type="button" class="canvas-wrap__button" id="canvas-wrap-selection" onclick="wrapSelectionIntoSubsystem()" disabled>封装为子系统</button>
         <button type="button" class="canvas-arrange__button" onclick="autoArrangeCanvas()">一键整理</button>
-        <button type="button" class="canvas-check__button" onclick="runModelCheck()">模型检查</button>
       </div>
       <div class="canvas-mode">
         <span class="canvas-mode__label">当前连接</span>
@@ -151,6 +149,7 @@
         <div class="scope-window-layer" id="scope-window-layer" aria-live="polite"></div>
         <div class="multimeter-window-layer" id="multimeter-window-layer" aria-live="polite"></div>
         <div class="spectrum-window-layer" id="spectrum-window-layer" aria-live="polite"></div>
+        <div class="display-console-window-layer" id="display-console-window-layer" aria-live="polite"></div>
       </div>
     </div>
   </div>

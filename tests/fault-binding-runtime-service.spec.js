@@ -10,6 +10,7 @@ import {
   createRuntimePayloadFromInstance,
   createRuntimePayloadWithAdapter,
   faultRecordMatchesRemovalRef,
+  getFaultSlotVectorLength,
   getCompatibleFaultModelsForTarget,
   getCompatibleFaultOptionsForTarget,
   getCompatibleSlotForFault,
@@ -134,6 +135,60 @@ describe('fault binding runtime service', () => {
       instance: plan.instance,
       model,
       slot
+    });
+  });
+
+  it('persists a selected vector item from the fault slot through the runtime payload', () => {
+    const vectorSlot = {
+      ...slot,
+      dataType: 'vector',
+      vectorLength: 3
+    };
+    const plan = createFaultInstancePlan({
+      target,
+      model,
+      slot: vectorSlot,
+      existingInstances: [],
+      vectorInjectionScope: 'item',
+      vectorIndex: 2,
+      instanceId: 'fault-inst-vector-item'
+    });
+
+    expect(getFaultSlotVectorLength(vectorSlot)).toBe(3);
+    expect(plan.instance).toMatchObject({
+      vectorInjectionScope: 'item',
+      vectorIndex: 2
+    });
+    expect(createRuntimePayloadFromInstance({ model, instance: plan.instance })).toMatchObject({
+      vectorInjectionScope: 'item',
+      vectorIndex: 2
+    });
+  });
+
+  it('persists selected vector channels and infers a vector parameter from its default value', () => {
+    const vectorSlot = {
+      ...slot,
+      dataType: 'vector',
+      default: '[1.0, 2.0, 3.0, 4.0]'
+    };
+    const plan = createFaultInstancePlan({
+      target,
+      model,
+      slot: vectorSlot,
+      existingInstances: [],
+      vectorInjectionScope: 'items',
+      vectorIndices: [0, 2, 2, 9],
+      instanceId: 'fault-inst-vector-items'
+    });
+
+    expect(getFaultSlotVectorLength(vectorSlot)).toBe(4);
+    expect(plan.instance).toMatchObject({
+      vectorInjectionScope: 'items',
+      vectorIndices: [0, 2, 3]
+    });
+    expect(createRuntimePayloadFromInstance({ model, instance: plan.instance })).toMatchObject({
+      vectorInjectionScope: 'items',
+      vectorIndices: [0, 2, 3]
     });
   });
 

@@ -1,3 +1,4 @@
+import copy
 import hashlib
 
 
@@ -61,9 +62,75 @@ class FaultRuntime:
 
     def _frozen_signal_value(self, fault, target_id, target_field, value, cycle=None):
         key = (str(fault.get("faultId", "")), str(target_id), str(target_field), cycle)
-        return self.frozen_signals.setdefault(key, float(value))
+        if key not in self.frozen_signals:
+            self.frozen_signals[key] = copy.deepcopy(value)
+        return copy.deepcopy(self.frozen_signals[key])
+
+    @staticmethod
+    def _zero_like(value):
+        if isinstance(value, list):
+            return [FaultRuntime._zero_like(item) for item in value]
+        return 0.0
+
+    @staticmethod
+    def _vector_injection_scope(fault):
+        scope = str(fault.get("vectorInjectionScope", fault.get("vectorScope", ""))).strip().lower()
+        if scope == "item":
+            return "item"
+        return "items" if scope in {"items", "selected", "partial"} else "all"
+
+    @staticmethod
+    def _vector_injection_index(fault, length):
+        try:
+            index = int(fault.get("vectorIndex", 0))
+        except (TypeError, ValueError):
+            index = 0
+        return min(max(index, 0), max(length - 1, 0))
+
+    @classmethod
+    def _vector_injection_indices(cls, fault, length):
+        raw_indices = fault.get("vectorIndices")
+        if not isinstance(raw_indices, list):
+            raw_indices = [fault.get("vectorIndex", 0)]
+        indices = []
+        for raw_index in raw_indices:
+            try:
+                index = min(max(int(raw_index), 0), max(length - 1, 0))
+            except (TypeError, ValueError):
+                continue
+            if index not in indices:
+                indices.append(index)
+        return indices
+
+    def _apply_vector_fault(self, fault, target_id, target_field, value, time, apply_item):
+        scope = self._vector_injection_scope(fault)
+        if scope == "item":
+            index = self._vector_injection_index(fault, len(value))
+            return [
+                apply_item(f"{target_field}[{item_index}]", item) if item_index == index else copy.deepcopy(item)
+                for item_index, item in enumerate(value)
+            ]
+        if scope == "items":
+            indices = set(self._vector_injection_indices(fault, len(value)))
+            return [
+                apply_item(f"{target_field}[{item_index}]", item) if item_index in indices else copy.deepcopy(item)
+                for item_index, item in enumerate(value)
+            ]
+        return [
+            apply_item(f"{target_field}[{item_index}]", item)
+            for item_index, item in enumerate(value)
+        ]
 
     def _apply_signal_fault(self, fault, target_id, target_field, value, time):
+        if isinstance(value, list):
+            return self._apply_vector_fault(
+                fault,
+                target_id,
+                target_field,
+                value,
+                time,
+                lambda item_field, item: self._apply_signal_fault(fault, target_id, item_field, item, time),
+            )
         params = fault.get("parameters") or {}
         fault_type = fault.get("faultType")
         result = float(value)
@@ -118,8 +185,43 @@ class FaultRuntime:
             return self._frozen_signal_value(fault, target_id, target_field, result, cycle)
         return result
 
-    def apply_node_input(self, node_id, input_name, value, time):
+    def _apply_parameter_fault(self, fault, parameter_key, target_field, value, time):
+        if isinstance(value, list):
+            return self._apply_vector_fault(
+                fault,
+                fault.get("targetId", ""),
+                target_field,
+                value,
+                time,
+                lambda item_field, item: self._apply_parameter_fault(
+                    fault, parameter_key, item_field, item, time
+                ),
+            )
+        params = fault.get("parameters") or {}
         result = float(value)
+        fault_type = fault.get("faultType")
+        if fault_type == "parameter_bias":
+            return result + float(params.get("bias", params.get("delta_p", 0.0)))
+        if fault_type == "parameter_degradation":
+            return result * float(params.get("scale", 1.0))
+        if fault_type == "parameter_step":
+            return result + float(params.get("stepValue", params.get("step_value", params.get("step", 0.0))))
+        if fault_type == "parameter_drift":
+            start = float(fault.get("startTime", params.get("start", 0.0)))
+            return result + float(params.get("rate", 0.0)) * max(0.0, time - start)
+        if fault_type == "parameter_freeze":
+            freeze_key = (str(fault.get("faultId", "")), target_field)
+            return self.frozen_parameters.setdefault(freeze_key, result)
+        if fault_type == "parameter_random":
+            return result + self._bounded_noise(
+                params.get("seed", 1),
+                f"{fault.get('faultId', '')}:{target_field}",
+                time,
+            ) * abs(float(params.get("std", 0.0)))
+        return result
+
+    def apply_node_input(self, node_id, input_name, value, time):
+        result = copy.deepcopy(value)
         for fault in self.fault_instances:
             if not self._is_active(fault, time):
                 continue
@@ -147,34 +249,14 @@ class FaultRuntime:
             if not self._is_module_parameter_fault(fault):
                 continue
             parameter_key = self._parameter_key(fault)
-            params = fault.get("parameters") or {}
-            value = float(result.get(parameter_key, 1.0))
-            fault_type = fault.get("faultType")
-            if fault_type == "parameter_bias":
-                value += float(params.get("bias", params.get("delta_p", 0.0)))
-            elif fault_type == "parameter_degradation":
-                value *= float(params.get("scale", 1.0))
-            elif fault_type == "parameter_step":
-                value += float(params.get("stepValue", params.get("step_value", params.get("step", 0.0))))
-            elif fault_type == "parameter_drift":
-                start = float(fault.get("startTime", params.get("start", 0.0)))
-                value += float(params.get("rate", 0.0)) * max(0.0, time - start)
-            elif fault_type == "parameter_freeze":
-                freeze_key = (str(fault.get("faultId", "")), parameter_key)
-                value = self.frozen_parameters.setdefault(freeze_key, value)
-            elif fault_type == "parameter_random":
-                value += self._bounded_noise(
-                    params.get("seed", 1),
-                    fault.get("faultId", ""),
-                    time,
-                ) * abs(float(params.get("std", 0.0)))
-            else:
-                continue
-            result[parameter_key] = value
+            value = result.get(parameter_key, 1.0)
+            result[parameter_key] = self._apply_parameter_fault(
+                fault, parameter_key, f"params.{parameter_key}", value, time
+            )
         return result
 
     def apply_node_output(self, node_id, value, time, output_name=None, is_primary=True):
-        result = float(value)
+        result = copy.deepcopy(value)
         for fault in self.fault_instances:
             if not self._is_active(fault, time):
                 continue
@@ -196,25 +278,25 @@ class FaultRuntime:
         return result
 
     def apply_edge_value(self, edge_id, value, time):
-        result = float(value)
-        state = self.edge_state.setdefault(edge_id, {"last": result})
+        result = copy.deepcopy(value)
+        state = self.edge_state.setdefault(edge_id, {"last": copy.deepcopy(result)})
         if edge_id in self.disconnected_edge_ids:
-            state["last"] = 0.0
-            return 0.0
+            state["last"] = self._zero_like(result)
+            return copy.deepcopy(state["last"])
         for fault in self.fault_instances:
             if fault.get("targetId") != edge_id or not self._is_active(fault, time):
                 continue
             fault_type = fault.get("faultType")
             if fault_type == "link_loss":
-                result = float(state.get("last", result))
+                result = copy.deepcopy(state.get("last", result))
             elif fault_type == "link_delay":
                 queue = state.setdefault("queue", [])
-                queue.append(result)
+                queue.append(copy.deepcopy(result))
                 delay_steps = int((fault.get("parameters") or {}).get("delaySteps", 1))
-                result = queue.pop(0) if len(queue) > delay_steps else float(state.get("last", result))
+                result = queue.pop(0) if len(queue) > delay_steps else copy.deepcopy(state.get("last", result))
             else:
                 result = self._apply_signal_fault(fault, edge_id, "edge", result, time)
-        state["last"] = result
+        state["last"] = copy.deepcopy(result)
         return result
 
     def collect_events(self, time):

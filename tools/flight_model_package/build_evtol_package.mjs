@@ -35,16 +35,10 @@ function createHydratedBinding(nodeBinding, parsedModule, meta) {
     moduleCategory: nodeBinding.moduleCategory,
     sourcePackageId: meta.modelId,
     sourcePackageName: meta.modelName,
-    executionMode: 'backend'
+    executionMode: 'mock'
   });
 
-  return {
-    ...binding,
-    executionConfig: {
-      endpoint: 'http://127.0.0.1:8765/api/python-flow/execute',
-      timeoutMs: 3000
-    }
-  };
+  return binding;
 }
 
 function requireSnapshotNode(snapshot, nodeId) {

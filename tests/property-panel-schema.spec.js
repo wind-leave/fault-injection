@@ -91,6 +91,21 @@ describe('property panel schema service', () => {
     expect(getComponentPropertySchema('instrument_scope').groups[0].fields[0].label).toBe('模块名称');
   });
 
+  it('keeps vector component selectors out of the static instrument schemas', () => {
+    const scopeHtml = renderPropertyFieldsFromSchema({
+      type: 'instrument_scope',
+      props: { vectorChannelCh1: 3, vectorChannelCh2: 2 }
+    }, getComponentPropertySchema('instrument_scope'));
+    const spectrumHtml = renderPropertyFieldsFromSchema({
+      type: 'instrument_spectrum',
+      props: { vectorChannel: 4 }
+    }, getComponentPropertySchema('instrument_spectrum'));
+
+    expect(scopeHtml).not.toContain('id="prop-vectorChannelCh1"');
+    expect(scopeHtml).not.toContain('id="prop-vectorChannelCh2"');
+    expect(spectrumHtml).not.toContain('id="prop-vectorChannel"');
+  });
+
   it('renders analog signal source fields for old signal sources by default', () => {
     const schema = getComponentPropertySchema('signal_source');
     const html = renderPropertyFieldsFromSchema({
@@ -134,6 +149,10 @@ describe('property panel schema service', () => {
       type: 'signal_source',
       props: { signalDomain: 'analog', waveType: 'ramp' }
     }, schema);
+    const pulseHtml = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'analog', waveType: 'pulse' }
+    }, schema);
 
     expect(stepHtml).toContain('id="prop-initialValue"');
     expect(stepHtml).toContain('id="prop-finalValue"');
@@ -142,6 +161,14 @@ describe('property panel schema service', () => {
     expect(rampHtml).toContain('id="prop-slope"');
     expect(rampHtml).toContain('id="prop-startTime"');
     expect(rampHtml).not.toContain('id="prop-finalValue"');
+    expect(pulseHtml).toContain('id="prop-lowValue"');
+    expect(pulseHtml).toContain('id="prop-frequency"');
+    expect(pulseHtml).toContain('id="prop-dutyCycle"');
+    expect(pulseHtml).toContain('id="prop-phase"');
+    expect(pulseHtml).not.toContain('id="prop-analogKind"');
+    expect(pulseHtml).not.toContain('id="prop-minValue"');
+    expect(pulseHtml).not.toContain('id="prop-maxValue"');
+    expect(pulseHtml).not.toContain('id="prop-sampleRate"');
   });
 
   it('renders only RF fields applicable to the selected modulation mode', () => {
@@ -165,7 +192,10 @@ describe('property panel schema service', () => {
     expect(cwHtml).not.toContain('id="prop-bandwidth"');
     expect(cwHtml).not.toContain('id="prop-pulseWidth"');
     expect(pulseHtml).toContain('id="prop-pulseWidth"');
-    expect(pulseHtml).toContain('id="prop-prf"');
+    expect(pulseHtml).toContain('id="prop-pulseWidthUnit"');
+    expect(pulseHtml).toContain('id="prop-pulsePeriod"');
+    expect(pulseHtml).toContain('id="prop-pulsePeriodUnit"');
+    expect(pulseHtml).toContain('重周');
     expect(pulseHtml).not.toContain('id="prop-snr"');
     expect(digitalHtml).toContain('id="prop-bandwidth"');
     expect(digitalHtml).toContain('id="prop-sampleRate"');
@@ -213,32 +243,17 @@ describe('property panel schema service', () => {
     expect(html).not.toContain('id="prop-centerFrequency"');
   });
 
-  it('renders analog type options with Chinese labels while preserving values', () => {
+  it('does not render the removed analog type option', () => {
     const schema = getComponentPropertySchema('signal_source');
     document.body.innerHTML = renderPropertyFieldsFromSchema({
       type: 'signal_source',
       props: {
         signalDomain: 'analog',
-        analogKind: 'sensor'
+        waveType: 'sine'
       }
     }, schema);
 
-    const options = Array.from(document.getElementById('prop-analogKind').options);
-    expect(options.map((option) => option.value)).toEqual([
-      'voltage',
-      'current',
-      'sensor',
-      'control',
-      'generic'
-    ]);
-    expect(options.map((option) => option.textContent)).toEqual([
-      '电压信号',
-      '电流信号',
-      '传感器量',
-      '控制量',
-      '通用模拟量'
-    ]);
-    expect(document.getElementById('prop-analogKind').value).toBe('sensor');
+    expect(document.getElementById('prop-analogKind')).toBeNull();
   });
 
   it('renders waveform options once with Chinese labels and supports legacy Chinese values', () => {
@@ -257,6 +272,7 @@ describe('property panel schema service', () => {
       'step',
       'constant',
       'ramp',
+      'pulse',
       'noise'
     ]);
     expect(options.map((option) => option.textContent)).toEqual([
@@ -264,6 +280,7 @@ describe('property panel schema service', () => {
       '阶跃',
       '常值',
       '斜坡',
+      '脉冲',
       '噪声'
     ]);
     expect(document.getElementById('prop-waveType').value).toBe('sine');
@@ -370,32 +387,17 @@ describe('property panel schema service', () => {
     expect(document.getElementById('prop-commandType').value).toBe('bus-message');
   });
 
-  it('renders RF kind options with Chinese labels while preserving values', () => {
+  it('does not render the removed RF type option', () => {
     const schema = getComponentPropertySchema('signal_source');
     document.body.innerHTML = renderPropertyFieldsFromSchema({
       type: 'signal_source',
       props: {
         signalDomain: 'rf',
-        rfKind: 'radar'
+        modulation: 'cw'
       }
     }, schema);
 
-    const options = Array.from(document.getElementById('prop-rfKind').options);
-    expect(options.map((option) => option.value)).toEqual([
-      'communication',
-      'radar',
-      'navigation',
-      'jamming',
-      'generic'
-    ]);
-    expect(options.map((option) => option.textContent)).toEqual([
-      '通信射频',
-      '雷达射频',
-      '导航射频',
-      '干扰射频',
-      '通用射频'
-    ]);
-    expect(document.getElementById('prop-rfKind').value).toBe('radar');
+    expect(document.getElementById('prop-rfKind')).toBeNull();
   });
 
   it('renders RF-only fields for RF signal sources', () => {
@@ -413,6 +415,7 @@ describe('property panel schema service', () => {
     expect(html).toContain('id="prop-centerFrequency"');
     expect(html).toContain('id="prop-bandwidth"');
     expect(html).toContain('id="prop-modulation"');
+    expect(html).not.toContain('id="prop-rfKind"');
     expect(html).not.toContain('id="prop-waveType"');
     expect(html).not.toContain('id="prop-digitalMode"');
   });

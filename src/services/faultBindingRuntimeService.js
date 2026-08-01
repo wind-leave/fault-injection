@@ -53,6 +53,42 @@ function getBindingObject(slot = {}) {
   return firstText(slot.bindingObject, slot.targetVariable, slot.variableKey, slot.parameterKey, slot.varName, slot.key);
 }
 
+function normalizeVectorInjectionScope(value = '') {
+  const scope = String(value || '').trim().toLowerCase();
+  if (scope === 'item') return 'item';
+  return ['items', 'selected', 'partial'].includes(scope) ? 'items' : 'all';
+}
+
+function normalizeVectorIndex(value, vectorLength = 0) {
+  const length = Math.max(0, Math.trunc(Number(vectorLength) || 0));
+  if (length < 1) {
+    return 0;
+  }
+  return Math.min(length - 1, Math.max(0, Math.trunc(Number(value) || 0)));
+}
+
+function normalizeVectorIndices(value, vectorLength = 0) {
+  const values = Array.isArray(value)
+    ? value
+    : String(value ?? '').split(',').filter(Boolean);
+  return [...new Set(values.map((index) => normalizeVectorIndex(index, vectorLength)))];
+}
+
+export function getFaultSlotVectorLength(slot = {}) {
+  const shapeLength = Array.isArray(slot.shape) ? Number(slot.shape[0]) : NaN;
+  const literalValue = slot.default ?? slot.value ?? slot.initialValue;
+  const parsedLiteral = typeof literalValue === 'string'
+    ? (() => { try { return JSON.parse(literalValue); } catch { return null; } })()
+    : literalValue;
+  const literalLength = Array.isArray(parsedLiteral) ? parsedLiteral.length : NaN;
+  const vectorLength = [slot.vectorLength, slot.length, shapeLength, literalLength]
+    .map(Number)
+    .find(Number.isFinite);
+  const type = String(slot.dataType ?? slot.type ?? slot.format ?? '').trim().toLowerCase();
+  const isVector = ['vector', 'array', '向量', '数组'].includes(type) || Number.isFinite(vectorLength);
+  return isVector && Number.isInteger(vectorLength) && vectorLength > 1 ? vectorLength : 0;
+}
+
 function getFaultInjectionForm(target = {}, layer = '') {
   const targetKind = inferTargetKind(target);
   const normalizedLayer = normalizeFaultLayer(layer);
@@ -396,6 +432,17 @@ export function createFaultInstanceRecord(options = {}) {
   const parameters = clone(options.parameters || {});
   const bindingObject = options.bindingObject || slot.bindingObject || slot.targetVariable || slot.varName || slot.variableKey || slot.key || '';
 
+  const vectorLength = getFaultSlotVectorLength(slot);
+  const vectorInjectionScope = normalizeVectorInjectionScope(options.vectorInjectionScope ?? options.vectorScope);
+  const vectorInjection = vectorLength > 1 ? {
+    vectorInjectionScope,
+    ...(vectorInjectionScope === 'item'
+      ? { vectorIndex: normalizeVectorIndex(options.vectorIndex, vectorLength) }
+      : vectorInjectionScope === 'items'
+        ? { vectorIndices: normalizeVectorIndices(options.vectorIndices ?? options.vectorIndex, vectorLength) }
+      : {})
+  } : {};
+
   return {
     instanceId: options.instanceId || `fault-inst-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     faultTypeId: model.id || model.faultTypeId || model.modelId || '',
@@ -408,6 +455,7 @@ export function createFaultInstanceRecord(options = {}) {
     bindingObject,
     targetVariable: options.targetVariable || bindingObject,
     targetField: options.targetField || slot.targetField || '',
+    ...vectorInjection,
     displayName: model.displayName || model.name || model.id || model.faultTypeId || '',
     parameters,
     active: options.active ?? true,
@@ -515,6 +563,9 @@ export function createFaultInstancePlan(options = {}) {
     parameters,
     bindingObject,
     injectionForm,
+    vectorInjectionScope: options.vectorInjectionScope ?? options.vectorScope,
+    vectorIndex: options.vectorIndex,
+    vectorIndices: options.vectorIndices,
     instanceId: options.instanceId
   });
 
@@ -554,7 +605,16 @@ export function createRuntimePayloadFromInstance(options = {}) {
     bindingObject: instance.bindingObject || basePayload.bindingObject || '',
     targetVariable: instance.targetVariable || basePayload.targetVariable || instance.bindingObject || basePayload.bindingObject || '',
     targetField: instance.targetField || basePayload.targetField || '',
-    injectionForm: instance.injectionForm || basePayload.injectionForm || ''
+    injectionForm: instance.injectionForm || basePayload.injectionForm || '',
+    ...(instance.vectorInjectionScope || basePayload.vectorInjectionScope
+      ? { vectorInjectionScope: instance.vectorInjectionScope || basePayload.vectorInjectionScope || 'all' }
+      : {}),
+    ...(instance.vectorInjectionScope === 'item' || basePayload.vectorInjectionScope === 'item'
+      ? { vectorIndex: instance.vectorIndex ?? basePayload.vectorIndex ?? 0 }
+      : {}),
+    ...(instance.vectorInjectionScope === 'items' || basePayload.vectorInjectionScope === 'items'
+      ? { vectorIndices: clone(instance.vectorIndices ?? basePayload.vectorIndices ?? []) }
+      : {})
   };
 }
 
@@ -631,6 +691,15 @@ export function createFaultTagRecord(options = {}) {
     targetVariable: instance.targetVariable || payload.targetVariable || instance.bindingObject || payload.bindingObject || '',
     targetField: instance.targetField || payload.targetField || '',
     injectionForm: instance.injectionForm || payload.injectionForm || '',
+    ...(instance.vectorInjectionScope || payload.vectorInjectionScope
+      ? { vectorInjectionScope: instance.vectorInjectionScope || payload.vectorInjectionScope || 'all' }
+      : {}),
+    ...(instance.vectorInjectionScope === 'item' || payload.vectorInjectionScope === 'item'
+      ? { vectorIndex: instance.vectorIndex ?? payload.vectorIndex ?? 0 }
+      : {}),
+    ...(instance.vectorInjectionScope === 'items' || payload.vectorInjectionScope === 'items'
+      ? { vectorIndices: clone(instance.vectorIndices ?? payload.vectorIndices ?? []) }
+      : {}),
     active: options.active ?? true,
     positionMode: options.positionMode || 'manual',
     expanded: options.expanded ?? false,
@@ -685,6 +754,15 @@ export function createFaultBindingRecord(options = {}) {
     targetVariable: payload.targetVariable || instance.targetVariable || payload.bindingObject || instance.bindingObject || '',
     targetField: payload.targetField || instance.targetField || '',
     injectionForm: payload.injectionForm || instance.injectionForm || '',
+    ...(payload.vectorInjectionScope || instance.vectorInjectionScope
+      ? { vectorInjectionScope: payload.vectorInjectionScope || instance.vectorInjectionScope || 'all' }
+      : {}),
+    ...(payload.vectorInjectionScope === 'item' || instance.vectorInjectionScope === 'item'
+      ? { vectorIndex: payload.vectorIndex ?? instance.vectorIndex ?? 0 }
+      : {}),
+    ...(payload.vectorInjectionScope === 'items' || instance.vectorInjectionScope === 'items'
+      ? { vectorIndices: clone(payload.vectorIndices ?? instance.vectorIndices ?? []) }
+      : {}),
     visualRole: options.visualRole || 'fault-source',
     propagationMode,
     canPropagate: options.canPropagate ?? propagationMode !== 'localOnly',
@@ -711,6 +789,11 @@ export function createRuntimeFaultBindingWithAdapter(options = {}) {
     binding.targetVariable = payload.targetVariable || binding.targetVariable || binding.bindingObject || '';
     binding.targetField = payload.targetField || binding.targetField || '';
     binding.injectionForm = payload.injectionForm || binding.injectionForm || '';
+    if (payload.vectorInjectionScope) {
+      binding.vectorInjectionScope = payload.vectorInjectionScope;
+      if (payload.vectorInjectionScope === 'item') binding.vectorIndex = payload.vectorIndex ?? 0;
+      if (payload.vectorInjectionScope === 'items') binding.vectorIndices = clone(payload.vectorIndices ?? []);
+    }
     adapter.appendFaultBinding(target, binding);
     return binding;
   }

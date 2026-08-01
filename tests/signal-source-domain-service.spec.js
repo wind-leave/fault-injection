@@ -40,10 +40,11 @@ describe('signalSourceDomainService', () => {
     expect(createSignalSourceProps('rf')).toMatchObject({
       name: '射频信号源',
       signalDomain: 'rf',
-      rfKind: 'communication',
       centerFrequency: '',
       bandwidth: '',
-      powerUnit: 'dBm'
+      powerUnit: 'dBm',
+      pulseWidthUnit: 'μs',
+      pulsePeriodUnit: 'ms'
     });
   });
 
@@ -78,6 +79,19 @@ describe('signalSourceDomainService', () => {
       amplitude: '3',
       centerFrequency: '2.4GHz',
       powerUnit: 'dBm'
+    });
+  });
+
+  it('splits legacy RF pulse durations into editable values and units', () => {
+    expect(normalizeSignalSourceProps({
+      signalDomain: 'rf',
+      pulseWidth: '250us',
+      pulsePeriod: '1ms'
+    })).toMatchObject({
+      pulseWidth: '250',
+      pulseWidthUnit: 'μs',
+      pulsePeriod: '1',
+      pulsePeriodUnit: 'ms'
     });
   });
 

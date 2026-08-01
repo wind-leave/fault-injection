@@ -11,10 +11,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from math import sin
 from random import Random
-from typing import Callable, Dict, Iterable, List, MutableMapping, Sequence
+from typing import Callable, Dict, Iterable, List, MutableMapping, Optional, Sequence, Union
 
 
-Number = float | int
+Number = Union[float, int]
 
 
 @dataclass
@@ -29,7 +29,7 @@ class FaultRuntimeState:
     sample_index: int = 0
 
 
-def is_active(t: float, start: float = 0.0, duration: float | None = None) -> bool:
+def is_active(t: float, start: float = 0.0, duration: Optional[float] = None) -> bool:
     """Return whether a fault should be active at time t."""
 
     if t < start:
@@ -77,7 +77,7 @@ def actuator_lock(command: float, lock_value: float = 0.0) -> float:
     return lock_value
 
 
-def saturation_limit(value: float, lower: float | None = None, upper: float | None = None) -> float:
+def saturation_limit(value: float, lower: Optional[float] = None, upper: Optional[float] = None) -> float:
     """Clamp a signal to a lower and/or upper bound."""
 
     if lower is not None:
@@ -226,9 +226,9 @@ def apply_fault_signal(
     value: float,
     t: float,
     kind: str,
-    params: MutableMapping[str, float | int | str | bool],
+    params: MutableMapping[str, Union[float, int, str, bool]],
     state: FaultRuntimeState,
-    rng: Random | None = None,
+    rng: Optional[Random] = None,
 ) -> float:
     """Dispatch a scalar signal fault by kind.
 

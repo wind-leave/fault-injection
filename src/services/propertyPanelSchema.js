@@ -5,19 +5,12 @@ import {
 
 const PORT_FORMATS = ['标量', '向量', '矩阵', '布尔', '事件'];
 
-const ANALOG_KIND_OPTIONS = [
-  { value: 'voltage', label: '电压信号' },
-  { value: 'current', label: '电流信号' },
-  { value: 'sensor', label: '传感器量' },
-  { value: 'control', label: '控制量' },
-  { value: 'generic', label: '通用模拟量' }
-];
-
 const WAVE_TYPE_OPTIONS = [
   { value: 'sine', label: '正弦' },
   { value: 'step', label: '阶跃' },
   { value: 'constant', label: '常值' },
   { value: 'ramp', label: '斜坡' },
+  { value: 'pulse', label: '脉冲' },
   { value: 'noise', label: '噪声' }
 ];
 
@@ -26,6 +19,7 @@ const WAVE_TYPE_ALIASES = {
   阶跃: 'step',
   常值: 'constant',
   斜坡: 'ramp',
+  脉冲: 'pulse',
   噪声: 'noise'
 };
 
@@ -41,14 +35,6 @@ const COMMAND_TYPE_OPTIONS = [
   { value: 'bus-message', label: '总线报文' },
   { value: 'task', label: '任务指令' },
   { value: 'mode', label: '模式指令' }
-];
-
-const RF_KIND_OPTIONS = [
-  { value: 'communication', label: '通信射频' },
-  { value: 'radar', label: '雷达射频' },
-  { value: 'navigation', label: '导航射频' },
-  { value: 'jamming', label: '干扰射频' },
-  { value: 'generic', label: '通用射频' }
 ];
 
 const RF_MODULATION_OPTIONS = [
@@ -71,11 +57,9 @@ const MULTIMETER_MODE_OPTIONS = [
 ];
 
 const SELECT_OPTION_OVERRIDES = {
-  analogKind: ANALOG_KIND_OPTIONS,
   waveType: WAVE_TYPE_OPTIONS,
   digitalMode: DIGITAL_MODE_OPTIONS,
   commandType: COMMAND_TYPE_OPTIONS,
-  rfKind: RF_KIND_OPTIONS,
   measurementMode: MULTIMETER_MODE_OPTIONS
 };
 
@@ -86,8 +70,9 @@ const PROPERTY_SCHEMAS = {
       {
         label: '信号定义',
         placement: 'overview',
+        help: '组件名称保存后会立即更新画布中的系统信号组件标题。',
         fields: [
-          { key: 'name', label: '模块名称', type: 'text', fallback: '信号源' },
+          { key: 'name', label: '组件名称', type: 'text', fallback: '信号源' },
           { key: 'signalDomain', label: '信号域', type: 'select', options: SIGNAL_DOMAINS, fallback: 'analog', row: 'signal-domain' },
           { key: 'signalName', label: '信号名称', type: 'text', fallback: '', row: 'signal-id' },
           { key: 'signalId', label: '信号 ID', type: 'text', fallback: '', row: 'signal-id' },
@@ -128,8 +113,7 @@ const PROPERTY_SCHEMAS = {
         label: '模拟信号配置',
         domains: ['analog'],
         fields: [
-          { key: 'analogKind', label: '模拟类型', type: 'select', options: ['voltage', 'current', 'sensor', 'control', 'generic'], fallback: 'generic', row: 'analog-kind' },
-          { key: 'waveType', label: '波形', type: 'select', options: ['正弦', '阶跃', '常值', 'sine', 'step', 'constant', 'ramp', 'noise'], fallback: '正弦', row: 'analog-kind' },
+          { key: 'waveType', label: '波形', type: 'select', options: ['正弦', '阶跃', '常值', '脉冲', 'sine', 'step', 'constant', 'ramp', 'pulse', 'noise'], fallback: '正弦' },
           { key: 'outputFormat', label: '输出格式', type: 'select', options: PORT_FORMATS, fallback: '标量', row: 'analog-format' },
           { key: 'amplitude', label: '幅值', type: 'text', fallback: '1.0', row: 'analog-basic', waveTypes: ['sine'] },
           { key: 'frequency', label: '频率 (Hz)', type: 'text', fallback: '1.0', row: 'analog-basic', waveTypes: ['sine'] },
@@ -141,10 +125,12 @@ const PROPERTY_SCHEMAS = {
           { key: 'amplitude', label: '常值', type: 'text', fallback: '1.0', row: 'analog-constant', waveTypes: ['constant'] },
           { key: 'slope', label: '斜率 (单位/s)', type: 'text', fallback: '1.0', row: 'analog-ramp', waveTypes: ['ramp'] },
           { key: 'startTime', label: '开始时刻 (s)', type: 'text', fallback: '0', row: 'analog-ramp', waveTypes: ['ramp'] },
-          { key: 'amplitude', label: '噪声标准差', type: 'text', fallback: '1.0', row: 'analog-noise', waveTypes: ['noise'] },
-          { key: 'sampleRate', label: '采样率', type: 'text', fallback: '', row: 'analog-rate' },
-          { key: 'minValue', label: '下限', type: 'text', fallback: '', row: 'analog-limit' },
-          { key: 'maxValue', label: '上限', type: 'text', fallback: '', row: 'analog-limit' }
+          { key: 'amplitude', label: '高电平', type: 'text', fallback: '1.0', row: 'analog-pulse', waveTypes: ['pulse'] },
+          { key: 'lowValue', label: '低电平', type: 'text', fallback: '0', row: 'analog-pulse', waveTypes: ['pulse'] },
+          { key: 'frequency', label: '频率 (Hz)', type: 'text', fallback: '1.0', row: 'analog-pulse', waveTypes: ['pulse'] },
+          { key: 'dutyCycle', label: '占空比 (%)', type: 'text', fallback: '50', row: 'analog-pulse', waveTypes: ['pulse'] },
+          { key: 'phase', label: '相位 (rad)', type: 'text', fallback: '0', row: 'analog-pulse', waveTypes: ['pulse'] },
+          { key: 'amplitude', label: '噪声标准差', type: 'text', fallback: '1.0', row: 'analog-noise', waveTypes: ['noise'] }
         ]
       },
       {
@@ -152,7 +138,6 @@ const PROPERTY_SCHEMAS = {
         domains: ['rf'],
         fields: [
           { key: 'centerFrequencyUnit', label: '\u9891\u7387\u5355\u4f4d', type: 'select', options: ['Hz', 'kHz', 'MHz', 'GHz'], fallback: 'GHz', row: 'rf-frequency', order: 2 },
-          { key: 'rfKind', label: '射频类型', type: 'select', options: RF_KIND_OPTIONS, fallback: 'communication', row: 'rf-kind' },
           { key: 'centerFrequency', label: '中心频率', type: 'text', fallback: '', row: 'rf-frequency' },
           { key: 'power', label: '功率', type: 'text', fallback: '', row: 'rf-power' },
           { key: 'powerUnit', label: '功率单位', type: 'select', options: ['dBm', 'W', 'mW'], fallback: 'dBm', row: 'rf-power' },
@@ -161,8 +146,10 @@ const PROPERTY_SCHEMAS = {
           { key: 'frequencyDeviation', label: '频偏', type: 'text', fallback: '', row: 'rf-modulation-parameter', rfModulations: ['fm'] },
           { key: 'phaseDeviation', label: '相偏 (°)', type: 'text', fallback: '', row: 'rf-modulation-parameter', rfModulations: ['pm'] },
           { key: 'modulationRate', label: '调制频率', type: 'text', fallback: '', row: 'rf-modulation-rate', rfModulations: ['am', 'fm', 'pm'] },
-          { key: 'pulseWidth', label: '脉宽', type: 'text', fallback: '', row: 'rf-pulse', rfModulations: ['pulse'] },
-          { key: 'prf', label: 'PRF', type: 'text', fallback: '', row: 'rf-pulse', rfModulations: ['pulse'] },
+          { key: 'pulseWidth', label: '脉宽', type: 'text', fallback: '', row: 'rf-pulse-width', order: 1, rfModulations: ['pulse'] },
+          { key: 'pulseWidthUnit', label: '单位', type: 'select', options: ['ns', 'μs', 'ms', 's'], fallback: 'μs', row: 'rf-pulse-width', order: 2, rfModulations: ['pulse'] },
+          { key: 'pulsePeriod', label: '重周', type: 'text', fallback: '', row: 'rf-pulse-period', order: 1, rfModulations: ['pulse'] },
+          { key: 'pulsePeriodUnit', label: '单位', type: 'select', options: ['ns', 'μs', 'ms', 's'], fallback: 'ms', row: 'rf-pulse-period', order: 2, rfModulations: ['pulse'] },
           { key: 'bandwidth', label: '带宽', type: 'text', fallback: '', row: 'rf-digital', rfModulations: ['digital', 'noise'] },
           { key: 'symbolRate', label: '符号率', type: 'text', fallback: '', row: 'rf-digital', rfModulations: ['digital'] },
           { key: 'sampleRate', label: '基带采样率', type: 'text', fallback: '', row: 'rf-quality', rfModulations: ['digital'] },

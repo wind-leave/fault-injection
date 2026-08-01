@@ -39,6 +39,8 @@ describe('simulation property panel schema service', () => {
     expect(html).toContain('data-role="输入"');
     expect(html).toContain('data-role="输出"');
     expect(html).toContain('data-role="中间变量"');
+    expect(html).toContain('电源接口');
+    expect(html).toContain('上边为电源输入端口，下边为电源输出（地）端口');
     expect(html).toContain('控制 &lt;A&gt;');
     expect(html).toContain('note &lt;x&gt;');
     expect(html).toContain('<option value="积分" selected>积分</option>');
@@ -84,6 +86,8 @@ describe('simulation property panel schema service', () => {
     expect(html).toContain('data-python-port-kind="inputs"');
     expect(html).toContain('data-python-port-kind="outputs"');
     expect(html).toContain('data-python-port-kind="middleVars"');
+    expect(html).toContain('电源接口');
+    expect(html).toContain('中间变量仅作为内部观测数据，不显示为画布端口');
     expect(html).toContain('backend');
     expect(html).toContain('error -&gt; command');
     expect(html).not.toContain('id="sim-input-count"');

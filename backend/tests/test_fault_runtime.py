@@ -150,6 +150,77 @@ class FaultRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.apply_node_output("sensor-1", 10.0, 0.0, output_name="other"), 10.0)
         self.assertEqual(runtime.apply_edge_value("edge-source-sensor", 10.0, 0.0), 14.0)
 
+    def test_vector_fault_can_target_one_item_or_the_complete_vector(self):
+        selected_item_runtime = FaultRuntime([
+            {
+                "faultId": "vector-item-bias",
+                "faultType": "sensor_bias",
+                "targetId": "sensor-1",
+                "targetField": "outputs.gyro",
+                "injectionForm": "signal-transform",
+                "vectorInjectionScope": "item",
+                "vectorIndex": 1,
+                "parameters": {"bias": 2.5},
+            }
+        ])
+        all_items_runtime = FaultRuntime([
+            {
+                "faultId": "vector-all-bias",
+                "faultType": "sensor_bias",
+                "targetId": "sensor-1",
+                "targetField": "outputs.gyro",
+                "injectionForm": "signal-transform",
+                "parameters": {"bias": 2.5},
+            }
+        ])
+
+        self.assertEqual(
+            selected_item_runtime.apply_node_output("sensor-1", [1.0, 2.0, 3.0], 0.0, output_name="gyro"),
+            [1.0, 4.5, 3.0],
+        )
+        self.assertEqual(
+            all_items_runtime.apply_node_output("sensor-1", [1.0, 2.0, 3.0], 0.0, output_name="gyro"),
+            [3.5, 4.5, 5.5],
+        )
+
+    def test_vector_module_parameter_fault_can_target_one_item(self):
+        runtime = FaultRuntime([
+            {
+                "faultId": "vector-parameter-step",
+                "faultType": "parameter_step",
+                "targetId": "controller-1",
+                "injectionForm": "module-variable",
+                "parameterKey": "gains",
+                "vectorInjectionScope": "item",
+                "vectorIndex": 2,
+                "parameters": {"step": 0.5},
+            }
+        ])
+
+        self.assertEqual(
+            runtime.apply_node_parameters("controller-1", {"gains": [1.0, 2.0, 3.0]}, 0.0)["gains"],
+            [1.0, 2.0, 3.5],
+        )
+
+    def test_vector_fault_can_target_selected_items(self):
+        runtime = FaultRuntime([
+            {
+                "faultId": "vector-selected-bias",
+                "faultType": "sensor_bias",
+                "targetId": "sensor-1",
+                "targetField": "outputs.gyro",
+                "injectionForm": "signal-transform",
+                "vectorInjectionScope": "items",
+                "vectorIndices": [0, 2, 2, 8],
+                "parameters": {"bias": 2.5},
+            }
+        ])
+
+        self.assertEqual(
+            runtime.apply_node_output("sensor-1", [1.0, 2.0, 3.0], 0.0, output_name="gyro"),
+            [3.5, 2.0, 5.5],
+        )
+
     def test_electrical_freeze_noise_and_intermittent_faults_transform_signals(self):
         runtime = FaultRuntime([
             {

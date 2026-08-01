@@ -59,7 +59,6 @@ export function executeFlowBlockPythonBindingSync({
   time = 0,
   dt = 0.1,
   adapterMode,
-  adapterEndpoint,
   executeSync = executePythonBindingSync,
   applyElectricalFault
 }) {
@@ -95,7 +94,6 @@ export function executeFlowBlockPythonBindingSync({
 
   const response = executeSync({
     adapterMode: adapterMode ?? binding?.executionMode ?? 'mock',
-    endpoint: adapterEndpoint ?? binding?.executionConfig?.endpoint,
     payload
   }) ?? {};
 

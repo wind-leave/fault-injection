@@ -82,6 +82,32 @@ describe('canvas graph geometry helpers', () => {
     });
   });
 
+  it('resolves bottom power ports across the node width and routes away from the node', () => {
+    const node = {
+      id: 'sim-3',
+      type: 'simulation_block',
+      x: 100,
+      y: 50,
+      w: 200,
+      h: 90
+    };
+    const ports = {
+      inputs: [],
+      outputs: [{ key: 'power-output-0', label: '电源地', side: 'bottom' }]
+    };
+
+    const powerPort = resolvePortInfo(node, 'output', 0, { ports, componentLibrary });
+    expect(powerPort).toMatchObject({
+      side: 'bottom',
+      localX: 100,
+      localY: 90,
+      x: 200,
+      y: 140
+    });
+    expect(buildEdgePath(powerPort, { x: 260, y: 220, side: 'top' }))
+      .toBe('M 200 140 C 200 188, 260 172, 260 220');
+  });
+
   it('builds stable bezier paths and rejects invalid points', () => {
     const start = { x: 100, y: 80, side: 'right' };
     const end = { x: 260, y: 140, side: 'left' };

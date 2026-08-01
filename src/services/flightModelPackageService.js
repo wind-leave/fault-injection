@@ -265,7 +265,7 @@ function hydrateSimulationBinding(binding, moduleEntry) {
     executionMode: binding.executionMode
   });
 
-  return {
+  const mergedBinding = {
     ...hydrated,
     ...clone(binding),
     bound: true,
@@ -279,9 +279,10 @@ function hydrateSimulationBinding(binding, moduleEntry) {
     entryFunction: binding.entryFunction ?? moduleEntry.entryFunction,
     parsedInterface: binding.parsedInterface ?? clone(moduleEntry.parsedInterface),
     rawSource: binding.rawSource || moduleEntry.source,
-    portMapping: hydrated.portMapping,
-    executionConfig: isPlainObject(binding.executionConfig) ? binding.executionConfig : hydrated.executionConfig
+    portMapping: hydrated.portMapping
   };
+  delete mergedBinding.executionConfig;
+  return mergedBinding;
 }
 
 function hydrateSnapshotBindings(snapshot, pythonModules) {

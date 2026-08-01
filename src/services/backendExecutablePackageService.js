@@ -18,11 +18,24 @@ function sanitizeNumber(value, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function sanitizeNumericVector(value) {
+  if (!Array.isArray(value) || !value.length) {
+    return null;
+  }
+  const vector = value.map((item) => Number(item));
+  return vector.every(Number.isFinite) ? vector : null;
+}
+
 function pickNumericParameters(props = {}) {
   return Object.fromEntries(
     Object.entries(props)
-      .filter(([, value]) => String(value ?? '').trim() !== '' && Number.isFinite(Number(value)))
-      .map(([key, value]) => [key, Number(value)])
+      .flatMap(([key, value]) => {
+        const vector = key === 'value' ? sanitizeNumericVector(value) : null;
+        if (vector) return [[key, vector]];
+        return String(value ?? '').trim() !== '' && Number.isFinite(Number(value))
+          ? [[key, Number(value)]]
+          : [];
+      })
   );
 }
 
@@ -37,7 +50,24 @@ function parseFrequencyHz(value, unit = '') {
   return numeric * (multipliers[String(detectedUnit).toLowerCase()] ?? 1);
 }
 
-function parseDurationSeconds(value, fallback = 0) {
+// 射频功率按标准 50 Ω 系统换算为正弦载波的峰值电压。
+function parseRfPowerPeakVoltage(value, unit = 'dBm') {
+  const text = String(value ?? '').trim();
+  const numeric = Number.parseFloat(text);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  const detectedUnit = text.match(/(dBm|mW|W)\s*$/i)?.[1] || String(unit ?? '').trim();
+  const normalizedUnit = detectedUnit.toLowerCase();
+  const watts = normalizedUnit === 'dbm'
+    ? 1e-3 * Math.pow(10, numeric / 10)
+    : normalizedUnit === 'mw'
+      ? numeric * 1e-3
+      : numeric;
+  return Math.sqrt(Math.max(0, watts) * 50 * 2);
+}
+
+function parseDurationSeconds(value, unit = '', fallback = 0) {
   const text = String(value ?? '').trim();
   const numeric = Number.parseFloat(text);
   if (!Number.isFinite(numeric)) {
@@ -46,6 +76,10 @@ function parseDurationSeconds(value, fallback = 0) {
   if (/ns\s*$/i.test(text)) return numeric * 1e-9;
   if (/(?:us|µs)\s*$/i.test(text)) return numeric * 1e-6;
   if (/ms\s*$/i.test(text)) return numeric * 1e-3;
+  const normalizedUnit = String(unit ?? '').trim().toLowerCase().replace('µ', 'μ');
+  if (normalizedUnit === 'ns') return numeric * 1e-9;
+  if (normalizedUnit === 'us' || normalizedUnit === 'μs') return numeric * 1e-6;
+  if (normalizedUnit === 'ms') return numeric * 1e-3;
   return numeric;
 }
 
@@ -62,17 +96,17 @@ function addSignalSourceExecutionParameters(parameters, rawProps = {}, normalize
       normalizedProps.centerFrequency,
       normalizedProps.centerFrequencyUnit
     );
-    const power = sanitizeNumber(normalizedProps.power, 0);
+    const amplitude = parseRfPowerPeakVoltage(normalizedProps.power, normalizedProps.powerUnit);
     parameters.rfModulation = modulation;
     parameters.centerFrequencyHz = centerFrequencyHz;
-    parameters.amplitude = power;
+    parameters.amplitude = amplitude;
     parameters.frequency = centerFrequencyHz;
     parameters.modulationRateHz = parseFrequencyHz(normalizedProps.modulationRate, 1);
     parameters.modulationDepthRatio = Math.max(0, Math.min(100, sanitizeNumber(normalizedProps.modulationDepth, 0))) / 100;
     parameters.frequencyDeviationHz = Math.max(0, parseFrequencyHz(normalizedProps.frequencyDeviation, 0));
     parameters.phaseDeviationRad = sanitizeNumber(normalizedProps.phaseDeviation, 0);
-    parameters.pulseWidthSeconds = Math.max(0, parseDurationSeconds(normalizedProps.pulseWidth, 0));
-    parameters.prfHz = Math.max(0, parseFrequencyHz(normalizedProps.prf, 1));
+    parameters.pulseWidthSeconds = Math.max(0, parseDurationSeconds(normalizedProps.pulseWidth, normalizedProps.pulseWidthUnit, 0));
+    parameters.pulsePeriodSeconds = Math.max(0, parseDurationSeconds(normalizedProps.pulsePeriod, normalizedProps.pulsePeriodUnit, 0));
     parameters.bandwidthHz = Math.max(0, parseFrequencyHz(normalizedProps.bandwidth, 0));
     parameters.symbolRateHz = Math.max(0, parseFrequencyHz(normalizedProps.symbolRate, 0));
     parameters.sampleRateHz = Math.max(0, parseFrequencyHz(normalizedProps.sampleRate, 0));
@@ -104,9 +138,30 @@ function addSumBlockExecutionParameters(parameters, rawProps = {}) {
   parameters.signs = normalizeSumBlockSigns(rawProps.signs, parameters.inputCount);
 }
 
+function normalizePortDataType(value) {
+  const text = String(value ?? 'scalar').trim().toLowerCase();
+  if (['scalar', '标量', 'float', 'number'].includes(text)) return 'scalar';
+  if (['vector', '向量'].includes(text)) return 'vector';
+  return 'scalar';
+}
+
 function normalizePorts(ports = []) {
   return Array.isArray(ports)
-    ? ports.map((port) => ({ name: String(port?.name ?? port?.label ?? '') })).filter((port) => port.name)
+    ? ports.map((port) => {
+      const name = String(port?.varName ?? port?.name ?? port?.label ?? '');
+      const id = String(port?.portId ?? port?.id ?? port?.key ?? name);
+      const dataType = normalizePortDataType(port?.dataType ?? port?.type);
+      const shapeLength = Array.isArray(port?.shape) ? Number(port.shape[0]) : NaN;
+      const vectorLength = Number(port?.vectorLength ?? port?.length ?? shapeLength);
+      return {
+        name,
+        id,
+        dataType,
+        ...(dataType === 'vector' && Number.isInteger(vectorLength) && vectorLength > 0
+          ? { vectorLength }
+          : {})
+      };
+    }).filter((port) => port.name)
     : [];
 }
 
@@ -118,7 +173,7 @@ function normalizeNode(node) {
   const parameters = pickNumericParameters(rawProps);
   if (node.type === 'signal_source') {
     addSignalSourceExecutionParameters(parameters, rawProps, props);
-    parameters.value = getSignalSourceScalarFallback(props);
+    parameters.value = sanitizeNumericVector(rawProps.value) ?? getSignalSourceScalarFallback(props);
   }
   if (node.type === 'sum_block') {
     addSumBlockExecutionParameters(parameters, rawProps);
@@ -324,6 +379,24 @@ function channelNameFromPoint(point = {}) {
   return String(point.channel ?? 'ch1').trim().toLowerCase() || 'ch1';
 }
 
+function normalizeMeasurementVectorIndex(value) {
+  const selectedChannel = Math.trunc(Number(value));
+  return Number.isFinite(selectedChannel) && selectedChannel > 0 ? selectedChannel - 1 : 0;
+}
+
+function vectorIndexForScopeChannel(scopeNode = {}, targetPortIndex, edges = [], nodesById = new Map()) {
+  const edge = edges.find((item) => (
+    item.targetNodeId === scopeNode.id && Number(item.targetPortIndex) === Number(targetPortIndex)
+  ));
+  const sourceNode = edge ? nodesById.get(edge.sourceNodeId) : null;
+  const sourcePort = sourceNode?.outputs?.[Number(edge?.sourcePortIndex) || 0];
+  if (sourcePort?.dataType !== 'vector') {
+    return null;
+  }
+  const property = Number(targetPortIndex) === 1 ? 'vectorChannelCh2' : 'vectorChannelCh1';
+  return normalizeMeasurementVectorIndex(scopeNode?.parameters?.[property]);
+}
+
 function normalizeMeasurementPoint(point = {}, edges = []) {
   const scopeNodeId = String(point.scopeNodeId);
   const channel = channelNameFromPoint(point);
@@ -343,10 +416,18 @@ function normalizeMeasurementPoint(point = {}, edges = []) {
 
 function buildMeasurementPoints(state, nodes, edges) {
   const scopeNodeIds = new Set(nodes.filter((node) => node.type === 'instrument_scope').map((node) => node.id));
+  const scopeNodes = new Map(nodes.filter((node) => node.type === 'instrument_scope').map((node) => [node.id, node]));
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
   const explicitPoints = Array.isArray(state.measurementPoints)
     ? state.measurementPoints
       .filter((point) => scopeNodeIds.has(String(point?.scopeNodeId)))
-      .map((point) => normalizeMeasurementPoint(point, edges))
+      .map((point) => {
+        const normalized = normalizeMeasurementPoint(point, edges);
+        const vectorIndex = point.vectorIndex == null
+          ? vectorIndexForScopeChannel(scopeNodes.get(normalized.scopeNodeId), normalized.targetPortIndex, edges, nodesById)
+          : Math.max(0, Math.trunc(Number(point.vectorIndex) || 0));
+        return vectorIndex === null ? normalized : { ...normalized, vectorIndex };
+      })
     : [];
   const pointsById = new Map(explicitPoints.map((point) => [String(point.id ?? ''), point]));
 
@@ -356,10 +437,13 @@ function buildMeasurementPoints(state, nodes, edges) {
       const channel = scopeChannelName(edge.targetPortIndex);
       const id = `${edge.targetNodeId}.${channel}`;
       if (!pointsById.has(id)) {
+        const scopeNode = scopeNodes.get(edge.targetNodeId);
+        const vectorIndex = vectorIndexForScopeChannel(scopeNode, edge.targetPortIndex, edges, nodesById);
         pointsById.set(id, {
           id,
           scopeNodeId: edge.targetNodeId,
-          channel
+          channel,
+          ...(vectorIndex === null ? {} : { vectorIndex })
         });
       }
     });

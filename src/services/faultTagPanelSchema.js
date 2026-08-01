@@ -53,7 +53,8 @@ const COPY = {
   fallbackFaultName: '故障',
   fallbackLayer: '未指定层级',
   fallbackTargetParameter: '未关联',
-  fallbackRuntime: '按故障库定义'
+  fallbackRuntime: '按故障库定义',
+  injectedChannels: '\u6ce8\u5165\u8def\u6570'
 };
 
 function escapeHtml(value = '') {
@@ -100,6 +101,21 @@ export function getFaultTagTargetParameter(tag = {}) {
   );
 }
 
+export function getFaultTagInjectedChannels(tag = {}) {
+  const source = tag.injectedFault ?? tag;
+  const scope = String(tag.vectorInjectionScope ?? source.vectorInjectionScope ?? '').toLowerCase();
+  if (scope === 'all') return '\u5168\u90e8\u8def';
+  if (scope === 'item') {
+    const index = Number(tag.vectorIndex ?? source.vectorIndex ?? 0);
+    return Number.isInteger(index) && index >= 0 ? `\u7b2c ${index + 1} \u8def` : '';
+  }
+  const indices = tag.vectorIndices ?? source.vectorIndices;
+  if (scope !== 'items' || !Array.isArray(indices)) return '';
+  const selected = [...new Set(indices.map(Number).filter((index) => Number.isInteger(index) && index >= 0))]
+    .sort((left, right) => left - right);
+  return selected.length ? `\u7b2c ${selected.map((index) => index + 1).join('\u3001')} \u8def` : '';
+}
+
 function renderParameterPreviewRows(parameters = {}) {
   const params = getEntries(parameters);
 
@@ -138,6 +154,7 @@ export function renderFaultTagOverviewPanel(options = {}) {
   const runtimeLabel = options.runtimeLabel || getFaultTagRuntimeLabel(runtimeValue);
   const targetName = options.targetName || tag.targetName || tag.targetId || '目标对象';
   const targetParameter = options.targetParameter || getFaultTagTargetParameter(tag);
+  const injectedChannels = options.injectedChannels ?? getFaultTagInjectedChannels(tag);
   const targetKindLabel = options.targetKindLabel || (tag.targetKind === 'edge' ? '连接线' : '模块');
 
   return `
@@ -159,6 +176,7 @@ export function renderFaultTagOverviewPanel(options = {}) {
           <div class="fault-tag-binding-card">
             <div><span>${escapeHtml(COPY.targetObject)}</span><strong>${escapeHtml(targetName)}</strong></div>
             <div><span>${escapeHtml(COPY.targetParameter)}</span><strong>${escapeHtml(targetParameter)}</strong></div>
+            ${injectedChannels ? `<div><span>${escapeHtml(COPY.injectedChannels)}</span><strong>${escapeHtml(injectedChannels)}</strong></div>` : ''}
             <div><span>${escapeHtml(COPY.targetType)}</span><strong>${escapeHtml(targetKindLabel)}</strong></div>
             <div><span>${escapeHtml(COPY.runtimeBehavior)}</span><strong>${escapeHtml(runtimeLabel)}</strong></div>
           </div>

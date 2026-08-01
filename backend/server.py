@@ -248,6 +248,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
             simulation_session,
             payload.get("dMatrix"),
             payload.get("targetFaultId"),
+            initial_point_states=payload.get("initialPointStates"),
             initial_recommended_path=payload.get("initialRecommendedPath"),
             key_nodes=payload.get("keyNodes"),
             scoring_rules=payload.get("scoringRules"),

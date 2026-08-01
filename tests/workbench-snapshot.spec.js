@@ -48,8 +48,7 @@ describe('workbenchSnapshotService', () => {
             description: 'PID controller',
             entryFunction: 'process',
             rawSource: 'def process(error): return error',
-            executionMode: 'backend',
-            executionConfig: { endpoint: '/api/python-flow/execute', timeoutMs: 5000 },
+            executionMode: 'mock',
             parsedInterface: {
               fileName: 'pid_controller.py',
               inputs: [{ name: 'error', type: 'float', default: null, comment: '' }],

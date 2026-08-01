@@ -1736,9 +1736,8 @@
             "rawSource": "\"\"\"Module: pid_controller\nDescription: Attitude PID controller abstraction for the Simulink eVTOL model\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(attitude_command=0.0, attitude_feedback=0.0, dt=0.02, state=None):\n    state = state or {}\n    error = _clamp(float(attitude_command) - float(attitude_feedback), -0.6, 0.6)\n    integrator = _clamp(float(state.get(\"integrator\", 0.0)) + error * float(dt), -0.35, 0.35)\n    moment_command = _clamp(1.35 * error + 0.18 * integrator, -0.45, 0.45)\n    return {\"outputs\": {\"moment_command\": moment_command}, \"state\": {\"integrator\": integrator}, \"middleVars\": {\"attitude_error\": error, \"integrator_state\": integrator}}\n"
           },
           "rawSource": "\"\"\"Module: pid_controller\nDescription: Attitude PID controller abstraction for the Simulink eVTOL model\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(attitude_command=0.0, attitude_feedback=0.0, dt=0.02, state=None):\n    state = state or {}\n    error = _clamp(float(attitude_command) - float(attitude_feedback), -0.6, 0.6)\n    integrator = _clamp(float(state.get(\"integrator\", 0.0)) + error * float(dt), -0.35, 0.35)\n    moment_command = _clamp(1.35 * error + 0.18 * integrator, -0.45, 0.45)\n    return {\"outputs\": {\"moment_command\": moment_command}, \"state\": {\"integrator\": integrator}, \"middleVars\": {\"attitude_error\": error, \"integrator_state\": integrator}}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -2070,9 +2069,8 @@
             "rawSource": "\"\"\"Module: control_allocation\nDescription: Control allocation abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(moment_command=0.0, speed_command=0.0, altitude_command=0.0):\n    raw = 0.72 * float(moment_command) + 0.18 * float(speed_command) + 0.10 * float(altitude_command)\n    actuator_command = _clamp(raw, -1.0, 1.0)\n    return {\"actuator_command\": actuator_command}, {\"allocation_margin\": 1.0 - abs(actuator_command)}\n"
           },
           "rawSource": "\"\"\"Module: control_allocation\nDescription: Control allocation abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(moment_command=0.0, speed_command=0.0, altitude_command=0.0):\n    raw = 0.72 * float(moment_command) + 0.18 * float(speed_command) + 0.10 * float(altitude_command)\n    actuator_command = _clamp(raw, -1.0, 1.0)\n    return {\"actuator_command\": actuator_command}, {\"allocation_margin\": 1.0 - abs(actuator_command)}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -2432,9 +2430,8 @@
             "rawSource": "\"\"\"Module: voltage_drop\nDescription: Voltage drop abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(actuator_command=0.0, bus_voltage=1.0):\n    voltage = _clamp(bus_voltage, 0.45, 1.05)\n    command = _clamp(float(actuator_command) * voltage, -1.0, 1.0)\n    return {\"voltage_limited_command\": command}, {\"voltage_margin\": voltage}\n"
           },
           "rawSource": "\"\"\"Module: voltage_drop\nDescription: Voltage drop abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(actuator_command=0.0, bus_voltage=1.0):\n    voltage = _clamp(bus_voltage, 0.45, 1.05)\n    command = _clamp(float(actuator_command) * voltage, -1.0, 1.0)\n    return {\"voltage_limited_command\": command}, {\"voltage_margin\": voltage}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -2823,9 +2820,8 @@
             "rawSource": "\"\"\"Module: motor_actuator\nDescription: Eight-channel motor actuator command distributor\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(voltage_limited_command=0.0):\n    command = _clamp(voltage_limited_command, -1.0, 1.0)\n    outputs = {f\"rotor_{index}_command\": command for index in range(1, 9)}\n    return outputs, {\"actuator_state\": command}\n"
           },
           "rawSource": "\"\"\"Module: motor_actuator\nDescription: Eight-channel motor actuator command distributor\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(voltage_limited_command=0.0):\n    command = _clamp(voltage_limited_command, -1.0, 1.0)\n    outputs = {f\"rotor_{index}_command\": command for index in range(1, 9)}\n    return outputs, {\"actuator_state\": command}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -3236,9 +3232,8 @@
             "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
           },
           "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -3499,9 +3494,8 @@
             "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
           },
           "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -3762,9 +3756,8 @@
             "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
           },
           "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -4025,9 +4018,8 @@
             "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
           },
           "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -4288,9 +4280,8 @@
             "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
           },
           "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -4551,9 +4542,8 @@
             "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
           },
           "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -4814,9 +4804,8 @@
             "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
           },
           "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -5077,9 +5066,8 @@
             "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
           },
           "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -5417,9 +5405,8 @@
             "rawSource": "\"\"\"Module: aero_moment\nDescription: Aggregate rotor thrust into aerodynamic force and moment\n\"\"\"\n\ndef process(rotor_1_thrust=0.0, rotor_2_thrust=0.0, rotor_3_thrust=0.0, rotor_4_thrust=0.0, rotor_5_thrust=0.0, rotor_6_thrust=0.0, rotor_7_thrust=0.0, rotor_8_thrust=0.0):\n    values = [float(item) for item in [rotor_1_thrust, rotor_2_thrust, rotor_3_thrust, rotor_4_thrust, rotor_5_thrust, rotor_6_thrust, rotor_7_thrust, rotor_8_thrust]]\n    total_force = sum(values)\n    total_moment = sum((index - 3.5) * value for index, value in enumerate(values)) / 8.0\n    return {\"total_force\": total_force, \"total_moment\": total_moment}, {\"aero_balance\": total_moment}\n"
           },
           "rawSource": "\"\"\"Module: aero_moment\nDescription: Aggregate rotor thrust into aerodynamic force and moment\n\"\"\"\n\ndef process(rotor_1_thrust=0.0, rotor_2_thrust=0.0, rotor_3_thrust=0.0, rotor_4_thrust=0.0, rotor_5_thrust=0.0, rotor_6_thrust=0.0, rotor_7_thrust=0.0, rotor_8_thrust=0.0):\n    values = [float(item) for item in [rotor_1_thrust, rotor_2_thrust, rotor_3_thrust, rotor_4_thrust, rotor_5_thrust, rotor_6_thrust, rotor_7_thrust, rotor_8_thrust]]\n    total_force = sum(values)\n    total_moment = sum((index - 3.5) * value for index, value in enumerate(values)) / 8.0\n    return {\"total_force\": total_force, \"total_moment\": total_moment}, {\"aero_balance\": total_moment}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -5899,9 +5886,8 @@
             "rawSource": "\"\"\"Module: six_dof\nDescription: 6DOF vehicle body response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(total_force=0.0, total_moment=0.0, dt=0.02, state=None):\n    state = state or {}\n    rate = _clamp(float(state.get(\"body_rate\", 0.0)) + float(dt) * (0.55 * float(total_moment) - 0.22 * float(state.get(\"body_rate\", 0.0))), -1.2, 1.2)\n    attitude = _clamp(float(state.get(\"attitude\", 0.0)) + rate * float(dt), -1.0, 1.0)\n    altitude = _clamp(float(state.get(\"altitude\", 0.0)) + 0.04 * float(total_force) * float(dt), -50.0, 50.0)\n    return {\"outputs\": {\"attitude\": attitude, \"body_rate\": rate, \"altitude\": altitude}, \"state\": {\"attitude\": attitude, \"body_rate\": rate, \"altitude\": altitude}, \"middleVars\": {\"vehicle_energy\": abs(rate) + abs(altitude) * 0.01}}\n"
           },
           "rawSource": "\"\"\"Module: six_dof\nDescription: 6DOF vehicle body response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(total_force=0.0, total_moment=0.0, dt=0.02, state=None):\n    state = state or {}\n    rate = _clamp(float(state.get(\"body_rate\", 0.0)) + float(dt) * (0.55 * float(total_moment) - 0.22 * float(state.get(\"body_rate\", 0.0))), -1.2, 1.2)\n    attitude = _clamp(float(state.get(\"attitude\", 0.0)) + rate * float(dt), -1.0, 1.0)\n    altitude = _clamp(float(state.get(\"altitude\", 0.0)) + 0.04 * float(total_force) * float(dt), -50.0, 50.0)\n    return {\"outputs\": {\"attitude\": attitude, \"body_rate\": rate, \"altitude\": altitude}, \"state\": {\"attitude\": attitude, \"body_rate\": rate, \"altitude\": altitude}, \"middleVars\": {\"vehicle_energy\": abs(rate) + abs(altitude) * 0.01}}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -6250,9 +6236,8 @@
             "rawSource": "\"\"\"Module: sensor_fault_injection\nDescription: Sensor feedback and fault injection abstraction\n\"\"\"\n\ndef process(attitude=0.0, body_rate=0.0, altitude=0.0):\n    residual = abs(float(attitude)) * 0.04 + abs(float(body_rate)) * 0.08\n    return {\"attitude_feedback\": float(attitude), \"rate_feedback\": float(body_rate), \"altitude_feedback\": float(altitude)}, {\"sensor_residual\": residual}\n"
           },
           "rawSource": "\"\"\"Module: sensor_fault_injection\nDescription: Sensor feedback and fault injection abstraction\n\"\"\"\n\ndef process(attitude=0.0, body_rate=0.0, altitude=0.0):\n    residual = abs(float(attitude)) * 0.04 + abs(float(body_rate)) * 0.08\n    return {\"attitude_feedback\": float(attitude), \"rate_feedback\": float(body_rate), \"altitude_feedback\": float(altitude)}, {\"sensor_residual\": residual}\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -8265,9 +8250,8 @@
                 "rawSource": "\"\"\"Module: pid_controller\nDescription: Attitude PID controller abstraction for the Simulink eVTOL model\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(attitude_command=0.0, attitude_feedback=0.0, dt=0.02, state=None):\n    state = state or {}\n    error = _clamp(float(attitude_command) - float(attitude_feedback), -0.6, 0.6)\n    integrator = _clamp(float(state.get(\"integrator\", 0.0)) + error * float(dt), -0.35, 0.35)\n    moment_command = _clamp(1.35 * error + 0.18 * integrator, -0.45, 0.45)\n    return {\"outputs\": {\"moment_command\": moment_command}, \"state\": {\"integrator\": integrator}, \"middleVars\": {\"attitude_error\": error, \"integrator_state\": integrator}}\n"
               },
               "rawSource": "\"\"\"Module: pid_controller\nDescription: Attitude PID controller abstraction for the Simulink eVTOL model\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(attitude_command=0.0, attitude_feedback=0.0, dt=0.02, state=None):\n    state = state or {}\n    error = _clamp(float(attitude_command) - float(attitude_feedback), -0.6, 0.6)\n    integrator = _clamp(float(state.get(\"integrator\", 0.0)) + error * float(dt), -0.35, 0.35)\n    moment_command = _clamp(1.35 * error + 0.18 * integrator, -0.45, 0.45)\n    return {\"outputs\": {\"moment_command\": moment_command}, \"state\": {\"integrator\": integrator}, \"middleVars\": {\"attitude_error\": error, \"integrator_state\": integrator}}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -8599,9 +8583,8 @@
                 "rawSource": "\"\"\"Module: control_allocation\nDescription: Control allocation abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(moment_command=0.0, speed_command=0.0, altitude_command=0.0):\n    raw = 0.72 * float(moment_command) + 0.18 * float(speed_command) + 0.10 * float(altitude_command)\n    actuator_command = _clamp(raw, -1.0, 1.0)\n    return {\"actuator_command\": actuator_command}, {\"allocation_margin\": 1.0 - abs(actuator_command)}\n"
               },
               "rawSource": "\"\"\"Module: control_allocation\nDescription: Control allocation abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(moment_command=0.0, speed_command=0.0, altitude_command=0.0):\n    raw = 0.72 * float(moment_command) + 0.18 * float(speed_command) + 0.10 * float(altitude_command)\n    actuator_command = _clamp(raw, -1.0, 1.0)\n    return {\"actuator_command\": actuator_command}, {\"allocation_margin\": 1.0 - abs(actuator_command)}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -8961,9 +8944,8 @@
                 "rawSource": "\"\"\"Module: voltage_drop\nDescription: Voltage drop abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(actuator_command=0.0, bus_voltage=1.0):\n    voltage = _clamp(bus_voltage, 0.45, 1.05)\n    command = _clamp(float(actuator_command) * voltage, -1.0, 1.0)\n    return {\"voltage_limited_command\": command}, {\"voltage_margin\": voltage}\n"
               },
               "rawSource": "\"\"\"Module: voltage_drop\nDescription: Voltage drop abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(actuator_command=0.0, bus_voltage=1.0):\n    voltage = _clamp(bus_voltage, 0.45, 1.05)\n    command = _clamp(float(actuator_command) * voltage, -1.0, 1.0)\n    return {\"voltage_limited_command\": command}, {\"voltage_margin\": voltage}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -9352,9 +9334,8 @@
                 "rawSource": "\"\"\"Module: motor_actuator\nDescription: Eight-channel motor actuator command distributor\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(voltage_limited_command=0.0):\n    command = _clamp(voltage_limited_command, -1.0, 1.0)\n    outputs = {f\"rotor_{index}_command\": command for index in range(1, 9)}\n    return outputs, {\"actuator_state\": command}\n"
               },
               "rawSource": "\"\"\"Module: motor_actuator\nDescription: Eight-channel motor actuator command distributor\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(voltage_limited_command=0.0):\n    command = _clamp(voltage_limited_command, -1.0, 1.0)\n    outputs = {f\"rotor_{index}_command\": command for index in range(1, 9)}\n    return outputs, {\"actuator_state\": command}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -9765,9 +9746,8 @@
                 "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
               },
               "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -10028,9 +10008,8 @@
                 "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
               },
               "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -10291,9 +10270,8 @@
                 "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
               },
               "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -10554,9 +10532,8 @@
                 "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
               },
               "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -10817,9 +10794,8 @@
                 "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
               },
               "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -11080,9 +11056,8 @@
                 "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
               },
               "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -11343,9 +11318,8 @@
                 "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
               },
               "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -11606,9 +11580,8 @@
                 "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n"
               },
               "rawSource": "\"\"\"Module: rotor_motor\nDescription: Rotor and motor first-order response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(rotor_command=0.0, dt=0.02, state=None):\n    state = state or {}\n    previous = float(state.get(\"rotor_speed\", 0.0))\n    target = _clamp(rotor_command, -1.0, 1.0)\n    alpha = _clamp(float(dt) / (0.18 + float(dt)), 0.0, 1.0)\n    rotor_speed = previous + alpha * (target - previous)\n    thrust = _clamp(rotor_speed * 0.82, -0.9, 0.9)\n    return {\"outputs\": {\"rotor_thrust\": thrust}, \"state\": {\"rotor_speed\": rotor_speed}, \"middleVars\": {\"rotor_speed_state\": rotor_speed}}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -11946,9 +11919,8 @@
                 "rawSource": "\"\"\"Module: aero_moment\nDescription: Aggregate rotor thrust into aerodynamic force and moment\n\"\"\"\n\ndef process(rotor_1_thrust=0.0, rotor_2_thrust=0.0, rotor_3_thrust=0.0, rotor_4_thrust=0.0, rotor_5_thrust=0.0, rotor_6_thrust=0.0, rotor_7_thrust=0.0, rotor_8_thrust=0.0):\n    values = [float(item) for item in [rotor_1_thrust, rotor_2_thrust, rotor_3_thrust, rotor_4_thrust, rotor_5_thrust, rotor_6_thrust, rotor_7_thrust, rotor_8_thrust]]\n    total_force = sum(values)\n    total_moment = sum((index - 3.5) * value for index, value in enumerate(values)) / 8.0\n    return {\"total_force\": total_force, \"total_moment\": total_moment}, {\"aero_balance\": total_moment}\n"
               },
               "rawSource": "\"\"\"Module: aero_moment\nDescription: Aggregate rotor thrust into aerodynamic force and moment\n\"\"\"\n\ndef process(rotor_1_thrust=0.0, rotor_2_thrust=0.0, rotor_3_thrust=0.0, rotor_4_thrust=0.0, rotor_5_thrust=0.0, rotor_6_thrust=0.0, rotor_7_thrust=0.0, rotor_8_thrust=0.0):\n    values = [float(item) for item in [rotor_1_thrust, rotor_2_thrust, rotor_3_thrust, rotor_4_thrust, rotor_5_thrust, rotor_6_thrust, rotor_7_thrust, rotor_8_thrust]]\n    total_force = sum(values)\n    total_moment = sum((index - 3.5) * value for index, value in enumerate(values)) / 8.0\n    return {\"total_force\": total_force, \"total_moment\": total_moment}, {\"aero_balance\": total_moment}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -12428,9 +12400,8 @@
                 "rawSource": "\"\"\"Module: six_dof\nDescription: 6DOF vehicle body response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(total_force=0.0, total_moment=0.0, dt=0.02, state=None):\n    state = state or {}\n    rate = _clamp(float(state.get(\"body_rate\", 0.0)) + float(dt) * (0.55 * float(total_moment) - 0.22 * float(state.get(\"body_rate\", 0.0))), -1.2, 1.2)\n    attitude = _clamp(float(state.get(\"attitude\", 0.0)) + rate * float(dt), -1.0, 1.0)\n    altitude = _clamp(float(state.get(\"altitude\", 0.0)) + 0.04 * float(total_force) * float(dt), -50.0, 50.0)\n    return {\"outputs\": {\"attitude\": attitude, \"body_rate\": rate, \"altitude\": altitude}, \"state\": {\"attitude\": attitude, \"body_rate\": rate, \"altitude\": altitude}, \"middleVars\": {\"vehicle_energy\": abs(rate) + abs(altitude) * 0.01}}\n"
               },
               "rawSource": "\"\"\"Module: six_dof\nDescription: 6DOF vehicle body response abstraction\n\"\"\"\n\ndef _clamp(value, minimum, maximum):\n    value = float(value)\n    return max(minimum, min(maximum, value))\n\ndef process(total_force=0.0, total_moment=0.0, dt=0.02, state=None):\n    state = state or {}\n    rate = _clamp(float(state.get(\"body_rate\", 0.0)) + float(dt) * (0.55 * float(total_moment) - 0.22 * float(state.get(\"body_rate\", 0.0))), -1.2, 1.2)\n    attitude = _clamp(float(state.get(\"attitude\", 0.0)) + rate * float(dt), -1.0, 1.0)\n    altitude = _clamp(float(state.get(\"altitude\", 0.0)) + 0.04 * float(total_force) * float(dt), -50.0, 50.0)\n    return {\"outputs\": {\"attitude\": attitude, \"body_rate\": rate, \"altitude\": altitude}, \"state\": {\"attitude\": attitude, \"body_rate\": rate, \"altitude\": altitude}, \"middleVars\": {\"vehicle_energy\": abs(rate) + abs(altitude) * 0.01}}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {
@@ -12779,9 +12750,8 @@
                 "rawSource": "\"\"\"Module: sensor_fault_injection\nDescription: Sensor feedback and fault injection abstraction\n\"\"\"\n\ndef process(attitude=0.0, body_rate=0.0, altitude=0.0):\n    residual = abs(float(attitude)) * 0.04 + abs(float(body_rate)) * 0.08\n    return {\"attitude_feedback\": float(attitude), \"rate_feedback\": float(body_rate), \"altitude_feedback\": float(altitude)}, {\"sensor_residual\": residual}\n"
               },
               "rawSource": "\"\"\"Module: sensor_fault_injection\nDescription: Sensor feedback and fault injection abstraction\n\"\"\"\n\ndef process(attitude=0.0, body_rate=0.0, altitude=0.0):\n    residual = abs(float(attitude)) * 0.04 + abs(float(body_rate)) * 0.08\n    return {\"attitude_feedback\": float(attitude), \"rate_feedback\": float(body_rate), \"altitude_feedback\": float(altitude)}, {\"sensor_residual\": residual}\n",
-              "executionMode": "backend",
+              "executionMode": "mock",
               "executionConfig": {
-                "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
                 "timeoutMs": 3000
               },
               "portMapping": {

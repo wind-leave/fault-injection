@@ -85,7 +85,55 @@ function renderSchemaPropertyFields(node){
   const api=window.__GZ_PROPERTY_PANEL_SCHEMA__;
   const schema=getSimplePropertySchema(node);
   if(!schema||!api?.renderPropertyFieldsFromSchema){return '';}
-  return api.renderPropertyFieldsFromSchema(node,schema,{escapeHtml,buildSelectOptions});
+  return `${api.renderPropertyFieldsFromSchema(node,schema,{escapeHtml,buildSelectOptions})}${renderInstrumentVectorMeasurementFields(node)}`;
+}
+
+function getInstrumentVectorLength(edge){
+  const source=getNode(edge?.sourceNodeId);
+  const portIndex=Math.max(0,Number.parseInt(edge?.sourcePortIndex,10)||0);
+  const port=getNodePorts(source)?.outputs?.[portIndex]||{};
+  const candidates=[edge?.sourcePortMeta,edge?.sourcePort,port?.meta,port,source?.props?.outputs?.[portIndex],source?.outputs?.[portIndex]];
+  for(const candidate of candidates){
+    const length=Number(candidate?.vectorLength??candidate?.length??candidate?.shape?.[0]);
+    if(Number.isInteger(length)&&length>1){return length;}
+  }
+  return 0;
+}
+
+function normalizeInstrumentVectorChannel(value,length){
+  const channel=Number.parseInt(value,10);
+  if(!Number.isInteger(channel)||channel<1){return 1;}
+  return Math.min(channel,Math.max(1,length));
+}
+
+function getInstrumentVectorMeasurements(node){
+  if(node?.type!=='instrument_scope'&&node?.type!=='instrument_spectrum'){return [];}
+  return getIncomingEdgesForNode(node.id)
+    .map(edge=>{
+      const targetPortIndex=Math.max(0,Number.parseInt(edge.targetPortIndex,10)||0);
+      const length=getInstrumentVectorLength(edge);
+      if(length<2){return null;}
+      const key=node.type==='instrument_scope'
+        ?(targetPortIndex===1?'vectorChannelCh2':'vectorChannelCh1')
+        :'vectorChannel';
+      return {targetPortIndex,length,key};
+    })
+    .filter(Boolean);
+}
+
+function renderInstrumentVectorMeasurementFields(node){
+  const measurements=getInstrumentVectorMeasurements(node);
+  if(!measurements.length){return '';}
+  const fields=measurements.map(item=>{
+    const selected=normalizeInstrumentVectorChannel(node.props?.[item.key],item.length);
+    const prefix=node.type==='instrument_scope'?`CH${item.targetPortIndex+1} `:'';
+    const options=Array.from({length:item.length},(_,index)=>{
+      const channel=index+1;
+      return `<option value="${channel}" ${channel===selected?'selected':''}>第 ${channel} 路</option>`;
+    }).join('');
+    return `<div class="props-field"><label>${prefix}测量数据路</label><select data-instrument-vector-channel="${item.key}">${options}</select></div>`;
+  }).join('');
+  return `<div class="pgroup instrument-vector-measurement" data-instrument-vector-measurement><div class="pglbl">向量测量</div>${fields}</div>`;
 }
 
 function renderSchemaOverviewPropertyFields(node){
@@ -251,6 +299,12 @@ function applySchemaPropertyValues(node){
   const values=readSchemaPropertyValues(node);
   if(!values){return false;}
   node.props={...(node.props||{}),...values};
+  if(node.type==='instrument_scope'||node.type==='instrument_spectrum'){
+    getInstrumentVectorMeasurements(node).forEach(item=>{
+      const input=document.querySelector(`[data-instrument-vector-channel="${item.key}"]`);
+      if(input){node.props[item.key]=normalizeInstrumentVectorChannel(input.value,item.length);}
+    });
+  }
   if(node.type==='signal_source'){
     node.props=normalizeSignalSourcePropsRuntime(node.props);
     syncRuntimeSignalSourceOutputFromProps(node);
@@ -949,12 +1003,28 @@ function normalizeSimulationInterfaceList(items,prefix,fallbackType,minCount=0){
   return normalized;
 }
 
+function normalizeSimulationPowerInterfaceList(items,prefix,voltage){
+  const base=Array.isArray(items)?items:[];
+  const normalized=base.map((item,index)=>{
+    const source=item&&typeof item==='object'?item:{};
+    return {
+      ...source,
+      name:String(source.name||source.displayName||`${prefix} ${index+1}`).trim()||`${prefix} ${index+1}`,
+      type:'电源',
+      voltage:String(source.voltage||voltage)
+    };
+  });
+  return normalized.length?normalized:[{name:prefix,type:'电源',voltage}];
+}
+
 function normalizeSimulationInterfaces(props){
   const inputFallback=PORT_FORMATS.includes(props?.inputFormat)?props.inputFormat:'标量';
   const outputFallback=PORT_FORMATS.includes(props?.outputFormat)?props.outputFormat:'标量';
   props.inputs=normalizeSimulationInterfaceList(props?.inputs,'输入',inputFallback,1);
   props.outputs=normalizeSimulationInterfaceList(props?.outputs,'输出',outputFallback,1);
   props.middleVars=normalizeSimulationInterfaceList(props?.middleVars,'中间量',outputFallback,0);
+  props.powerInputs=normalizeSimulationPowerInterfaceList(props?.powerInputs,'电源输入','28V');
+  props.powerOutputs=normalizeSimulationPowerInterfaceList(props?.powerOutputs,'电源地','0V');
   if(!props.middleVars.length&&props?.inputFormat){
     props.middleVars=[{name:'中间量 1',type:outputFallback}];
   }
@@ -971,7 +1041,9 @@ function getSimulationPortSets(props){
   return {
     inputs:props.inputs,
     outputs:props.outputs,
-    middleVars:props.middleVars
+    middleVars:props.middleVars,
+    powerInputs:props.powerInputs,
+    powerOutputs:props.powerOutputs
   };
 }
 
@@ -979,11 +1051,11 @@ function getSimulationNodeSize(props){
   const groups=getSimulationPortSets(props);
   const leftCount=Math.max(groups.inputs.length,1);
   const rightCount=Math.max(groups.outputs.length,1);
-  const topCount=groups.middleVars.length;
+  const horizontalPowerCount=Math.max(groups.powerInputs.length,groups.powerOutputs.length);
   const verticalDominant=Math.max(leftCount,rightCount);
   return {
-    width:clamp(196+Math.max(0,topCount-2)*28,196,336),
-    height:clamp(116+Math.max(0,verticalDominant-2)*22+(topCount?18:0),116,312)
+    width:clamp(196+Math.max(0,horizontalPowerCount-2)*28,196,336),
+    height:clamp(116+Math.max(0,verticalDominant-2)*22+(horizontalPowerCount?36:0),116,312)
   };
 }
 
@@ -1034,8 +1106,8 @@ function pruneInvalidEdgesForNode(node){
 function getSimulationFlatOutputs(props){
   const groups=getSimulationPortSets(props);
   return [
-    ...groups.outputs.map((item,index)=>({kind:'output',name:item.name,type:item.type,index,side:'right'})),
-    ...groups.middleVars.map((item,index)=>({kind:'middle',name:item.name,type:item.type,index,side:'top'}))
+    ...groups.outputs.map((item,index)=>({...item,kind:'output',name:item.name,type:item.type,index,side:'right'})),
+    ...groups.powerOutputs.map((item,index)=>({...item,kind:'power',name:item.name,type:item.type,index,side:'bottom',voltage:item.voltage}))
   ];
 }
 
@@ -1573,10 +1645,9 @@ function resetCanvasStageSize(){
   syncCanvasStageDimensions();
 }
 
-function expandCanvasStageForNode(node,nextX,nextY){
-  if(!node){return false;}
-  const right=nextX+(node.w||0)+CANVAS_STAGE.nodePadding;
-  const bottom=nextY+(node.h||0)+CANVAS_STAGE.nodePadding;
+function expandCanvasStageForBounds({x=0,y=0,width=0,height=0}={}){
+  const right=x+width+CANVAS_STAGE.nodePadding;
+  const bottom=y+height+CANVAS_STAGE.nodePadding;
   let changed=false;
   if(right>=CANVAS_STAGE.width-CANVAS_STAGE_EXPANSION.edgeThreshold){
     const required=right+CANVAS_STAGE_EXPANSION.trailingSpace;
@@ -1602,6 +1673,26 @@ function expandCanvasStageForNode(node,nextX,nextY){
   return changed;
 }
 
+function expandCanvasStageForNode(node,nextX,nextY){
+  if(!node){return false;}
+  return expandCanvasStageForBounds({
+    x:nextX,
+    y:nextY,
+    width:node.w||0,
+    height:node.h||0
+  });
+}
+
+function expandCanvasStageForViewportPan(nextOffsetX,nextOffsetY){
+  const viewport=getCanvasViewport();
+  if(!viewport){return false;}
+  const scale=Math.max(S.canvasScale||1,0.001);
+  return expandCanvasStageForBounds({
+    x:(viewport.clientWidth-nextOffsetX)/scale-CANVAS_STAGE.nodePadding,
+    y:(viewport.clientHeight-nextOffsetY)/scale-CANVAS_STAGE.nodePadding
+  });
+}
+
 function getEdgeLabel(edge){
   if(edge.lineType==='can'&&edge.injectedFault?.faultKind){
     return `CAN · ${edge.injectedFault.faultKind}`;
@@ -1619,7 +1710,6 @@ function createDefaultPythonBinding(){
     parsedInterface:null,
     rawSource:'',
     executionMode:'mock',
-    executionConfig:{endpoint:'/api/python-flow/execute',timeoutMs:3000},
     portMapping:{inputs:[],outputs:[],middleVars:[]}
   };
 }
@@ -1856,8 +1946,21 @@ function getNodePorts(node){
         label:`${item.kind==='middle'?'中间量':'输出'} ${item.index+1} · ${item.name} / ${item.type}`,
         kind:item.kind,
         side:item.side,
-        portIndex:index
+        portIndex:index,
+        meta:item
       }))
+    };
+  }
+  if(node.type==='display_console'){
+    return {
+      inputs:getDisplayConsoleInputDefinitions(node).map((input,index)=>({
+        key:`display-input-${index}`,
+        label:`${input.label} / 标量`,
+        kind:'input',
+        side:'left',
+        meta:{displayName:input.label,type:input.type||'scalar'}
+      })),
+      outputs:[]
     };
   }
   if(node.type==='fault_tag'||node.type==='edge_fault_tag'){
@@ -2713,7 +2816,7 @@ function deleteSelectedNode(){
 }
 
 function restoreSimulationPaletteComponent(node){
-  if(node?.type!=='simulation_block'){return;}
+  if(node?.type!=='simulation_block'&&node?.type!=='display_console'){return;}
   const paletteKey=node.paletteKey||node.templateId||node.type;
   if(paletteKey){
     window.dispatchEvent(new CustomEvent('gz:palette-component-deleted',{detail:{paletteKey}}));
@@ -2801,7 +2904,7 @@ function createNode(type,rawX,rawY){
   }
   const props=cloneDefaults(meta.defaults);
   const count=getNodeTypeCount(nodeType);
-  if(meta.templateId){props.name=`${meta.label} ${count}`;}
+  if(meta.templateId){props.name=props.name||meta.label;}
   else if(nodeType==='signal_source'){
     const baseName=props.name||meta.label||'信号源';
     Object.assign(props,normalizeSignalSourcePropsRuntime(props));
@@ -2809,6 +2912,7 @@ function createNode(type,rawX,rawY){
   }
   else if(nodeType==='flow_block'){props.name=`流程块 ${count}`;}
   else if(nodeType==='simulation_block'){props.name=`仿真块 ${count}`;}
+  else if(type==='display_console'){props.name=`显控台 ${count}`;}
   if(type.startsWith('fault_')){props.name=`${meta.label} ${count}`;}
   if(type.startsWith('instrument_')){props.name=`${meta.label} ${count}`;}
   if(type.startsWith('link_')){props.name=`${meta.label} ${count}`;}
@@ -2817,6 +2921,12 @@ function createNode(type,rawX,rawY){
     normalizeSimulationInterfaces(props);
   }
   const size=nodeType==='simulation_block'?getSimulationNodeSize(props):{width:meta.width,height:meta.height};
+  expandCanvasStageForBounds({
+    x:Math.round(rawX-size.width/2),
+    y:Math.round(rawY-size.height/2),
+    width:size.width,
+    height:size.height
+  });
   const point={
     x:clamp(Math.round(rawX-size.width/2),CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-size.width-CANVAS_STAGE.nodePadding),
     y:clamp(Math.round(rawY-size.height/2),CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-size.height-CANVAS_STAGE.nodePadding)
@@ -2926,7 +3036,7 @@ function initCanvasDrop(){
       }
     }
     const node=createNode(type,point.x,point.y);
-    if(node?.type==='simulation_block'&&paletteKey){
+    if((node?.type==='simulation_block'||node?.type==='display_console')&&paletteKey){
       node.paletteKey=paletteKey;
       window.dispatchEvent(new CustomEvent('gz:palette-component-created',{detail:{paletteKey}}));
     }
@@ -3010,8 +3120,11 @@ function bindCanvasInteractions(){
         CANVAS_PAN.engaged=true;
         viewport.classList.add('panning');
       }
-      S.canvasOffsetX=CANVAS_PAN.originX+(event.clientX-CANVAS_PAN.startX);
-      S.canvasOffsetY=CANVAS_PAN.originY+(event.clientY-CANVAS_PAN.startY);
+      const nextOffsetX=CANVAS_PAN.originX+(event.clientX-CANVAS_PAN.startX);
+      const nextOffsetY=CANVAS_PAN.originY+(event.clientY-CANVAS_PAN.startY);
+      expandCanvasStageForViewportPan(nextOffsetX,nextOffsetY);
+      S.canvasOffsetX=nextOffsetX;
+      S.canvasOffsetY=nextOffsetY;
       clampCanvasOffset();
       applyCanvasTransform();
     }
@@ -3233,6 +3346,14 @@ function renderPropertyPanel(node){
       </div>`;
   }else if(node.type==='simulation_block'){
     fields=buildSimulationBlockFields(node);
+  }else if(node.type==='display_console'){
+    fields=`
+      <div class="pgroup">
+        <div class="pglbl">显控配置</div>
+        <div class="props-field"><label>模块名称</label><input id="prop-name" value="${escapeHtml(node.props.name)}"></div>
+        <div class="props-field"><label>显控类型</label><input value="射频参数显控" readonly></div>
+        <div class="props-help">该组件固定接收中心频率、重复周期、脉宽和幅度四路标量输入。</div>
+      </div>`;
   }else if(node.type.startsWith('fault_')){
     fields=`
       <div class="pgroup">
@@ -3292,6 +3413,7 @@ function renderPropertyPanel(node){
       <div class="props-actions">
         ${node.type==='flow_block'?`<button class="props-secondary" onclick="openPythonBindingDialog('${node.id}')">${pythonBound?'Rebind Python':'Bind Python File'}</button>`:''}
         ${node.type==='flow_block'&&pythonBound?`<button class="props-secondary" onclick="unbindPythonBinding('${node.id}')">Unbind Python</button>`:''}
+        ${node.type==='display_console'?`<button class="props-secondary" data-open-display-console="${node.id}" onclick="openDisplayConsolePanel('${node.id}')">进入显控台</button>`:''}
         ${isElectricalInjectableType(node.type)?`<button class="props-secondary props-fault-action" onclick="openElectricalFaultImport()">${node.injectedFault?'更换故障':'导入故障'}</button>`:''}
         <button class="props-save" onclick="saveSelectedNode()">保存设置</button>
         <button class="props-danger" onclick="deleteSelectedNode()">删除模块</button>
@@ -3344,6 +3466,8 @@ function saveSelectedNode(){
     node.props.ffunctionNote=document.getElementById('prop-ffunctionNote').value.trim()||'\u5f53\u524d\u9884\u7559 Python \u51fd\u6570\u63a5\u53e3\uff0c\u53ef\u5728\u540e\u7eed\u5bfc\u5165\u51fd\u6570\u5b9a\u4e49\u3002';
     applyNodeGeometry(node);
     pruneInvalidEdgesForNode(node);
+  }else if(node.type==='display_console'){
+    node.props.name=document.getElementById('prop-name').value.trim()||node.props.name;
   }else if(node.type.startsWith('fault_')){
     node.props.name=document.getElementById('prop-name').value.trim()||node.props.name;
     node.props.faultType=document.getElementById('prop-faultType').value.trim()||node.props.faultType;
@@ -4180,6 +4304,172 @@ const SIM = {
   componentOutputs:{time:[],steps:[]}
 };
 
+const DISPLAY_CONSOLE_STATE={openNodeId:'',x:null,y:null};
+const DISPLAY_CONSOLE_INPUTS=(window.__GZ_DISPLAY_CONSOLE_CONFIG__?.DISPLAY_CONSOLE_INPUTS||[
+  {key:'centerFrequency',label:'中心频率',type:'scalar'},
+  {key:'repetitionPeriod',label:'重复周期',type:'scalar'},
+  {key:'pulseWidth',label:'脉宽',type:'scalar'},
+  {key:'amplitude',label:'幅度',type:'scalar'}
+]).slice(0,4);
+const DISPLAY_CONSOLE_COLUMNS=(window.__GZ_DISPLAY_CONSOLE_CONFIG__?.DISPLAY_CONSOLE_COLUMNS||[]).slice(0,16);
+
+function formatDisplayConsoleValue(value){
+  const numeric=Number(value);
+  if(!Number.isFinite(numeric)){return '--';}
+  if(Math.abs(numeric)>=1000||Math.abs(numeric)<0.001&&numeric!==0){return numeric.toExponential(3);}
+  return String(Number(numeric.toFixed(6)));
+}
+
+function getDisplayConsoleInputReadings(node){
+  const incoming=getIncomingEdgesForNode(node.id);
+  const inputs=getDisplayConsoleInputDefinitions(node);
+  return inputs.map((input,index)=>{
+    const label=input.label||`输入 ${index+1}`;
+    const edge=incoming.find(item=>(item.targetPortIndex||0)===index);
+    if(!edge){return {label,value:'--',connected:false};}
+    const edgeValue=SIM.actual?.edgeStates?.[edge.id]?.lastOutput;
+    if(Number.isFinite(edgeValue)){
+      return {label,value:formatDisplayConsoleValue(edgeValue),connected:true};
+    }
+    const source=getNode(edge.sourceNodeId);
+    if(source?.type==='signal_source'){
+      return {label,value:formatDisplayConsoleValue(computeSourceSignal(source,SIM.time||0)),connected:true};
+    }
+    const sourceValue=SIM.actual?.nodeStates?.[edge.sourceNodeId]?.lastOutputs?.[edge.sourcePortIndex||0];
+    return {label,value:formatDisplayConsoleValue(sourceValue),connected:true};
+  });
+}
+
+function getDisplayConsoleTemplateConfig(node){
+  const configApi=window.__GZ_DISPLAY_CONSOLE_CONFIG__;
+  const presetId=node?.templateId||node?.paletteKey;
+  const preset=configApi?.DISPLAY_CONSOLE_PRESETS?.[presetId];
+  if(preset&&typeof configApi?.createDisplayConsoleConfig==='function'){
+    return configApi.createDisplayConsoleConfig(preset);
+  }
+  return node?.props?.displayConfig||null;
+}
+
+function getDisplayConsoleInputDefinitions(node){
+  const configured=getDisplayConsoleTemplateConfig(node)?.inputs;
+  return Array.isArray(configured)&&configured.length
+    ?configured.slice(0,4)
+    :DISPLAY_CONSOLE_INPUTS;
+}
+
+function getDisplayConsoleColumnDefinitions(node){
+  const configured=getDisplayConsoleTemplateConfig(node)?.columns;
+  return Array.isArray(configured)&&configured.length
+    ?configured.slice(0,16)
+    :DISPLAY_CONSOLE_COLUMNS;
+}
+
+function getDisplayConsoleDefaultPosition(node,host){
+  const hostWidth=host?.clientWidth||CANVAS_STAGE.width;
+  const hostHeight=host?.clientHeight||CANVAS_STAGE.height;
+  const estimatedWidth=1120;
+  const estimatedHeight=250;
+  return {
+    x:Math.max(18,Math.min((node.x||0)+(node.w||196)+16,hostWidth-estimatedWidth-18)),
+    y:Math.max(48,Math.min(node.y||76,hostHeight-estimatedHeight-18))
+  };
+}
+
+function renderDisplayConsolePanel(){
+  const host=document.getElementById('display-console-window-layer');
+  if(!host){return;}
+  const node=getNode(DISPLAY_CONSOLE_STATE.openNodeId);
+  if(!node||node.type!=='display_console'){
+    host.innerHTML='';
+    return;
+  }
+  if(!Number.isFinite(DISPLAY_CONSOLE_STATE.x)||!Number.isFinite(DISPLAY_CONSOLE_STATE.y)){
+    Object.assign(DISPLAY_CONSOLE_STATE,getDisplayConsoleDefaultPosition(node,host));
+  }
+  const readings=getDisplayConsoleInputReadings(node);
+  const inputs=getDisplayConsoleInputDefinitions(node);
+  const columns=getDisplayConsoleColumnDefinitions(node);
+  const connectionCount=readings.filter(item=>item.connected).length;
+  const cells=columns.map(column=>{
+    if(column.source==='input') return readings[column.inputIndex]?.value||'--';
+    if(column.source==='status') return connectionCount===inputs.length?'就绪':`已连接 ${connectionCount}/${inputs.length}`;
+    if(column.source==='time') return SIM.hasSamples?`${formatDisplayConsoleValue(SIM.time)} s`:'--';
+    return column.value??'--';
+  });
+  host.innerHTML=`
+    <section class="display-console-window" data-display-console-panel="${escapeHtml(node.id)}" style="left:${DISPLAY_CONSOLE_STATE.x}px;top:${DISPLAY_CONSOLE_STATE.y}px">
+      <header class="display-console-window__header">
+        <div>
+          <div class="display-console-window__kicker">显控组件</div>
+          <h2>${escapeHtml(node.props?.name||'显控台')}</h2>
+        </div>
+        <button type="button" class="display-console-window__close">关闭 ×</button>
+      </header>
+      <div class="display-console-window__summary">四路标量输入：${readings.map(item=>`${item.label} ${item.connected?'已连接':'未连接'}`).join(' · ')}</div>
+      <div class="display-console-window__table-wrap">
+        <table class="display-console-table" data-display-console-table>
+          <thead><tr>${columns.map(column=>`<th>${escapeHtml(column.label||'未命名')}</th>`).join('')}</tr></thead>
+          <tbody><tr>${cells.map(value=>`<td>${escapeHtml(value)}</td>`).join('')}</tr></tbody>
+        </table>
+      </div>
+    </section>`;
+  const panel=host.querySelector('.display-console-window');
+  panel?.addEventListener('pointerdown',event=>event.stopPropagation());
+  const dragHeader=panel?.querySelector('.display-console-window__header');
+  dragHeader?.addEventListener('pointerdown',event=>{
+    if(event.button!==undefined&&event.button!==0){return;}
+    if(event.target.closest('button,input,select,textarea')){return;}
+    const startX=event.clientX;
+    const startY=event.clientY;
+    const originX=DISPLAY_CONSOLE_STATE.x;
+    const originY=DISPLAY_CONSOLE_STATE.y;
+    const move=moveEvent=>{
+      const maxX=Math.max(0,(host.clientWidth||CANVAS_STAGE.width)-(panel.offsetWidth||1120));
+      const maxY=Math.max(0,(host.clientHeight||CANVAS_STAGE.height)-(panel.offsetHeight||250));
+      DISPLAY_CONSOLE_STATE.x=Math.round(Math.max(0,Math.min(maxX,originX+(moveEvent.clientX-startX))));
+      DISPLAY_CONSOLE_STATE.y=Math.round(Math.max(0,Math.min(maxY,originY+(moveEvent.clientY-startY))));
+      panel.style.left=`${DISPLAY_CONSOLE_STATE.x}px`;
+      panel.style.top=`${DISPLAY_CONSOLE_STATE.y}px`;
+      moveEvent.stopPropagation();
+      moveEvent.preventDefault();
+    };
+    const end=()=>{
+      document.removeEventListener('pointermove',move);
+      document.removeEventListener('pointerup',end);
+    };
+    document.addEventListener('pointermove',move);
+    document.addEventListener('pointerup',end);
+    if(event.currentTarget?.setPointerCapture&&event.pointerId!==undefined){
+      try{event.currentTarget.setPointerCapture(event.pointerId);}catch(error){}
+    }
+    event.stopPropagation();
+    event.preventDefault();
+  });
+  panel?.querySelector('.display-console-window__close')?.addEventListener('click',closeDisplayConsolePanel);
+}
+
+function openDisplayConsolePanel(nodeId=''){
+  const node=getNode(nodeId||S.selBlk);
+  if(!node||node.type!=='display_console'){
+    toast('请选择显控台组件','w');
+    return;
+  }
+  DISPLAY_CONSOLE_STATE.openNodeId=node.id;
+  DISPLAY_CONSOLE_STATE.x=null;
+  DISPLAY_CONSOLE_STATE.y=null;
+  renderDisplayConsolePanel();
+}
+
+function closeDisplayConsolePanel(){
+  DISPLAY_CONSOLE_STATE.openNodeId='';
+  DISPLAY_CONSOLE_STATE.x=null;
+  DISPLAY_CONSOLE_STATE.y=null;
+  renderDisplayConsolePanel();
+}
+
+window.openDisplayConsolePanel=openDisplayConsolePanel;
+window.closeDisplayConsolePanel=closeDisplayConsolePanel;
+
 function clearSimLoop(){
   if(SIM.timer){
     clearInterval(SIM.timer);
@@ -4367,8 +4657,6 @@ function hasSimulationFaults(){
 
 function canInitializeSimulation(){
   if(!S.sysLoaded){return false;}
-  if(!S.modelNodes.some(node=>node.type==='signal_source')){return false;}
-  if(getConnectedMeasurementInstrumentNodes().length===0){return false;}
   if(findInputCouplingConflicts().length>0){return false;}
   return true;
 }
@@ -4450,18 +4738,6 @@ function findInputCouplingConflicts(){
 
 function validateSimulationTopology(){
   if(!S.sysLoaded){toast('请先导入系统模型','w');return false;}
-  if(!S.modelNodes.some(node=>node.type==='signal_source')){
-    toast('请至少放置一个信号源','w');
-    return false;
-  }
-  if(getMeasurementInstrumentNodes().length===0){
-    toast('请至少放置一个测量仪器用于观察信号','w');
-    return false;
-  }
-  if(getConnectedMeasurementInstrumentNodes().length===0){
-    toast('请至少让一个测量仪器接入信号链路，才能查看测量结果','w');
-    return false;
-  }
   const conflicts=findInputCouplingConflicts();
   if(conflicts.length){
     selectEdge(conflicts[0].id);
@@ -4511,7 +4787,7 @@ function computeDigitalSourceSignal(props,time){
 }
 
 function normalizeAnalogWaveType(value){
-  const aliases={正弦:'sine',阶跃:'step',常值:'constant',斜坡:'ramp',噪声:'noise'};
+  const aliases={正弦:'sine',阶跃:'step',常值:'constant',斜坡:'ramp',脉冲:'pulse',噪声:'noise'};
   return aliases[value]||String(value||'sine').trim().toLowerCase();
 }
 
@@ -4534,6 +4810,16 @@ function computeAnalogSourceSignal(props,time){
     const startTime=Math.max(0,parseScalar(props.startTime,0));
     return initialValue+(time>=startTime?slope*(time-startTime):0);
   }
+  if(waveType==='pulse'){
+    const frequency=Math.max(0,parseScalar(props.frequency,1));
+    const lowValue=parseScalar(props.lowValue,0);
+    if(frequency<=0){return lowValue;}
+    const rawDuty=parseScalar(props.dutyCycle,50);
+    const duty=clamp(rawDuty>1?rawDuty/100:rawDuty,0,1);
+    const phase=parseScalar(props.phase,0);
+    const cycle=((2*Math.PI*frequency*time+phase)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)/(2*Math.PI);
+    return cycle<duty?amplitude:lowValue;
+  }
   if(waveType==='noise'){
     const phase=parseScalar(props.phase,0);
     const pseudoRandom=Math.sin((time+phase)*12.9898)*43758.5453;
@@ -4553,13 +4839,31 @@ function parseRfRate(value,fallback=1){
   return base;
 }
 
-function parseRfDuration(value,fallback=0){
+function parseRfDuration(value,unit='',fallback=0){
   const raw=String(value??'').trim().toLowerCase();
   const base=parseScalar(raw,fallback);
   if(/ns/.test(raw)){return base/1000000000;}
   if(/(?:μ|µ|u)s/.test(raw)){return base/1000000;}
   if(/ms/.test(raw)){return base/1000;}
+  const normalizedUnit=String(unit??'').trim().toLowerCase().replace('µ','μ');
+  if(normalizedUnit==='ns'){return base/1000000000;}
+  if(normalizedUnit==='us'||normalizedUnit==='μs'){return base/1000000;}
+  if(normalizedUnit==='ms'){return base/1000;}
   return base;
+}
+
+function parseRfPowerPeakVoltage(value,unit='dBm'){
+  const raw=String(value??'').trim();
+  const numeric=Number.parseFloat(raw);
+  if(!Number.isFinite(numeric)){return 0;}
+  const detected=raw.match(/(dBm|mW|W)\s*$/i)?.[1]||String(unit??'').trim();
+  const normalized=detected.toLowerCase();
+  const watts=normalized==='dbm'
+    ?0.001*Math.pow(10,numeric/10)
+    :normalized==='mw'
+      ?numeric*0.001
+      :numeric;
+  return Math.sqrt(Math.max(0,watts)*50*2);
 }
 
 function rfSeedForNode(node){
@@ -4568,7 +4872,7 @@ function rfSeedForNode(node){
 
 function computeRfSourceSignal(node,time){
   const props=getRuntimeAdjustedSignalSourceProps(node);
-  const power=parseScalar(props.power,0);
+  const power=parseRfPowerPeakVoltage(props.power,props.powerUnit);
   const modulation=String(props.modulation||'cw').trim().toLowerCase();
   const rate=Math.max(parseRfRate(props.modulationRate,1),0.000001);
   const phase=2*Math.PI*rate*time;
@@ -4593,9 +4897,9 @@ function computeRfSourceSignal(node,time){
     return power*Math.sin(carrierPhase+deviation*Math.sin(phase));
   }
   if(modulation==='pulse'){
-    const prf=Math.max(parseRfRate(props.prf,1),0.000001);
-    const period=1/prf;
-    const width=Math.max(0,Math.min(parseRfDuration(props.pulseWidth,0),period));
+    const legacyPrf=Math.max(parseRfRate(props.prf,1),0.000001);
+    const period=Math.max(parseRfDuration(props.pulsePeriod,props.pulsePeriodUnit,1/legacyPrf),0.000000001);
+    const width=Math.max(0,Math.min(parseRfDuration(props.pulseWidth,props.pulseWidthUnit,0),period));
     return ((time%period)+period)%period<width?power*carrier:0;
   }
   if(modulation==='digital'){
@@ -4825,7 +5129,6 @@ function executeBoundFlowBlock(node,nodeState,inputValues,modeKey,time,dt){
     time,
     dt,
     adapterMode:binding.executionMode||'mock',
-    adapterEndpoint:binding.executionConfig?.endpoint,
     applyElectricalFault:value=>applyElectricalFault(node,inputValues[0]||0,value,time)
   });
 
@@ -6828,10 +7131,15 @@ function buildRenderDataChannelsForNode(node,actualScopeSamples,actualInstrument
   return {};
 }
 
-function getRenderDataPortLabel(node,direction,index){
+function getRenderDataPortId(node,direction,index){
   const ports=getNodePorts(node)?.[direction==='source'?'outputs':'inputs']||[];
   const port=ports[index||0];
-  return port?.label||port?.name||port?.key||`${direction==='source'?'output':'input'}${(index||0)+1}`;
+  return port?.meta?.portId
+    ||port?.meta?.id
+    ||port?.portId
+    ||port?.id
+    ||port?.key
+    ||`${direction==='source'?'output':'input'}${(index||0)+1}`;
 }
 
 function buildSimulationRenderDataSnapshot(actualScopeSamples,actualInstrumentSamples){
@@ -6852,8 +7160,8 @@ function buildSimulationRenderDataSnapshot(actualScopeSamples,actualInstrumentSa
         id:edge.id,
         sourceDeviceId:edge.sourceNodeId,
         targetDeviceId:edge.targetNodeId,
-        sourcePort:getRenderDataPortLabel(source,'source',edge.sourcePortIndex||0),
-        targetPort:getRenderDataPortLabel(target,'target',edge.targetPortIndex||0),
+        sourcePort:getRenderDataPortId(source,'source',edge.sourcePortIndex||0),
+        targetPort:getRenderDataPortId(target,'target',edge.targetPortIndex||0),
         label:edge.label||edge.signalName||edge.signalId||`${source?.props?.name||edge.sourceNodeId} -> ${target?.props?.name||edge.targetNodeId}`
       };
     });
@@ -7271,18 +7579,6 @@ getScopeSignalName = function(scopeNode){
 
 validateSimulationTopology = function(){
   if(!S.sysLoaded){toast('请先导入系统模型','w');return false;}
-  if(!S.modelNodes.some(node=>node.type==='signal_source')){
-    toast('请至少放置一个信号源','w');
-    return false;
-  }
-  if(getMeasurementInstrumentNodes().length===0){
-    toast('请至少放置一个测量仪器用于观察信号','w');
-    return false;
-  }
-  if(getConnectedMeasurementInstrumentNodes().length===0){
-    toast('请至少让一个测量仪器接入信号链路，才能查看测量结果','w');
-    return false;
-  }
   const conflicts=findInputCouplingConflicts();
   if(conflicts.length){
     selectEdge(conflicts[0].id);
@@ -8580,12 +8876,26 @@ recordScopeSamples = function(time,dt){
   applyMiddleAssignmentsForAllCanvases('actual',time,dt,actualCache,actualVisiting);
   applyMiddleAssignmentsForAllCanvases('reference',time,dt,referenceCache,referenceVisiting);
   getScopeNodes().forEach(scopeNode=>{
-    const actualValue=resolveNodeSignal(scopeNode.id,'actual',time,dt,actualCache,actualVisiting);
-    const referenceValue=resolveNodeSignal(scopeNode.id,'reference',time,dt,referenceCache,referenceVisiting);
+    const actualValue=selectScopeVectorComponent(scopeNode,0,resolveNodeSignal(scopeNode.id,'actual',time,dt,actualCache,actualVisiting));
+    const referenceValue=selectScopeVectorComponent(scopeNode,0,resolveNodeSignal(scopeNode.id,'reference',time,dt,referenceCache,referenceVisiting));
     pushLimitedSample(SIM.actual.scopeSamples[scopeNode.id],{t:time,v:actualValue});
     pushLimitedSample(SIM.reference.scopeSamples[scopeNode.id],{t:time,v:referenceValue});
   });
 };
+
+function selectScopeVectorComponent(scopeNode,portIndex,value){
+  return selectInstrumentVectorComponent(scopeNode,portIndex,value);
+}
+
+function selectInstrumentVectorComponent(instrumentNode,portIndex,value){
+  if(!Array.isArray(value)){return value;}
+  const key=instrumentNode?.type==='instrument_scope'
+    ?(Number(portIndex)===1?'vectorChannelCh2':'vectorChannelCh1')
+    :'vectorChannel';
+  const selectedChannel=Math.trunc(Number(instrumentNode?.props?.[key]));
+  const vectorIndex=Number.isFinite(selectedChannel)&&selectedChannel>0?selectedChannel-1:0;
+  return value[Math.min(vectorIndex,Math.max(0,value.length-1))];
+}
 
 const __legacyOscilloscopeGetNodePorts = getNodePorts;
 const __legacyOscilloscopeRenderModelNodes = renderModelNodes;
@@ -9246,8 +9556,8 @@ recordScopeSamples = function(time,dt){
       const channelKey=getScopeChannelKey(edge.targetPortIndex||0);
       const actualSourceValue=resolveNodeOutput(edge.sourceNodeId,edge.sourcePortIndex||0,'actual',time,dt,actualCache,actualVisiting);
       const referenceSourceValue=resolveNodeOutput(edge.sourceNodeId,edge.sourcePortIndex||0,'reference',time,dt,referenceCache,referenceVisiting);
-      const actualValue=transmitEdgeSignal(edge,actualSourceValue,'actual',time);
-      const referenceValue=transmitEdgeSignal(edge,referenceSourceValue,'reference',time);
+      const actualValue=selectInstrumentVectorComponent(scopeNode,edge.targetPortIndex||0,transmitEdgeSignal(edge,actualSourceValue,'actual',time));
+      const referenceValue=selectInstrumentVectorComponent(scopeNode,edge.targetPortIndex||0,transmitEdgeSignal(edge,referenceSourceValue,'reference',time));
       const actualEdgeState=SIM.actual.edgeStates?.[edge.id]||{};
       pushLimitedSample(
         actualBucket[channelKey],
@@ -9284,7 +9594,7 @@ recordScopeSamples = function(time,dt){
       return;
     }
     const actualSourceValue=resolveNodeOutput(incoming.sourceNodeId,incoming.sourcePortIndex||0,'actual',time,dt,actualCache,actualVisiting);
-    const actualValue=transmitEdgeSignal(incoming,actualSourceValue,'actual',time);
+    const actualValue=selectInstrumentVectorComponent(instrumentNode,incoming.targetPortIndex||0,transmitEdgeSignal(incoming,actualSourceValue,'actual',time));
     const actualEdgeState=SIM.actual.edgeStates?.[incoming.id]||{};
     if(instrumentNode.type==='instrument_spectrum'){
       // 频谱分析仪只观察接入连线的实际信号，不计算或保存参考通道。
@@ -9317,7 +9627,7 @@ recordScopeSamples = function(time,dt){
       SIM.reference.instrumentSamples[instrumentNode.id]=[];
     }
     const referenceSourceValue=resolveNodeOutput(incoming.sourceNodeId,incoming.sourcePortIndex||0,'reference',time,dt,referenceCache,referenceVisiting);
-    const referenceValue=transmitEdgeSignal(incoming,referenceSourceValue,'reference',time);
+    const referenceValue=selectInstrumentVectorComponent(instrumentNode,incoming.targetPortIndex||0,transmitEdgeSignal(incoming,referenceSourceValue,'reference',time));
     pushLimitedSample(
       SIM.actual.instrumentSamples[instrumentNode.id],
       actualEdgeState.lastTransmissionDropped
@@ -10415,6 +10725,7 @@ function applyBlankWorkspaceState(toastMessage=''){
   if(typeof clearTask5NodeSelectionState==='function'){
     clearTask5NodeSelectionState();
   }
+  window.dispatchEvent(new CustomEvent('gz:palette-components-reset'));
   clearModelTransientStateForBlankWorkspace();
   S.rootCanvasId='canvas-root';
   S.activeCanvasId='canvas-root';
@@ -10443,6 +10754,7 @@ function applyBlankWorkspaceState(toastMessage=''){
   S.step=1;
   S.workspaceSource='blank';
   resetCanvasStageSize();
+  if(typeof closeDisplayConsolePanel==='function'){closeDisplayConsolePanel();}
   initializeFaultCatalog();
   resetSimulationRuntimeForBlankWorkspace();
   document.getElementById('empty')?.style?.setProperty('display','none');
@@ -10491,10 +10803,33 @@ restoreSystemModelSnapshot = function(snapshot){
 };
 
 const __blankWorkspaceApplyFlightModelPackage = window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__;
+function syncPaletteTemplatesFromImportedModel(){
+  window.dispatchEvent(new CustomEvent('gz:palette-components-reset'));
+  const consumedKeys=new Set();
+  const collectNodes=(nodes)=>{
+    if(!Array.isArray(nodes)){return;}
+    nodes.forEach((node)=>{
+      const paletteKey=node?.paletteKey||node?.templateId;
+      const paletteComponent=paletteKey&&window.__GZ_COMPONENT_REGISTRY__?.[paletteKey];
+      if(paletteComponent&&(paletteComponent.group==='simulation'||paletteComponent.group==='display-control')){
+        consumedKeys.add(paletteKey);
+      }
+    });
+  };
+  collectNodes(S.modelNodes);
+  if(S.canvases&&typeof S.canvases==='object'){
+    Object.values(S.canvases).forEach((canvas)=>collectNodes(canvas?.nodes));
+  }
+  consumedKeys.forEach((paletteKey)=>{
+    window.dispatchEvent(new CustomEvent('gz:palette-component-created',{detail:{paletteKey}}));
+  });
+}
+
 window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__ = function(pkg,prepared){
   const result=__blankWorkspaceApplyFlightModelPackage(pkg,prepared);
   if(result?.ok!==false){
     S.workspaceSource='imported';
+    syncPaletteTemplatesFromImportedModel();
     updateModelPackageStatus();
     updateUI();
   }
@@ -12478,6 +12813,8 @@ Object.assign(window,{
         pruneInvalidEdgesForNode(node);
       }
       }
+    }else if(node.type==='display_console'){
+      node.props.name=document.getElementById('prop-name')?.value.trim()||node.props.name;
     }else if(node.type?.startsWith('instrument_')){
       node.props.name=document.getElementById('prop-name')?.value.trim()||node.props.name;
       node.props.sampleRate=document.getElementById('prop-sampleRate')?.value.trim()||node.props.sampleRate||'64kHz';
@@ -12654,6 +12991,7 @@ Object.assign(window,{
     if(kind==='scope'){return ['overview','parameters','outputs'];}
     if(kind==='measurement-instrument'){return ['overview','parameters','outputs'];}
     if(kind==='empty'){return ['overview'];}
+    if(target?.type==='display_console'){return ['overview','parameters'];}
     if(target?.type==='signal_source'){return ['overview','parameters','faults'];}
     if(target?.type==='simulation_block'){return ['overview','parameters','faults'];}
     return ['overview','parameters','faults','outputs'];
@@ -12975,6 +13313,12 @@ Object.assign(window,{
       ?buildSimulationBlockPackageRows(node)
       :'';
     const signalDefinitionRows=renderSignalSourceDefinitionOverview(node);
+    const displayConsoleAction=node.type==='display_console'?`
+      <div class="props-form" data-display-console-entry>
+        <div class="props-actions">
+          <button type="button" class="props-secondary" data-open-display-console="${jsString(node.id)}">进入显控台</button>
+        </div>
+      </div>`:'';
     const canvasPositionRows=(node.type==='signal_source'||node.type==='simulation_block')?'':`
       <div class="pgroup">
         <div class="pglbl">画布位置</div>
@@ -12999,6 +13343,7 @@ Object.assign(window,{
         ])}
       </div>
       ${canvasPositionRows}
+      ${displayConsoleAction}
       ${renderLegacyOverviewCompat(node)}`;
   }
 
@@ -13137,6 +13482,15 @@ Object.assign(window,{
     if(node.type==='signal_source'){return renderSignalSourceFields(node);}
     if(node.type==='simulation_block'){return buildSimulationBlockFields(node);}
     if(node.type==='flow_block'){return buildFlowBlockFields(node);}
+    if(node.type==='display_console'){
+      return `
+        <div class="pgroup" data-display-console-configuration>
+          <div class="pglbl">显控配置</div>
+          <div class="props-field"><label>模块名称</label><input id="prop-name" value="${text(node.props.name)}"></div>
+          <div class="props-field"><label>显控类型</label><input value="射频参数显控" readonly></div>
+          <div class="props-help">固定四路标量输入：中心频率、重复周期、脉宽、幅度。</div>
+        </div>`;
+    }
     if(node.type==='gain_block'||node.type==='sum_block'||node.type==='mux_block'){return buildSignalUtilityFields(node);}
     if(node.type?.startsWith('fault_')){return renderFaultBlockFields(node);}
     if(node.type?.startsWith('instrument_')){return renderInstrumentFields(node);}
@@ -13150,6 +13504,7 @@ Object.assign(window,{
       <div class="props-form">
         ${renderNodeParameterFields(node)}
         <div class="props-actions">
+          ${node.type==='display_console'?`<button type="button" class="props-secondary" data-open-display-console="${jsString(node.id)}">进入显控台</button>`:''}
           ${node.type==='instrument_scope'?`<button type="button" class="props-secondary" onclick="openScope('${jsString(node.id)}')">查看波形</button>`:''}
           ${node.type==='flow_block'?`<button type="button" class="props-secondary" onclick="openPythonBindingDialog('${jsString(node.id)}')">${pythonBound?'重新绑定 Python':'绑定 Python 文件'}</button>`:''}
           ${node.type==='flow_block'&&pythonBound?`<button type="button" class="props-secondary" onclick="unbindPythonBinding('${jsString(node.id)}')">解除 Python 绑定</button>`:''}
@@ -13822,7 +14177,7 @@ Object.assign(window,{
   }
   window.refreshFaultUiAfterChange=refreshFaultUiAfterChange;
 
-  function createPropertyPanelFallbackFault(target,model,slot,parameters){
+  function createPropertyPanelFallbackFault(target,model,slot,parameters,options={}){
     const targetKind=isEdgeTarget(target)?'edge':'node';
     const slotId=getPropertyPanelSlotId(slot);
     const bindingObject=plainValue(slot?.bindingObject||slot?.targetVariable||slot?.variableKey||slot?.parameterKey||slotId,slotId);
@@ -13838,7 +14193,10 @@ Object.assign(window,{
         targetKind,
         slotId,
         bindingObject,
-        injectionForm
+        injectionForm,
+        vectorInjectionScope:options.vectorInjectionScope,
+        vectorIndex:options.vectorIndex,
+        vectorIndices:options.vectorIndices
       });
       if(!plan.ok){
         return plan;
@@ -14342,6 +14700,31 @@ Object.assign(window,{
     return manualPoint;
   }
 
+  function getEdgeTestPointVectorLength(edge){
+    const source=getNode(edge?.sourceNodeId);
+    const portIndex=Math.max(0,Number.parseInt(edge?.sourcePortIndex,10)||0);
+    const port=getNodePorts(source)?.outputs?.[portIndex]||{};
+    const candidates=[edge?.sourcePortMeta,edge?.sourcePort,port?.meta,port,source?.props?.outputs?.[portIndex],source?.outputs?.[portIndex]];
+    for(const candidate of candidates){
+      const length=Number(candidate?.vectorLength??candidate?.length??candidate?.shape?.[0]);
+      if(Number.isInteger(length)&&length>1){return length;}
+    }
+    return 0;
+  }
+
+  function normalizeEdgeTestPointVectorIndex(value,length){
+    const index=Number.parseInt(value,10);
+    if(!Number.isInteger(index)||index<0){return 0;}
+    return length>0?Math.min(index,length-1):index;
+  }
+
+  function renderEdgeTestPointVectorSelector(edge,point){
+    const length=getEdgeTestPointVectorLength(edge);
+    if(length<2){return '';}
+    const selected=normalizeEdgeTestPointVectorIndex(point?.vectorIndex,length);
+    return `<div class="props-field"><label>测量数据路</label><select data-edge-testpoint-vector-index>${Array.from({length},(_,index)=>`<option value="${index}" ${index===selected?'selected':''}>第 ${index+1} 路</option>`).join('')}</select></div>`;
+  }
+
   function findManualEdgeTestPoint(edge,pointId){
     return list(S.manualDiagnosticTestPoints).find(point=>
       (point.pointId||point.id)===pointId
@@ -14426,6 +14809,7 @@ Object.assign(window,{
             <option value="virtual" ${normalizeDiagnosticTestPointType(point.pointType)==='virtual'?'selected':''}>虚拟测点</option>
           </select>
         </div>
+        ${renderEdgeTestPointVectorSelector(edge,point)}
         <div class="pgroup edge-testpoint-fault-group">
           <div class="pglbl">可检测故障</div>
           <div class="props-fault-slot-layers edge-testpoint-fault-list" data-edge-testpoint-fault-list>
@@ -14486,8 +14870,13 @@ Object.assign(window,{
     if(!card) return false;
     const nameInput=card.querySelector('[data-edge-testpoint-name]');
     const typeInput=card.querySelector('[data-edge-testpoint-type]');
+    const vectorIndexInput=card.querySelector('[data-edge-testpoint-vector-index]');
     const nextName=nameInput?.value?.trim()||point.name||getEdgeTestPointDefaultName(edge);
     const nextPointType=normalizeDiagnosticTestPointType(typeInput?.value||point.pointType);
+    const vectorLength=getEdgeTestPointVectorLength(edge);
+    const nextVectorIndex=vectorLength>1
+      ?normalizeEdgeTestPointVectorIndex(vectorIndexInput?.value??point.vectorIndex,vectorLength)
+      :null;
     const nextDetects=Array.from(card.querySelectorAll('[data-edge-testpoint-fault]:checked'))
       .map(input=>input.dataset.edgeTestpointFault)
       .filter(Boolean);
@@ -14504,6 +14893,8 @@ Object.assign(window,{
       target.labelZh=nextName;
       target.positionNameZh=nextName;
       target.pointType=nextPointType;
+      if(nextVectorIndex===null){delete target.vectorIndex;}
+      else{target.vectorIndex=nextVectorIndex;}
       target.detects=[...nextDetects];
       target.signalId=nextSignalId;
       target.channelId=nextChannelId;
@@ -14703,6 +15094,14 @@ Object.assign(window,{
       saveButton.dataset.propertySaveNodeBound='true';
     }
     const node=getNode(S.selBlk);
+    const displayConsoleOpenButton=host?.querySelector?.('[data-open-display-console]');
+    if(node?.type==='display_console'&&displayConsoleOpenButton&&!displayConsoleOpenButton.dataset.displayConsoleOpenBound){
+      displayConsoleOpenButton.addEventListener('click',event=>{
+        event.preventDefault();
+        openDisplayConsolePanel(node.id);
+      });
+      displayConsoleOpenButton.dataset.displayConsoleOpenBound='true';
+    }
     if(!isDigitalSignalSourceNode(node)){return;}
     bindDigitalSignalConfigurationActions(host,node);
     const currentValueInput=host?.querySelector?.('#prop-initialState');
@@ -19247,10 +19646,6 @@ function decorateDataflowEdges(){
   };
 
   Object.assign(window,{
-    runModelCheck,
-    collectModelDiagnostics,
-    renderModelDiagnosticsPanel,
-    focusDiagnosticItem,
     focusParentSubsystemInterface,
     renderPropertyPanel
   });
@@ -19617,9 +20012,6 @@ function decorateDataflowEdges(){
         break;
       case 'auto-arrange':
         autoArrangeCanvas();
-        break;
-      case 'model-check':
-        runModelCheck();
         break;
       case 'undo':
         undoCanvasCommand();
@@ -21466,6 +21858,12 @@ function decorateDataflowEdges(){
     event.stopPropagation();
     FAULT_TAG_DRAG.engaged=true;
     tag.positionMode='manual';
+    expandCanvasStageForBounds({
+      x:Math.round(FAULT_TAG_DRAG.originX+dx/(S.canvasScale||1)),
+      y:Math.round(FAULT_TAG_DRAG.originY+dy/(S.canvasScale||1)),
+      width:tag.w||204,
+      height:tag.h||76
+    });
     tag.x=clamp(Math.round(FAULT_TAG_DRAG.originX+dx/(S.canvasScale||1)),CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-(tag.w||204)-CANVAS_STAGE.nodePadding);
     tag.y=clamp(Math.round(FAULT_TAG_DRAG.originY+dy/(S.canvasScale||1)),CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-(tag.h||76)-CANVAS_STAGE.nodePadding);
     updateFaultTagElementPosition(el,tag);
@@ -23070,7 +23468,10 @@ function decorateDataflowEdges(){
         targetKind,
         slotId,
         bindingObject,
-        injectionForm
+        injectionForm,
+        vectorInjectionScope:options.vectorInjectionScope,
+        vectorIndex:options.vectorIndex,
+        vectorIndices:options.vectorIndices
       });
       if(!plan.ok){
         return plan;
@@ -23096,7 +23497,10 @@ function decorateDataflowEdges(){
       slotId,
       parameters,
       bindingObject,
-      injectionForm
+      injectionForm,
+      vectorInjectionScope:options.vectorInjectionScope,
+      vectorIndex:options.vectorIndex,
+      vectorIndices:options.vectorIndices
     }):{
       instanceId:`fault-inst-${Date.now()}-${Math.random().toString(16).slice(2,8)}`,
       faultTypeId:model.id,
@@ -23387,6 +23791,11 @@ function decorateDataflowEdges(){
     payload.targetVariable=instance.targetVariable||instance.bindingObject||'';
     payload.targetField=instance.targetField||'';
     payload.injectionForm=instance.injectionForm||getFaultInjectionForm(target,payload.layer);
+    if(instance.vectorInjectionScope){
+      payload.vectorInjectionScope=instance.vectorInjectionScope;
+      if(instance.vectorInjectionScope==='item') payload.vectorIndex=instance.vectorIndex??0;
+      if(instance.vectorInjectionScope==='items') payload.vectorIndices=instance.vectorIndices??[];
+    }
     if(runtimeService?.applyFaultBindingToState){
       const state=getState();
       const result=runtimeService.applyFaultBindingToState(state,target,{
@@ -23476,6 +23885,57 @@ function decorateDataflowEdges(){
     return draft;
   }
 
+  function getTargetFaultVectorLength(target,slot){
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    const fromSlot=runtimeService?.getFaultSlotVectorLength?.(slot);
+    if(fromSlot>1) return fromSlot;
+    const targetField=String(slot?.targetField||'').toLowerCase();
+    const match=targetField.match(/^(params|parameters|inputs|outputs|middlevars)\.(.+)$/);
+    const groupNames=match?.[1]==='params'||match?.[1]==='parameters'
+      ? ['parameters','modelParameters','physicalParameters']
+      : match?.[1]==='middlevars'
+        ? ['middleVars']
+        : match ? [match[1]] : ['parameters','modelParameters','physicalParameters','inputs','outputs','middleVars'];
+    const groups=groupNames.flatMap(name=>[target?.[name],target?.props?.[name]]);
+    const variable=String(slot?.bindingObject||slot?.targetVariable||'').toLowerCase();
+    for(const group of groups){
+      for(const item of Array.isArray(group)?group:[]){
+        const name=String(item?.name||item?.varName||item?.id||'').toLowerCase();
+        const literal=item?.default??item?.value??item?.initialValue;
+        let literalLength=Array.isArray(literal)?literal.length:0;
+        if(!literalLength&&typeof literal==='string'){
+          try{const parsed=JSON.parse(literal);literalLength=Array.isArray(parsed)?parsed.length:0;}catch{}
+        }
+        const length=Number(item?.vectorLength??item?.length??(Array.isArray(item?.shape)?item.shape[0]:literalLength));
+        if((!match||name===match[2]||name===variable)&&Number.isInteger(length)&&length>1) return length;
+      }
+    }
+    return 0;
+  }
+
+  function renderTargetFaultVectorInjectionControls(target,slot){
+    const vectorLength=getTargetFaultVectorLength(target,slot);
+    if(vectorLength<2) return '';
+    const checkboxes=Array.from({length:vectorLength},(_,index)=>`<label><input type="checkbox" data-fault-vector-item value="${index}">第 ${index+1} 路</label>`).join('');
+    return `
+      <div class="target-fault-vector-injection" data-fault-vector-injection>
+        <div class="target-fault-param-row"><span>注入路数</span><div class="target-fault-vector-items">${checkboxes}</div></div>
+      </div>`;
+  }
+
+  function readTargetFaultVectorInjectionOptions(panel){
+    const inputs=panel?.querySelectorAll?.('[data-fault-vector-item]');
+    if(!inputs?.length) return {};
+    return {
+      vectorInjectionScope:'items',
+      vectorIndices:Array.from(panel?.querySelectorAll?.('[data-fault-vector-item]:checked')||[]).map(input=>Number(input.value)).filter(Number.isInteger)
+    };
+  }
+
+  function bindTargetFaultVectorInjectionControls(panel){
+    // Vector injection is selected directly through the channel checkboxes.
+  }
+
   function getFaultSlotDisplayName(slot){
     return slot?.slotName||slot?.name||slot?.label||getCapabilitySlotId(slot);
   }
@@ -23514,6 +23974,7 @@ function decorateDataflowEdges(){
       </div>
       <div class="target-fault-parameters__grid">
         ${renderTargetFaultParameterInputs(model)}
+        ${renderTargetFaultVectorInjectionControls(target,slot)}
       </div>
       <div class="target-fault-parameters__actions">
         <button type="button" data-cancel-target-fault>取消</button>
@@ -23522,10 +23983,16 @@ function decorateDataflowEdges(){
     `;
     panel.addEventListener('submit',event=>{
       event.preventDefault();
+      const vectorOptions=readTargetFaultVectorInjectionOptions(panel);
+      if(panel.querySelector('[data-fault-vector-injection]')&&vectorOptions.vectorIndices.length===0){
+        toast('请至少选择一路向量数据','w');
+        return;
+      }
       const result=activateFaultForTarget(target,model.id,readTargetFaultParameterDraft(panel),{
         ...normalizeFaultOptionFilters(filters),
         slotId,
-        slot
+        slot,
+        ...vectorOptions
       });
       if(result?.ok){
         box.remove();
@@ -23535,6 +24002,7 @@ function decorateDataflowEdges(){
         toast('该目标无法注入所选故障','w');
       }
     });
+    bindTargetFaultVectorInjectionControls(panel);
     panel.querySelector('[data-cancel-target-fault]')?.addEventListener('click',()=>panel.remove());
     box.querySelector('.target-fault-dialog__body')?.appendChild(panel);
   }
@@ -24337,12 +24805,14 @@ function decorateDataflowEdges(){
       point.pointId||point.id||'',
       point.edgeId||point.edgeID||point.targetEdgeId||point.targetId||'',
       normalizeDiagnosticTestPointType(point.pointType),
+      point.vectorIndex??'',
       arr(point.detects).join('|')
     ].join(':')).join('|');
     const manualSignature=manualConfigured.map(point=>[
       point.pointId||point.id||'',
       point.edgeId||point.edgeID||point.targetEdgeId||point.targetId||'',
       normalizeDiagnosticTestPointType(point.pointType),
+      point.vectorIndex??'',
       arr(point.detects).join('|')
     ].join(':')).join('|');
     const edgeSignature=[activeCanvasId,runtimeEdges.map(edge=>edge.id).join('|'),runtimeNodes.map(node=>node.id).join('|'),explicitSignature,manualSignature].join('::');
@@ -26925,6 +27395,9 @@ function decorateDataflowEdges(){
           {
             signalRole:role,
             signalType:item?.type||item?.format||'',
+            dataType:item?.dataType||item?.type||item?.format||'',
+            vectorLength:item?.vectorLength??item?.length??(Array.isArray(item?.shape)?item.shape[0]:undefined),
+            targetField:plainText(item?.targetField,`${role==='middle'?'middleVars':`${role}s`}.${stableVariableKey(item?.key||item?.id||item?.varName||item?.name,`${role}_${index+1}`)}`),
             variableKey:stableVariableKey(item?.key||item?.id||item?.varName||item?.name,`${role}_${index+1}`),
             variableRole:role,
             bindingObject:rawSlotBindingName(item,index),
@@ -27194,7 +27667,10 @@ function decorateDataflowEdges(){
       targetKind:getTargetKind(target),
       targetId:target?.id||'',
       injectionForm:getLayeredInjectionForm(target,layer),
-      parameters:cloneValue(parameters||defaultLayeredFaultParameters(layer,mathModel))
+      parameters:cloneValue(parameters||defaultLayeredFaultParameters(layer,mathModel)),
+      ...(model.vectorInjectionScope?{vectorInjectionScope:model.vectorInjectionScope}:{}),
+      ...(model.vectorInjectionScope==='item'?{vectorIndex:model.vectorIndex??0}:{}),
+      ...(model.vectorInjectionScope==='items'?{vectorIndices:cloneValue(model.vectorIndices||[])}:{})
     };
   }
 
@@ -27218,6 +27694,9 @@ function decorateDataflowEdges(){
       targetVariable:payload.targetVariable||payload.bindingObject||'',
       targetField:payload.targetField||'',
       injectionForm:payload.injectionForm||getLayeredInjectionForm(target,payload.layer),
+      ...(payload.vectorInjectionScope?{vectorInjectionScope:payload.vectorInjectionScope}:{}),
+      ...(payload.vectorInjectionScope==='item'?{vectorIndex:payload.vectorIndex??0}:{}),
+      ...(payload.vectorInjectionScope==='items'?{vectorIndices:cloneValue(payload.vectorIndices||[])}:{}),
       visualRole:'fault-source',
       propagationMode:payload.layer==='physical'?'localParameter':payload.layer==='protocol'?'protocolEdge':'signalTransform',
       canPropagate:payload.layer!=='physical',
@@ -27254,6 +27733,9 @@ function decorateDataflowEdges(){
       targetField:payload.targetField||'',
       displayName:model.name||payload.name||payload.modelId,
       parameters:cloneValue(payload.parameters||{}),
+      ...(payload.vectorInjectionScope?{vectorInjectionScope:payload.vectorInjectionScope}:{}),
+      ...(payload.vectorInjectionScope==='item'?{vectorIndex:payload.vectorIndex??0}:{}),
+      ...(payload.vectorInjectionScope==='items'?{vectorIndices:cloneValue(payload.vectorIndices||[])}:{}),
       active:true,
       visual:{expanded:false}
     };
@@ -27325,6 +27807,9 @@ function decorateDataflowEdges(){
       targetField:payload.targetField||'',
       injectionForm:payload.injectionForm||getLayeredInjectionForm(target,payload.layer),
       parameters:cloneValue(payload.parameters||{}),
+      ...(payload.vectorInjectionScope?{vectorInjectionScope:payload.vectorInjectionScope}:{}),
+      ...(payload.vectorInjectionScope==='item'?{vectorIndex:payload.vectorIndex??0}:{}),
+      ...(payload.vectorInjectionScope==='items'?{vectorIndices:cloneValue(payload.vectorIndices||[])}:{}),
       injectedFault:cloneValue(payload),
       ...box
     };
@@ -27380,6 +27865,9 @@ function decorateDataflowEdges(){
       modelClass:options.modelClass||config.faultType,
       runtimeBehavior:mathModel,
       defaultParameters:cloneValue(options.parameters||defaultLayeredFaultParameters(layer,mathModel)),
+      vectorInjectionScope:options.vectorInjectionScope,
+      vectorIndex:options.vectorIndex,
+      vectorIndices:options.vectorIndices,
       visualInjection:{targetId:target.id,targetKind:getTargetKind(target)}
     };
     const payload=buildLayeredFaultPayload({
@@ -27405,6 +27893,9 @@ function decorateDataflowEdges(){
         tag.targetVariable=payload.targetVariable||payload.bindingObject||'';
         tag.targetField=payload.targetField||'';
         tag.injectionForm=payload.injectionForm||getLayeredInjectionForm(target,layer);
+        tag.vectorInjectionScope=payload.vectorInjectionScope||'';
+        if(payload.vectorInjectionScope==='item') tag.vectorIndex=payload.vectorIndex??0;
+        if(payload.vectorInjectionScope==='items') tag.vectorIndices=cloneValue(payload.vectorIndices||[]);
         tag.runtimeBehavior=mathModel;
         tag.parameters=cloneValue(payload.parameters||{});
         tag.injectedFault=cloneValue(payload);
@@ -27877,6 +28368,7 @@ function decorateDataflowEdges(){
     const modelHost=dialog.querySelector('[data-layered-fault-model-host]');
     if(modelHost) modelHost.innerHTML=renderLayeredDropdown('model',nextValue,nextModels);
     refreshLayeredFaultDialogParameters(dialog);
+    refreshLayeredFaultVectorInjectionControls(dialog);
   }
 
   function setLayeredFaultDropdownChoice(button){
@@ -27894,6 +28386,59 @@ function decorateDataflowEdges(){
   function renderLayeredMathModelOptions(select,models){
     if(!select) return;
     select.innerHTML=arr(models).map(model=>`<option value="${escapeHtml(model.value)}">${escapeHtml(model.label)}</option>`).join('');
+  }
+
+  function getLayeredFaultVectorLength(target,slot){
+    const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
+    const fromSlot=runtimeService?.getFaultSlotVectorLength?.(slot);
+    if(fromSlot>1) return fromSlot;
+    const targetField=String(slot?.targetField||'').toLowerCase();
+    const fieldMatch=targetField.match(/^(inputs|outputs|middlevars)\.(.+)$/);
+    const role=fieldMatch?.[1]==='middlevars'?'middleVars':fieldMatch?.[1];
+    const groups=role
+      ?[target?.[role],target?.props?.[role],target?.ports?.[role],typeof getNodePorts==='function'?getNodePorts(target)?.[role]:null]
+      :[target?.outputs,target?.props?.outputs,target?.ports?.outputs,typeof getNodePorts==='function'?getNodePorts(target)?.outputs:null];
+    const binding=String(slot?.bindingObject||slot?.targetVariable||slot?.variableKey||'').toLowerCase();
+    for(const group of groups){
+      for(const item of arr(group)){
+        const name=String(item?.name||item?.varName||item?.key||item?.id||'').toLowerCase();
+        const length=Number(item?.vectorLength??item?.length??(Array.isArray(item?.shape)?item.shape[0]:0));
+        if((!fieldMatch||name===fieldMatch[2]||name===binding)&&Number.isInteger(length)&&length>1) return length;
+      }
+    }
+    return 0;
+  }
+
+  function renderLayeredFaultVectorInjectionControls(target,slot){
+    const vectorLength=getLayeredFaultVectorLength(target,slot);
+    if(vectorLength<2) return '';
+    const items=Array.from({length:vectorLength},(_,index)=>`<label><input type="checkbox" data-layered-fault-vector-item value="${index}">第 ${index+1} 路</label>`).join('');
+    return `
+      <div class="layered-fault-dialog__vector" data-layered-fault-vector>
+        <div class="layered-fault-dialog__field"><span>注入路数</span><div class="target-fault-vector-items">${items}</div></div>
+      </div>`;
+  }
+
+  function syncLayeredFaultVectorInjectionControls(dialog){
+    // Vector injection is selected directly through the channel checkboxes.
+  }
+
+  function readLayeredFaultVectorInjectionOptions(dialog){
+    const inputs=dialog?.querySelectorAll?.('[data-layered-fault-vector-item]');
+    if(!inputs?.length) return {};
+    return {
+      vectorInjectionScope:'items',
+      vectorIndices:[...dialog.querySelectorAll('[data-layered-fault-vector-item]:checked')].map(input=>Number(input.value)).filter(Number.isInteger)
+    };
+  }
+
+  function refreshLayeredFaultVectorInjectionControls(dialog){
+    const state=dialog?.__layeredFaultDialogState;
+    const host=dialog?.querySelector?.('[data-layered-fault-vector-host]');
+    if(!state||!host) return;
+    const slot=findLayeredSlot(state.slots,getLayeredDropdownValue(dialog,'slot'));
+    host.innerHTML=renderLayeredFaultVectorInjectionControls(state.target,slot);
+    syncLayeredFaultVectorInjectionControls(dialog);
   }
 
   function getDialogParameters(layer,mathModel){
@@ -27932,7 +28477,9 @@ function decorateDataflowEdges(){
     const dialog=document.createElement('div');
     dialog.className='layered-fault-dialog';
     dialog.dataset.layeredFaultBindingDialog='true';
-    const initialSlot=slots[0];
+    // Prefer a vector signal so its injection scope is immediately visible;
+    // users can still switch to any other compatible slot in the dialog.
+    const initialSlot=slots.find(slot=>getLayeredFaultVectorLength(target,slot)>1)||slots[0];
     const models=getLayeredMathModelsForSlot(config.layer,initialSlot);
     const slotFieldLabel=config.layer==='protocol'&&getTargetKind(target)==='edge'?'协议链路/报文':'关联参数/信号';
     dialog.innerHTML=`
@@ -27961,6 +28508,7 @@ function decorateDataflowEdges(){
           </div>
         </label>
         <div class="layered-fault-dialog__params" data-layered-fault-params></div>
+        <div data-layered-fault-vector-host>${renderLayeredFaultVectorInjectionControls(target,initialSlot)}</div>
       </div>
       <div class="layered-fault-dialog__actions">
         <button type="button" data-layered-fault-cancel>取消</button>
@@ -27971,10 +28519,12 @@ function decorateDataflowEdges(){
     dialog.__layeredFaultDialogState={
       config,
       slots,
+      target,
       slotOptions:slots.map(slot=>({value:slot.id,label:getLayeredFaultSlotOptionLabel(slot)})),
       modelOptions:models
     };
     renderDialogParameterFields(paramsHost,config.layer,getLayeredDropdownValue(dialog,'model')||models[0]?.value||config.defaultModel);
+    syncLayeredFaultVectorInjectionControls(dialog);
     makeLayeredFaultBindingDialogDraggable(dialog);
     dialog.addEventListener('click',event=>{
       const option=event.target?.closest?.('[data-layered-fault-option]');
@@ -27996,12 +28546,18 @@ function decorateDataflowEdges(){
       const selectedSlot=findLayeredSlot(slots,slotId);
       const availableModels=getLayeredMathModelsForSlot(config.layer,selectedSlot);
       const mathModel=getLayeredDropdownValue(dialog,'model')||availableModels[0]?.value||config.defaultModel;
+      const vectorOptions=readLayeredFaultVectorInjectionOptions(dialog);
+      if(dialog.querySelector('[data-layered-fault-vector]')&&vectorOptions.vectorIndices.length===0){
+        if(typeof toast==='function') toast('请至少选择一路向量数据','w');
+        return;
+      }
       const result=bindLayeredFaultInjectorToTarget(injector.id,{
         targetKind:getTargetKind(target),
         targetId:target.id,
         slotId,
         mathModel,
-        parameters:readLayeredDialogParameters(paramsHost)
+        parameters:readLayeredDialogParameters(paramsHost),
+        ...vectorOptions
       });
       if(result?.ok){
         cancelLayeredFaultBinding();
@@ -28680,6 +29236,18 @@ function decorateDataflowEdges(){
   }
 
   getNodePorts=function(node){
+    if(node?.type==='display_console'){
+      return {
+        inputs:getDisplayConsoleInputDefinitions(node).map((input,index)=>({
+          key:`display-input-${index}`,
+          label:`${input.label} / 标量`,
+          kind:'input',
+          side:'left',
+          meta:{displayName:input.label,type:input.type||'scalar'}
+        })),
+        outputs:[]
+      };
+    }
     if(node?.type==='instrument_multimeter'){
       return {
         inputs:[
@@ -28954,6 +29522,17 @@ function decorateDataflowEdges(){
     return candidates;
   }
 
+  function getVectorLengthForEdge(edge,node){
+    const index=Number.isFinite(Number(edge?.sourcePortIndex))?Number(edge.sourcePortIndex):0;
+    const port=getOutputPorts(node)[index]||{};
+    const candidates=[edge?.sourcePortMeta,edge?.sourcePort,port?.meta,port,node?.props?.outputs?.[index],node?.outputs?.[index]];
+    for(const candidate of candidates){
+      const length=Number(candidate?.vectorLength??candidate?.length??candidate?.shape?.[0]);
+      if(Number.isInteger(length)&&length>1){return length;}
+    }
+    return 0;
+  }
+
   function readOutputValue(bucket,nodeId,candidates){
     const outputs=bucket?.[nodeId];
     if(!outputs||typeof outputs!=='object') return undefined;
@@ -28966,6 +29545,11 @@ function decorateDataflowEdges(){
     return first;
   }
 
+  function selectVectorComponent(value,vectorIndex){
+    if(!Number.isInteger(vectorIndex)){return value;}
+    return Array.isArray(value)?value[vectorIndex]:undefined;
+  }
+
   function getStepTime(trace,step,index){
     if(Number.isFinite(Number(step?.time))) return Number(step.time);
     const traceTime=arr(trace?.time)[index];
@@ -28973,13 +29557,13 @@ function decorateDataflowEdges(){
     return index;
   }
 
-  function collectSeries(trace,sourceNodeId,portCandidates){
+  function collectSeries(trace,sourceNodeId,portCandidates,vectorIndex=null){
     const actualSeries=[];
     const referenceSeries=[];
     arr(trace?.steps).forEach((step,index)=>{
       const time=getStepTime(trace,step,index);
-      const actual=readOutputValue(step?.actual,sourceNodeId,portCandidates);
-      const reference=readOutputValue(step?.reference,sourceNodeId,portCandidates);
+      const actual=selectVectorComponent(readOutputValue(step?.actual,sourceNodeId,portCandidates),vectorIndex);
+      const reference=selectVectorComponent(readOutputValue(step?.reference,sourceNodeId,portCandidates),vectorIndex);
       const actualNumber=Number(actual);
       const referenceNumber=Number(reference);
       if(Number.isFinite(actualNumber)){
@@ -29022,7 +29606,11 @@ function decorateDataflowEdges(){
         const sourceNode=nodes.get(sourceNodeId)||null;
         const targetNode=nodes.get(targetNodeId)||null;
         const portCandidates=getPortCandidates(edge,sourceNode);
-        const {actualSeries,referenceSeries}=collectSeries(trace,sourceNodeId,portCandidates);
+        const vectorLength=getVectorLengthForEdge(edge,sourceNode);
+        const vectorIndex=vectorLength>1
+          ?Math.max(0,Math.min(Number.parseInt(point.vectorIndex,10)||0,vectorLength-1))
+          :null;
+        const {actualSeries,referenceSeries}=collectSeries(trace,sourceNodeId,portCandidates,vectorIndex);
         const actual=lastSeriesValue(actualSeries);
         const reference=lastSeriesValue(referenceSeries);
         const actualNumber=Number(actual);
@@ -29039,7 +29627,8 @@ function decorateDataflowEdges(){
           targetName:point.targetName||targetNode?.props?.name||targetNode?.name||targetNodeId||'',
           sourceType:sourceNode?.type||'',
           sourceProps:sourceNode?.props||{},
-          portName:portCandidates[0]||'output',
+          portName:`${portCandidates[0]||'output'}${vectorIndex===null?'':`[${vectorIndex}]`}`,
+          vectorIndex,
           time:lastSeriesTime(actualSeries.length?actualSeries:referenceSeries),
           actual,
           reference,
@@ -29682,6 +30271,94 @@ function decorateDataflowEdges(){
     }
     return previousExecuteBoundFlowBlock(node,nodeState,inputValues,modeKey,time,dt);
   };
+})();
+
+// --- Simulation power ports ---
+;(function installSimulationPowerPortAdapter(){
+  const previousGetNodePorts=window.getNodePorts||(typeof getNodePorts==='function'?getNodePorts:null);
+  if(!previousGetNodePorts||window.__simulationPowerPortsInstalled){return;}
+  window.__simulationPowerPortsInstalled=true;
+
+  const normalizePowerPorts=(items,fallbackName,voltage)=>{
+    const base=Array.isArray(items)?items:[];
+    const normalized=base.map((item,index)=>{
+      const source=item&&typeof item==='object'?item:{};
+      return {
+        ...source,
+        name:String(source.name||source.displayName||`${fallbackName} ${index+1}`).trim()||`${fallbackName} ${index+1}`,
+        type:'电源',
+        voltage:String(source.voltage||voltage)
+      };
+    });
+    return normalized.length?normalized:[{name:fallbackName,type:'电源',voltage}];
+  };
+
+  const ensurePowerInterfaces=node=>{
+    const props=node?.props||{};
+    props.powerInputs=normalizePowerPorts(props.powerInputs,'电源输入','28V');
+    props.powerOutputs=normalizePowerPorts(props.powerOutputs,'电源地','0V');
+    return props;
+  };
+
+  window.getNodePorts=function(node){
+    const ports=previousGetNodePorts.apply(this,arguments);
+    if(node?.type!=='simulation_block'){
+      return ports;
+    }
+    const props=ensurePowerInterfaces(node);
+    const signalInputs=(ports.inputs||[]).filter(port=>port.kind!=='power');
+    const signalOutputs=(ports.outputs||[]).filter(port=>port.kind!=='middle'&&port.kind!=='power');
+    return {
+      inputs:[
+        ...signalInputs,
+        ...props.powerInputs.map((item,index)=>({
+          key:`power-input-${index}`,
+          label:`电源输入 ${index+1} · ${item.name} / ${item.voltage}`,
+          kind:'power',
+          side:'top',
+          meta:item
+        }))
+      ],
+      outputs:[
+        ...signalOutputs,
+        ...props.powerOutputs.map((item,index)=>({
+          key:`power-output-${index}`,
+          label:`电源输出 ${index+1} · ${item.name} / ${item.voltage}`,
+          kind:'power',
+          side:'bottom',
+          meta:item
+        }))
+      ]
+    };
+  };
+  if(typeof getNodePorts!=='undefined'){getNodePorts=window.getNodePorts;}
+
+  const previousRenderModelNodes=window.renderModelNodes||(typeof renderModelNodes==='function'?renderModelNodes:null);
+  if(!previousRenderModelNodes){return;}
+  window.renderModelNodes=function(){
+    const result=previousRenderModelNodes.apply(this,arguments);
+    document.querySelectorAll('.blk[id^="b-"]').forEach(element=>{
+      const node=getNode(element.id.replace(/^b-/,''));
+      if(node?.type!=='simulation_block'){return;}
+      const ports=window.getNodePorts(node);
+      ports.inputs.forEach((port,index)=>{
+        const portElement=element.querySelectorAll('.node-port--input')[index];
+        if(portElement&&port.side==='top'){
+          portElement.classList.add('node-port--top','node-port--power');
+        }
+      });
+      ports.outputs.forEach((port,index)=>{
+        const portElement=element.querySelectorAll('.node-port--output')[index];
+        if(portElement&&port.side==='bottom'){
+          portElement.classList.add('node-port--bottom','node-port--power');
+        }
+      });
+      element.style.paddingTop='18px';
+      element.style.paddingBottom='18px';
+    });
+    return result;
+  };
+  if(typeof renderModelNodes!=='undefined'){renderModelNodes=window.renderModelNodes;}
 })();
 
 ;(function installMultimeterCanvasLeadControlsFinal(){

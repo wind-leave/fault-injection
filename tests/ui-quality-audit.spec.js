@@ -39,7 +39,6 @@ describe('UI quality audit loop', () => {
         'simulation-summary-feeds-result-performance-views',
         'technical-typography-tokens',
         'status-metrics-structured-typography',
-        'model-check-feeds-status-stream',
         'canvas-toolbar-command-contract',
         'canvas-command-history-wraps-edits',
         'canvas-command-listeners-clean-up',

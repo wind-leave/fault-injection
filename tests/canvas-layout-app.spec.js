@@ -367,45 +367,23 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
-  it('runs model diagnostics and renders actionable results in the inspector', async () => {
+  it('does not expose the removed model-check command or inspector entry', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
-    expect(document.querySelector('.canvas-check__button')?.textContent).toContain('模型检查');
-    expect(typeof window.runModelCheck).toBe('function');
-
-    window.doCreateBlankWorkspace();
-    window.createNode('instrument_scope', 420, 260);
-    await flushRuntime();
-
-    const diagnostics = window.runModelCheck({ silent: true });
-    await flushRuntime();
-
-    expect(diagnostics.some((item) => item.title === '测量仪器尚未接入信号')).toBe(true);
-    expect(document.getElementById('pd')?.textContent).toContain('模型检查');
-    expect(document.getElementById('pd')?.textContent).toContain('测量仪器尚未接入信号');
-    expect(document.querySelector('.diagnostics-card__button')).not.toBeNull();
-    expect(document.querySelector('.diagnostics-title')).not.toBeNull();
-    expect(document.querySelector('.diagnostics-score__num')).not.toBeNull();
-    expect(document.querySelector('.diagnostics-pill__value')).not.toBeNull();
-
-    const statusEntry = Array.from(document.querySelectorAll('[data-log-entry]')).find((row) =>
-      row.textContent?.includes('模型检查')
-    );
-    expect(statusEntry).not.toBeNull();
-    expect(statusEntry?.dataset.view).toBe('alerts');
+    expect(document.querySelector('.canvas-check__button')).toBeNull();
+    expect(document.querySelector('[data-canvas-command="model-check"]')).toBeNull();
+    expect(window.runModelCheck).toBeUndefined();
 
     wrapper.unmount();
   });
 
-  it('docks simulation controls above the canvas and removes the old global taskbar', async () => {
+  it('docks simulation controls above the canvas and removes obsolete header project details', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
     expect(document.querySelector('.workbench-taskbar')).toBeNull();
-    expect(document.querySelector('header .header-project')).not.toBeNull();
-    expect(document.querySelector('header .header-project__name')?.textContent).toContain('飞控系统仿真项目');
-    expect(document.querySelector('header .header-project__state')?.textContent).toContain('已保存');
+    expect(document.querySelector('header .header-project')).toBeNull();
     expect(document.querySelector('.canvas-sim-dock #simbar')).not.toBeNull();
     expect(document.querySelector('header > .toolbar #btn-imp-sys')).not.toBeNull();
     expect(document.querySelector('.canvas-wrap > #simbar')).toBeNull();
@@ -425,12 +403,12 @@ describe('canvas layout cleanup', () => {
     expect(consoleCss).toContain('grid-template-rows:56px minmax(0,1fr)');
     expect(consoleCss).toContain('.workbench-taskbar');
     expect(consoleCss).toContain('display:none!important');
-    expect(consoleCss).toContain('.header-project');
+    expect(consoleCss).not.toContain('.header-project');
     expect(consoleCss).toContain('.canvas-sim-dock .simbar');
     expect(consoleCss).toContain('@media (max-width:1680px)');
     expect(consoleCss).toContain('grid-template-rows:104px minmax(0,1fr)');
     expect(consoleCss).toContain('header .toolbar .tbtn{\n  flex:0 0 auto;');
-    expect(consoleCss).toContain('header .toolbar{\n    grid-column:2 / 4;');
+    expect(consoleCss).toContain('header .toolbar{\n    grid-column:2;');
     expect(consoleCss).toContain('@media (max-width:1120px)');
     expect(consoleCss).toContain('grid-template-rows:156px minmax(0,1fr)');
     expect(consoleCss).toContain('top:140px');
@@ -438,7 +416,7 @@ describe('canvas layout cleanup', () => {
     expect(ibmCss).toContain('@media (min-width:1121px) and (max-width:1280px)');
     expect(ibmCss).toContain('grid-template-rows:56px minmax(0,1fr)');
     expect(ibmCss).toContain('grid-template-rows:104px minmax(0,1fr)');
-    expect(ibmCss).toContain('grid-column:1 / 4;');
+    expect(ibmCss).toContain('grid-column:1 / -1;');
     expect(ibmCss).toContain('minmax(520px,max-content)');
     expect(ibmCss).toContain('grid-template-rows:70px 48px');
     expect(ibmCss).toContain('top:118px');
@@ -599,6 +577,30 @@ describe('canvas layout cleanup', () => {
     expect(document.getElementById('edge-layer')?.getAttribute('viewBox')).toBe(`0 0 ${stage.style.width.replace('px', '')} ${stage.style.height.replace('px', '')}`);
     expect(node.x + node.w).toBeLessThan(Number.parseInt(stage.style.width, 10));
     expect(node.y + node.h).toBeLessThan(Number.parseInt(stage.style.height, 10));
+
+    wrapper.unmount();
+  });
+
+  it('keeps extending the workspace while panning into empty canvas space', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const viewport = document.getElementById('canvas-viewport');
+    const stage = document.getElementById('canvas-stage');
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 900 },
+      clientHeight: { configurable: true, value: 640 }
+    });
+
+    dispatchPointer(viewport, 'pointerdown', { pointerId: 43, clientX: 500, clientY: 400 });
+    dispatchPointer(viewport, 'pointermove', { pointerId: 43, clientX: -2600, clientY: -2100 });
+    dispatchPointer(viewport, 'pointerup', { pointerId: 43, clientX: -2600, clientY: -2100 });
+    await flushRuntime();
+
+    expect(Number.parseInt(stage.style.width, 10)).toBeGreaterThan(2400);
+    expect(Number.parseInt(stage.style.height, 10)).toBeGreaterThan(1500);
+    expect(document.getElementById('edge-layer')?.getAttribute('viewBox')).toBe(`0 0 ${stage.style.width.replace('px', '')} ${stage.style.height.replace('px', '')}`);
 
     wrapper.unmount();
   });

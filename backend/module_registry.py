@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.schemas import SimulationBackendError, ensure_number
+from backend.schemas import SimulationBackendError, ensure_number, ensure_signal_value
 
 
 @dataclass(frozen=True)
@@ -23,7 +23,7 @@ class RegisteredModule:
         if not callable(entry):
             raise SimulationBackendError("MODULE_SIGNATURE_MISMATCH", "pythonBinding.entryFunction", f"entry function not found: {self.entry_function}")
 
-        kwargs = {name: ensure_number(inputs.get(name, 0.0), f"inputs.{name}") for name in self.inputs}
+        kwargs = {name: ensure_signal_value(inputs.get(name, 0.0), f"inputs.{name}") for name in self.inputs}
         kwargs.update(resolved_parameters)
         kwargs = self._filter_call_kwargs(entry, kwargs, {
             "time": time,
@@ -47,9 +47,9 @@ class RegisteredModule:
         if not isinstance(middle_vars, dict):
             raise SimulationBackendError("MODULE_SIGNATURE_MISMATCH", "moduleResult.middleVars", "module middleVars must be a mapping")
         return {
-            "outputs": {name: ensure_number(output_source.get(name, 0.0), f"outputs.{name}") for name in self.outputs},
+            "outputs": {name: ensure_signal_value(output_source.get(name, 0.0), f"outputs.{name}") for name in self.outputs},
             "state": dict(next_state),
-            "middleVars": {name: ensure_number(value, f"middleVars.{name}") for name, value in middle_vars.items()},
+            "middleVars": {name: ensure_signal_value(value, f"middleVars.{name}") for name, value in middle_vars.items()},
         }
 
     def _filter_call_kwargs(self, entry, kwargs, context):

@@ -50,12 +50,12 @@ export function resolvePortInfo(node, direction, index = 0, options = {}) {
   let localX = direction === 'input' ? 0 : nodeW;
   let localY = Math.round(nodeH / 2);
 
-  if (side === 'top') {
-    const topPorts = portList.filter((item) => (item.side || 'right') === 'top');
-    const topIndex = topPorts.findIndex((item) => item.key === port.key);
-    const topGap = nodeW / (Math.max(topPorts.length, 1) + 1);
-    localX = Math.round(topGap * (topIndex + 1));
-    localY = 0;
+  if (side === 'top' || side === 'bottom') {
+    const horizontalPorts = portList.filter((item) => (item.side || 'right') === side);
+    const horizontalIndex = horizontalPorts.findIndex((item) => item.key === port.key);
+    const horizontalGap = nodeW / (Math.max(horizontalPorts.length, 1) + 1);
+    localX = Math.round(horizontalGap * (horizontalIndex + 1));
+    localY = side === 'top' ? 0 : nodeH;
   } else {
     const sidePorts = portList.filter((item) => (item.side || (direction === 'input' ? 'left' : 'right')) === side);
     const sideIndex = sidePorts.findIndex((item) => item.key === port.key);
@@ -85,11 +85,11 @@ export function buildEdgePath(start, end) {
   const deltaY = Math.max(48, Math.abs(end.y - start.y) * 0.38);
   const cp1 = {
     x: start.side === 'right' ? start.x + deltaX : (start.side === 'left' ? start.x - deltaX : start.x),
-    y: start.side === 'top' ? start.y - deltaY : start.y
+    y: start.side === 'top' ? start.y - deltaY : (start.side === 'bottom' ? start.y + deltaY : start.y)
   };
   const cp2 = {
     x: end.side === 'right' ? end.x + deltaX : (end.side === 'left' ? end.x - deltaX : end.x),
-    y: end.side === 'top' ? end.y - deltaY : end.y
+    y: end.side === 'top' ? end.y - deltaY : (end.side === 'bottom' ? end.y + deltaY : end.y)
   };
 
   return `M ${start.x} ${start.y} C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${end.x} ${end.y}`;

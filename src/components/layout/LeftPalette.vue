@@ -1,19 +1,30 @@
 <script setup>
-import { onBeforeUnmount, onMounted, reactive } from 'vue';
-import { getPaletteGroups } from '../../services/componentRegistry.js';
+import { computed, onBeforeUnmount, onMounted, reactive } from 'vue';
+import { getPaletteGroups, getSimulationMenuSections } from '../../services/componentRegistry.js';
 
 const paletteGroups = getPaletteGroups();
 const groupOpen = reactive(Object.fromEntries(
   paletteGroups.map((group) => [group.id, group.defaultOpen !== false])
 ));
 const consumedPaletteKeys = reactive(new Set());
+const simulationMenuOpen = reactive({});
+
+const simulationMenuSections = computed(() => {
+  const simulationGroup = paletteGroups.find((group) => group.id === 'simulation');
+  return getSimulationMenuSections(simulationGroup?.components ?? []);
+});
 
 function paletteKey(component) {
   return component.paletteKey || component.templateId || component.type;
 }
 
 function isPaletteComponentAvailable(component) {
-  return component.group !== 'simulation' || !consumedPaletteKeys.has(paletteKey(component));
+  const isOneShotTemplate = component.group === 'simulation' || component.group === 'display-control';
+  return !isOneShotTemplate || !consumedPaletteKeys.has(paletteKey(component));
+}
+
+function availableSimulationMenuCount(section) {
+  return section.components.filter(isPaletteComponentAvailable).length;
 }
 
 function handlePaletteComponentCreated(event) {
@@ -30,14 +41,20 @@ function handlePaletteComponentDeleted(event) {
   }
 }
 
+function handlePaletteComponentsReset() {
+  consumedPaletteKeys.clear();
+}
+
 onMounted(() => {
   window.addEventListener('gz:palette-component-created', handlePaletteComponentCreated);
   window.addEventListener('gz:palette-component-deleted', handlePaletteComponentDeleted);
+  window.addEventListener('gz:palette-components-reset', handlePaletteComponentsReset);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('gz:palette-component-created', handlePaletteComponentCreated);
   window.removeEventListener('gz:palette-component-deleted', handlePaletteComponentDeleted);
+  window.removeEventListener('gz:palette-components-reset', handlePaletteComponentsReset);
 });
 
 function groupDomId(groupId) {
@@ -67,6 +84,18 @@ function badgeClass(component) {
 
 function badgeIcon(component) {
   return component.palette?.icon || component.badge?.slice(0, 1) || component.label?.slice(0, 1) || '?';
+}
+
+function handlePaletteDragStart(event, component) {
+  const componentPaletteKey = paletteKey(component);
+  event.currentTarget?.classList.add('citem-dragging');
+  event.dataTransfer.effectAllowed = 'copy';
+  event.dataTransfer.setData('text/plain', component.type);
+  event.dataTransfer.setData('application/x-gz-palette-key', componentPaletteKey);
+}
+
+function handlePaletteDragEnd(event) {
+  event.currentTarget?.classList.remove('citem-dragging');
 }
 
 function lineToolClasses(component) {
@@ -103,6 +132,14 @@ function toggleGroup(groupId) {
   groupOpen[groupId] = !groupOpen[groupId];
 }
 
+function isSimulationMenuOpen(section) {
+  return simulationMenuOpen[section.id] ?? section.defaultOpen !== false;
+}
+
+function toggleSimulationMenu(section) {
+  simulationMenuOpen[section.id] = !isSimulationMenuOpen(section);
+}
+
 function handleLineToolClick(component) {
   if (typeof window.setConnectionTool === 'function') {
     window.setConnectionTool(component.lineType);
@@ -135,7 +172,44 @@ function handleLineToolClick(component) {
           :id="groupDomId(group.id)"
           :data-palette-body="group.id"
         >
-          <template v-for="component in group.components" :key="paletteKey(component)">
+          <template v-if="group.id === 'simulation'">
+            <section
+              v-for="section in simulationMenuSections"
+              :key="section.id"
+              class="simulation-menu-section"
+              :data-simulation-menu-section="section.id"
+            >
+              <button
+                type="button"
+                class="simulation-menu-section__head"
+                :aria-expanded="isSimulationMenuOpen(section)"
+                @click="toggleSimulationMenu(section)"
+              >
+                <span class="simulation-menu-section__icon">{{ section.icon }}</span>
+                <span>{{ section.label }}</span>
+                <span class="simulation-menu-section__count">{{ availableSimulationMenuCount(section) }}</span>
+                <span class="simulation-menu-section__arrow" :class="{ open: isSimulationMenuOpen(section) }">&#9654;</span>
+              </button>
+              <div v-show="isSimulationMenuOpen(section)" class="simulation-menu-section__body">
+                <template v-for="component in section.components" :key="paletteKey(component)">
+                  <div
+                    v-if="isPaletteComponentAvailable(component)"
+                    :class="componentClasses(component)"
+                    draggable="true"
+                    :data-component="component.type"
+                    :data-palette-key="paletteKey(component)"
+                    :title="component.title"
+                    @dragstart="handlePaletteDragStart($event, component)"
+                    @dragend="handlePaletteDragEnd"
+                  >
+                    <span :class="badgeClass(component)">{{ badgeIcon(component) }}</span>
+                    <span class="citem-label">{{ component.label }}</span>
+                  </div>
+                </template>
+              </div>
+            </section>
+          </template>
+          <template v-else v-for="component in group.components" :key="paletteKey(component)">
             <div
               v-if="component.paletteKind === 'line-tool'"
               :class="lineToolClasses(component)"
@@ -152,6 +226,8 @@ function handleLineToolClick(component) {
               :data-component="component.type"
               :data-palette-key="paletteKey(component)"
               :title="component.title"
+              @dragstart="handlePaletteDragStart($event, component)"
+              @dragend="handlePaletteDragEnd"
             >
               <span :class="badgeClass(component)">{{ badgeIcon(component) }}</span>
               <span class="citem-label">{{ component.label }}</span>

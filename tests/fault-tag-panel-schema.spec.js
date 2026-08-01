@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getFaultTagInjectedChannels,
   readFaultTagParameterDraftFromPanel,
   renderFaultTagOverviewPanel,
   renderFaultTagParameterPanel
@@ -38,6 +39,22 @@ describe('fault tag panel schema service', () => {
     expect(html).not.toContain('故障参数');
     expect(html).not.toContain('data-fault-tag-edit-params');
     expect(html).not.toContain('data-fault-tag-param');
+  });
+
+  it('shows the selected vector channels directly below the target parameter', () => {
+    const html = renderFaultTagOverviewPanel({
+      tag: {
+        ...tag,
+        vectorInjectionScope: 'items',
+        vectorIndices: [2, 0, 2]
+      }
+    });
+
+    expect(getFaultTagInjectedChannels({ vectorInjectionScope: 'item', vectorIndex: 1 })).toBe('第 2 路');
+    expect(getFaultTagInjectedChannels({ vectorInjectionScope: 'items', vectorIndices: [2, 0, 2] })).toBe('第 1、3 路');
+    expect(html).toContain('注入路数');
+    expect(html).toContain('第 1、3 路');
+    expect(html.indexOf('目标参数')).toBeLessThan(html.indexOf('注入路数'));
   });
 
   it('renders the parameter editor with inputs and disabled actions', () => {

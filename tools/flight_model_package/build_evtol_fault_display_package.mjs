@@ -40,16 +40,10 @@ function makeBinding(moduleId, sourcePackage) {
     moduleCategory: entry.category,
     sourcePackageId: sourcePackage.modelId,
     sourcePackageName: sourcePackage.modelName,
-    executionMode: 'backend'
+    executionMode: 'mock'
   });
 
-  return {
-    ...binding,
-    executionConfig: {
-      endpoint: 'http://127.0.0.1:8765/api/python-flow/execute',
-      timeoutMs: 3000
-    }
-  };
+  return binding;
 }
 
 function electricalSlot(name, role, targetField, signalId = '') {

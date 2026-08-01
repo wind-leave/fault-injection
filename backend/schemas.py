@@ -58,6 +58,42 @@ def ensure_number(value, field):
     return float(value)
 
 
+def ensure_signal_value(value, field):
+    """Validate a scalar or a fixed-length numeric vector signal."""
+    if isinstance(value, list):
+        if not value:
+            raise SimulationBackendError("INVALID_SCHEMA", field, f"{field} must not be an empty vector")
+        return [ensure_number(item, f"{field}[{index}]") for index, item in enumerate(value)]
+    return ensure_number(value, field)
+
+
+def normalize_port_data_type(value):
+    text = str(value or "scalar").strip().lower()
+    if text in {"scalar", "标量", "float", "number"}:
+        return "scalar"
+    if text in {"vector", "向量"}:
+        return "vector"
+    return text
+
+
+def validate_ports(value, field):
+    ports = ensure_list(value or [], field)
+    for index, port in enumerate(ports):
+        ensure_mapping(port, f"{field}[{index}]")
+        data_type = normalize_port_data_type(port.get("dataType", port.get("type", "scalar")))
+        if data_type not in {"scalar", "vector"}:
+            raise SimulationBackendError("INVALID_SCHEMA", f"{field}[{index}].dataType", "only scalar and vector ports are supported")
+        if data_type == "vector":
+            length = port.get("vectorLength", port.get("length"))
+            if isinstance(length, bool) or not isinstance(length, int) or not 1 <= length <= 1024:
+                raise SimulationBackendError(
+                    "INVALID_SCHEMA",
+                    f"{field}[{index}].vectorLength",
+                    "vectorLength must be an integer from 1 to 1024",
+                )
+    return ports
+
+
 SIGNAL_SOURCE_TEXT_PARAMETERS = {"signalDomain", "waveType", "outputFormat", "rfModulation"}
 
 
@@ -77,6 +113,9 @@ def validate_numeric_parameters(parameters, field, text_parameters=None):
     allowed_text = set(text_parameters or ())
     for key, value in parameters.items():
         if key in allowed_text and isinstance(value, str):
+            continue
+        if key == "value" and isinstance(value, list):
+            ensure_signal_value(value, f"{field}.{key}")
             continue
         ensure_number(value, f"{field}.{key}")
     return parameters
@@ -132,6 +171,8 @@ def validate_executable_package(package):
         node_type = node.get("type")
         if node_type not in SUPPORTED_NODE_TYPES:
             raise SimulationBackendError("UNSUPPORTED_NODE_TYPE", f"nodes[{index}].type", f"unsupported node type: {node_type}")
+        validate_ports(node.get("inputs", []), f"nodes[{index}].inputs")
+        validate_ports(node.get("outputs", []), f"nodes[{index}].outputs")
         if node_type == "sum_block":
             validate_sum_block_parameters(node.get("parameters", {}), f"nodes[{index}].parameters")
         else:

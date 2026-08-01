@@ -2,7 +2,9 @@
   "schemaVersion": 1,
   "packageType": "flight-control-model",
   "systemFamily": "uav-flight-control",
-  "supportedFaultLibraries": ["uav-flight-control-faults"],
+  "supportedFaultLibraries": [
+    "uav-flight-control-faults"
+  ],
   "modelId": "evtol-small-nonlinear",
   "modelName": "eVTOL Small Nonlinear Flight Control",
   "description": "Manually decomposed eVTOL flight-control reference package derived from the Simulink validation model",
@@ -675,9 +677,8 @@
             "rawSource": "\"\"\"\nModule: imu_gyro\nDescription: Gyro sensing with optional bias injection\n\"\"\"\n\n\ndef process(body_rate: float, bias: float = 0.0, scale: float = 1.0):\n    # @observable\n    measured_rate = (body_rate + bias) * scale  # gyro measurement\n    return measured_rate\n"
           },
           "rawSource": "\"\"\"\nModule: imu_gyro\nDescription: Gyro sensing with optional bias injection\n\"\"\"\n\n\ndef process(body_rate: float, bias: float = 0.0, scale: float = 1.0):\n    # @observable\n    measured_rate = (body_rate + bias) * scale  # gyro measurement\n    return measured_rate\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -810,9 +811,8 @@
             "rawSource": "\"\"\"\nModule: imu_accel\nDescription: Accelerometer sensing with scale distortion\n\"\"\"\n\n\ndef process(vertical_accel: float, scale: float = 1.0, offset: float = 0.0):\n    # @observable\n    measured_accel = vertical_accel * scale + offset  # accel measurement\n    return measured_accel\n"
           },
           "rawSource": "\"\"\"\nModule: imu_accel\nDescription: Accelerometer sensing with scale distortion\n\"\"\"\n\n\ndef process(vertical_accel: float, scale: float = 1.0, offset: float = 0.0):\n    # @observable\n    measured_accel = vertical_accel * scale + offset  # accel measurement\n    return measured_accel\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -939,9 +939,8 @@
             "rawSource": "\"\"\"\nModule: barometer\nDescription: Barometric altitude channel with drift\n\"\"\"\n\n\ndef process(altitude: float, drift: float = 0.0):\n    # @observable\n    estimated_altitude = altitude + drift  # barometer estimate\n    return estimated_altitude\n"
           },
           "rawSource": "\"\"\"\nModule: barometer\nDescription: Barometric altitude channel with drift\n\"\"\"\n\n\ndef process(altitude: float, drift: float = 0.0):\n    # @observable\n    estimated_altitude = altitude + drift  # barometer estimate\n    return estimated_altitude\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -1069,9 +1068,8 @@
             "rawSource": "\"\"\"\nModule: gps_velocity\nDescription: GPS velocity channel with held-sample freeze approximation\n\"\"\"\n\n\ndef process(true_velocity: float, held_velocity: float = 0.0, freeze: float = 0.0):\n    # @observable\n    reported_velocity = held_velocity if freeze >= 1.0 else true_velocity  # gps report\n    return reported_velocity\n"
           },
           "rawSource": "\"\"\"\nModule: gps_velocity\nDescription: GPS velocity channel with held-sample freeze approximation\n\"\"\"\n\n\ndef process(true_velocity: float, held_velocity: float = 0.0, freeze: float = 0.0):\n    # @observable\n    reported_velocity = held_velocity if freeze >= 1.0 else true_velocity  # gps report\n    return reported_velocity\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -1235,9 +1233,8 @@
             "rawSource": "\"\"\"\nModule: attitude_pid\nDescription: Simplified attitude PID control block\n\"\"\"\n\n\ndef process(\n    attitude_error: float,\n    rate_feedback: float,\n    dt: float = 0.01,\n    kp: float = 1.2,\n    ki: float = 0.25,\n    kd: float = 0.08\n):\n    # @observable\n    integral_state = attitude_error * dt  # integral state\n    # @observable\n    derivative_state = -rate_feedback * kd  # derivative term\n    command = kp * attitude_error + ki * integral_state + derivative_state\n    return command\n"
           },
           "rawSource": "\"\"\"\nModule: attitude_pid\nDescription: Simplified attitude PID control block\n\"\"\"\n\n\ndef process(\n    attitude_error: float,\n    rate_feedback: float,\n    dt: float = 0.01,\n    kp: float = 1.2,\n    ki: float = 0.25,\n    kd: float = 0.08\n):\n    # @observable\n    integral_state = attitude_error * dt  # integral state\n    # @observable\n    derivative_state = -rate_feedback * kd  # derivative term\n    command = kp * attitude_error + ki * integral_state + derivative_state\n    return command\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -1420,9 +1417,8 @@
             "rawSource": "\"\"\"\nModule: control_allocation\nDescription: Convert total thrust and roll command into left and right motor references\n\"\"\"\n\n\ndef process(total_thrust: float, roll_command: float):\n    # @observable\n    left_cmd = total_thrust * 0.5 - roll_command * 0.5  # left motor command\n    # @observable\n    right_cmd = total_thrust * 0.5 + roll_command * 0.5  # right motor command\n    return left_cmd, right_cmd\n"
           },
           "rawSource": "\"\"\"\nModule: control_allocation\nDescription: Convert total thrust and roll command into left and right motor references\n\"\"\"\n\n\ndef process(total_thrust: float, roll_command: float):\n    # @observable\n    left_cmd = total_thrust * 0.5 - roll_command * 0.5  # left motor command\n    # @observable\n    right_cmd = total_thrust * 0.5 + roll_command * 0.5  # right motor command\n    return left_cmd, right_cmd\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -1607,9 +1603,8 @@
             "rawSource": "\"\"\"\nModule: motor_model\nDescription: Motor efficiency and saturation model\n\"\"\"\n\n\ndef process(\n    left_cmd: float,\n    right_cmd: float,\n    efficiency: float = 1.0,\n    left_lock: float = 0.0,\n    saturation: float = 20.0\n):\n    # @observable\n    left_efficiency = 0.0 if left_lock >= 1.0 else efficiency  # left motor availability\n    # @observable\n    left_thrust = min(max(left_cmd * left_efficiency, 0.0), saturation)  # left thrust\n    # @observable\n    right_thrust = min(max(right_cmd * efficiency, 0.0), saturation)  # right thrust\n    return left_thrust, right_thrust\n"
           },
           "rawSource": "\"\"\"\nModule: motor_model\nDescription: Motor efficiency and saturation model\n\"\"\"\n\n\ndef process(\n    left_cmd: float,\n    right_cmd: float,\n    efficiency: float = 1.0,\n    left_lock: float = 0.0,\n    saturation: float = 20.0\n):\n    # @observable\n    left_efficiency = 0.0 if left_lock >= 1.0 else efficiency  # left motor availability\n    # @observable\n    left_thrust = min(max(left_cmd * left_efficiency, 0.0), saturation)  # left thrust\n    # @observable\n    right_thrust = min(max(right_cmd * efficiency, 0.0), saturation)  # right thrust\n    return left_thrust, right_thrust\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {
@@ -1800,9 +1795,8 @@
             "rawSource": "\"\"\"\nModule: vehicle_dynamics\nDescription: Reduced-order vertical and roll dynamics\n\"\"\"\n\n\ndef process(\n    left_thrust: float,\n    right_thrust: float,\n    mass: float = 8.0,\n    drag: float = 0.12\n):\n    total_thrust = left_thrust + right_thrust\n    # @observable\n    roll_moment = right_thrust - left_thrust  # roll moment\n    vertical_accel = total_thrust / max(mass, 0.1) - drag\n    return vertical_accel, roll_moment\n"
           },
           "rawSource": "\"\"\"\nModule: vehicle_dynamics\nDescription: Reduced-order vertical and roll dynamics\n\"\"\"\n\n\ndef process(\n    left_thrust: float,\n    right_thrust: float,\n    mass: float = 8.0,\n    drag: float = 0.12\n):\n    total_thrust = left_thrust + right_thrust\n    # @observable\n    roll_moment = right_thrust - left_thrust  # roll moment\n    vertical_accel = total_thrust / max(mass, 0.1) - drag\n    return vertical_accel, roll_moment\n",
-          "executionMode": "backend",
+          "executionMode": "mock",
           "executionConfig": {
-            "endpoint": "http://127.0.0.1:8765/api/python-flow/execute",
             "timeoutMs": 3000
           },
           "portMapping": {

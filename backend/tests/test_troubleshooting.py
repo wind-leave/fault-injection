@@ -162,6 +162,19 @@ class TroubleshootingAlgorithmTests(unittest.TestCase):
         self.assertNotIn("M1", [step["pointCode"] for step in measurement_steps])
         self.assertEqual(path["steps"][-1]["action"], "replaceComponent")
 
+    def test_skips_virtual_measurements_when_physical_signature_is_unique(self):
+        matrix = sample_d_matrix()
+        matrix["points"][0]["pointType"] = "physical"
+        matrix["points"][1]["pointType"] = "physical"
+        matrix["points"][2]["pointType"] = "virtual"
+        matrix["rows"][1]["cells"][1]["detectable"] = False
+
+        path = build_troubleshooting_path(matrix, "target-fault")
+
+        self.assertEqual([step["action"] for step in path["steps"]], ["replaceComponent"])
+        self.assertEqual(path["steps"][0]["targetLabel"], "IMU")
+        self.assertEqual(path["summary"], "现有物理测点已可唯一定位该故障，可直接执行修复。")
+
 
 if __name__ == "__main__":
     unittest.main()

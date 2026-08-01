@@ -115,6 +115,7 @@ describe('practiceTaskPackageService', () => {
             name: 'Physical point',
             pointType: 'physical',
             edgeId: 'controller-wire',
+            sourcePort: '控制输出',
             observationRule: { normalThreshold: 0.1, abnormalThreshold: 0.2 }
           },
           {
@@ -123,6 +124,7 @@ describe('practiceTaskPackageService', () => {
             name: 'Virtual point',
             pointType: 'virtual',
             edgeId: 'controller-wire',
+            sourcePort: '控制输出',
             observationRule: { normalThreshold: 0.1, abnormalThreshold: 0.2 }
           }
         ]
@@ -148,7 +150,7 @@ describe('practiceTaskPackageService', () => {
           { id: 'meter-1', type: 'instrument_multimeter' }
         ],
         connections: [
-          { id: 'controller-wire', sourceDeviceId: 'controller-1', targetDeviceId: 'controller-1', sourcePort: 'command' },
+          { id: 'controller-wire', sourceDeviceId: 'controller-1', targetDeviceId: 'controller-1', sourcePort: 'socket04' },
           { id: 'scope-wire', sourceDeviceId: 'controller-1', targetDeviceId: 'scope-1' }
         ]
       }
@@ -156,7 +158,7 @@ describe('practiceTaskPackageService', () => {
 
     expect(result.publicData.renderData).toEqual({
       devices: [{ id: 'controller-1', type: 'simulation_block' }],
-      connections: [{ id: 'controller-wire', sourceDeviceId: 'controller-1', targetDeviceId: 'controller-1', sourcePort: 'command' }]
+      connections: [{ id: 'controller-wire', sourceDeviceId: 'controller-1', targetDeviceId: 'controller-1', sourcePort: 'socket04' }]
     });
     expect(result.publicData.initialSimulationResult).not.toHaveProperty('componentOutputs');
     expect(result.publicData.initialSimulationResult).not.toHaveProperty('physicalMeasurementSnapshot');
@@ -166,7 +168,7 @@ describe('practiceTaskPackageService', () => {
         pointName: 'Physical point',
         channel: 'controller-wire',
         sourceDeviceId: 'controller-1',
-        sourcePort: 'command',
+        sourcePort: 'socket04',
         samples: [
           { time: 0, actual: 1 },
           { time: 0.1, actual: 2 }
@@ -178,7 +180,7 @@ describe('practiceTaskPackageService', () => {
       pointName: 'Virtual point',
       channel: 'controller-wire',
       sourceDeviceId: 'controller-1',
-      sourcePort: 'command',
+      sourcePort: 'socket04',
       samples: [
         { time: 0, actual: 1 },
         { time: 0.1, actual: 2 }
@@ -221,5 +223,50 @@ describe('practiceTaskPackageService', () => {
       { actionType: 'replaceComponent', target: { type: 'component', id: 'component-1' } }
     ]);
     expect(result.privateData).not.toHaveProperty('keyNodes');
+  });
+
+  it('derives each saved measurement state from enabled faults and the D matrix', () => {
+    const result = buildPracticeTaskPackage({
+      dMatrix: {
+        points: [
+          { pointId: 'p1', shortName: 'M1', pointType: 'physical' },
+          { pointId: 'v1', shortName: 'V1', pointType: 'virtual' },
+          { pointId: 'v2', shortName: 'V2', pointType: 'virtual' }
+        ],
+        rows: [
+          {
+            faultId: 'enabled-fault',
+            cells: [
+              { pointCode: 'M1', detectable: true },
+              { pointCode: 'V1', detectable: false },
+              { pointCode: 'V2', detectable: true }
+            ]
+          },
+          {
+            faultId: 'disabled-fault',
+            cells: [
+              { pointCode: 'M1', detectable: false },
+              { pointCode: 'V1', detectable: true },
+              { pointCode: 'V2', detectable: false }
+            ]
+          }
+        ]
+      },
+      executableModel: {
+        simulationConfig: {},
+        nodes: [],
+        edges: [],
+        faultInstances: [
+          { faultId: 'enabled-fault', enabled: true },
+          { faultId: 'disabled-fault', enabled: false }
+        ]
+      }
+    });
+
+    expect(result.privateData.initialPointStates).toEqual([
+      { pointCode: 'M1', observed: 'abnormal' },
+      { pointCode: 'V1', observed: 'normal' },
+      { pointCode: 'V2', observed: 'abnormal' }
+    ]);
   });
 });

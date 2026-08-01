@@ -15,6 +15,7 @@ import * as simulationInterfaceLockService from './simulationInterfaceLockServic
 import * as signalComponentRuntime from './signalComponentRuntime.js';
 import * as signalSourceDomainService from './signalSourceDomainService.js';
 import * as multimeterMeasurementService from './multimeterMeasurementService.js';
+import * as displayConsoleConfig from '../constants/displayConsoleConfig.js';
 import * as subsystemPropertyPanelSchema from './subsystemPropertyPanelSchema.js';
 import * as practiceTaskPackageService from './practiceTaskPackageService.js';
 import { installBackendStepSimulationRuntime } from './backendStepSimulationRuntime.js';
@@ -224,6 +225,7 @@ export function mountLegacyRuntime() {
   window.__GZ_SIGNAL_COMPONENT_RUNTIME__ = signalComponentRuntime;
   window.__GZ_SIGNAL_SOURCE_DOMAIN__ = signalSourceDomainService;
   window.__GZ_MULTIMETER_MEASUREMENT__ = multimeterMeasurementService;
+  window.__GZ_DISPLAY_CONSOLE_CONFIG__ = displayConsoleConfig;
   window.__GZ_PRACTICE_TASK_PACKAGE__ = practiceTaskPackageService;
   window.__GZ_FLIGHT_MODEL_PACKAGE__ = {
     validate(pkg) {
@@ -399,6 +401,7 @@ export function __resetLegacyRuntimeForTests() {
   delete window.__GZ_DISABLE_DEFAULT_MODEL__;
   delete window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__;
   delete window.__GZ_PYTHON_BINDING_EVENTS__;
+  delete window.__simulationPowerPortsInstalled;
   delete window.__GZ_SCOPE_WINDOW_DRAG_BOUND__;
   delete window.__GZ_RUNTIME_LISTENERS__;
   delete window.__compactDiagnosisSearchEvents;

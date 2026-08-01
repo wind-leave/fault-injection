@@ -171,36 +171,38 @@ describe('property panel interaction', () => {
     source.props.centerFrequency = '1';
     source.props.centerFrequencyUnit = 'GHz';
     expect(outputAt(0)).toBeCloseTo(0, 10);
-    expect(outputAt(0.25e-9)).toBeCloseTo(10, 6);
+    expect(outputAt(0.25e-9)).toBeCloseTo(1, 6);
     expect(outputAt(0.5e-9)).toBeCloseTo(0, 6);
-    expect(outputAt(0.75e-9)).toBeCloseTo(-10, 6);
+    expect(outputAt(0.75e-9)).toBeCloseTo(-1, 6);
 
     source.props.modulation = 'am';
     source.props.centerFrequency = '1';
     source.props.centerFrequencyUnit = 'Hz';
     source.props.modulationDepth = '50';
     source.props.modulationRate = '1Hz';
-    expect(outputAt(0.25)).toBeCloseTo(15, 6);
+    expect(outputAt(0.25)).toBeCloseTo(1.5, 6);
 
     source.props.modulation = 'fm';
     source.props.frequencyDeviation = '1Hz';
-    expect(outputAt(0.25)).toBeCloseTo(10 * Math.sin(Math.PI / 2 + 1), 6);
+    expect(outputAt(0.25)).toBeCloseTo(Math.sin(Math.PI / 2 + 1), 6);
 
     source.props.modulation = 'pm';
     source.props.phaseDeviation = `${Math.PI / 2}`;
     expect(outputAt(0.25)).toBeCloseTo(0, 6);
 
     source.props.modulation = 'pulse';
-    source.props.pulseWidth = '500ms';
-    source.props.prf = '1Hz';
-    expect(outputAt(0.25)).toBeCloseTo(10, 6);
+    source.props.pulseWidth = '500';
+    source.props.pulseWidthUnit = 'ms';
+    source.props.pulsePeriod = '1';
+    source.props.pulsePeriodUnit = 's';
+    expect(outputAt(0.25)).toBeCloseTo(1, 6);
     expect(outputAt(0.75)).toBe(0);
 
     source.props.modulation = 'digital';
     source.props.bandwidth = '20Hz';
     source.props.symbolRate = '10Hz';
     source.props.sampleRate = '20Hz';
-    expect(Math.abs(outputAt(0.25))).toBeCloseTo(10, 6);
+    expect(Math.abs(outputAt(0.25))).toBeCloseTo(1, 6);
 
     source.props.modulation = 'noise';
     source.props.snr = '0';
@@ -220,6 +222,15 @@ describe('property panel interaction', () => {
     source.props.slope = '3';
     source.props.startTime = '0.5';
     expect(outputAt(1)).toBeCloseTo(3.5, 6);
+
+    source.props.waveType = 'pulse';
+    source.props.amplitude = '8';
+    source.props.lowValue = '-1';
+    source.props.frequency = '1';
+    source.props.dutyCycle = '25';
+    source.props.phase = '0';
+    expect(outputAt(0.1)).toBe(8);
+    expect(outputAt(0.5)).toBe(-1);
 
     wrapper.unmount();
   });
@@ -265,6 +276,7 @@ describe('property panel interaction', () => {
       unit: 'MHz',
       description: '用于空速传感器链路仿真'
     });
+    expect(document.querySelector(`#b-${source.id} .blk-lbl`)?.textContent.trim()).toBe('RF Test Source');
 
     window.setPropertyPanelTab('parameters');
     await flushRuntime();
@@ -573,6 +585,63 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
+  it('only shows instrument vector-channel choices for connected vector ports', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('simulation_block', 180, 220);
+    const scope = window.createNode('instrument_scope', 480, 180);
+    const spectrum = window.createNode('instrument_spectrum', 480, 360);
+    const state = window.__GZ_STATE__;
+    source.props.outputs = [{ name: 'Control vector', type: '向量', vectorLength: 3 }];
+    state.modelEdges.push({
+      id: 'edge-vector-to-scope',
+      sourceNodeId: source.id,
+      targetNodeId: scope.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0
+    });
+    state.modelEdges.push({
+      id: 'edge-vector-to-spectrum',
+      sourceNodeId: source.id,
+      targetNodeId: spectrum.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0
+    });
+    window.renderModelNodes();
+
+    window.selectNode(scope.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+    expect(document.querySelector('[data-instrument-vector-measurement]')).not.toBeNull();
+    const scopeSelector = document.querySelector('[data-instrument-vector-channel="vectorChannelCh1"]');
+    expect(scopeSelector).not.toBeNull();
+    expect(Array.from(scopeSelector.options).map((option) => option.value)).toEqual(['1', '2', '3']);
+    scopeSelector.value = '3';
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+    expect(scope.props.vectorChannelCh1).toBe(3);
+
+    window.selectNode(spectrum.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+    const spectrumSelector = document.querySelector('[data-instrument-vector-channel="vectorChannel"]');
+    expect(spectrumSelector).not.toBeNull();
+    spectrumSelector.value = '2';
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+    expect(spectrum.props.vectorChannel).toBe(2);
+
+    source.props.outputs = [{ name: 'Scalar output', type: '标量' }];
+    window.renderModelNodes();
+    window.selectNode(scope.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+    expect(document.querySelector('[data-instrument-vector-measurement]')).toBeNull();
+
+    wrapper.unmount();
+  });
+
   it.skip('saves editable display names for Python-bound simulation ports', async () => {
     const wrapper = await mountWorkbench();
 
@@ -801,6 +870,49 @@ describe('property panel interaction', () => {
     const actual = window.resolveNodeOutput(sensor.id, 0, 'actual', 0.25, 0.1, new Map(), new Set());
     expect(actual).toBeCloseTo(reference + 0.1);
 
+    wrapper.unmount();
+  });
+
+  it('selects individual RF vector channels in the electrical fault binding dialog', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('rf_four_channel_source', 360, 220);
+    const injector = window.createNode('electrical_fault_injector', 160, 220);
+    await flushRuntime();
+
+    const slot = window.getLayeredFaultSlotsForTarget(source)
+      .find((item) => item.layer === 'electrical' && item.bindingObject === 'rf_samples');
+    expect(slot).toMatchObject({
+      targetField: 'outputs.rf_samples',
+      vectorLength: 4
+    });
+
+    window.beginLayeredFaultBinding(injector.id);
+    document.querySelector(`#b-${source.id}`).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushRuntime();
+
+    const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    expect(dialog).not.toBeNull();
+    expect(dialog.querySelector('[data-layered-fault-vector-scope]')).toBeNull();
+    expect(dialog.querySelector('[data-layered-fault-vector-index]')).toBeNull();
+    expect(dialog.querySelectorAll('[data-layered-fault-vector-item]')).toHaveLength(4);
+    const items = dialog.querySelectorAll('[data-layered-fault-vector-item]');
+    items[0].checked = true;
+    items[1].checked = false;
+    items[2].checked = true;
+    items[3].checked = false;
+    dialog.querySelector('[data-layered-fault-confirm]').click();
+    await flushRuntime();
+
+    expect(window.__GZ_STATE__.faultInstances).toContainEqual(expect.objectContaining({
+      targetId: source.id,
+      targetField: 'outputs.rf_samples',
+      vectorInjectionScope: 'items',
+      vectorIndices: [0, 2]
+    }));
+    expect(document.getElementById('pd')?.textContent).toContain('注入路数');
+    expect(document.getElementById('pd')?.textContent).toContain('第 1、3 路');
     wrapper.unmount();
   });
 
@@ -1050,12 +1162,15 @@ describe('property panel interaction', () => {
 
     const state = window.__GZ_STATE__;
     source.props.name = 'Source controller';
+    source.props.outputs = [{ name: 'Control vector', type: '向量', vectorLength: 3 }];
     target.props.name = 'Output scope';
     source.faultSlots = [
       {
         slotId: 'electrical:output:torque',
         slotName: 'Torque output',
         layer: 'electrical',
+        dataType: 'vector',
+        vectorLength: 3,
         allowedFaultTypeIds: ['source_bias', 'source_noise']
       }
     ];
@@ -1079,6 +1194,16 @@ describe('property panel interaction', () => {
         }
       ]
     };
+    window.selectNode(source.id);
+    await flushRuntime();
+    expect(window.openTargetFaultActivationDialog()).toBe(true);
+    document.querySelector('[data-activate-compatible-fault="source_bias"]').click();
+    await flushRuntime();
+    expect(document.querySelector('[data-fault-vector-scope]')).toBeNull();
+    expect(document.querySelector('[data-fault-vector-index]')).toBeNull();
+    expect(document.querySelectorAll('[data-fault-vector-item]')).toHaveLength(3);
+    document.querySelector('[data-cancel-target-fault]').click();
+    document.querySelector('[data-close-target-fault-dialog]').click();
     state.modelEdges.push({
       id: 'edge-source-scope-testpoint',
       lineType: 'normal',
@@ -1109,6 +1234,8 @@ describe('property panel interaction', () => {
 
     const cards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
     expect(cards).toHaveLength(2);
+    const vectorOptions = Array.from(cards[0].querySelectorAll('[data-edge-testpoint-vector-index] option'));
+    expect(vectorOptions.map((option) => option.value)).toEqual(['0', '1', '2']);
     expect(cards[0].querySelector('[data-edge-testpoint-fault="source_bias"]')).toBeNull();
     expect(cards[0].querySelector('[data-edge-testpoint-fault="source_noise"]')).toBeNull();
     expect(cards[0].querySelector('[data-edge-testpoint-fault="target_fault"]')).toBeNull();
@@ -1158,6 +1285,7 @@ describe('property panel interaction', () => {
 
     globallyInjectedCards[0].querySelector('[data-edge-testpoint-name]').value = 'Controller output monitor A';
     globallyInjectedCards[0].querySelector('[data-edge-testpoint-name]').dispatchEvent(new Event('input', { bubbles: true }));
+    globallyInjectedCards[0].querySelector('[data-edge-testpoint-vector-index]').value = '2';
     globallyInjectedCards[0].querySelector('[data-edge-testpoint-fault="source_bias"]').checked = true;
     globallyInjectedCards[0].querySelector('[data-edge-testpoint-fault="source_bias"]').dispatchEvent(new Event('change', { bubbles: true }));
     globallyInjectedCards[0].querySelector('[data-save-edge-testpoint]').click();
@@ -1189,6 +1317,7 @@ describe('property panel interaction', () => {
       ['source_bias'],
       ['source_noise']
     ]);
+    expect(points.map((point) => point.vectorIndex)).toEqual([2, 0]);
     expect(new Set(points.map((point) => point.pointId)).size).toBe(2);
 
     const diagnosticPositions = window.buildDiagnosticTestPointModel().positions
@@ -1739,6 +1868,68 @@ describe('property panel interaction', () => {
     await flushRuntime();
     expect(document.querySelector('[data-multimeter-window]')?.style.left).toBe(initialLeft);
     expect(document.querySelector('[data-multimeter-window]')?.style.top).toBe(initialTop);
+
+    wrapper.unmount();
+  });
+
+  it('opens independently configured sixteen-column display consoles from the property panel', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const displayConsole = window.createNode('display_console_1', 420, 240);
+    const secondDisplayConsole = window.createNode('display_console_2', 720, 240);
+    await flushRuntime();
+    expect(displayConsole).toMatchObject({ type: 'display_console', templateId: 'display_console_1' });
+    expect(secondDisplayConsole).toMatchObject({ type: 'display_console', templateId: 'display_console_2' });
+    displayConsole.props.displayConfig.columns[0].label = '台 1 序号';
+    expect(secondDisplayConsole.props.displayConfig.columns[0].label).toBe('序号');
+    window.selectNode(displayConsole.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
+    expect(document.querySelector('[data-props-tab="outputs"]')?.hidden).toBe(true);
+    expect(window.getNodePorts(displayConsole).inputs).toEqual([
+      expect.objectContaining({ label: '中心频率 / 标量', meta: expect.objectContaining({ type: 'scalar' }) }),
+      expect.objectContaining({ label: '重复周期 / 标量', meta: expect.objectContaining({ type: 'scalar' }) }),
+      expect.objectContaining({ label: '脉宽 / 标量', meta: expect.objectContaining({ type: 'scalar' }) }),
+      expect.objectContaining({ label: '幅度 / 标量', meta: expect.objectContaining({ type: 'scalar' }) })
+    ]);
+    expect(document.querySelector('[data-display-console-configuration]')).not.toBeNull();
+    document.querySelector(`[data-open-display-console="${displayConsole.id}"]`)?.click();
+    await flushRuntime();
+
+    const panel = document.querySelector(`[data-display-console-panel="${displayConsole.id}"]`);
+    expect(panel).not.toBeNull();
+    expect(panel?.parentElement?.id).toBe('display-console-window-layer');
+    expect(panel?.style.left).toBe(`${displayConsole.x + displayConsole.w + 16}px`);
+    expect(panel?.style.top).toBe(`${displayConsole.y}px`);
+    expect(panel?.querySelectorAll('th')).toHaveLength(16);
+    expect(panel?.querySelectorAll('tbody td')).toHaveLength(16);
+    expect(panel?.textContent).toContain('中心频率');
+    expect(panel?.textContent).toContain('重复周期');
+    expect(panel?.textContent).toContain('脉宽');
+    expect(panel?.textContent).toContain('幅度');
+
+    const dragHeader = panel?.querySelector('.display-console-window__header');
+    dragHeader?.dispatchEvent(new MouseEvent('pointerdown', {
+      bubbles: true,
+      clientX: 640,
+      clientY: 260,
+      button: 0
+    }));
+    document.dispatchEvent(new MouseEvent('pointermove', {
+      bubbles: true,
+      clientX: 700,
+      clientY: 300
+    }));
+    document.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    expect(panel?.style.left).toBe(`${displayConsole.x + displayConsole.w + 76}px`);
+    expect(panel?.style.top).toBe(`${displayConsole.y + 40}px`);
+
+    panel?.querySelector('.display-console-window__close')?.click();
+    await flushRuntime();
+    expect(document.querySelector('[data-display-console-panel]')).toBeNull();
 
     wrapper.unmount();
   });

@@ -82,6 +82,9 @@ class RegisteredModule:
                 raise SimulationBackendError("PARAM_OUT_OF_RANGE", f"parameters.{name}", f"{name} is below minimum")
             if maximum is not None and numeric > float(maximum):
                 raise SimulationBackendError("PARAM_OUT_OF_RANGE", f"parameters.{name}", f"{name} is above maximum")
+            allowed_values = spec.get("enum")
+            if allowed_values is not None and numeric not in {float(item) for item in allowed_values}:
+                raise SimulationBackendError("PARAM_OUT_OF_RANGE", f"parameters.{name}", f"{name} is not an allowed value")
             resolved[name] = numeric
         return resolved
 

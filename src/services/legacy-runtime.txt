@@ -17,6 +17,7 @@ const S={
   selTpls:[],
   faultedBlks:[],
   activeModelPackage:null,
+  taskName:'仿真参数',
   cmpMode:false,
   activeLayer:'物理层',
   modelNodes:[],
@@ -72,7 +73,7 @@ const SCOPE_WINDOW_DRAG={active:false,engaged:false,pointerId:null,scopeId:'',st
 
 const PORT_FORMATS=['标量','向量','矩阵','布尔','事件'];
 const SIM_MODULE_TYPES=['一阶函数','微分','积分'];
-const SIM_INTERFACE_LIMITS={inputs:[1,6],outputs:[1,6],middleVars:[0,6]};
+const SIM_INTERFACE_LIMITS={inputs:[0,6],outputs:[0,6],middleVars:[0,6]};
 const SUBSYSTEM_INTERFACE_LIMITS={inputs:[0,6],outputs:[0,6]};
 
 function getSimplePropertySchema(node){
@@ -457,13 +458,13 @@ const COMPONENT_LIBRARY=window.__GZ_COMPONENT_LIBRARY__||{
     height:64,
     defaults:{name:'普通连接线',linkType:'普通连接线',sourcePort:'源端口',targetPort:'目标端口'}
   },
-  link_can:{
-    label:'CAN 总线',
+  link_power:{
+    label:'电源线',
     badge:'连接',
     className:'b-link',
     width:154,
     height:64,
-    defaults:{name:'CAN 总线',linkType:'CAN 总线',sourcePort:'节点 A',targetPort:'节点 B'}
+    defaults:{name:'电源线',linkType:'电源线',sourcePort:'电源输出',targetPort:'电源输入'}
   }
 };
 
@@ -504,7 +505,8 @@ const TPLS={
     {id:'el1',name:'电源电压扰动',desc:'注入纹波或瞬时压降，模拟电源管理失效',tags:['电压','瞬态'],c:'#b45309'},
     {id:'el2',name:'信号线短路',desc:'模拟两路信号线短接导致数据混叠',tags:['短路','永久性'],c:'#b45309'},
     {id:'el3',name:'断路 / 开路',desc:'导线断裂或接头松动引发信号中断',tags:['断路','间歇'],c:'#b45309'},
-    {id:'el4',name:'过流保护触发',desc:'模拟电机过载导致 ESC 过流保护切断',tags:['过流','响应'],c:'#b45309'}
+    {id:'el4',name:'过流保护触发',desc:'模拟电机过载导致 ESC 过流保护切断',tags:['过流','响应'],c:'#b45309'},
+    {id:'electrical_signal_attenuation',name:'信号衰减故障',desc:'按设定衰减量（dB）降低目标信号或电压的幅值',tags:['衰减','dB'],c:'#b45309',runtimeBehavior:'attenuation',defaultParameters:{attenuation_db:6,start:0,duration:null}}
   ],
   protocol:[
     {id:'pr1',name:'CAN 帧丢包',desc:'按设定概率丢失 CAN 帧，模拟总线竞争或链路退化。',tags:['丢包','CAN'],faultKind:'丢包',faultCode:'loss',c:'#1d6fbf'},
@@ -605,9 +607,9 @@ function updateUI(){
   }
   if(typeof SIM!=='undefined'){
     if(SIM.running&&!SIM.paused){
-      statusText=`仿真运行中 · t = ${SIM.time.toFixed(2)}s / ${SIM.duration.toFixed(2)}s`;
+      statusText=`仿真运行中 · t = ${formatSimulationTimeForLog(SIM.time)} / ${formatSimulationTimeForLog(SIM.duration)}`;
     }else if(SIM.paused){
-      statusText=`仿真已暂停 · t = ${SIM.time.toFixed(2)}s / ${SIM.duration.toFixed(2)}s`;
+      statusText=`仿真已暂停 · t = ${formatSimulationTimeForLog(SIM.time)} / ${formatSimulationTimeForLog(SIM.duration)}`;
     }else if(SIM.hasSamples&&S.step===3){
       statusText=`仿真结果就绪 · ${SIM.datasetName} · 已采样 ${SIM.stepIndex} 步`;
     }
@@ -776,6 +778,7 @@ function openCanvasRecord(canvasId,trail=null){
   S.selBlk=null;
   S.selEdge=null;
   clearPendingConnection();
+  expandCanvasStageForActiveCanvasNodes();
   renderModelNodes();
   clampCanvasOffset();
   applyCanvasTransform();
@@ -911,6 +914,7 @@ function createSystemModelSnapshot(){
     canvasTrail:S.canvasTrail,
     canvases:S.canvases,
     activeLineType:S.activeLineType,
+    taskName:S.taskName,
     faultedBlks:S.faultedBlks,
     importedFaultModels:S.importedFaultModels,
     faultInstances:S.faultInstances,
@@ -940,6 +944,9 @@ function restoreSystemModelSnapshot(snapshot){
   S.nodeSeq=restored.nodeSeq||0;
   S.edgeSeq=restored.edgeSeq||0;
   S.activeLineType=restored.activeLineType||'normal';
+  S.taskName=typeof restored.taskName==='string'&&restored.taskName.trim()
+    ?restored.taskName.trim()
+    :(S.activeModelPackage?.modelName||S.taskName||'仿真参数');
   S.workspaceSource=typeof restored.workspaceSource==='string'?restored.workspaceSource:(S.workspaceSource||'');
   S.faultedBlks=restored.faultedBlks||[];
   S.importedFaultModels=restored.importedFaultModels||[];
@@ -957,6 +964,8 @@ function restoreSystemModelSnapshot(snapshot){
   S.selEdge=null;
   S.selFaultTag=null;
   restoreActiveCanvasViewport(S.activeCanvasId);
+  syncTaskNameInput();
+  expandCanvasStageForActiveCanvasNodes();
   applyCanvasTransform();
   clearPendingConnection();
   renderCanvasBreadcrumbs();
@@ -1014,17 +1023,22 @@ function normalizeSimulationPowerInterfaceList(items,prefix,voltage){
       voltage:String(source.voltage||voltage)
     };
   });
-  return normalized.length?normalized:[{name:prefix,type:'电源',voltage}];
+  return normalized;
 }
 
 function normalizeSimulationInterfaces(props){
   const inputFallback=PORT_FORMATS.includes(props?.inputFormat)?props.inputFormat:'标量';
   const outputFallback=PORT_FORMATS.includes(props?.outputFormat)?props.outputFormat:'标量';
-  props.inputs=normalizeSimulationInterfaceList(props?.inputs,'输入',inputFallback,1);
-  props.outputs=normalizeSimulationInterfaceList(props?.outputs,'输出',outputFallback,1);
+  // The absence of one side of a component interface means that side has no
+  // ports.  Do not synthesize an "输入 1" / "输出 1" port: imported source-only
+  // and sink-only components must remain selectable as such for fault binding.
+  props.inputs=normalizeSimulationInterfaceList(props?.inputs,'输入',inputFallback,0);
+  props.outputs=normalizeSimulationInterfaceList(props?.outputs,'输出',outputFallback,0);
   props.middleVars=normalizeSimulationInterfaceList(props?.middleVars,'中间量',outputFallback,0);
   props.powerInputs=normalizeSimulationPowerInterfaceList(props?.powerInputs,'电源输入','28V');
-  props.powerOutputs=normalizeSimulationPowerInterfaceList(props?.powerOutputs,'电源地','0V');
+  // Ground terminals were removed from the simulation component contract.
+  // Clear legacy persisted values so old drawings do not render one.
+  props.powerOutputs=[];
   if(!props.middleVars.length&&props?.inputFormat){
     props.middleVars=[{name:'中间量 1',type:outputFallback}];
   }
@@ -1421,6 +1435,21 @@ function getMutationScopeForType(type){
   return isFaultNodeType(type)?'fault':'system';
 }
 
+function isElectricalComponentNode(node){
+  const paletteKey=node?.paletteKey||node?.templateId||node?.pythonBinding?.moduleId||node?.type;
+  return window.__GZ_COMPONENT_REGISTRY__?.[paletteKey]?.group==='electrical';
+}
+
+function resolveConnectionLineType(sourceNode,targetNode,fallback='normal'){
+  return fallback==='can'?'can':'normal';
+}
+
+function normalizeElectricalEdgeLineTypes(){
+  (S.modelEdges||[]).forEach(edge=>{
+    edge.lineType=resolveConnectionLineType(getNode(edge.sourceNodeId),getNode(edge.targetNodeId),edge.lineType);
+  });
+}
+
 function getMutationScopeForEdge(edge){
   const sourceNode=getNode(edge?.sourceNodeId);
   const targetNode=getNode(edge?.targetNodeId);
@@ -1697,6 +1726,7 @@ function getEdgeLabel(edge){
   if(edge.lineType==='can'&&edge.injectedFault?.faultKind){
     return `CAN · ${edge.injectedFault.faultKind}`;
   }
+  if(edge.lineType==='power'){return 'PWR';}
   return edge.lineType==='can'?'CAN':'LINK';
 }
 
@@ -1762,19 +1792,21 @@ function buildEdgePortMeta(port){
     kind:port.kind||'output',
     varName:port.meta?.varName||null,
     displayName:port.meta?.displayName||port.label||'',
-    type:port.meta?.type||'any',
+    type:(port.kind==='power'||port.kind==='powerInput'||port.kind==='powerOutput')?'power':(port.meta?.type||'any'),
     default:port.meta?.default??null
   };
 }
 
 function normalizePortType(type){
   if(!type){return 'any';}
-  return String(type).trim().toLowerCase();
+  const normalized=String(type).trim().toLowerCase();
+  return normalized==='number'?'float':normalized;
 }
 
 function arePortTypesCompatible(sourceMeta,targetMeta){
   const sourceType=normalizePortType(sourceMeta?.type);
   const targetType=normalizePortType(targetMeta?.type);
+  if(sourceType==='power'||targetType==='power'){return true;}
   if(sourceType==='any'||targetType==='any'){return true;}
   if(sourceType===targetType){return true;}
   if(sourceType==='int'&&targetType==='float'){return true;}
@@ -1921,9 +1953,16 @@ function getNodePorts(node){
     };
   }
   if(node.type==='signal_source'){
+    const props=normalizeSignalSourcePropsRuntime(node.props||{});
+    const vector=isRfVectorOutput(props);
     return {
       inputs:[],
-      outputs:[{key:'signal',label:node.props.outputFormat||'输出'}]
+      outputs:[{
+        key:'signal',
+        label:props.outputPortName||props.outputFormat||'输出',
+        dataType:vector?'vector':'scalar',
+        ...(vector?{vectorLength:Math.min(16,Math.max(2,Number.parseInt(props.rfVectorLength,10)||4))}:{})
+      }]
     };
   }
   if(node.type==='flow_block'){
@@ -2156,8 +2195,8 @@ function setConnectionTool(type){
   });
   const chip=document.getElementById('line-mode-chip');
   if(chip){
-    chip.textContent=S.activeLineType==='can'?'CAN 总线':'普通连接线';
-    chip.classList.toggle('can',S.activeLineType==='can');
+    chip.textContent=S.activeLineType==='power'?'电源线':'普通连接线';
+    chip.classList.toggle('power',S.activeLineType==='power');
   }
   if(S.pendingConnection){
     S.pendingConnection.lineType=S.activeLineType;
@@ -2353,7 +2392,7 @@ function buildNodeSubtitle(node){
     case 'instrument_logger':
       return `${props.instrumentType} · ${props.sampleRate}`;
     case 'link_normal':
-    case 'link_can':
+    case 'link_power':
       return `${props.sourcePort} → ${props.targetPort}`;
     default:
       return '';
@@ -2432,8 +2471,8 @@ function renderEdges(){
         x:S.pendingConnection.x,
         y:S.pendingConnection.y
       }));
-      preview.setAttribute('stroke',S.pendingConnection.lineType==='can'?'#8c7cf6':'#7ab7ff');
-      preview.setAttribute('stroke-width',S.pendingConnection.lineType==='can'?'2.8':'2');
+      preview.setAttribute('stroke',S.pendingConnection.lineType==='power'?'#dc2626':(S.pendingConnection.lineType==='can'?'#8c7cf6':'#7ab7ff'));
+      preview.setAttribute('stroke-width',S.pendingConnection.lineType==='power'?'2.8':(S.pendingConnection.lineType==='can'?'2.8':'2'));
     }else{
       preview.style.display='none';
       preview.setAttribute('d','');
@@ -2503,7 +2542,7 @@ function handlePortClick(event,nodeId,direction,index){
     S.pendingConnection={
       sourceNodeId:nodeId,
       sourcePortIndex:index,
-      lineType:S.activeLineType,
+      lineType:resolveConnectionLineType(node,null,S.activeLineType),
       x:port.x,
       y:port.y
     };
@@ -2567,7 +2606,7 @@ function handlePortClick(event,nodeId,direction,index){
 
   const newEdge={
     id:`edge-${++S.edgeSeq}`,
-    lineType:S.pendingConnection.lineType,
+    lineType:resolveConnectionLineType(sourceNode,node,S.pendingConnection.lineType),
     sourceNodeId:S.pendingConnection.sourceNodeId,
     targetNodeId:nodeId,
     sourcePortIndex:S.pendingConnection.sourcePortIndex||0,
@@ -2826,7 +2865,7 @@ function restoreSimulationPaletteComponent(node){
 function deleteSelectedEdge(){
   const edge=getEdge(S.selEdge);
   if(!edge){return;}
-  const edgeName=edge.lineType==='can'?'CAN 总线':'普通连接线';
+  const edgeName=edge.lineType==='power'?'电源线':(edge.lineType==='can'?'CAN 总线':'普通连接线');
   S.modelEdges=S.modelEdges.filter(item=>item.id!==edge.id);
   if(S.protocolInjectTargetId===edge.id){
     S.protocolInjectTargetId='';
@@ -3284,7 +3323,7 @@ function renderPropertyPanel(node){
   if(node.sourceNodeId&&node.targetNodeId&&!node.type){
     const sourceNode=getNode(node.sourceNodeId);
     const targetNode=getNode(node.targetNodeId);
-    const edgeLabel=node.lineType==='can'?'CAN 总线':'普通连接线';
+    const edgeLabel=node.lineType==='power'?'电源线':(node.lineType==='can'?'CAN 总线':'普通连接线');
     const sourceName=sourceNode?.props?.name||node.sourceNodeId;
     const targetName=targetNode?.props?.name||node.targetNodeId;
     const sourcePortName=node.sourcePort?.displayName||node.sourcePort?.varName||`#${(node.sourcePortIndex||0)+1}`;
@@ -3820,7 +3859,9 @@ function confirmElectricalFaultInjection(){
       tags:selected.tags,
       createdAt:new Date().toLocaleDateString('zh-CN'),
       origin:'template',
-      templateId:selected.id
+      templateId:selected.id,
+      runtimeBehavior:selected.runtimeBehavior||'',
+      defaultParameters:cloneDefaults(selected.defaultParameters||{})
     });
   }
 
@@ -3830,7 +3871,9 @@ function confirmElectricalFaultInjection(){
     name:importedModel.name,
     layer:'electrical',
     tags:cloneDefaults(importedModel.tags||[]),
-    desc:importedModel.desc||''
+    desc:importedModel.desc||'',
+    runtimeBehavior:importedModel.runtimeBehavior||'',
+    parameters:cloneDefaults(importedModel.defaultParameters||{})
   };
   if(!S.faultedBlks.includes(target.id)){
     S.faultedBlks.push(target.id);
@@ -4306,10 +4349,10 @@ const SIM = {
 
 const DISPLAY_CONSOLE_STATE={openNodeId:'',x:null,y:null};
 const DISPLAY_CONSOLE_INPUTS=(window.__GZ_DISPLAY_CONSOLE_CONFIG__?.DISPLAY_CONSOLE_INPUTS||[
-  {key:'centerFrequency',label:'中心频率',type:'scalar'},
-  {key:'repetitionPeriod',label:'重复周期',type:'scalar'},
-  {key:'pulseWidth',label:'脉宽',type:'scalar'},
-  {key:'amplitude',label:'幅度',type:'scalar'}
+  {key:'centerFrequency',label:'中心频率（MHz）',type:'float',displayScale:1e-6},
+  {key:'repetitionPeriod',label:'重复周期（μs）',type:'float',displayScale:1e6},
+  {key:'pulseWidth',label:'脉宽（μs）',type:'float',displayScale:1e6},
+  {key:'amplitude',label:'幅度',type:'float'}
 ]).slice(0,4);
 const DISPLAY_CONSOLE_COLUMNS=(window.__GZ_DISPLAY_CONSOLE_CONFIG__?.DISPLAY_CONSOLE_COLUMNS||[]).slice(0,16);
 
@@ -4318,6 +4361,12 @@ function formatDisplayConsoleValue(value){
   if(!Number.isFinite(numeric)){return '--';}
   if(Math.abs(numeric)>=1000||Math.abs(numeric)<0.001&&numeric!==0){return numeric.toExponential(3);}
   return String(Number(numeric.toFixed(6)));
+}
+
+function formatDisplayConsoleInputValue(value,input){
+  const numeric=Number(value);
+  const scale=Number(input?.displayScale);
+  return formatDisplayConsoleValue(numeric*(Number.isFinite(scale)?scale:1));
 }
 
 function getDisplayConsoleInputReadings(node){
@@ -4329,14 +4378,38 @@ function getDisplayConsoleInputReadings(node){
     if(!edge){return {label,value:'--',connected:false};}
     const edgeValue=SIM.actual?.edgeStates?.[edge.id]?.lastOutput;
     if(Number.isFinite(edgeValue)){
-      return {label,value:formatDisplayConsoleValue(edgeValue),connected:true};
+      return {label,value:formatDisplayConsoleInputValue(edgeValue,input),connected:true};
     }
     const source=getNode(edge.sourceNodeId);
     if(source?.type==='signal_source'){
-      return {label,value:formatDisplayConsoleValue(computeSourceSignal(source,SIM.time||0)),connected:true};
+      return {label,value:formatDisplayConsoleInputValue(computeSourceSignal(source,SIM.time||0),input),connected:true};
     }
     const sourceValue=SIM.actual?.nodeStates?.[edge.sourceNodeId]?.lastOutputs?.[edge.sourcePortIndex||0];
-    return {label,value:formatDisplayConsoleValue(sourceValue),connected:true};
+    if(Number.isFinite(sourceValue)){
+      return {label,value:formatDisplayConsoleInputValue(sourceValue,input),connected:true};
+    }
+    const latestStep=SIM.componentOutputs?.steps?.at(-1);
+    const latestOutputs=latestStep?.actual?.[edge.sourceNodeId];
+    const sourcePort=getPortInfo(source,'output',edge.sourcePortIndex||0);
+    const sourceValueFromBackend=Number.isFinite(Number(latestOutputs))
+      ?Number(latestOutputs)
+      :latestOutputs?.[sourcePort?.meta?.varName]
+        ??latestOutputs?.output
+        ??latestOutputs?.out
+        ??latestOutputs?.value;
+    return {label,value:formatDisplayConsoleInputValue(sourceValueFromBackend,input),connected:true};
+  });
+}
+
+function expandCanvasStageForActiveCanvasNodes(){
+  (S.modelNodes||[]).forEach(node=>{
+    const meta=COMPONENT_LIBRARY[node?.type]||{};
+    const x=Number(node?.x);
+    const y=Number(node?.y);
+    if(!Number.isFinite(x)||!Number.isFinite(y)){return;}
+    const width=Number(node?.w)||Number(meta.width)||160;
+    const height=Number(node?.h)||Number(meta.height)||90;
+    expandCanvasStageForBounds({x,y,width,height});
   });
 }
 
@@ -4364,15 +4437,168 @@ function getDisplayConsoleColumnDefinitions(node){
     :DISPLAY_CONSOLE_COLUMNS;
 }
 
+function getDisplayConsoleControlDefinitions(node){
+  const configured=getDisplayConsoleTemplateConfig(node)?.controls;
+  return Array.isArray(configured)
+    ?configured.filter(item=>item&&String(item.componentType||'').trim()&&Array.isArray(item.parameterKeys)&&item.parameterKeys.length)
+    :[];
+}
+
+function getDisplayConsoleComponentType(node){
+  return String(node?.paletteKey||node?.templateId||node?.pythonBinding?.moduleId||node?.type||'').trim();
+}
+
+function getDisplayConsoleControlTargets(consoleNode){
+  const controls=getDisplayConsoleControlDefinitions(consoleNode);
+  return (S.modelNodes||[]).flatMap(node=>{
+    if(node?.type!=='simulation_block'){return [];}
+    const componentType=getDisplayConsoleComponentType(node);
+    const control=controls.find(item=>item.componentType===componentType);
+    return control?[{node,control,componentType}]:[];
+  });
+}
+
+function getDisplayConsoleControlledParameters(target,control){
+  const definitions=Array.isArray(target?.props?.parameters)?target.props.parameters:[];
+  return (control?.parameterKeys||[]).map(key=>{
+    const definition=definitions.find(item=>String(item?.key||'').trim()===key);
+    if(!definition){return null;}
+    const baseUnit=String(definition.unit||'').trim();
+    const configuredUnit=target?.props?.parameterUnits?.[key];
+    const isFrequency=/^(hz|khz|mhz|ghz)$/i.test(baseUnit);
+    const unit=isFrequency&&/^(hz|khz|mhz|ghz)$/i.test(String(configuredUnit||''))?configuredUnit:baseUnit;
+    const value=target?.props?.parameterValues?.[key]??definition.default??'';
+    const options=Array.isArray(definition.options)
+      ?definition.options.map(option=>({value:option?.value,label:option?.label??option?.value})).filter(option=>option.value!==undefined&&option.value!==null)
+      :[];
+    return {key,name:definition.name||key,baseUnit,unit,value,min:definition.min,max:definition.max,step:definition.step,isFrequency,options,control:definition.control||''};
+  }).filter(Boolean);
+}
+
+const DISPLAY_CONSOLE_FREQUENCY_FACTORS={hz:1,khz:1e3,mhz:1e6,ghz:1e9};
+
+function getDisplayConsoleFrequencyFactor(unit){
+  return DISPLAY_CONSOLE_FREQUENCY_FACTORS[String(unit||'').trim().toLowerCase()]||0;
+}
+
+function convertDisplayConsoleParameterValue(value,fromUnit,toUnit){
+  const numeric=Number(value);
+  const fromFactor=getDisplayConsoleFrequencyFactor(fromUnit);
+  const toFactor=getDisplayConsoleFrequencyFactor(toUnit);
+  return Number.isFinite(numeric)&&fromFactor&&toFactor?numeric*fromFactor/toFactor:value;
+}
+
+function formatDisplayConsoleControlledParameter(parameter){
+  return convertDisplayConsoleParameterValue(parameter.value,parameter.baseUnit,parameter.unit);
+}
+
+function renderDisplayConsoleParameterControls(node){
+  const targets=getDisplayConsoleControlTargets(node);
+  if(!targets.length){
+    return '<section class="display-console-controls" data-display-console-controls><div class="display-console-controls__title">组件参数控制</div><div class="display-console-controls__empty">当前画布中没有该显控台已配置的受控组件。</div></section>';
+  }
+  const requestedId=String(node.props?.controlTargetId||'');
+  const selected=targets.find(item=>item.node.id===requestedId)||targets[0];
+  const parameters=getDisplayConsoleControlledParameters(selected.node,selected.control);
+  const targetOptions=targets.map(item=>`<option value="${escapeHtml(item.node.id)}" ${item.node.id===selected.node.id?'selected':''}>${escapeHtml(item.node.props?.name||item.control.label||item.componentType)}</option>`).join('');
+  const fields=parameters.map((parameter,index)=>{
+    const units=parameter.isFrequency?['Hz','kHz','MHz','GHz']:[];
+    const limits=[parameter.min!==undefined?`min="${escapeHtml(parameter.min)}"`:'',parameter.max!==undefined?`max="${escapeHtml(parameter.max)}"`:'',parameter.step!==undefined?`step="${escapeHtml(parameter.step)}"`:'step="any"'].filter(Boolean).join(' ');
+    const unit=units.length
+      ?`<select data-display-console-parameter-unit="${escapeHtml(parameter.key)}">${units.map(value=>`<option value="${value}" ${value===parameter.unit?'selected':''}>${value}</option>`).join('')}</select>`
+      :(parameter.unit?`<span>${escapeHtml(parameter.unit)}</span>`:'');
+    const selectedOption=parameter.options.find(option=>String(option.value)===String(parameter.value))||parameter.options[0];
+    const input=parameter.options.length&&parameter.control==='stepper'
+      ?`<div class="display-console-controls__mode-switch" data-display-console-mode-switch="${escapeHtml(parameter.key)}">${parameter.options.map(option=>`<button type="button" class="${String(option.value)===String(selectedOption?.value)?'is-active':''}" data-display-console-mode-select="${escapeHtml(option.value)}" data-display-console-mode-key="${escapeHtml(parameter.key)}">${escapeHtml(option.label)}</button>`).join('')}<input type="hidden" data-display-console-parameter="${escapeHtml(parameter.key)}" value="${escapeHtml(selectedOption?.value??parameter.value)}"></div>`
+      :parameter.options.length
+        ?`<select data-display-console-parameter="${escapeHtml(parameter.key)}">${parameter.options.map(option=>`<option value="${escapeHtml(option.value)}" ${String(option.value)===String(parameter.value)?'selected':''}>${escapeHtml(option.label)}</option>`).join('')}</select>`
+      :`<input type="number" data-display-console-parameter="${escapeHtml(parameter.key)}" ${limits} value="${escapeHtml(formatDisplayConsoleControlledParameter(parameter))}">`;
+    return `<label class="display-console-controls__field" data-display-console-parameter-row="${escapeHtml(parameter.key)}"><span>${escapeHtml(parameter.name)}</span><div>${input}${unit}</div></label>`;
+  }).join('');
+  return `
+    <section class="display-console-controls" data-display-console-controls>
+      <div class="display-console-controls__title">组件参数控制</div>
+      <label class="display-console-controls__target"><span>受控组件</span><select data-display-console-control-target>${targetOptions}</select></label>
+      <div class="display-console-controls__fields">${fields||'<div class="display-console-controls__empty">该组件没有可由当前显控台修改的参数。</div>'}</div>
+      <div class="display-console-controls__actions"><button type="button" data-display-console-apply ${parameters.length?'':'disabled'}>应用参数</button><span>仅应用本显控台白名单中的参数；应用后从下一次初始化开始生效。</span></div>
+    </section>`;
+}
+
+function applyDisplayConsoleParameterControls(consoleNode,panel){
+  const targetId=panel?.querySelector?.('[data-display-console-control-target]')?.value||consoleNode?.props?.controlTargetId;
+  const entry=getDisplayConsoleControlTargets(consoleNode).find(item=>item.node.id===targetId);
+  if(!entry){toast('未找到可控制的仿真组件','w');return;}
+  const parameters=getDisplayConsoleControlledParameters(entry.node,entry.control);
+  const values={...(entry.node.props?.parameterValues||{})};
+  const units={...(entry.node.props?.parameterUnits||{})};
+  for(const parameter of parameters){
+    const input=panel.querySelector(`[data-display-console-parameter="${parameter.key}"]`);
+    const numeric=Number(input?.value);
+    if(!Number.isFinite(numeric)){toast(`${parameter.name} 必须是有效数字`,'w');return;}
+    const selectedUnit=panel.querySelector(`[data-display-console-parameter-unit="${parameter.key}"]`)?.value||parameter.unit;
+    const value=convertDisplayConsoleParameterValue(numeric,selectedUnit,parameter.baseUnit);
+    if((parameter.min!==undefined&&value<Number(parameter.min))||(parameter.max!==undefined&&value>Number(parameter.max))){
+      toast(`${parameter.name} 超出允许范围`,'w');return;
+    }
+    values[parameter.key]=value;
+    if(parameter.isFrequency){units[parameter.key]=selectedUnit;}
+  }
+  entry.node.props={...(entry.node.props||{}),parameterValues:values,parameterUnits:units};
+  consoleNode.props={...(consoleNode.props||{}),controlTargetId:entry.node.id};
+  markTopologyDirty('system');
+  renderModelNodes();
+  renderPropertyPanel(consoleNode);
+  updateUI();
+  renderDisplayConsolePanel();
+  toast(`${entry.node.props.name||entry.control.label} 参数已应用，将在下一次初始化时生效`,'s');
+}
+
+function selectDisplayConsoleModeControl(consoleNode,panel,key,value){
+  const targetId=panel?.querySelector?.('[data-display-console-control-target]')?.value||consoleNode?.props?.controlTargetId;
+  const entry=getDisplayConsoleControlTargets(consoleNode).find(item=>item.node.id===targetId);
+  const parameter=getDisplayConsoleControlledParameters(entry?.node,entry?.control).find(item=>item.key===key);
+  const input=panel?.querySelector?.(`[data-display-console-parameter="${key}"]`);
+  if(!parameter?.options?.length||!input){return;}
+  const selected=parameter.options.find(option=>String(option.value)===String(value));
+  if(!selected){return;}
+  input.value=String(selected.value);
+  panel.querySelectorAll(`[data-display-console-mode-key="${key}"]`).forEach(button=>{
+    button.classList.toggle('is-active',String(button.dataset.displayConsoleModeSelect)===String(selected.value));
+  });
+}
+
 function getDisplayConsoleDefaultPosition(node,host){
   const hostWidth=host?.clientWidth||CANVAS_STAGE.width;
   const hostHeight=host?.clientHeight||CANVAS_STAGE.height;
-  const estimatedWidth=1120;
+  const estimatedWidth=1280;
   const estimatedHeight=250;
   return {
     x:Math.max(18,Math.min((node.x||0)+(node.w||196)+16,hostWidth-estimatedWidth-18)),
     y:Math.max(48,Math.min(node.y||76,hostHeight-estimatedHeight-18))
   };
+}
+
+function buildDisplayConsolePanelValues(node){
+  const readings=getDisplayConsoleInputReadings(node);
+  const inputs=getDisplayConsoleInputDefinitions(node);
+  const columns=getDisplayConsoleColumnDefinitions(node);
+  const connectionCount=readings.filter(item=>item.connected).length;
+  const cells=columns.map(column=>{
+    if(column.source==='input') return readings[column.inputIndex]?.value||'--';
+    if(column.source==='status') return connectionCount===inputs.length?'就绪':`已连接 ${connectionCount}/${inputs.length}`;
+    if(column.source==='time') return SIM.hasSamples?`${formatDisplayConsoleValue(SIM.time)} s`:'--';
+    return column.value??'--';
+  });
+  return {readings,inputs,columns,connectionCount,cells};
+}
+
+function getDisplayConsoleColumnClass(column,index){
+  const key=String(column?.key||`column-${index+1}`)
+    .replace(/([a-z0-9])([A-Z])/g,'$1-$2')
+    .replace(/[^A-Za-z0-9_-]+/g,'-')
+    .replace(/^-+|-+$/g,'')
+    .toLowerCase()||`column-${index+1}`;
+  return `display-console-table__column display-console-table__column--${key}`;
 }
 
 function renderDisplayConsolePanel(){
@@ -4386,16 +4612,7 @@ function renderDisplayConsolePanel(){
   if(!Number.isFinite(DISPLAY_CONSOLE_STATE.x)||!Number.isFinite(DISPLAY_CONSOLE_STATE.y)){
     Object.assign(DISPLAY_CONSOLE_STATE,getDisplayConsoleDefaultPosition(node,host));
   }
-  const readings=getDisplayConsoleInputReadings(node);
-  const inputs=getDisplayConsoleInputDefinitions(node);
-  const columns=getDisplayConsoleColumnDefinitions(node);
-  const connectionCount=readings.filter(item=>item.connected).length;
-  const cells=columns.map(column=>{
-    if(column.source==='input') return readings[column.inputIndex]?.value||'--';
-    if(column.source==='status') return connectionCount===inputs.length?'就绪':`已连接 ${connectionCount}/${inputs.length}`;
-    if(column.source==='time') return SIM.hasSamples?`${formatDisplayConsoleValue(SIM.time)} s`:'--';
-    return column.value??'--';
-  });
+  const {readings,inputs,columns,cells}=buildDisplayConsolePanelValues(node);
   host.innerHTML=`
     <section class="display-console-window" data-display-console-panel="${escapeHtml(node.id)}" style="left:${DISPLAY_CONSOLE_STATE.x}px;top:${DISPLAY_CONSOLE_STATE.y}px">
       <header class="display-console-window__header">
@@ -4408,10 +4625,11 @@ function renderDisplayConsolePanel(){
       <div class="display-console-window__summary">四路标量输入：${readings.map(item=>`${item.label} ${item.connected?'已连接':'未连接'}`).join(' · ')}</div>
       <div class="display-console-window__table-wrap">
         <table class="display-console-table" data-display-console-table>
-          <thead><tr>${columns.map(column=>`<th>${escapeHtml(column.label||'未命名')}</th>`).join('')}</tr></thead>
-          <tbody><tr>${cells.map(value=>`<td>${escapeHtml(value)}</td>`).join('')}</tr></tbody>
+          <thead><tr>${columns.map((column,index)=>`<th class="${getDisplayConsoleColumnClass(column,index)}">${escapeHtml(column.label||'未命名')}</th>`).join('')}</tr></thead>
+          <tbody><tr>${cells.map((value,index)=>`<td class="${getDisplayConsoleColumnClass(columns[index],index)}">${escapeHtml(value)}</td>`).join('')}</tr></tbody>
         </table>
       </div>
+      ${renderDisplayConsoleParameterControls(node)}
     </section>`;
   const panel=host.querySelector('.display-console-window');
   panel?.addEventListener('pointerdown',event=>event.stopPropagation());
@@ -4424,7 +4642,7 @@ function renderDisplayConsolePanel(){
     const originX=DISPLAY_CONSOLE_STATE.x;
     const originY=DISPLAY_CONSOLE_STATE.y;
     const move=moveEvent=>{
-      const maxX=Math.max(0,(host.clientWidth||CANVAS_STAGE.width)-(panel.offsetWidth||1120));
+      const maxX=Math.max(0,(host.clientWidth||CANVAS_STAGE.width)-(panel.offsetWidth||1280));
       const maxY=Math.max(0,(host.clientHeight||CANVAS_STAGE.height)-(panel.offsetHeight||250));
       DISPLAY_CONSOLE_STATE.x=Math.round(Math.max(0,Math.min(maxX,originX+(moveEvent.clientX-startX))));
       DISPLAY_CONSOLE_STATE.y=Math.round(Math.max(0,Math.min(maxY,originY+(moveEvent.clientY-startY))));
@@ -4446,6 +4664,35 @@ function renderDisplayConsolePanel(){
     event.preventDefault();
   });
   panel?.querySelector('.display-console-window__close')?.addEventListener('click',closeDisplayConsolePanel);
+  panel?.querySelector('[data-display-console-control-target]')?.addEventListener('change',event=>{
+    node.props={...(node.props||{}),controlTargetId:event.target.value};
+    renderDisplayConsolePanel();
+  });
+  panel?.querySelector('[data-display-console-apply]')?.addEventListener('click',event=>{
+    event.preventDefault();
+    applyDisplayConsoleParameterControls(node,panel);
+  });
+  panel?.querySelectorAll('[data-display-console-mode-select]').forEach(button=>{
+    button.addEventListener('click',event=>{
+      event.preventDefault();
+      selectDisplayConsoleModeControl(node,panel,button.dataset.displayConsoleModeKey,button.dataset.displayConsoleModeSelect);
+    });
+  });
+}
+
+function refreshDisplayConsolePanel(){
+  const host=document.getElementById('display-console-window-layer');
+  const node=getNode(DISPLAY_CONSOLE_STATE.openNodeId);
+  const panel=host?.querySelector?.('[data-display-console-panel]');
+  if(!node||node.type!=='display_console'||!panel){return;}
+  const {readings,inputs,cells}=buildDisplayConsolePanelValues(node);
+  const summary=panel.querySelector('.display-console-window__summary');
+  if(summary){
+    summary.textContent=`四路标量输入：${readings.map(item=>`${item.label} ${item.connected?'已连接':'未连接'}`).join(' · ')}`;
+  }
+  panel.querySelectorAll('[data-display-console-table] tbody td').forEach((cell,index)=>{
+    cell.textContent=cells[index]??'--';
+  });
 }
 
 function openDisplayConsolePanel(nodeId=''){
@@ -4469,6 +4716,7 @@ function closeDisplayConsolePanel(){
 
 window.openDisplayConsolePanel=openDisplayConsolePanel;
 window.closeDisplayConsolePanel=closeDisplayConsolePanel;
+window.refreshDisplayConsolePanel=refreshDisplayConsolePanel;
 
 function clearSimLoop(){
   if(SIM.timer){
@@ -4553,13 +4801,21 @@ function ensureScopeWindow(scopeId){
     return existing;
   }
   const index=Object.keys(SIM.scopeWindows).length;
+  const node=getNode(scopeId);
+  const anchorX=Number(node?.x)||SCOPE_WINDOW_LAYOUT.gutter;
+  const anchorY=Number(node?.y)||SCOPE_WINDOW_LAYOUT.reservedTop;
+  const nodeWidth=Number(node?.w)||150;
+  const nodeHeight=Number(node?.h)||74;
+  const hostMetrics=getScopeWindowHostMetrics();
+  const maxX=Math.max(SCOPE_WINDOW_LAYOUT.gutter,hostMetrics.width-SCOPE_WINDOW_LAYOUT.defaultWidth-SCOPE_WINDOW_LAYOUT.gutter);
+  const preferredX=anchorX+nodeWidth+SCOPE_WINDOW_LAYOUT.gutter;
   const created={
     scopeId,
     open:true,
     mode:'overlay',
     windowSeconds:SCOPE_WINDOW_DEFAULT_SECONDS,
-    x:SCOPE_WINDOW_LAYOUT.gutter+index*SCOPE_WINDOW_LAYOUT.cascadeX,
-    y:SCOPE_WINDOW_LAYOUT.reservedTop+index*SCOPE_WINDOW_LAYOUT.cascadeY,
+    x:(preferredX<=maxX?preferredX:clamp(anchorX,SCOPE_WINDOW_LAYOUT.gutter,maxX))+index*SCOPE_WINDOW_LAYOUT.cascadeX,
+    y:anchorY+nodeHeight+SCOPE_WINDOW_LAYOUT.gutter+index*SCOPE_WINDOW_LAYOUT.cascadeY,
     z:++SIM.scopeWindowZ
   };
   SIM.scopeWindows[scopeId]=clampScopeWindowPosition(created);
@@ -4870,6 +5126,24 @@ function rfSeedForNode(node){
   return Array.from(String(node?.id||'rf')).reduce((total,char)=>total+char.charCodeAt(0),0);
 }
 
+function isRfVectorOutput(props){
+  return props?.signalDomain==='rf'&&['vector','向量'].includes(String(props.outputFormat||'').trim().toLowerCase());
+}
+
+function getRfVectorMultipliers(props){
+  const api=signalSourceDomainApi();
+  if(api?.getRfVectorValues){
+    return api.getRfVectorValues(props?.rfVectorValues,props?.rfVectorLength);
+  }
+  const length=Math.min(16,Math.max(2,Number.parseInt(props?.rfVectorLength,10)||4));
+  const values=String(props?.rfVectorValues||'').split(/[,，;；\s]+/).map(Number).filter(Number.isFinite);
+  return Array.from({length},(_,index)=>values[index]??1);
+}
+
+function formatRfSourceOutput(props,value){
+  return isRfVectorOutput(props)?getRfVectorMultipliers(props).map(multiplier=>value*multiplier):value;
+}
+
 function computeRfSourceSignal(node,time){
   const props=getRuntimeAdjustedSignalSourceProps(node);
   const power=parseRfPowerPeakVoltage(props.power,props.powerUnit);
@@ -4885,22 +5159,22 @@ function computeRfSourceSignal(node,time){
 
   if(modulation==='am'){
     const depth=Math.max(0,Math.min(100,parseScalar(props.modulationDepth,0)))/100;
-    return power*(1+depth*Math.sin(phase))*carrier;
+    return formatRfSourceOutput(props,power*(1+depth*Math.sin(phase))*carrier);
   }
   if(modulation==='fm'){
     const deviation=Math.max(0,parseRfRate(props.frequencyDeviation,0));
     const index=Math.min(deviation/rate,1000);
-    return power*Math.sin(carrierPhase+index*Math.sin(phase));
+    return formatRfSourceOutput(props,power*Math.sin(carrierPhase+index*Math.sin(phase)));
   }
   if(modulation==='pm'){
     const deviation=parseScalar(props.phaseDeviation,0);
-    return power*Math.sin(carrierPhase+deviation*Math.sin(phase));
+    return formatRfSourceOutput(props,power*Math.sin(carrierPhase+deviation*Math.sin(phase)));
   }
   if(modulation==='pulse'){
     const legacyPrf=Math.max(parseRfRate(props.prf,1),0.000001);
     const period=Math.max(parseRfDuration(props.pulsePeriod,props.pulsePeriodUnit,1/legacyPrf),0.000000001);
     const width=Math.max(0,Math.min(parseRfDuration(props.pulseWidth,props.pulseWidthUnit,0),period));
-    return ((time%period)+period)%period<width?power*carrier:0;
+    return formatRfSourceOutput(props,((time%period)+period)%period<width?power*carrier:0);
   }
   if(modulation==='digital'){
     const bandwidth=Math.max(parseRfRate(props.bandwidth,1),0.000001);
@@ -4908,16 +5182,16 @@ function computeRfSourceSignal(node,time){
     const sampleRate=parseRfRate(props.sampleRate,symbolRate*2);
     const effectiveRate=Math.min(symbolRate,Math.max(sampleRate/2,0.000001));
     const symbolIndex=Math.floor(time*effectiveRate);
-    return power*(noiseAt(rfSeedForNode(node),symbolIndex,time)>=0?1:-1)*carrier;
+    return formatRfSourceOutput(props,power*(noiseAt(rfSeedForNode(node),symbolIndex,time)>=0?1:-1)*carrier);
   }
   if(modulation==='noise'){
     const snr=parseScalar(props.snr,0);
     const bandwidth=Math.max(parseRfRate(props.bandwidth,1000000),1);
     const noiseScale=Math.pow(10,-snr/20)*Math.sqrt(bandwidth/1000000);
-    return power*carrier+Math.abs(power)*noiseScale*noiseAt(rfSeedForNode(node),Math.floor(time*1000),time);
+    return formatRfSourceOutput(props,power*carrier+Math.abs(power)*noiseScale*noiseAt(rfSeedForNode(node),Math.floor(time*1000),time));
   }
   // CW 是未调制的射频载波：功率字段作为载波幅度，中心频率决定振荡频率。
-  return power*carrier;
+  return formatRfSourceOutput(props,power*carrier);
 }
 
 function computeSourceSignal(node,time){
@@ -5232,12 +5506,13 @@ function runSimulationTick(){
   const dt=SIM.stepSize;
   recordScopeSamples(time,dt);
   SIM.stepIndex+=1;
-  SIM.time=Number((SIM.time+dt).toFixed(6));
+  SIM.time+=dt;
   SIM.hasSamples=true;
   S.step=3;
   if(document.getElementById('ov-scope').classList.contains('open')){
     drawScope();
   }
+  refreshDisplayConsolePanel();
   updateUI();
   return SIM.time>=SIM.duration;
 }
@@ -5376,11 +5651,11 @@ function getSpectrumWindowCoefficient(kind,index,size){
 function parseSpectrumFrequencyRange(value,sampleRate){
   const nyquist=Math.max(Number(sampleRate)||0,0)/2;
   const raw=String(value||'').trim();
-  const defaultUnit=/mhz/i.test(raw)?1000000:/khz/i.test(raw)?1000:1;
-  const values=Array.from(raw.replace(/\s*[-~]\s*/g,',').matchAll(/\d+(?:\.\d+)?(?:\s*(?:m|k)?hz)?/gi))
+  const defaultUnit=/ghz/i.test(raw)?1000000000:/mhz/i.test(raw)?1000000:/khz/i.test(raw)?1000:1;
+  const values=Array.from(raw.replace(/\s*[-~]\s*/g,',').matchAll(/\d+(?:\.\d+)?(?:\s*(?:g|m|k)?hz)?/gi))
     .map(match=>{
       const item=match[0];
-      const unit=/mhz/i.test(item)?1000000:/khz/i.test(item)?1000:/hz/i.test(item)?1:defaultUnit;
+      const unit=/ghz/i.test(item)?1000000000:/mhz/i.test(item)?1000000:/khz/i.test(item)?1000:/hz/i.test(item)?1:defaultUnit;
       return parseScalar(item,NaN)*unit;
     })
     .filter(Number.isFinite);
@@ -5390,14 +5665,38 @@ function parseSpectrumFrequencyRange(value,sampleRate){
 }
 
 function getSpectrumFrequencyUnit(value,fallback='Hz'){
-  const match=String(value||'').match(/m(?:hz)?|k(?:hz)?|hz/i);
+  const match=String(value||'').match(/g(?:hz)?|m(?:hz)?|k(?:hz)?|hz/i);
   if(!match){return fallback;}
   const unit=match[0].toLowerCase();
-  return unit.startsWith('m')?'MHz':unit.startsWith('k')?'kHz':'Hz';
+  return unit.startsWith('g')?'GHz':unit.startsWith('m')?'MHz':unit.startsWith('k')?'kHz':'Hz';
 }
 
 function getSpectrumFrequencyMultiplier(unit){
-  return unit==='MHz'?1000000:unit==='kHz'?1000:1;
+  return unit==='GHz'?1000000000:unit==='MHz'?1000000:unit==='kHz'?1000:1;
+}
+
+function getSpectrumFrequencyDisplayUnit(...values){
+  const magnitude=Math.max(...values.map(value=>Math.abs(Number(value)||0)));
+  if(magnitude>=1000000000){return 'GHz';}
+  if(magnitude>=1000000){return 'MHz';}
+  if(magnitude>=1000){return 'kHz';}
+  return 'Hz';
+}
+
+function formatSpectrumFrequency(value,unit=getSpectrumFrequencyDisplayUnit(value)){
+  return `${formatScopeMetric(Number(value)/getSpectrumFrequencyMultiplier(unit))}${unit}`;
+}
+
+function formatSpectrumFrequencyFixed(value,unit,fractionDigits=4){
+  const frequency=Number(value);
+  if(!Number.isFinite(frequency)){return '--';}
+  return `${(frequency/getSpectrumFrequencyMultiplier(unit)).toFixed(fractionDigits)}${unit}`;
+}
+
+function formatSpectrumFrequencyRange(start,end){
+  const unit=getSpectrumFrequencyDisplayUnit(start,end);
+  const multiplier=getSpectrumFrequencyMultiplier(unit);
+  return `${Number((start/multiplier).toFixed(9))}-${Number((end/multiplier).toFixed(9))}${unit}`;
 }
 
 function splitSpectrumFrequencyValue(value,fallbackValue='0',fallbackUnit='Hz'){
@@ -5412,7 +5711,7 @@ function splitSpectrumFrequencyValue(value,fallbackValue='0',fallbackUnit='Hz'){
 function splitSpectrumFrequencyRange(value){
   const raw=String(value??'').replace(/\s*[-~]\s*/g,',');
   const fallbackUnit=getSpectrumFrequencyUnit(raw,'kHz');
-  const matches=Array.from(raw.matchAll(/\d+(?:\.\d+)?(?:\s*(?:m|k)?hz)?/gi));
+  const matches=Array.from(raw.matchAll(/\d+(?:\.\d+)?(?:\s*(?:g|m|k)?hz)?/gi));
   const unit=getSpectrumFrequencyUnit(matches[1]?.[0]||matches[0]?.[0],fallbackUnit);
   const fallbackMultiplier=getSpectrumFrequencyMultiplier(fallbackUnit);
   const toDisplayValue=(rawValue,fallbackValue)=>{
@@ -5426,6 +5725,26 @@ function splitSpectrumFrequencyRange(value){
   };
 }
 
+function getSpectrumFrequencyRangeForAnalysis(node,sampleRate,values=[]){
+  const nyquist=Math.max(Number(sampleRate)||0,0)/2;
+  if(String(node?.props?.autoFrequencyRange||'off')==='on'){
+    if(!nyquist||values.filter(Number.isFinite).length<4){return formatSpectrumFrequencyRange(0,nyquist);}
+    const scan=buildSpectrumAnalysis(values,{
+      sampleRate,
+      fftSize:node?.props?.fftSize,
+      windowFunction:node?.props?.windowFunction,
+      frequencyRange:formatSpectrumFrequencyRange(0,nyquist),
+      binCount:128
+    });
+    if(!scan.peak){return formatSpectrumFrequencyRange(0,nyquist);}
+    const binWidth=Math.max(sampleRate/scan.fftSize,1e-9);
+    const span=Math.min(nyquist,Math.max(binWidth*32,nyquist*0.01));
+    const start=clamp(scan.peak.frequency-span/2,0,Math.max(nyquist-span,0));
+    return formatSpectrumFrequencyRange(start,start+span);
+  }
+  return node?.props?.frequencyRange||formatSpectrumFrequencyRange(0,Math.max(Number(sampleRate)||0,0)/2);
+}
+
 function buildSpectrumAnalysis(values,options={}){
   const source=(values||[]).filter(Number.isFinite);
   const fftSize=normalizeSpectrumFftSize(options.fftSize,1024);
@@ -5435,16 +5754,11 @@ function buildSpectrumAnalysis(values,options={}){
   const sampleCount=Math.min(source.length,fftSize);
   const samples=source.slice(-sampleCount);
   const windowSum=samples.reduce((sum,_value,index)=>sum+getSpectrumWindowCoefficient(windowType,index,sampleCount),0);
-  const startBin=Math.max(1,Math.ceil(frequencyRange.min*fftSize/sampleRate));
+  const startBin=Math.max(0,Math.ceil(frequencyRange.min*fftSize/sampleRate));
   const endBin=Math.max(startBin,Math.min(Math.floor(frequencyRange.max*fftSize/sampleRate),Math.floor(fftSize/2)));
-  const requestedBins=clamp(Math.round(Number(options.binCount)||32),1,64);
-  const count=Math.min(requestedBins,endBin-startBin+1);
-  const binIndices=[];
-  for(let index=0;index<count;index++){
-    const bin=count===1?startBin:Math.round(startBin+(endBin-startBin)*index/(count-1));
-    if(!binIndices.includes(bin)){binIndices.push(bin);}
-  }
-  const bins=binIndices.map(bin=>{
+  // 峰值测量必须覆盖频段内的每一个 FFT bin，不能因曲线显示点数有限而遗漏窄带信号。
+  const fullBins=[];
+  for(let bin=startBin;bin<=endBin;bin+=1){
     let real=0;
     let imag=0;
     samples.forEach((value,index)=>{
@@ -5453,17 +5767,30 @@ function buildSpectrumAnalysis(values,options={}){
       real+=weighted*Math.cos(angle);
       imag-=weighted*Math.sin(angle);
     });
-    return {
+    fullBins.push({
       bin,
       frequency:bin*sampleRate/fftSize,
-      magnitude:sampleCount?2*Math.sqrt(real*real+imag*imag)/Math.max(windowSum,1e-9):0
-    };
-  });
-  const maximum=Math.max(...bins.map(item=>item.magnitude),0);
-  bins.forEach(item=>{item.normalized=maximum?item.magnitude/maximum:0;});
+      magnitude:sampleCount?(bin===0?1:2)*Math.sqrt(real*real+imag*imag)/Math.max(windowSum,1e-9):0
+    });
+  }
+  const maximum=Math.max(...fullBins.map(item=>item.magnitude),0);
+  fullBins.forEach(item=>{item.normalized=maximum?item.magnitude/maximum:0;});
   const peak=sampleCount>=4
-    ?bins.reduce((current,item)=>item.magnitude>(current?.magnitude??-1)?item:current,null)
+    ?fullBins.reduce((current,item)=>item.magnitude>(current?.magnitude??-1)?item:current,null)
     :null;
+
+  // 绘图可压缩为有限点数，但每个频段桶保留其中最强的 bin，确保真实峰值仍可见。
+  const requestedBins=clamp(Math.round(Number(options.binCount)||32),1,256);
+  const displayCount=Math.min(requestedBins,fullBins.length);
+  const bins=[];
+  for(let index=0;index<displayCount;index+=1){
+    const bucketStart=Math.floor(index*fullBins.length/displayCount);
+    const bucketEnd=Math.max(bucketStart,Math.floor((index+1)*fullBins.length/displayCount)-1);
+    const strongest=fullBins.slice(bucketStart,bucketEnd+1)
+      .reduce((current,item)=>item.magnitude>(current?.magnitude??-1)?item:current,null);
+    if(strongest){bins.push({...strongest});}
+  }
+  bins.forEach(item=>{item.normalized=maximum?item.magnitude/maximum:0;});
   return {bins,peak,fftSize,windowType,sampleCount,sampleRate,frequencyRange};
 }
 
@@ -5484,16 +5811,20 @@ function averageSpectrumLevels(levels,radius){
 }
 
 function buildSpectrumAnalyzerDisplay(analysis,node){
-  const referenceLevel=parseScalar(node.props.referenceLevel,10);
-  const attenuation=Math.max(0,parseScalar(node.props.attenuation,0));
-  const preamp=String(node.props.preamp||'off')==='on';
-  const preampGain=preamp?20:0;
+  const manualReferenceLevel=parseScalar(node.props.referenceLevel,10);
+  const autoRange=String(node.props.autoRange||'off')==='on';
+  const dynamicRange=clamp(parseScalar(node.props.dynamicRange,80),20,200);
   const binWidth=Math.max(analysis.sampleRate/analysis.fftSize,1e-9);
-  const rbw=Math.max(binWidth,parseScalar(node.props.rbw,binWidth));
-  const vbw=Math.max(binWidth,Math.min(rbw,parseScalar(node.props.vbw,rbw)));
+  const rbw=Math.max(binWidth,parseScalar(node.props.rbw,binWidth/1000000)*1000000);
+  const vbw=Math.max(binWidth,Math.min(rbw,parseScalar(node.props.vbw,rbw/1000000)*1000000));
   const rbwRadius=Math.max(0,Math.round(rbw/binWidth)-1);
   const vbwRadius=Math.max(0,Math.round(rbw/vbw)-1);
-  let levels=analysis.bins.map(item=>20*Math.log10(Math.max(item.magnitude,1e-9))-attenuation+preampGain);
+  // FFT magnitudes represent peak voltage. Convert them to power in dBm for
+  // the spectrum display, assuming the same 50 Ω RF system used by sources.
+  let levels=analysis.bins.map(item=>{
+    const watts=(Math.max(item.magnitude,1e-12)**2)/(2*50);
+    return 10*Math.log10(Math.max(watts/0.001,1e-15));
+  });
   levels=averageSpectrumLevels(levels,rbwRadius);
   levels=averageSpectrumLevels(levels,vbwRadius);
   const detector=String(node.props.detector||'Sample');
@@ -5517,7 +5848,9 @@ function buildSpectrumAnalyzerDisplay(analysis,node){
   }
   traceStore[node.id]=trace;
   const displayed=trace.levels||levels;
-  const floor=referenceLevel-(preamp?100:80);
+  const tracePeak=Math.max(...displayed.filter(Number.isFinite),manualReferenceLevel-dynamicRange);
+  const referenceLevel=autoRange?Math.ceil((tracePeak+6)*10)/10:manualReferenceLevel;
+  const floor=referenceLevel-dynamicRange;
   return {
     referenceLevel,
     floor,
@@ -5635,15 +5968,85 @@ function drawScope(){
   ctx2.fillStyle='#94b4cc';
   ctx2.font='8px JetBrains Mono,monospace';
   ctx2.fillText('0Hz',3,ch2.height-4);
-  ctx2.fillText(`${(0.5/Math.max(SIM.stepSize,0.001)).toFixed(1)}Hz`,Math.max(ch2.width-42,3),ch2.height-4);
+  ctx2.fillText(`${(0.5/Math.max(SIM.stepSize,0.000001)).toFixed(1)}Hz`,Math.max(ch2.width-42,3),ch2.height-4);
 }
 
 // ─── 仿真控制栏 ───
+function parseSimulationTimeSeconds(value,unit='s',fallback=10){
+  const numeric=Number(value);
+  if(!Number.isFinite(numeric)||numeric<=0) return fallback;
+  const normalizedUnit=String(unit??'s').trim().toLowerCase();
+  const multipliers={ps:1e-12,ns:1e-9,us:1e-6,'µs':1e-6,ms:1e-3,s:1};
+  return Number((numeric*(multipliers[normalizedUnit]??1)).toPrecision(15));
+}
+
+function getSimulationDurationTimeUnit(){
+  const unit=String(document.getElementById('sim-dur-unit')?.value||'s').trim().toLowerCase();
+  if(unit==='us'||unit==='µs'||unit==='μs'){return 'µs';}
+  return ['s','ms','ns','ps'].includes(unit)?unit:'s';
+}
+
+function formatSimulationTimeForLog(seconds){
+  const unit=getSimulationDurationTimeUnit();
+  const scale={s:1,ms:1e-3,'µs':1e-6,ns:1e-9,ps:1e-12}[unit];
+  const numeric=Number(seconds);
+  return Number.isFinite(numeric)?`${Number((numeric/scale).toPrecision(8))}${unit}`:`--${unit}`;
+}
+
+function normalizeTaskName(value,fallback='仿真参数'){
+  const name=String(value??'').trim();
+  return name||fallback;
+}
+
+function syncTaskNameInput(){
+  const input=document.getElementById('task-name');
+  const fallback=S.activeModelPackage?.modelName||S.taskName||'仿真参数';
+  S.taskName=normalizeTaskName(S.taskName,fallback);
+  if(input&&input.value!==S.taskName){
+    input.value=S.taskName;
+  }
+  return S.taskName;
+}
+
+function syncTaskNameFromInput(){
+  const input=document.getElementById('task-name');
+  const fallback=S.taskName||S.activeModelPackage?.modelName||'仿真参数';
+  const taskName=normalizeTaskName(input?.value,fallback);
+  S.taskName=taskName;
+  if(S.activeModelPackage){
+    S.activeModelPackage.modelName=taskName;
+  }
+  if(input&&input.value!==taskName){
+    input.value=taskName;
+  }
+  return taskName;
+}
+
+function bindTaskNameInput(){
+  const runtimeListeners=getRuntimeListenerStore();
+  const input=document.getElementById('task-name');
+  if(runtimeListeners.taskNameInput&&input){
+    input.removeEventListener('input',runtimeListeners.taskNameInput);
+    input.removeEventListener('change',runtimeListeners.taskNameInput);
+    input.removeEventListener('blur',runtimeListeners.taskNameInput);
+  }
+  runtimeListeners.taskNameInput=()=>{
+    syncTaskNameFromInput();
+    S.systemSaved=false;
+  };
+  input?.addEventListener('input',runtimeListeners.taskNameInput);
+  input?.addEventListener('change',runtimeListeners.taskNameInput);
+  input?.addEventListener('blur',runtimeListeners.taskNameInput);
+  syncTaskNameInput();
+}
+
 function syncSimulationConfigFromInputs(){
   const durationInput=document.getElementById('sim-dur');
+  const durationUnitInput=document.getElementById('sim-dur-unit');
   const stepInput=document.getElementById('sim-step');
-  const duration=Math.max(parseScalar(durationInput?.value,S.simulationConfig?.duration??10),0.1);
-  const stepSize=Math.max(parseScalar(stepInput?.value,S.simulationConfig?.stepSize??0.1),0.001);
+  const stepUnitInput=document.getElementById('sim-step-unit');
+  const duration=parseSimulationTimeSeconds(durationInput?.value,durationUnitInput?.value,S.simulationConfig?.duration??10);
+  const stepSize=Math.max(parseSimulationTimeSeconds(stepInput?.value,stepUnitInput?.value,S.simulationConfig?.stepSize??0.1),1e-12);
   S.simulationConfig={duration,stepSize};
   return S.simulationConfig;
 }
@@ -5653,29 +6056,43 @@ function bindSimulationConfigInputs(){
   if(runtimeListeners.simulationConfigInput){
     document.getElementById('sim-dur')?.removeEventListener('input',runtimeListeners.simulationConfigInput);
     document.getElementById('sim-step')?.removeEventListener('input',runtimeListeners.simulationConfigInput);
+    document.getElementById('sim-dur-unit')?.removeEventListener('change',runtimeListeners.simulationConfigInput);
+    document.getElementById('sim-step-unit')?.removeEventListener('change',runtimeListeners.simulationConfigInput);
     document.getElementById('sim-dur')?.removeEventListener('change',runtimeListeners.simulationConfigInput);
     document.getElementById('sim-step')?.removeEventListener('change',runtimeListeners.simulationConfigInput);
   }
   runtimeListeners.simulationConfigInput=()=>syncSimulationConfigFromInputs();
   document.getElementById('sim-dur')?.addEventListener('input',runtimeListeners.simulationConfigInput);
   document.getElementById('sim-step')?.addEventListener('input',runtimeListeners.simulationConfigInput);
+  document.getElementById('sim-dur-unit')?.addEventListener('change',runtimeListeners.simulationConfigInput);
+  document.getElementById('sim-step-unit')?.addEventListener('change',runtimeListeners.simulationConfigInput);
   document.getElementById('sim-dur')?.addEventListener('change',runtimeListeners.simulationConfigInput);
   document.getElementById('sim-step')?.addEventListener('change',runtimeListeners.simulationConfigInput);
   syncSimulationConfigFromInputs();
 }
 
 function simInit(silent=false){
+  const simulationConfig=syncSimulationConfigFromInputs();
+  if(simulationConfig.stepSize>simulationConfig.duration){
+    clearSimLoop();
+    SIM.inited=false;
+    SIM.running=false;
+    SIM.paused=false;
+    updateSimbarEnabled();
+    updateUI();
+    toast('仿真步长不能大于仿真时长，请调整参数后重新开始','e');
+    return;
+  }
   if(!validateSimulationTopology()){return;}
   const autoSaved=!S.systemSaved;
   if(autoSaved){
     S.systemSaved=true;
     if(S.step<2){S.step=2;}
   }
-  SIM.datasetName=document.getElementById('sim-name').value.trim()||'test';
-  const simulationConfig=syncSimulationConfigFromInputs();
+  SIM.datasetName='test';
   SIM.duration=simulationConfig.duration;
   SIM.stepSize=simulationConfig.stepSize;
-  SIM.realtime=document.getElementById('sim-rt').checked;
+  SIM.realtime=true;
   SIM.inited=true;
   SIM.running=false;
   SIM.paused=false;
@@ -5687,10 +6104,10 @@ function simInit(silent=false){
   }
   if(!silent){
     if(autoSaved){
-      toast(`系统模型已自动保存，并完成仿真初始化：${SIM.datasetName} · 时长 ${SIM.duration}s · 步长 ${SIM.stepSize}s`,'s');
+      toast(`系统模型已自动保存，并完成仿真初始化：${SIM.datasetName} · 时长 ${formatSimulationTimeForLog(SIM.duration)} · 步长 ${formatSimulationTimeForLog(SIM.stepSize)}`,'s');
       return;
     }
-    toast(`仿真初始化完成：${SIM.datasetName} · 时长 ${SIM.duration}s · 步长 ${SIM.stepSize}s`,'s');
+    toast(`仿真初始化完成：${SIM.datasetName} · 时长 ${formatSimulationTimeForLog(SIM.duration)} · 步长 ${formatSimulationTimeForLog(SIM.stepSize)}`,'s');
   }
 }
 
@@ -5702,7 +6119,7 @@ function simRun(){
   if(SIM.time>=SIM.duration){
     simInit(true);
   }
-  SIM.realtime=document.getElementById('sim-rt').checked;
+  SIM.realtime=true;
   SIM.running=true;
   SIM.paused=false;
   startSimulationLoop();
@@ -5725,7 +6142,7 @@ function simStep(){
   if(completed){
     simStop('completed');
   }else{
-    toast(`步进完成 · t = ${SIM.time.toFixed(2)}s`,'s');
+    toast(`步进完成 · t = ${formatSimulationTimeForLog(SIM.time)}`,'s');
   }
 }
 
@@ -5761,13 +6178,6 @@ function simStop(mode='manual'){
   }
 }
 
-function onRtToggle(el){
-  SIM.realtime=el.checked;
-  if(SIM.running&&!SIM.paused){
-    startSimulationLoop();
-  }
-  toast(el.checked?'实时模式已开启':'实时模式已关闭', el.checked?'s':'w');
-}
 function ensurePythonBindingRuntimeStyles(){
   if(document.getElementById('python-binding-runtime-style')){return;}
   const style=document.createElement('style');
@@ -5891,7 +6301,7 @@ function renderPropertyPanel(node){
   if(node.sourceNodeId&&node.targetNodeId&&!node.type){
     const sourceNode=getNode(node.sourceNodeId);
     const targetNode=getNode(node.targetNodeId);
-    const edgeLabel=node.lineType==='can'?'CAN 总线':'普通连接线';
+    const edgeLabel=node.lineType==='power'?'电源线':(node.lineType==='can'?'CAN 总线':'普通连接线');
     const sourceName=sourceNode?.props?.name||node.sourceNodeId;
     const targetName=targetNode?.props?.name||node.targetNodeId;
     const sourcePortName=node.sourcePort?.displayName||node.sourcePort?.varName||`#${(node.sourcePortIndex||0)+1}`;
@@ -6040,6 +6450,7 @@ Object.assign(window,{
 });
 
 bindSimulationConfigInputs();
+bindTaskNameInput();
 
 updateUI();
 
@@ -6831,9 +7242,11 @@ function downloadFlightModelPackage(pkg){
   const blob=new Blob([JSON.stringify(pkg,null,2)],{type:'application/json;charset=utf-8'});
   const url=URL.createObjectURL(blob);
   const link=document.createElement('a');
-  const safeModelId=(pkg&&pkg.modelId)||'workbench-export';
+  const safeModelName=String(pkg?.modelName||pkg?.modelId||'workbench-export')
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g,'-')||'workbench-export';
   link.href=url;
-  link.download=`${safeModelId}.json`;
+  link.download=`${safeModelName}.json`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -6863,6 +7276,12 @@ window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__ = function(pkg,prepared){
     description:pkg?.description??prepared?.descriptor?.description??'',
     source:cloneDefaults(pkg?.source||{})
   };
+  S.taskName=normalizeTaskName(
+    restored.taskName,
+    S.activeModelPackage.modelName||S.taskName||'仿真参数'
+  );
+  S.activeModelPackage.modelName=S.taskName;
+  syncTaskNameInput();
   renderAll();
   updateModelPackageStatus();
   toast(`飞控模型包“${S.activeModelPackage.modelName||'未命名模型'}”已导入`,'s');
@@ -6907,7 +7326,7 @@ buildNodeSubtitle = function(node){
     case 'instrument_logger':
       return `${props.instrumentType||'仪器'} · ${props.sampleRate||'1000 Hz'}`;
     case 'link_normal':
-    case 'link_can':
+    case 'link_power':
       return `${props.sourcePort||'源端口'} → ${props.targetPort||'目标端口'}`;
     default:
       return '';
@@ -6918,7 +7337,7 @@ setConnectionTool = function(type){
   __legacySetConnectionTool(type);
   const chip=document.getElementById('line-mode-chip');
   if(chip){
-    chip.textContent=S.activeLineType==='can'?'CAN 总线':'普通连接线';
+    chip.textContent=S.activeLineType==='power'?'电源线':'普通连接线';
   }
 };
 
@@ -6995,6 +7414,7 @@ doImportSys = async function(){
 doSaveSys = function(){
   if(!S.sysLoaded){toast('请先导入系统模型','w');return;}
   if(S.modelNodes.length===0){toast('请至少添加一个组件后再导出','w');return;}
+  syncTaskNameFromInput();
   const packageApi=window.__GZ_FLIGHT_MODEL_PACKAGE__;
   if(typeof packageApi?.exportCurrent!=='function'){
     toast('飞控模型导出桥接未就绪','w');
@@ -7398,6 +7818,7 @@ doImportSys = async function(){
 doSaveSys = function(){
   if(!S.sysLoaded){toast('请先导入系统模型','w');return;}
   if(S.modelNodes.length===0){toast('请至少添加一个组件后再导出','w');return;}
+  syncTaskNameFromInput();
   const packageApi=window.__GZ_FLIGHT_MODEL_PACKAGE__;
   if(typeof packageApi?.exportCurrent!=='function'){
     toast('飞控模型导出桥接未就绪','w');
@@ -7608,7 +8029,7 @@ simInit = function(silent=false){
   if(!SIM.inited||silent){return;}
   const autoSaved=S.systemSaved;
   if(autoSaved&&SIM.time===0&&SIM.stepIndex===0){
-    toast(`仿真初始化完成：${SIM.datasetName} · 时长 ${SIM.duration}s · 步长 ${SIM.stepSize}s`,'s');
+    toast(`仿真初始化完成：${SIM.datasetName} · 时长 ${formatSimulationTimeForLog(SIM.duration)} · 步长 ${formatSimulationTimeForLog(SIM.stepSize)}`,'s');
   }
 };
 
@@ -7626,7 +8047,7 @@ simStep = function(){
   if(completed){
     simStop('completed');
   }else{
-    toast(`步进完成 · t = ${SIM.time.toFixed(2)}s`,'s');
+    toast(`步进完成 · t = ${formatSimulationTimeForLog(SIM.time)}`,'s');
   }
 };
 
@@ -7661,14 +8082,15 @@ function publishSimulationRuntimeSummary(status='updated'){
     return {ok:false,reason:'missing-statusbar-runtime'};
   }
   return statusBar.publishSimulationSummary({
-    datasetName:SIM?.datasetName||document.getElementById('sim-name')?.value?.trim?.()||'test',
-    duration:SIM?.duration||parseScalar(document.getElementById('sim-dur')?.value,0),
+    datasetName:SIM?.datasetName||'test',
+    duration:SIM?.duration||parseSimulationTimeSeconds(document.getElementById('sim-dur')?.value,document.getElementById('sim-dur-unit')?.value,0),
     elapsedSeconds:SIM?.time||0,
     faults:S?.faultModels??S?.importedFaultModels?.length??0,
     sampleRate:getSimulationSampleRateLabel(),
     status,
     stepIndex:SIM?.stepIndex||0,
-    stepSize:SIM?.stepSize||parseScalar(document.getElementById('sim-step')?.value,0)
+    stepSize:SIM?.stepSize||parseSimulationTimeSeconds(document.getElementById('sim-step')?.value,document.getElementById('sim-step-unit')?.value,0),
+    timeUnit:getSimulationDurationTimeUnit()
   });
 }
 
@@ -7684,7 +8106,7 @@ simInit = function(silent=false){
   window.__GZ_STATUS_BAR__?.pushEntry?.({
     level:'info',
     source:'仿真控制',
-    message:`初始化 ${SIM.datasetName} · ${SIM.duration}s · step ${SIM.stepSize}s`
+      message:`初始化 ${SIM.datasetName} · ${formatSimulationTimeForLog(SIM.duration)} · step ${formatSimulationTimeForLog(SIM.stepSize)}`
   });
 };
 
@@ -7694,7 +8116,7 @@ simRun = function(){
     window.__GZ_STATUS_BAR__?.pushEntry?.({
       level:'ok',
       source:'仿真控制',
-      message:`运行 ${SIM.datasetName} · ${SIM.duration}s · ${getSimulationSampleRateLabel()}`
+      message:`运行 ${SIM.datasetName} · ${formatSimulationTimeForLog(SIM.duration)} · ${getSimulationSampleRateLabel()}`
     });
   }
 };
@@ -9396,7 +9818,7 @@ function resetScopeWindowDrag(options={}){
   }
 }
 
-function refreshScopeWindow(scopeId){
+function refreshScopeWindow(scopeId,{refreshShell=false}={}){
   const scopeEl=document.querySelector(`.scope-window[data-scope-id="${scopeId}"]`);
   if(!scopeEl){return false;}
   if(isScopeWindowDragActive(scopeId)){
@@ -9405,13 +9827,17 @@ function refreshScopeWindow(scopeId){
   }
   const state=getScopeWindowRenderState(scopeId);
   if(!state){return false;}
+  if(refreshShell){
   const title=scopeEl.querySelector('.scope-window__title');
   if(title){title.textContent=state.node?.props?.name||state.node?.name||'示波器';}
-  updateScopeWindowTag(scopeEl,'ch1',state.ch1Signal,state.ch1);
-  updateScopeWindowTag(scopeEl,'ch2',state.ch2Signal,state.ch2);
+  }
+  if(refreshShell){
+    updateScopeWindowTag(scopeEl,'ch1',state.ch1Signal,state.ch1);
+    updateScopeWindowTag(scopeEl,'ch2',state.ch2Signal,state.ch2);
+    syncScopeWindowControls(scopeId);
+  }
   updateScopeWindowReadout(scopeEl,'ch1',state.ch1);
   updateScopeWindowReadout(scopeEl,'ch2',state.ch2);
-  syncScopeWindowControls(scopeId);
   positionScopeWindowElement(scopeId);
   drawScopeWindow(scopeId);
   return true;
@@ -9420,6 +9846,17 @@ function refreshScopeWindow(scopeId){
 function refreshOpenScopeWindows(){
   let needsRender=false;
   listOpenScopeWindows().forEach(scopeWindow=>{
+    if(SIM.running&&!SIM.paused){
+      const scopeEl=document.querySelector(`.scope-window[data-scope-id="${scopeWindow.scopeId}"]`);
+      if(scopeEl){
+        if(!isScopeWindowDragActive(scopeWindow.scopeId)){
+          drawScopeWindow(scopeWindow.scopeId);
+        }
+      }else{
+        needsRender=true;
+      }
+      return;
+    }
     if(!refreshScopeWindow(scopeWindow.scopeId)){
       needsRender=true;
     }
@@ -9440,7 +9877,7 @@ function syncScopeWindowsAfterModelRender(){
 function setScopeDisplayMode(scopeId,mode){
   const scopeWindow=ensureScopeWindow(scopeId);
   scopeWindow.mode=['overlay','ch1','ch2'].includes(mode)?mode:'overlay';
-  if(!refreshScopeWindow(scopeId)){
+  if(!refreshScopeWindow(scopeId,{refreshShell:true})){
     renderScopeWindows();
   }
 }
@@ -9448,7 +9885,7 @@ function setScopeDisplayMode(scopeId,mode){
 function setScopeWindowSize(scopeId,value){
   const scopeWindow=ensureScopeWindow(scopeId);
   scopeWindow.windowSeconds=normalizeScopeWindowSeconds(value);
-  if(!refreshScopeWindow(scopeId)){
+  if(!refreshScopeWindow(scopeId,{refreshShell:true})){
     renderScopeWindows();
   }
 }
@@ -9605,13 +10042,15 @@ recordScopeSamples = function(time,dt){
       const sampleState=SIM.spectrumSampling[instrumentNode.id]||{lastTime:null};
       const sampleRateRaw=String(instrumentNode.props?.sampleRate||'10Hz');
       const sampleRateBase=parseScalar(sampleRateRaw,10);
-      const requestedSampleRate=/mhz/i.test(sampleRateRaw)
-        ?sampleRateBase*1000000
+      const requestedSampleRate=/ghz/i.test(sampleRateRaw)
+        ?sampleRateBase*1000000000
+        :/mhz/i.test(sampleRateRaw)
+          ?sampleRateBase*1000000
         :/khz/i.test(sampleRateRaw)
           ?sampleRateBase*1000
           :sampleRateBase;
       const sampleInterval=1/Math.max(requestedSampleRate,1);
-      if(sampleState.lastTime!==null&&time>=sampleState.lastTime&&time-sampleState.lastTime<sampleInterval-1e-9){return;}
+      if(sampleState.lastTime!==null&&time>=sampleState.lastTime&&time-sampleState.lastTime<sampleInterval*(1-1e-9)){return;}
       sampleState.lastTime=time;
       SIM.spectrumSampling[instrumentNode.id]=sampleState;
       pushLimitedSample(
@@ -9651,11 +10090,24 @@ getNodePorts = function(node){
   return __dualScopeGetNodePorts(node);
 };
 
+function hasScopeWindowShells(host,scopeWindows){
+  const expected=scopeWindows.map(item=>item.scopeId).sort();
+  const current=Array.from(host.querySelectorAll('.scope-window[data-scope-id]'))
+    .map(item=>item.dataset.scopeId||'')
+    .sort();
+  return expected.length===current.length&&expected.every((scopeId,index)=>scopeId===current[index]);
+}
+
 renderScopeWindows = function(){
   const host=document.getElementById('scope-window-layer');
   if(!host){return;}
   bindScopeWindowDragListeners();
-  host.innerHTML=listOpenScopeWindows()
+  const openScopeWindows=listOpenScopeWindows();
+  if(SIM.running&&!SIM.paused&&hasScopeWindowShells(host,openScopeWindows)){
+    refreshOpenScopeWindows();
+    return;
+  }
+  host.innerHTML=openScopeWindows
     .sort((left,right)=>left.z-right.z)
     .map(scopeWindow=>{
       clampScopeWindowPosition(scopeWindow);
@@ -9879,7 +10331,7 @@ buildNodeSubtitle = function(node){
     case 'instrument_logger':
       return `${props.instrumentType||'仪器'} · ${props.sampleRate||'-'}`;
     case 'link_normal':
-    case 'link_can':
+    case 'link_power':
       return `${props.sourcePort||'源端口'} → ${props.targetPort||'目标端口'}`;
     default:
       return __task3BuildNodeSubtitle(node);
@@ -10665,7 +11117,7 @@ function resetSimulationRuntimeForBlankWorkspace(){
   SIM.time=0;
   SIM.stepIndex=0;
   SIM.activeScopeId='';
-  SIM.datasetName=document.getElementById('sim-name')?.value?.trim?.()||'test';
+  SIM.datasetName='test';
   SIM.actual=createRuntimeBucket();
   SIM.reference=createRuntimeBucket();
   SIM.scopeWindows={};
@@ -10747,6 +11199,7 @@ function applyBlankWorkspaceState(toastMessage=''){
   S.protocolInjectSelectionMode='';
   S.protocolInjectSelectionId='';
   S.activeModelPackage=null;
+  S.taskName='仿真参数';
   S.faultedBlks=[];
   S.sysLoaded=true;
   S.systemSaved=false;
@@ -10772,6 +11225,7 @@ function applyBlankWorkspaceState(toastMessage=''){
     window.renderCanvasDiagnosticAnnotations();
   }
   updateModelPackageStatus();
+  syncTaskNameInput();
   updateUI();
   if(toastMessage){
     toast(toastMessage,'s');
@@ -10811,7 +11265,7 @@ function syncPaletteTemplatesFromImportedModel(){
     nodes.forEach((node)=>{
       const paletteKey=node?.paletteKey||node?.templateId;
       const paletteComponent=paletteKey&&window.__GZ_COMPONENT_REGISTRY__?.[paletteKey];
-      if(paletteComponent&&(paletteComponent.group==='simulation'||paletteComponent.group==='display-control')){
+      if(paletteComponent&&(['simulation','electrical','display-control'].includes(paletteComponent.group))){
         consumedKeys.add(paletteKey);
       }
     });
@@ -11329,13 +11783,9 @@ Object.assign(window,{
   }
 
   function normalizeBindingLabels(node){
-    const binding=node?.pythonBinding;
-    if(!binding?.bound||!binding.portMapping){return;}
-    ['inputs','outputs','middleVars'].forEach(groupKey=>{
-      (binding.portMapping[groupKey]||[]).forEach(item=>{
-        item.displayName=deriveDisplayName(item);
-      });
-    });
+    // Port names are model data.  Rendering may derive a friendlier label,
+    // but must never mutate the saved interface declaration.
+    return node;
   }
 
   function normalizeAllBindingLabels(){
@@ -11444,6 +11894,7 @@ Object.assign(window,{
     const edgeGroup=document.getElementById('edge-group');
     const preview=document.getElementById('edge-preview');
     if(!edgeGroup||!preview){return;}
+    normalizeElectricalEdgeLineTypes();
     edgeGroup.innerHTML='';
 
     S.modelEdges.forEach(edge=>{
@@ -11455,7 +11906,7 @@ Object.assign(window,{
       if(!sourcePort||!targetPort){return;}
       const selected=S.selEdge===edge.id;
       const faulted=Boolean(edge.injectedFault);
-      const lineType=edge.lineType==='can'?'can':'normal';
+      const lineType=edge.lineType==='power'?'power':(edge.lineType==='can'?'can':'normal');
       const routeOffset=getEdgeRouteOffset(edge,sourceNode,targetNode);
       const edgePath=buildRoutedEdgePath(sourcePort,targetPort,routeOffset);
 
@@ -11529,8 +11980,8 @@ Object.assign(window,{
           x:S.pendingConnection.x,
           y:S.pendingConnection.y
         },0));
-        preview.setAttribute('stroke',S.pendingConnection.lineType==='can'?'#8c7cf6':'#7ab7ff');
-        preview.setAttribute('stroke-width',S.pendingConnection.lineType==='can'?'2.8':'2');
+        preview.setAttribute('stroke',S.pendingConnection.lineType==='power'?'#dc2626':(S.pendingConnection.lineType==='can'?'#8c7cf6':'#7ab7ff'));
+        preview.setAttribute('stroke-width',S.pendingConnection.lineType==='power'?'2.8':(S.pendingConnection.lineType==='can'?'2.8':'2'));
       }else{
         preview.style.display='none';
         preview.setAttribute('d','');
@@ -11687,6 +12138,7 @@ Object.assign(window,{
         buildSelectOptions,
         buildPythonBindingPortRows,
         getPythonBindingSummary,
+        isElectricalComponent:target=>window.__GZ_COMPONENT_REGISTRY__?.[target?.templateId||target?.type]?.group==='electrical',
         escapeHtml
       });
     }
@@ -11933,6 +12385,7 @@ Object.assign(window,{
   function parseInstrumentSampleRateHz(node){
     const raw=String(node.props?.sampleRate||'10Hz');
     const base=parseScalar(raw,10);
+    if(/ghz/i.test(raw)){return base*1000000000;}
     if(/khz/i.test(raw)){return base*1000;}
     if(/mhz/i.test(raw)){return base*1000000;}
     return base;
@@ -11947,7 +12400,7 @@ Object.assign(window,{
     const intervals=[];
     for(let index=1;index<times.length;index+=1){
       const interval=times[index]-times[index-1];
-      if(interval>1e-9){intervals.push(interval);}
+      if(interval>0){intervals.push(interval);}
     }
     if(!intervals.length){return requested;}
     intervals.sort((left,right)=>left-right);
@@ -12030,7 +12483,7 @@ Object.assign(window,{
           <div class="props-field"><label>FFT 点数</label><input id="prop-fftSize" value="${escapeHtml(node.props.fftSize||'1024')}"></div>
         </div>
         <div class="props-row">
-          <div class="props-field"><label>窗函数</label><input id="prop-windowFunction" value="${escapeHtml(node.props.windowFunction||'Hann')}"></div>
+          <div class="props-field"><label>窗函数</label><select id="prop-windowFunction">${buildSelectOptions([{value:'Hann',label:'Hann'},{value:'Hamming',label:'Hamming'},{value:'Blackman',label:'Blackman'},{value:'Rectangular',label:'Rectangular'}],node.props.windowFunction||'Hann')}</select></div>
           <div class="props-field"><label>幅值单位</label><input id="prop-amplitudeUnit" value="${escapeHtml(node.props.amplitudeUnit||'dB')}"></div>
         </div>
         <div class="props-field"><label>观测信号</label><input id="prop-signal" value="${escapeHtml(node.props.signal||getInstrumentSignalName(node))}"></div>
@@ -12089,14 +12542,18 @@ Object.assign(window,{
   function buildSpectrumFieldsClean(node){
     const samples=getInstrumentSamples(node);
     const values=samples.map(getSampleValue).filter(Number.isFinite);
+    const sampleRate=getEffectiveSpectrumSampleRate(samples,node);
     const analysis=buildSpectrumAnalysis(values,{
-      sampleRate:getEffectiveSpectrumSampleRate(samples,node),
+      sampleRate,
       fftSize:node.props.fftSize,
       windowFunction:node.props.windowFunction,
-      frequencyRange:node.props.frequencyRange,
+      frequencyRange:getSpectrumFrequencyRangeForAnalysis(node,sampleRate,values),
       binCount:24
     });
     const peak=analysis.peak;
+    const spectrumDisplayUnit=String(node.props.autoFrequencyRange||'off')==='on'
+      ?getSpectrumFrequencyDisplayUnit(analysis.frequencyRange.min,analysis.frequencyRange.max)
+      :getSpectrumFrequencyUnit(node.props.frequencyRange,'Hz');
     return `
       <div class="instrument-props instrument-props--spectrum" data-instrument-panel="spectrum">
         <div class="instrument-hero">
@@ -12111,7 +12568,7 @@ Object.assign(window,{
           </div>
         </div>
         <div class="instrument-metrics">
-          <span><b>${escapeHtml(peak?`${formatScopeMetric(peak.frequency)}Hz`:'--')}</b><em>峰值频点</em></span>
+          <span><b>${escapeHtml(peak?formatSpectrumFrequencyFixed(peak.frequency,spectrumDisplayUnit):'--')}</b><em>峰值频点</em></span>
           <span><b>${escapeHtml(peak?formatScopeMetric(peak.magnitude):'--')}</b><em>幅值峰值</em></span>
           <span><b>${analysis.bins.length}</b><em>分析频段</em></span>
         </div>
@@ -12307,11 +12764,16 @@ Object.assign(window,{
     return SIM.spectrumWindow;
   }
 
-  function renderSpectrumWindow(){
+  function renderSpectrumWindow({rebuild=false}={}){
     const host=document.getElementById('spectrum-window-layer');
     if(!host){return;}
-    host.querySelector('[data-spectrum-window]')?.remove();
     const state=getSpectrumWindowState();
+    const currentWindow=host.querySelector('[data-spectrum-window]');
+    if(!rebuild&&SIM.running&&state.open&&currentWindow&&typeof state.refreshTrace==='function'){
+      state.refreshTrace();
+      return;
+    }
+    currentWindow?.remove();
     if(!state.open){
       if(state.timer){clearTimeout(state.timer);state.timer=null;}
       return;
@@ -12328,8 +12790,8 @@ Object.assign(window,{
       sampleRate,
       fftSize:node.props.fftSize,
       windowFunction:node.props.windowFunction,
-      frequencyRange:node.props.frequencyRange,
-      binCount:32
+      frequencyRange:getSpectrumFrequencyRangeForAnalysis(node,sampleRate,values),
+      binCount:128
     });
     const display=buildSpectrumAnalyzerDisplay(analysis,node);
     const bins=display.displayed;
@@ -12352,13 +12814,51 @@ Object.assign(window,{
     windowEl.style.left=`${state.x}px`;
     windowEl.style.top=`${state.y}px`;
     const sampleRateDisplay=splitSpectrumFrequencyValue(node.props.sampleRate,'32','kHz');
-    const frequencyRange=splitSpectrumFrequencyRange(node.props.frequencyRange||'0-16kHz');
-    const frequencyUnitOptions=['Hz','kHz','MHz'];
+    const automaticFrequencyRange=String(node.props.autoFrequencyRange||'off')==='on';
+    const tuningMode=String(node.props.tuningMode||'startStop')==='centerSpan'?'centerSpan':'startStop';
+    const frequencyRange=splitSpectrumFrequencyRange(automaticFrequencyRange
+      ?formatSpectrumFrequencyRange(analysis.frequencyRange.min,analysis.frequencyRange.max)
+      :node.props.frequencyRange||'0-16kHz');
+    const frequencyUnitOptions=['Hz','kHz','MHz','GHz'];
     const frequencyRangeMax=analysis.sampleRate/(2*getSpectrumFrequencyMultiplier(frequencyRange.end.unit));
     ['start','end'].forEach(key=>{
       const value=Math.max(0,Math.min(parseScalar(frequencyRange[key].value,0),frequencyRangeMax));
       frequencyRange[key].value=String(Number(value.toFixed(9)));
     });
+    const frequencyRangeStartHz=parseScalar(frequencyRange.start.value,0)*getSpectrumFrequencyMultiplier(frequencyRange.start.unit);
+    const frequencyRangeEndHz=parseScalar(frequencyRange.end.value,0)*getSpectrumFrequencyMultiplier(frequencyRange.end.unit);
+    const centerFrequency=(frequencyRangeStartHz+frequencyRangeEndHz)/2/getSpectrumFrequencyMultiplier(frequencyRange.end.unit);
+    const frequencySpan=(frequencyRangeEndHz-frequencyRangeStartHz)/getSpectrumFrequencyMultiplier(frequencyRange.end.unit);
+    const traceWidth=1000;
+    const traceHeight=300;
+    const tracePadding=6;
+    const buildTraceGeometry=(traceBins,currentMarkerBin,currentFrequencyRange=analysis.frequencyRange)=>{
+      const pointFor=(item,index)=>{
+      const frequencySpan=Math.max(currentFrequencyRange.max-currentFrequencyRange.min,1e-9);
+      const frequency=Number(item?.frequency);
+      const x=traceBins.length>1&&Number.isFinite(frequency)
+        ?clamp((frequency-currentFrequencyRange.min)/frequencySpan,0,1)*traceWidth
+        :traceWidth/2;
+      const normalized=clamp(Number(item?.normalized)||0,0,1);
+      const y=traceHeight-tracePadding-normalized*(traceHeight-tracePadding*2);
+      return {x,y};
+      };
+      const points=traceBins.map((item,index)=>{
+        const point=pointFor(item,index);
+        return `${point.x.toFixed(2)},${point.y.toFixed(2)}`;
+      }).join(' ');
+      const markerIndex=currentMarkerBin?traceBins.indexOf(currentMarkerBin):-1;
+      return {
+        points,
+        pointFor,
+        markerPoint:markerIndex>=0?pointFor(currentMarkerBin,markerIndex):null
+      };
+    };
+    const traceGeometry=buildTraceGeometry(bins,markerBin);
+    const traceHitTargets=bins.map((item,index)=>{
+      const point=traceGeometry.pointFor(item,index);
+      return `<circle class="spectrum-window__trace-hit" data-spectrum-bin data-spectrum-frequency="${escapeHtml(item.frequency)}" title="${escapeHtml(formatScopeMetric(item.frequency))}Hz · ${escapeHtml(formatScopeMetric(item.level))}dBm" cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="12"></circle>`;
+    }).join('');
     windowEl.innerHTML=`
       <header class="spectrum-window__header">
         <div>
@@ -12369,58 +12869,69 @@ Object.assign(window,{
       </header>
       <div class="spectrum-window__body">
         <div class="spectrum-window__summary">
-          <span><em>峰值频点</em><b data-spectrum-peak-frequency>${escapeHtml(peakFrequency===null?'--':`${formatScopeMetric(peakFrequency)}Hz`)}</b></span>
-          <span><em>峰值电平</em><b data-spectrum-peak-amplitude>${escapeHtml(values.length?`${formatScopeMetric(Math.max(...bins.map(item=>item.level),display.floor))} dB`:'--')}</b></span>
-          <span><em>Marker</em><b data-spectrum-marker>${escapeHtml(markerBin?`${formatScopeMetric(markerBin.frequency)}Hz / ${formatScopeMetric(markerBin.level)}dB`:'--')}</b></span>
+          <span><em>峰值频点</em><b data-spectrum-peak-frequency>${escapeHtml(peakFrequency===null?'--':formatSpectrumFrequencyFixed(peakFrequency,frequencyRange.end.unit))}</b></span>
+          <span><em>峰值功率</em><b data-spectrum-peak-amplitude>${escapeHtml(values.length?`${formatScopeMetric(Math.max(...bins.map(item=>item.level),display.floor))} dBm`:'--')}</b></span>
+          <span><em>Marker</em><b data-spectrum-marker>${escapeHtml(markerBin?`${formatSpectrumFrequencyFixed(markerBin.frequency,frequencyRange.end.unit)} / ${formatScopeMetric(markerBin.level)}dBm`:'--')}</b></span>
         </div>
         <div class="spectrum-window__workspace">
         <div class="spectrum-window__left-column">
         <div class="spectrum-window__chart" aria-label="频谱能量分布">
-          <span class="spectrum-window__axis-title spectrum-window__axis-title--y">电平（dB）</span>
+          <span class="spectrum-window__axis-title spectrum-window__axis-title--y">功率（dBm）</span>
           <div class="spectrum-window__axis spectrum-window__axis--y" data-spectrum-axis="y" aria-hidden="true">
             <span>${escapeHtml(formatScopeMetric(display.referenceLevel))}</span><span>${escapeHtml(formatScopeMetric(display.floor))}</span>
           </div>
           <div class="spectrum-window__plot">
-            ${bins.map(item=>`<span class="spectrum-window__bar${markerBin===item?' is-marker':''}${item.overloaded?' is-overloaded':''}" data-spectrum-bin data-spectrum-frequency="${escapeHtml(item.frequency)}" title="${escapeHtml(formatScopeMetric(item.frequency))}Hz · ${escapeHtml(formatScopeMetric(item.level))}dB" style="height:${Math.max(4,Math.round(item.normalized*150))}px"></span>`).join('')}
+            <svg class="spectrum-window__trace" viewBox="0 0 ${traceWidth} ${traceHeight}" preserveAspectRatio="none" role="img" aria-label="频谱曲线">
+              <polyline class="spectrum-window__trace-line" points="${traceGeometry.points}"></polyline>
+              ${traceGeometry.markerPoint?`<circle class="spectrum-window__trace-marker" cx="${traceGeometry.markerPoint.x.toFixed(2)}" cy="${traceGeometry.markerPoint.y.toFixed(2)}" r="10"></circle>`:''}
+              ${traceHitTargets}
+            </svg>
           </div>
           <div class="spectrum-window__axis spectrum-window__axis--x" data-spectrum-axis="x" aria-hidden="true">
-            <span>${escapeHtml(formatScopeMetric(analysis.frequencyRange.min))}Hz</span><span>${escapeHtml(formatScopeMetric(analysis.frequencyRange.max))}Hz</span>
+          <span>${escapeHtml(formatSpectrumFrequency(analysis.frequencyRange.min,frequencyRange.end.unit))}</span><span>${escapeHtml(formatSpectrumFrequency(analysis.frequencyRange.max,frequencyRange.end.unit))}</span>
           </div>
-          <span class="spectrum-window__axis-title spectrum-window__axis-title--x">频率（Hz）</span>
+          <span class="spectrum-window__axis-title spectrum-window__axis-title--x">频率（${escapeHtml(frequencyRange.end.unit)}）</span>
         </div>
         <div class="spectrum-window__config spectrum-window__config--analysis">
           <div class="spectrum-window__config-title">分析设置</div>
+          <label>操作方式<select data-spectrum-config="tuningMode">${buildSelectOptions([{value:'startStop',label:'起始 / 截止'},{value:'centerSpan',label:'中心 / 跨度'}],tuningMode)}</select></label>
           <label>采样率
             <span class="spectrum-window__measurement">
               <input type="text" inputmode="decimal" aria-label="采样率数值" data-spectrum-config="sampleRateValue" value="${escapeHtml(sampleRateDisplay.value)}">
               <select aria-label="采样率单位" data-spectrum-config="sampleRateUnit">${buildSelectOptions(frequencyUnitOptions,sampleRateDisplay.unit)}</select>
             </span>
           </label>
-          <label class="spectrum-window__config-range">频率范围
+          ${tuningMode==='startStop'?`<label class="spectrum-window__config-range">频率范围
             <span class="spectrum-window__measurement spectrum-window__measurement--range">
-              <input type="text" inputmode="decimal" aria-label="频率范围起始数值" data-spectrum-config="frequencyRangeStart" value="${escapeHtml(frequencyRange.start.value)}">
+              <input type="text" inputmode="decimal" aria-label="频率范围起始数值" data-spectrum-config="frequencyRangeStart" value="${escapeHtml(frequencyRange.start.value)}"${automaticFrequencyRange?' disabled':''}>
               <span aria-hidden="true">~</span>
-              <input type="text" inputmode="decimal" aria-label="频率范围结束数值" data-spectrum-config="frequencyRangeEnd" value="${escapeHtml(frequencyRange.end.value)}">
-              <select aria-label="频率范围单位" data-spectrum-config="frequencyRangeUnit">${buildSelectOptions(frequencyUnitOptions,frequencyRange.end.unit)}</select>
+              <input type="text" inputmode="decimal" aria-label="频率范围结束数值" data-spectrum-config="frequencyRangeEnd" value="${escapeHtml(frequencyRange.end.value)}"${automaticFrequencyRange?' disabled':''}>
+              <select aria-label="频率范围单位" data-spectrum-config="frequencyRangeUnit"${automaticFrequencyRange?' disabled':''}>${buildSelectOptions(frequencyUnitOptions,frequencyRange.end.unit)}</select>
             </span>
-          </label>
-          <label>FFT 点数<input data-spectrum-config="fftSize" value="${escapeHtml(node.props.fftSize||'1024')}"></label>
-          <label>窗函数<input data-spectrum-config="windowFunction" value="${escapeHtml(node.props.windowFunction||'Hann')}"></label>
+          </label>`:`<label class="spectrum-window__config-range">中心频率 / 跨度
+            <span class="spectrum-window__measurement spectrum-window__measurement--range">
+              <input type="text" inputmode="decimal" aria-label="中心频率" data-spectrum-config="centerFrequency" value="${escapeHtml(String(Number(centerFrequency.toFixed(9))))}"${automaticFrequencyRange?' disabled':''}>
+              <span aria-hidden="true">/</span>
+              <input type="text" inputmode="decimal" aria-label="频率跨度" data-spectrum-config="frequencySpan" value="${escapeHtml(String(Number(frequencySpan.toFixed(9))))}"${automaticFrequencyRange?' disabled':''}>
+              <select aria-label="中心频率与跨度单位" data-spectrum-config="centerSpanUnit"${automaticFrequencyRange?' disabled':''}>${buildSelectOptions(frequencyUnitOptions,frequencyRange.end.unit)}</select>
+            </span>
+          </label>`}
+          <label>自动调谐<select data-spectrum-config="autoFrequencyRange">${buildSelectOptions([{value:'on',label:'开启（锁定峰值）'},{value:'off',label:'关闭'}],node.props.autoFrequencyRange||'off')}</select></label>
+          <label>窗函数<select data-spectrum-config="windowFunction">${buildSelectOptions([{value:'Hann',label:'Hann'},{value:'Hamming',label:'Hamming'},{value:'Blackman',label:'Blackman'},{value:'Rectangular',label:'Rectangular'}],node.props.windowFunction||'Hann')}</select></label>
         </div>
         </div>
         <div class="spectrum-window__config spectrum-window__config--controls">
-          <div class="spectrum-window__config-title">输入与量程</div>
-          <label>参考电平 (dB)<input data-spectrum-config="referenceLevel" value="${escapeHtml(node.props.referenceLevel??'10')}"></label>
-          <label>输入衰减 (dB)<select data-spectrum-config="attenuation">${buildSelectOptions(['0','10','20','30','40'],String(node.props.attenuation??'0'))}</select></label>
-          <label>前置放大<select data-spectrum-config="preamp">${buildSelectOptions([{value:'off',label:'关闭'},{value:'on',label:'开启 (+20 dB)'}],node.props.preamp||'off')}</select></label>
+          <div class="spectrum-window__config-title">显示与量程</div>
+          <label>功率上限 (dBm)<input data-spectrum-config="referenceLevel" value="${escapeHtml(node.props.referenceLevel??'10')}"></label>
+          <label>自动量程<select data-spectrum-config="autoRange">${buildSelectOptions([{value:'off',label:'关闭'},{value:'on',label:'开启'}],node.props.autoRange||'off')}</select></label>
+          <label>动态范围 (dB)<input type="number" min="20" max="200" step="1" data-spectrum-config="dynamicRange" value="${escapeHtml(node.props.dynamicRange??'80')}"></label>
           <div class="spectrum-window__config-title">带宽与扫描</div>
-          <label>RBW (Hz)<input type="number" min="0.001" step="any" data-spectrum-config="rbw" value="${escapeHtml(node.props.rbw||'0.1')}"></label>
-          <label>VBW (Hz)<input type="number" min="0.001" step="any" data-spectrum-config="vbw" value="${escapeHtml(node.props.vbw||'0.1')}"></label>
+          <label>RBW (MHz)<input type="number" min="0.000001" step="any" data-spectrum-config="rbw" value="${escapeHtml(node.props.rbw||'0.1')}"></label>
+          <label>VBW (MHz)<input type="number" min="0.000001" step="any" data-spectrum-config="vbw" value="${escapeHtml(node.props.vbw||'0.1')}"></label>
           <label>扫描时间 (ms)<input data-spectrum-config="sweepTime" value="${escapeHtml(node.props.sweepTime||'100')}"></label>
-          <div class="spectrum-window__config-title">检波、迹线与 Marker</div>
+          <div class="spectrum-window__config-title">检波与迹线</div>
           <label>检波器<select data-spectrum-config="detector">${buildSelectOptions(['Sample','Peak','RMS'],node.props.detector||'Sample')}</select></label>
           <label>迹线模式<select data-spectrum-config="traceMode">${buildSelectOptions(['Clear/Write','Max Hold','Average'],node.props.traceMode||'Clear/Write')}</select></label>
-          <label>Marker 频率 (Hz)<input data-spectrum-config="markerFrequency" value="${escapeHtml(node.props.markerFrequency||'')}"></label>
         </div>
         </div>
         <div class="spectrum-window__actions">
@@ -12463,7 +12974,7 @@ Object.assign(window,{
     });
     windowEl.querySelector('[data-spectrum-close]')?.addEventListener('click',()=>{
       state.open=false;
-      renderSpectrumWindow();
+      renderSpectrumWindow({rebuild:true});
     });
     windowEl.querySelectorAll('[data-spectrum-config]').forEach(input=>{
       input.addEventListener('keydown',event=>event.stopPropagation());
@@ -12473,16 +12984,31 @@ Object.assign(window,{
           const value=windowEl.querySelector('[data-spectrum-config="sampleRateValue"]')?.value.trim();
           const unit=windowEl.querySelector('[data-spectrum-config="sampleRateUnit"]')?.value||'Hz';
           node.props.sampleRate=value?`${value}${unit}`:node.props.sampleRate;
+        }else if(key==='tuningMode'){
+          node.props.tuningMode=input.value==='centerSpan'?'centerSpan':'startStop';
         }else if(key.startsWith('frequencyRange')){
           const start=windowEl.querySelector('[data-spectrum-config="frequencyRangeStart"]')?.value.trim();
           const end=windowEl.querySelector('[data-spectrum-config="frequencyRangeEnd"]')?.value.trim();
           const unit=windowEl.querySelector('[data-spectrum-config="frequencyRangeUnit"]')?.value||'Hz';
           if(start&&end){node.props.frequencyRange=`${start}-${end}${unit}`;}
+        }else if(key==='centerFrequency'||key==='frequencySpan'||key==='centerSpanUnit'){
+          const center=Number(windowEl.querySelector('[data-spectrum-config="centerFrequency"]')?.value);
+          const span=Number(windowEl.querySelector('[data-spectrum-config="frequencySpan"]')?.value);
+          const unit=windowEl.querySelector('[data-spectrum-config="centerSpanUnit"]')?.value||'Hz';
+          const multiplier=getSpectrumFrequencyMultiplier(unit);
+          const nyquist=Math.max(sampleRate/2,0);
+          if(Number.isFinite(center)&&Number.isFinite(span)&&span>0&&nyquist>0){
+            const spanHz=Math.min(span*multiplier,nyquist);
+            const centerHz=clamp(center*multiplier,spanHz/2,nyquist-spanHz/2);
+            const start=Number(((centerHz-spanHz/2)/multiplier).toFixed(9));
+            const end=Number(((centerHz+spanHz/2)/multiplier).toFixed(9));
+            node.props.frequencyRange=`${start}-${end}${unit}`;
+          }
         }else{
           node.props[key]=input.value.trim()||node.props[key];
         }
         if(typeof setDirtyState==='function'){setDirtyState();}
-        renderSpectrumWindow();
+        renderSpectrumWindow({rebuild:true});
         if(S.selBlk===node.id){renderPropertyPanel(node);}
       });
     });
@@ -12490,7 +13016,7 @@ Object.assign(window,{
       if(!Number.isFinite(frequency)){return;}
       node.props.markerFrequency=String(frequency);
       if(typeof setDirtyState==='function'){setDirtyState();}
-      renderSpectrumWindow();
+      renderSpectrumWindow({rebuild:true});
     };
     windowEl.querySelectorAll('[data-spectrum-bin]').forEach(bin=>bin.addEventListener('click',event=>{
       event.stopPropagation();
@@ -12507,16 +13033,101 @@ Object.assign(window,{
     windowEl.querySelector('[data-spectrum-peak-search]')?.addEventListener('click',()=>{
       if(analysis.peak){node.props.markerFrequency=String(analysis.peak.frequency);}
       if(typeof setDirtyState==='function'){setDirtyState();}
-      renderSpectrumWindow();
+      renderSpectrumWindow({rebuild:true});
     });
     windowEl.querySelector('[data-spectrum-clear]')?.addEventListener('click',()=>{
       clearInstrumentSamples(node);
-      renderSpectrumWindow();
+      renderSpectrumWindow({rebuild:true});
     });
+    const refreshSpectrumTrace=()=>{
+      state.timer=null;
+      if(!SIM.running||!state.open||state.nodeId!==node.id||host.querySelector('[data-spectrum-window]')!==windowEl){return;}
+      const currentSamples=getInstrumentSamples(node);
+      const currentValues=currentSamples.map(getSampleValue).filter(Number.isFinite);
+      const currentSampleRate=getEffectiveSpectrumSampleRate(currentSamples,node);
+      const currentAnalysis=buildSpectrumAnalysis(currentValues,{
+        sampleRate:currentSampleRate,
+        fftSize:node.props.fftSize,
+        windowFunction:node.props.windowFunction,
+        frequencyRange:getSpectrumFrequencyRangeForAnalysis(node,currentSampleRate,currentValues),
+        binCount:128
+      });
+      const currentBins=buildSpectrumAnalyzerDisplay(currentAnalysis,node).displayed;
+      const currentMarkerFrequency=parseScalar(node.props.markerFrequency,NaN);
+      const currentMarkerBin=Number.isFinite(currentMarkerFrequency)
+        ?currentBins.reduce((closest,item)=>Math.abs(item.frequency-currentMarkerFrequency)<Math.abs(closest.frequency-currentMarkerFrequency)?item:closest,currentBins[0]||null)
+        :null;
+      const currentTrace=buildTraceGeometry(currentBins,currentMarkerBin,currentAnalysis.frequencyRange);
+      const currentFrequencyUnit=automaticFrequencyRange
+        ?getSpectrumFrequencyDisplayUnit(currentAnalysis.frequencyRange.min,currentAnalysis.frequencyRange.max)
+        :frequencyRange.end.unit;
+      if(automaticFrequencyRange){
+        windowEl.dataset.spectrumRange=`${currentAnalysis.frequencyRange.min}-${currentAnalysis.frequencyRange.max}`;
+        const rangeLabels=windowEl.querySelectorAll('[data-spectrum-axis="x"] span');
+        const automaticUnit=currentFrequencyUnit;
+        rangeLabels[0]&&(rangeLabels[0].textContent=formatSpectrumFrequency(currentAnalysis.frequencyRange.min,automaticUnit));
+        rangeLabels[1]&&(rangeLabels[1].textContent=formatSpectrumFrequency(currentAnalysis.frequencyRange.max,automaticUnit));
+        const centerSpanMode=String(node.props.tuningMode||'startStop')==='centerSpan';
+        const rangeUnit=automaticUnit;
+        const rangeUnitInput=centerSpanMode
+          ?windowEl.querySelector('[data-spectrum-config="centerSpanUnit"]')
+          :windowEl.querySelector('[data-spectrum-config="frequencyRangeUnit"]');
+        if(rangeUnitInput){rangeUnitInput.value=rangeUnit;}
+        const axisTitle=windowEl.querySelector('.spectrum-window__axis-title--x');
+        if(axisTitle){axisTitle.textContent=`频率（${rangeUnit}）`;}
+        const rangeMultiplier=getSpectrumFrequencyMultiplier(rangeUnit);
+        if(centerSpanMode){
+          const center=windowEl.querySelector('[data-spectrum-config="centerFrequency"]');
+          const span=windowEl.querySelector('[data-spectrum-config="frequencySpan"]');
+          if(center){center.value=String(Number((((currentAnalysis.frequencyRange.min+currentAnalysis.frequencyRange.max)/2)/rangeMultiplier).toFixed(9)));}
+          if(span){span.value=String(Number(((currentAnalysis.frequencyRange.max-currentAnalysis.frequencyRange.min)/rangeMultiplier).toFixed(9)));}
+        }else{
+          const rangeStart=windowEl.querySelector('[data-spectrum-config="frequencyRangeStart"]');
+          const rangeEnd=windowEl.querySelector('[data-spectrum-config="frequencyRangeEnd"]');
+          if(rangeStart){rangeStart.value=String(Number((currentAnalysis.frequencyRange.min/rangeMultiplier).toFixed(9)));}
+          if(rangeEnd){rangeEnd.value=String(Number((currentAnalysis.frequencyRange.max/rangeMultiplier).toFixed(9)));}
+        }
+      }
+      const currentPeakFrequency=currentAnalysis.peak?.frequency;
+      const peakFrequencyLabel=windowEl.querySelector('[data-spectrum-peak-frequency]');
+      if(peakFrequencyLabel){
+        peakFrequencyLabel.textContent=Number.isFinite(currentPeakFrequency)
+          ?formatSpectrumFrequencyFixed(currentPeakFrequency,currentFrequencyUnit)
+          :'--';
+      }
+      const markerLabel=windowEl.querySelector('[data-spectrum-marker]');
+      if(markerLabel){
+        markerLabel.textContent=currentMarkerBin
+          ?`${formatSpectrumFrequencyFixed(currentMarkerBin.frequency,currentFrequencyUnit)} / ${formatScopeMetric(currentMarkerBin.level)}dBm`
+          :'--';
+      }
+      windowEl.querySelector('.spectrum-window__trace-line')?.setAttribute('points',currentTrace.points);
+      const marker=windowEl.querySelector('.spectrum-window__trace-marker');
+      if(marker&&currentTrace.markerPoint){
+        marker.setAttribute('cx',currentTrace.markerPoint.x.toFixed(2));
+        marker.setAttribute('cy',currentTrace.markerPoint.y.toFixed(2));
+      }
+      windowEl.querySelectorAll('[data-spectrum-bin]').forEach((target,index)=>{
+        const bin=currentBins[index];
+        if(!bin||!Number.isFinite(Number(bin.frequency))){
+          target.style.display='none';
+          return;
+        }
+        target.style.display='';
+        const point=currentTrace.pointFor(bin,index);
+        target.setAttribute('cx',point.x.toFixed(2));
+        target.setAttribute('cy',point.y.toFixed(2));
+        target.dataset.spectrumFrequency=String(bin.frequency??'');
+        target.title=`${formatScopeMetric(bin.frequency)}Hz · ${formatScopeMetric(bin.level)}dBm`;
+      });
+      const nextSweepTime=clamp(parseScalar(node.props.sweepTime,100),50,10000);
+      state.timer=setTimeout(refreshSpectrumTrace,nextSweepTime);
+    };
+    state.refreshTrace=refreshSpectrumTrace;
     if(state.timer){clearTimeout(state.timer);state.timer=null;}
     if(SIM.running){
       const sweepTime=clamp(parseScalar(node.props.sweepTime,100),50,10000);
-      state.timer=setTimeout(()=>renderSpectrumWindow(),sweepTime);
+      state.timer=setTimeout(refreshSpectrumTrace,sweepTime);
     }
   }
 
@@ -12536,7 +13147,7 @@ Object.assign(window,{
       state.x=null;
       state.y=null;
     }
-    renderSpectrumWindow();
+    renderSpectrumWindow({rebuild:true});
   };
 
   function ensureSpectrumInstrumentSamplesForCurrentStep(){
@@ -12556,12 +13167,27 @@ Object.assign(window,{
           delete SIM.reference.instrumentSamples[node.id];
         }
         if(actualSamples.at(-1)?.t===time){return;}
+        if(!SIM.spectrumSampling){SIM.spectrumSampling={};}
+        const sampleState=SIM.spectrumSampling[node.id]||{lastTime:null};
+        const sampleRateRaw=String(node.props?.sampleRate||'10Hz');
+        const sampleRateBase=parseScalar(sampleRateRaw,10);
+        const requestedSampleRate=/ghz/i.test(sampleRateRaw)
+          ?sampleRateBase*1000000000
+          :/mhz/i.test(sampleRateRaw)
+            ?sampleRateBase*1000000
+            :/khz/i.test(sampleRateRaw)
+              ?sampleRateBase*1000
+              :sampleRateBase;
+        const sampleInterval=1/Math.max(requestedSampleRate,1);
+        if(sampleState.lastTime!==null&&time>=sampleState.lastTime&&time-sampleState.lastTime<sampleInterval*(1-1e-9)){return;}
+        sampleState.lastTime=time;
+        SIM.spectrumSampling[node.id]=sampleState;
         const actualSourceValue=resolveNodeOutput(incoming.sourceNodeId,incoming.sourcePortIndex||0,'actual',time,dt,actualCache,actualVisiting);
         const actualValue=transmitEdgeSignal(incoming,actualSourceValue,'actual',time);
         const actualEdgeState=SIM.actual.edgeStates?.[incoming.id]||{};
         pushLimitedSample(actualSamples,actualEdgeState.lastTransmissionDropped
           ?{t:time,actual:null,dropped:true}
-          :{t:time,actual:actualValue});
+          :{t:time,actual:actualValue},normalizeSpectrumFftSize(node.props?.fftSize,1024));
       });
   }
 
@@ -12767,6 +13393,17 @@ Object.assign(window,{
         if(typeof setDirtyState==='function'){setDirtyState();}
         renderPropertyPanel(node);
       });
+      const refreshRfVectorFields=event=>{
+        if(normalizeSignalSourcePropsRuntime(node.props||{}).signalDomain!=='rf'){return;}
+        const values=readSchemaPropertyValues(node)||{};
+        node.props=normalizeSignalSourcePropsRuntime({...node.props,...values,[event.target.id.replace(/^prop-/,'')]:event.target.value});
+        if(typeof setDirtyState==='function'){setDirtyState();}
+        renderModelNodes();
+        renderPropertyPanel(node);
+      };
+      ['#prop-outputFormat','#prop-rfVectorLength','#prop-rfVectorConfigMode'].forEach(selector=>{
+        pd.querySelector(selector)?.addEventListener('change',refreshRfVectorFields);
+      });
     }
     if(node.type==='simulation_block'){
       updateModelPackageStatus(node);
@@ -12889,7 +13526,7 @@ Object.assign(window,{
     __finalCleanSetConnectionTool(type);
     const chip=document.getElementById('line-mode-chip');
     if(chip){
-      chip.textContent=S.activeLineType==='can'?'CAN 总线':'普通连接线';
+    chip.textContent=S.activeLineType==='power'?'电源线':'普通连接线';
     }
   };
 
@@ -13072,7 +13709,7 @@ Object.assign(window,{
   }
 
   function getLineLabel(edge){
-    return edge?.lineType==='can'?'CAN 总线':'普通连线';
+    return edge?.lineType==='power'?'电源线':(edge?.lineType==='can'?'CAN 总线':'普通连线');
   }
 
   function getPortLabelForPanel(node,direction,index){
@@ -13370,7 +14007,7 @@ Object.assign(window,{
             ['源模块',sourceLabel],
             ['目标模块',targetLabel],
             ['连线类型',edge.lineType||'normal'],
-            ['总线类型',edge.lineType==='can'?'CAN':'普通连线'],
+            ['总线类型',edge.lineType==='power'?'电源':(edge.lineType==='can'?'CAN':'普通连线')],
             ['通道数量',signals.length],
             ['状态',status],
             ['故障来源',faultSource==='none'?'无':faultSource]
@@ -13526,7 +14163,7 @@ Object.assign(window,{
         ${renderEdgeInternalMapping(semanticContext.mapping)}
         <div class="pgroup">
           <div class="pglbl">通道配置</div>
-          <div class="props-field"><label>连接类型</label><select id="prop-edge-line-type">${buildSelectOptions(['normal','can'],edge.lineType||'normal')}</select></div>
+          <div class="props-field"><label>连接类型</label><select id="prop-edge-line-type">${buildSelectOptions(edge.lineType==='can'?['normal','power','can']:['normal','power'],edge.lineType||'normal')}</select></div>
           <div class="props-channel-list" data-edge-channel-list>
             <div class="props-channel-card" data-edge-channel-card="primary">
               <div class="props-channel-card__head">
@@ -13565,7 +14202,7 @@ Object.assign(window,{
       <div class="props-form">
         <div class="pgroup">
           <div class="pglbl">连线参数</div>
-          <div class="props-field"><label>连接类型</label><select id="prop-edge-line-type">${buildSelectOptions(['normal','can'],edge.lineType||'normal')}</select></div>
+          <div class="props-field"><label>连接类型</label><select id="prop-edge-line-type">${buildSelectOptions(edge.lineType==='can'?['normal','power','can']:['normal','power'],edge.lineType||'normal')}</select></div>
           <div class="props-row">
             <div class="props-field"><label>信号ID</label><input id="prop-edge-signal-id" value="${text(signal.signalId)}"></div>
             <div class="props-field"><label>通道ID</label><input id="prop-edge-channel-id" value="${text(signal.channelId)}"></div>
@@ -13712,7 +14349,7 @@ Object.assign(window,{
   const FAULT_SLOT_CONFIG_LABELS={physical:'物理层',electrical:'电气层',protocol:'协议层'};
   const FAULT_SLOT_CONFIG_MODELS={
     physical:['bias','drift','step','degradation','freeze','random'],
-    electrical:['bias','noise','freeze','intermittent'],
+    electrical:['bias','noise','attenuation','data_cutoff','freeze','intermittent'],
     protocol:['delay','dropout','tamper','stale']
   };
 
@@ -14382,12 +15019,17 @@ Object.assign(window,{
   }
   window.openPropertyPanelTargetFaultDialog=openPropertyPanelTargetFaultDialog;
 
+  function hidesDirectFaultInjectionAction(target){
+    return target?.type==='simulation_block'
+      ||window.__GZ_COMPONENT_REGISTRY__?.[target?.type]?.group==='electrical';
+  }
+
   function renderFaults(target){
     const targetKind=isEdgeTarget(target)?'edge':'node';
     const bindings=activeFaultBindingsForPanel(target);
     const injectButton=isEdgeTarget(target)
       ?(isProtocolInjectableEdge(target)?'<button type="button" class="props-secondary props-protocol-action" onclick="openProtocolFaultImport()">注入协议故障</button>':'')
-      :(!target.type?.startsWith('instrument_')?'<button type="button" class="props-secondary props-fault-action" data-open-property-fault-dialog>注入故障</button>':'');
+      :(!target.type?.startsWith('instrument_')&&!hidesDirectFaultInjectionAction(target)?'<button type="button" class="props-secondary props-fault-action" data-open-property-fault-dialog>注入故障</button>':'');
     const body=bindings.length
       ?bindings.map((binding,index)=>renderFaultBinding(binding,target,targetKind,index)).join('')
       :'<div class="props-empty-state">No active faults</div>';
@@ -14682,6 +15324,7 @@ Object.assign(window,{
       channelId:edge.channelId||'',
       sourceName:getNode(edge.sourceNodeId)?.props?.name||edge.sourceNodeId||'',
       targetName:getNode(edge.targetNodeId)?.props?.name||edge.targetNodeId||'',
+      pointType:'virtual',
       detects:[],
       manuallyAdded:true
     };
@@ -15094,6 +15737,23 @@ Object.assign(window,{
       saveButton.dataset.propertySaveNodeBound='true';
     }
     const node=getNode(S.selBlk);
+    if(node?.type==='simulation_block'){
+      host.querySelectorAll('[data-simulation-parameter-mode-select]').forEach(button=>{
+        if(button.dataset.simulationParameterModeBound){return;}
+        button.addEventListener('click',event=>{
+          event.preventDefault();
+          const key=button.dataset.simulationParameterModeKey;
+          const value=button.dataset.simulationParameterModeSelect;
+          const input=host.querySelector(`[data-simulation-parameter="${key}"]`);
+          if(!input){return;}
+          input.value=value;
+          host.querySelectorAll(`[data-simulation-parameter-mode-key="${key}"]`).forEach(option=>{
+            option.classList.toggle('is-active',option.dataset.simulationParameterModeSelect===value);
+          });
+        });
+        button.dataset.simulationParameterModeBound='true';
+      });
+    }
     const displayConsoleOpenButton=host?.querySelector?.('[data-open-display-console]');
     if(node?.type==='display_console'&&displayConsoleOpenButton&&!displayConsoleOpenButton.dataset.displayConsoleOpenBound){
       displayConsoleOpenButton.addEventListener('click',event=>{
@@ -17376,7 +18036,7 @@ function ensureDiagnosticTestPointState(points=null){
       sourcePort,
       targetPort,
       signalName:getEdgeSignalName(edge,sourceNode),
-      lineType:edge?.lineType==='can'?'CAN 总线':'普通连接线',
+      lineType:edge?.lineType==='power'?'电源线':(edge?.lineType==='can'?'CAN 总线':'普通连接线'),
       status,
       faultActive,
       protocolActive,
@@ -17433,7 +18093,7 @@ function ensureDiagnosticTestPointState(points=null){
 
   function renderDataflowCompactBadges(metrics){
     const badges=[
-      `<span class="dataflow-badge">${escapeHtml(metrics.lineType==='can'?'CAN 总线':'普通连接')}</span>`,
+      `<span class="dataflow-badge">${escapeHtml(metrics.lineType==='power'?'电源线':(metrics.lineType==='can'?'CAN 总线':'普通连接'))}</span>`,
       metrics.faultActive?`<span class="dataflow-badge dataflow-badge--fault">故障</span>`:'',
       metrics.protocolActive?`<span class="dataflow-badge dataflow-badge--protocol">协议</span>`:'',
       metrics.residualActive?`<span class="dataflow-badge dataflow-badge--residual">残差</span>`:'',
@@ -20108,6 +20768,7 @@ function decorateDataflowEdges(){
     sensor_additive_bias:'additive_bias',
     fault_bias_overlay:'additive_bias',
     sensor_scale_distortion:'scale',
+    electrical_signal_attenuation:'attenuation',
     noise_increase:'noise',
     fault_noise_injection:'noise',
     colored_noise:'colored_noise',
@@ -20482,6 +21143,10 @@ function decorateDataflowEdges(){
     }
     if(behavior==='scale'){
       return outputValue*Number(getFaultParam(model,'scale',1.2)||1.2);
+    }
+    if(behavior==='attenuation'){
+      const attenuationDb=Math.max(0,Number(getFaultParam(model,'attenuation_db',getFaultParam(model,'attenuationDb',0)))||0);
+      return outputValue*Math.pow(10,-attenuationDb/20);
     }
     if(behavior==='noise'){
       return outputValue+noiseAt(getNodeSeed(node.id),SIM.stepIndex,time)*Number(getFaultParam(model,'std',0.08)||0.08);
@@ -22942,7 +23607,7 @@ function decorateDataflowEdges(){
     return {
       title:`${source?.props?.name||target?.sourceNodeId||'源'} → ${dest?.props?.name||target?.targetNodeId||'目标'}`,
       rows:[
-        ['连接类型',target?.lineType==='can'?'CAN 总线':'普通连线'],
+        ['连接类型',target?.lineType==='power'?'电源线':(target?.lineType==='can'?'CAN 总线':'普通连线')],
         ['信号标识',signal?.signalId||target?.signalId||'未声明'],
         ['通道 / 报文',`${signal?.channelId||target?.channelId||'--'} / ${signal?.messageId||target?.messageId||'--'}`]
       ]
@@ -24658,6 +25323,7 @@ function decorateDataflowEdges(){
       edgeId:edge.id,
       sourceName:options.sourceName||base.sourceName,
       targetName:options.targetName||base.targetName,
+      pointType:options.pointType||'virtual',
       manuallyAdded:true
     };
   }
@@ -27007,6 +27673,8 @@ function decorateDataflowEdges(){
   function getVisualKind(node){
     const text=nodeText(node);
     if(!node) return 'unknown';
+    const paletteKey=node.paletteKey||node.templateId||node.pythonBinding?.moduleId||node.type;
+    if(window.__GZ_COMPONENT_REGISTRY__?.[paletteKey]?.group==='electrical') return 'electrical';
     if(node.type==='signal_source'||node.type==='subsystem_in_port') return 'source';
     if(node.type==='sum_block') return 'sum';
     if(node.type==='gain_block'||node.type==='mux_block'||node.type==='middle_var_assign') return 'utility';
@@ -27033,6 +27701,12 @@ function decorateDataflowEdges(){
         .forEach(cls=>el.classList.remove(cls));
       el.classList.add(`canvas-node--${kind}`);
       el.dataset.visualKind=kind;
+      if(kind==='electrical'){
+        el.classList.remove('b-sim');
+        el.classList.add('b-electrical');
+        const kicker=el.querySelector('.blk-kicker');
+        if(kicker){kicker.textContent='电气';}
+      }
     });
   }
 
@@ -27201,7 +27875,7 @@ function decorateDataflowEdges(){
   const COMPONENT_FAULT_LAYERS=['physical','electrical','protocol'];
   const COMPONENT_LAYER_MODELS={
     physical:['bias','drift','step','degradation','freeze','random'],
-    electrical:['bias','noise','freeze','intermittent'],
+    electrical:['bias','noise','attenuation','data_cutoff','freeze','intermittent'],
     protocol:['delay','dropout','tamper','stale']
   };
 
@@ -27615,6 +28289,12 @@ function decorateDataflowEdges(){
   }
 
   function defaultLayeredFaultParameters(layer,mathModel){
+    if(mathModel==='data_cutoff'){
+      return {start:0};
+    }
+    if(mathModel==='attenuation'){
+      return {attenuation_db:6,start:0,duration:''};
+    }
     if(mathModel==='degradation'){
       return {scale:0.85,start:0,duration:''};
     }
@@ -28277,6 +28957,8 @@ function decorateDataflowEdges(){
     return [
       {value:'noise',label:'随机噪声'},
       {value:'bias',label:'偏置叠加'},
+      {value:'attenuation',label:'信号衰减'},
+      {value:'data_cutoff',label:'数据通断'},
       {value:'freeze',label:'卡死保持'},
       {value:'intermittent',label:'间歇异常'}
     ];
@@ -29185,6 +29867,101 @@ function decorateDataflowEdges(){
   if(typeof renderPropertyPanel!=='undefined'){renderPropertyPanel=window.renderPropertyPanel;}
 })();
 
+// --- Canvas signal / electrical line visibility ---
+;(function installCanvasLineViewToggle(){
+  const VIEW_SEQUENCE=['all','signal','electrical'];
+  const VIEW_LABELS={all:'全部',signal:'信号',electrical:'电气'};
+  S.canvasLineView=VIEW_SEQUENCE.includes(S.canvasLineView)?S.canvasLineView:'all';
+
+  const isElectricalNode=node=>{
+    const paletteKey=node?.templateId||node?.type;
+    return window.__GZ_COMPONENT_REGISTRY__?.[paletteKey]?.group==='electrical';
+  };
+  const isSimulationNode=node=>node?.type==='simulation_block';
+
+  function isEdgeVisible(edge){
+    const source=getNode(edge?.sourceNodeId);
+    const target=getNode(edge?.targetNodeId);
+    if(!source||!target){return false;}
+    const sourceElectrical=isElectricalNode(source);
+    const targetElectrical=isElectricalNode(target);
+    if(S.canvasLineView==='signal'){
+      return !sourceElectrical&&!targetElectrical;
+    }
+    if(S.canvasLineView==='electrical'){
+      return (sourceElectrical&&targetElectrical)
+        ||(sourceElectrical&&isSimulationNode(target))
+        ||(targetElectrical&&isSimulationNode(source));
+    }
+    return true;
+  }
+
+  function syncCanvasLineView(){
+    const button=document.getElementById('canvas-line-view-toggle');
+    if(button){
+      button.textContent=VIEW_LABELS[S.canvasLineView];
+      button.dataset.lineView=S.canvasLineView;
+      button.setAttribute('aria-label',`当前画布线路视图：${VIEW_LABELS[S.canvasLineView]}`);
+    }
+    document.querySelectorAll('.blk[id^="b-"]').forEach(element=>{
+      const node=getNode(element.id.replace(/^b-/,''));
+      element.style.display=S.canvasLineView==='signal'&&isElectricalNode(node)?'none':'';
+    });
+    document.querySelectorAll('[data-edge-id]').forEach(element=>{
+      const edge=S.modelEdges.find(item=>item.id===element.dataset.edgeId);
+      element.style.display=edge&&isEdgeVisible(edge)?'':'none';
+    });
+  }
+
+  window.cycleCanvasLineView=function(){
+    const current=VIEW_SEQUENCE.indexOf(S.canvasLineView);
+    S.canvasLineView=VIEW_SEQUENCE[(current+1)%VIEW_SEQUENCE.length];
+    renderModelNodes();
+    renderEdges();
+    syncCanvasLineView();
+  };
+  window.getCanvasLineView=()=>S.canvasLineView;
+
+  const previousRenderModelNodes=window.renderModelNodes||(typeof renderModelNodes==='function'?renderModelNodes:null);
+  if(previousRenderModelNodes){
+    window.renderModelNodes=function(){
+      const result=previousRenderModelNodes.apply(this,arguments);
+      syncCanvasLineView();
+      return result;
+    };
+    if(typeof renderModelNodes!=='undefined'){renderModelNodes=window.renderModelNodes;}
+  }
+
+  const previousRenderEdges=window.renderEdges||(typeof renderEdges==='function'?renderEdges:null);
+  if(previousRenderEdges){
+    window.renderEdges=function(){
+      const result=previousRenderEdges.apply(this,arguments);
+      syncCanvasLineView();
+      return result;
+    };
+    if(typeof renderEdges!=='undefined'){renderEdges=window.renderEdges;}
+  }
+
+  setTimeout(syncCanvasLineView,0);
+})();
+
+// --- Refresh RF vector controls when the output shape or editing mode changes ---
+;(function installRfVectorFieldRefresh(){
+  if(window.__rfVectorFieldRefreshInstalled){return;}
+  window.__rfVectorFieldRefreshInstalled=true;
+  document.addEventListener('change',event=>{
+    const field=event.target;
+    if(!['prop-outputFormat','prop-rfVectorLength','prop-rfVectorConfigMode'].includes(field?.id)){return;}
+    const target=getNode(S.selBlk);
+    if(target?.type!=='signal_source'||normalizeSignalSourcePropsRuntime(target.props||{}).signalDomain!=='rf'){return;}
+    const values=readSchemaPropertyValues(target)||{};
+    target.props=normalizeSignalSourcePropsRuntime({...target.props,...values,[field.id.replace(/^prop-/,'')]:field.value});
+    if(typeof setDirtyState==='function'){setDirtyState();}
+    window.renderModelNodes?.();
+    window.renderPropertyPanel?.(target);
+  },true);
+})();
+
 ;(function installMultimeterCanvasLeadControls(){
   const previousRenderModelNodes=window.renderModelNodes||(typeof renderModelNodes!=='undefined'?renderModelNodes:null);
   if(!previousRenderModelNodes||window.__multimeterCanvasLeadControlsWrapped||!window.__GZ_MULTIMETER_LEAD_BINDING_ENABLED__){return;}
@@ -29240,7 +30017,7 @@ function decorateDataflowEdges(){
       return {
         inputs:getDisplayConsoleInputDefinitions(node).map((input,index)=>({
           key:`display-input-${index}`,
-          label:`${input.label} / 标量`,
+        label:`${input.label} / ${input.type||'float'}`,
           kind:'input',
           side:'left',
           meta:{displayName:input.label,type:input.type||'scalar'}
@@ -29352,8 +30129,8 @@ function decorateDataflowEdges(){
       actual:collectRuntimeOutputs(SIM.actual),
       reference:collectRuntimeOutputs(SIM.reference)
     };
-    trace.time.push(time);
-    trace.steps.push(step);
+    pushLimitedSample(trace.time,time);
+    pushLimitedSample(trace.steps,step);
     if(document.getElementById('cw')?.dataset.view==='components'){
       window.renderSimulationViewPanel?.();
     }
@@ -29546,8 +30323,11 @@ function decorateDataflowEdges(){
   }
 
   function selectVectorComponent(value,vectorIndex){
-    if(!Number.isInteger(vectorIndex)){return value;}
-    return Array.isArray(value)?value[vectorIndex]:undefined;
+    if(Array.isArray(value)){
+      const index=Number.isInteger(vectorIndex)&&vectorIndex>=0?vectorIndex:0;
+      return value[index];
+    }
+    return Number.isInteger(vectorIndex)?undefined:value;
   }
 
   function getStepTime(trace,step,index){
@@ -30273,11 +31053,41 @@ function decorateDataflowEdges(){
   };
 })();
 
+// CAN is again a first-class connection tool.  Electrical endpoints retain
+// their normal-line appearance and no longer force a power-line type.
+;(function restoreCanConnectionToolLabel(){
+  const previousSetConnectionTool=window.setConnectionTool||setConnectionTool;
+  window.setConnectionTool=function(type){
+    previousSetConnectionTool(type);
+    const chip=document.getElementById('line-mode-chip');
+    if(chip){
+      chip.textContent=S.activeLineType==='can'?'CAN 总线':'普通连接线';
+      chip.classList.remove('power');
+    }
+  };
+  setConnectionTool=window.setConnectionTool;
+})();
+
 // --- Simulation power ports ---
 ;(function installSimulationPowerPortAdapter(){
   const previousGetNodePorts=window.getNodePorts||(typeof getNodePorts==='function'?getNodePorts:null);
   if(!previousGetNodePorts||window.__simulationPowerPortsInstalled){return;}
   window.__simulationPowerPortsInstalled=true;
+
+  // A later Python-port adapter rebuilds this metadata from `meta.type` alone.
+  // Keep power terminals explicit so the connection compatibility check accepts
+  // electrical-component outputs wired into a simulation-component supply input.
+  const previousBuildEdgePortMeta=window.buildEdgePortMeta||(typeof buildEdgePortMeta==='function'?buildEdgePortMeta:null);
+  if(previousBuildEdgePortMeta){
+    window.buildEdgePortMeta=function(port){
+      const result=previousBuildEdgePortMeta.apply(this,arguments);
+      if(port?.kind==='power'||port?.kind==='powerInput'||port?.kind==='powerOutput'){
+        return {...result,type:'power'};
+      }
+      return result;
+    };
+    if(typeof buildEdgePortMeta!=='undefined'){buildEdgePortMeta=window.buildEdgePortMeta;}
+  }
 
   const normalizePowerPorts=(items,fallbackName,voltage)=>{
     const base=Array.isArray(items)?items:[];
@@ -30290,18 +31100,34 @@ function decorateDataflowEdges(){
         voltage:String(source.voltage||voltage)
       };
     });
-    return normalized.length?normalized:[{name:fallbackName,type:'电源',voltage}];
+    return normalized;
   };
 
   const ensurePowerInterfaces=node=>{
     const props=node?.props||{};
-    props.powerInputs=normalizePowerPorts(props.powerInputs,'电源输入','28V');
-    props.powerOutputs=normalizePowerPorts(props.powerOutputs,'电源地','0V');
-    return props;
+    return {
+      ...props,
+      powerInputs:normalizePowerPorts(props.powerInputs,'电源输入','28V'),
+      powerOutputs:[]
+    };
   };
 
   window.getNodePorts=function(node){
     const ports=previousGetNodePorts.apply(this,arguments);
+    if(node?.type==='signal_source'){
+      const props=normalizeSignalSourcePropsRuntime(node.props||{});
+      if(isRfVectorOutput(props)){
+        const vectorLength=Math.min(16,Math.max(2,Number.parseInt(props.rfVectorLength,10)||4));
+        return {
+          ...ports,
+          outputs:(ports.outputs||[]).map((port,index)=>index===0?{
+            ...port,
+            dataType:'vector',
+            vectorLength
+          }:port)
+        };
+      }
+    }
     if(node?.type!=='simulation_block'){
       return ports;
     }
@@ -30314,7 +31140,7 @@ function decorateDataflowEdges(){
         ...props.powerInputs.map((item,index)=>({
           key:`power-input-${index}`,
           label:`电源输入 ${index+1} · ${item.name} / ${item.voltage}`,
-          kind:'power',
+          kind:'powerInput',
           side:'top',
           meta:item
         }))
@@ -30324,7 +31150,7 @@ function decorateDataflowEdges(){
         ...props.powerOutputs.map((item,index)=>({
           key:`power-output-${index}`,
           label:`电源输出 ${index+1} · ${item.name} / ${item.voltage}`,
-          kind:'power',
+          kind:'powerOutput',
           side:'bottom',
           meta:item
         }))

@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   SIGNAL_DOMAINS,
   createSignalSourceProps,
+  formatRfVectorValues,
+  getRfVectorValues,
   getSignalSourceScalarFallback,
+  isRfVectorOutput,
   normalizeSignalSourceProps,
   summarizeSignalSource
 } from '../src/services/signalSourceDomainService.js';
@@ -42,6 +45,7 @@ describe('signalSourceDomainService', () => {
       signalDomain: 'rf',
       centerFrequency: '',
       bandwidth: '',
+      power: '0',
       powerUnit: 'dBm',
       pulseWidthUnit: 'μs',
       pulsePeriodUnit: 'ms'
@@ -95,6 +99,10 @@ describe('signalSourceDomainService', () => {
     });
   });
 
+  it('uses the default 0 dBm level for legacy RF sources with an empty power field', () => {
+    expect(normalizeSignalSourceProps({ signalDomain: 'rf', power: '' }).power).toBe('0');
+  });
+
   it('summarizes each signal domain for canvas display', () => {
     expect(summarizeSignalSource({ props: createSignalSourceProps('digital', { digitalMode: 'enum', initialState: '2' }) }))
       .toBe('数字 · enum · 取值 2');
@@ -103,7 +111,7 @@ describe('signalSourceDomainService', () => {
     expect(summarizeSignalSource({ props: createSignalSourceProps('analog', { waveType: 'sine', amplitude: '1.0', unit: 'V', frequency: '10Hz' }) }))
       .toBe('模拟 · sine · 1.0V · 10Hz');
     expect(summarizeSignalSource({ props: createSignalSourceProps('rf', { centerFrequency: '2.4GHz', bandwidth: '20MHz', modulation: 'QPSK' }) }))
-      .toBe('射频 · 2.4GHz · 20MHz · QPSK');
+      .toBe('射频 · 2.4GHz · 20MHz · QPSK · 0dBm');
   });
 
   it('selects numeric scalar fallbacks for backend execution', () => {
@@ -112,5 +120,26 @@ describe('signalSourceDomainService', () => {
     expect(getSignalSourceScalarFallback({ signalDomain: 'command', payloadValue: '7' })).toBe(7);
     expect(getSignalSourceScalarFallback({ signalDomain: 'rf', power: '10' })).toBe(10);
     expect(getSignalSourceScalarFallback({ signalDomain: 'rf', power: '10dBm' })).toBe(0);
+  });
+
+  it('normalizes configurable RF vector values and output mode', () => {
+    const props = normalizeSignalSourceProps({
+      signalDomain: 'rf',
+      outputFormat: '向量',
+      rfVectorLength: '3',
+      rfVectorConfigMode: 'item',
+      rfVectorValues: '1, 0.5'
+    });
+
+    expect(props).toMatchObject({
+      outputFormat: '向量',
+      rfVectorLength: 3,
+      rfVectorConfigMode: 'item',
+      rfVectorValues: '1, 0.5, 1'
+    });
+    expect(getRfVectorValues('2， 1; 0.25', 3)).toEqual([2, 1, 0.25]);
+    expect(formatRfVectorValues([2, 1], 3)).toBe('2, 1, 1');
+    expect(isRfVectorOutput(props)).toBe(true);
+    expect(isRfVectorOutput({ signalDomain: 'rf', outputFormat: '标量' })).toBe(false);
   });
 });

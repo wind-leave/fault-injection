@@ -20,6 +20,24 @@ class SchemaValidationTests(unittest.TestCase):
 
         self.assertIs(result, package)
 
+    def test_accepts_one_microsecond_step_size(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 0.1
+        package["simulationConfig"]["stepSize"] = 0.000001
+
+        result = validate_executable_package(package)
+
+        self.assertIs(result, package)
+
+    def test_accepts_a_one_picosecond_step_size(self):
+        package = valid_package()
+        package["simulationConfig"]["duration"] = 1e-11
+        package["simulationConfig"]["stepSize"] = 1e-12
+
+        result = validate_executable_package(package)
+
+        self.assertIs(result, package)
+
     def test_rejects_unsupported_node_type(self):
         package = valid_package()
         package["nodes"].append({"id": "bad-1", "type": "ui_panel"})
@@ -40,16 +58,14 @@ class SchemaValidationTests(unittest.TestCase):
         self.assertEqual(context.exception.error_code, "SIMULATION_LIMIT_EXCEEDED")
         self.assertEqual(context.exception.field, "simulationConfig.duration")
 
-    def test_rejects_excessive_total_sample_count(self):
+    def test_accepts_total_sample_count_above_the_former_limit(self):
         package = valid_package()
         package["simulationConfig"]["duration"] = 1000.0
-        package["simulationConfig"]["stepSize"] = 0.001
+        package["simulationConfig"]["stepSize"] = 0.0005
 
-        with self.assertRaises(SimulationBackendError) as context:
-            validate_executable_package(package)
+        result = validate_executable_package(package)
 
-        self.assertEqual(context.exception.error_code, "SIMULATION_LIMIT_EXCEEDED")
-        self.assertEqual(context.exception.field, "simulationConfig.samples")
+        self.assertIs(result, package)
 
     def test_rejects_non_numeric_parameter(self):
         package = valid_package()

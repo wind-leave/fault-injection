@@ -63,6 +63,7 @@ describe('left palette taxonomy', () => {
 
     expect(groups).toEqual([
       ['signals', '系统信号'],
+      ['electrical', '电气组件'],
       ['simulation', '仿真组件'],
       ['subsystem', '子系统'],
       ['faults', '故障组件'],
@@ -77,16 +78,20 @@ describe('left palette taxonomy', () => {
     wrapper.unmount();
   });
 
-  it('keeps subsystem, instruments, and CAN tools in separate groups', () => {
+  it('keeps subsystem, instruments, and line tools in separate groups', () => {
     const wrapper = mountPalette();
 
     expect(groupComponents(wrapper, 'signals')).toEqual([
       'signal_source',
       'signal_source_digital',
-      'signal_source_command',
       'signal_source_rf'
     ]);
     expect(wrapper.find('[data-palette-group="signal-ops"]').exists()).toBe(false);
+    expect(groupComponents(wrapper, 'electrical')).toEqual([
+      'electrical_ac_power_source',
+      'electrical_dc_boost',
+      'electrical_ac_dc_matching'
+    ]);
     expect(groupComponents(wrapper, 'simulation')).toEqual([
       'airspeed_sensor',
       'barometer_sensor'
@@ -111,6 +116,7 @@ describe('left palette taxonomy', () => {
     expect(groupBody(wrapper, 'instruments').text()).toContain('数字万用表');
     expect(groupComponents(wrapper, 'display-control')).toEqual(['display_console_1', 'display_console_2']);
     expect(groupBody(wrapper, 'can-lines').find('[data-line-type="normal"]').exists()).toBe(true);
+    expect(groupBody(wrapper, 'can-lines').find('[data-line-type="power"]').exists()).toBe(false);
     expect(groupBody(wrapper, 'can-lines').find('[data-line-type="can"]').exists()).toBe(true);
 
     wrapper.unmount();
@@ -121,7 +127,7 @@ describe('left palette taxonomy', () => {
 
     expect(wrapper.find('[data-component="signal_source"] .citem-icon-badge').text()).toBe('A');
     expect(wrapper.find('[data-component="signal_source_digital"] .citem-icon-badge').text()).toBe('D');
-    expect(wrapper.find('[data-component="signal_source_command"] .citem-icon-badge').text()).toBe('C');
+    expect(wrapper.find('[data-component="signal_source_command"]').exists()).toBe(false);
     expect(wrapper.find('[data-component="signal_source_rf"] .citem-icon-badge').text()).toBe('RF');
     expect(wrapper.find('[data-component="sum_block"]').exists()).toBe(false);
     expect(wrapper.find('[data-component="instrument_scope"] .citem-icon-badge').text()).toBe('波');
@@ -134,6 +140,27 @@ describe('left palette taxonomy', () => {
     expect(wrapper.find('[data-component="display_console_1"] .citem-icon-badge').classes()).toContain(
       'citem-icon-badge--display-control'
     );
+
+    wrapper.unmount();
+  });
+
+  it('offers normal and CAN lines without a power-line tool', () => {
+    const wrapper = mountPalette();
+    const lineTools = groupBody(wrapper, 'can-lines');
+
+    expect(lineTools.find('[data-line-type="normal"]').exists()).toBe(true);
+    expect(lineTools.find('[data-line-type="power"]').exists()).toBe(false);
+    expect(lineTools.find('[data-line-type="can"]').exists()).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it('shows the protocol-layer injector together with the restored CAN tool', () => {
+    const wrapper = mountPalette();
+
+    expect(wrapper.find('[data-component="protocol_fault_injector"]').exists()).toBe(true);
+    expect(groupBody(wrapper, 'can-lines').find('[data-line-type="can"]').exists()).toBe(true);
+    expect(groupBody(wrapper, 'can-lines').find('[data-line-type="power"]').exists()).toBe(false);
 
     wrapper.unmount();
   });
@@ -152,6 +179,24 @@ describe('left palette taxonomy', () => {
     }));
     await wrapper.vm.$nextTick();
     expect(groupComponents(wrapper, 'display-control')).toEqual(['display_console_1', 'display_console_2']);
+
+    wrapper.unmount();
+  });
+
+  it('treats each electrical component as a one-time palette entry', async () => {
+    const wrapper = mountPalette();
+
+    window.dispatchEvent(new CustomEvent('gz:palette-component-created', {
+      detail: { paletteKey: 'electrical_dc_boost' }
+    }));
+    await wrapper.vm.$nextTick();
+    expect(groupComponents(wrapper, 'electrical')).not.toContain('electrical_dc_boost');
+
+    window.dispatchEvent(new CustomEvent('gz:palette-component-deleted', {
+      detail: { paletteKey: 'electrical_dc_boost' }
+    }));
+    await wrapper.vm.$nextTick();
+    expect(groupComponents(wrapper, 'electrical')).toContain('electrical_dc_boost');
 
     wrapper.unmount();
   });

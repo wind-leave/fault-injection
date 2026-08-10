@@ -13,6 +13,7 @@ export const FAULT_RUNTIME_BEHAVIOR_BY_ID = Object.freeze({
   sensor_additive_bias: 'additive_bias',
   fault_bias_overlay: 'additive_bias',
   sensor_scale_distortion: 'scale',
+  electrical_signal_attenuation: 'attenuation',
   noise_increase: 'noise',
   fault_noise_injection: 'noise',
   colored_noise: 'colored_noise',
@@ -46,6 +47,7 @@ export const FAULT_TARGET_MODULES_BY_ID = Object.freeze({
   sensor_additive_bias: ['imu_gyro', 'barometer', 'gps_velocity'],
   fault_bias_overlay: ['imu_gyro', 'barometer', 'gps_velocity'],
   sensor_scale_distortion: ['imu_accel', 'gps_velocity'],
+  electrical_signal_attenuation: ['rf_downconverter', 'imu_gyro', 'imu_accel', 'barometer'],
   noise_increase: ['imu_gyro', 'imu_accel', 'barometer'],
   fault_noise_injection: ['imu_gyro', 'imu_accel', 'barometer'],
   colored_noise: ['imu_gyro', 'barometer'],
@@ -72,6 +74,9 @@ const RUNTIME_BEHAVIOR_ALIASES = Object.freeze({
   drift: 'parameter_drift',
   step: 'parameter_step',
   degradation: 'scale',
+  attenuation: 'attenuation',
+  disconnect: 'data_cutoff',
+  cutoff: 'data_cutoff',
   random: 'noise',
   delay: 'fixed_delay',
   dropout: 'packet_loss',
@@ -86,6 +91,7 @@ const PYTHON_KIND_BY_BEHAVIOR = Object.freeze({
   lock: 'lock',
   saturation: 'saturation',
   scale: 'scale',
+  attenuation: 'attenuation',
   noise: 'gaussian_noise',
   colored_noise: 'colored_noise',
   freeze: 'freeze',
@@ -332,6 +338,15 @@ export function applyScalarFault(value, options = {}) {
 
   if (behavior === 'scale') {
     return input * asNumber(params.scale, 1);
+  }
+
+  if (behavior === 'attenuation') {
+    const decibels = Math.max(0, asNumber(readParam(params, ['attenuation_db', 'attenuationDb', 'loss_db'], 0), 0));
+    return input * Math.pow(10, -decibels / 20);
+  }
+
+  if (behavior === 'data_cutoff') {
+    return 0;
   }
 
   if (behavior === 'parameter_drift') {
@@ -1059,6 +1074,12 @@ export function buildFaultPythonModuleSpec(faultModel = {}) {
     '        return value + _num(PARAMS.get("offset", PARAMS.get("delta_p", PARAMS.get("bias", 0.0))))',
     '    if KIND == "scale":',
     '        return value * _num(PARAMS.get("scale", 1.0), 1.0)',
+    '    if KIND == "attenuation":',
+    '        import math',
+    '        attenuation_db = max(0.0, _num(PARAMS.get("attenuation_db", PARAMS.get("attenuationDb", 0.0))))',
+    '        return value * math.pow(10.0, -attenuation_db / 20.0)',
+    '    if KIND == "data_cutoff":',
+    '        return 0.0',
     '    if KIND == "drift":',
     '        return value + max(time - start, 0.0) * _num(PARAMS.get("rate", 0.0))',
     '    if KIND == "step":',

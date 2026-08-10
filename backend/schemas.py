@@ -13,9 +13,9 @@ SUPPORTED_NODE_TYPES = {
 
 LIMITS = {
     "max_duration": 1000.0,
-    "min_step_size": 0.001,
+    # 1 ps supports a 100 GHz carrier with ten samples per cycle.
+    "min_step_size": 1e-12,
     "max_step_size": 1.0,
-    "max_samples": 100_000,
     "max_nodes": 200,
     "max_edges": 400,
     "max_faults": 50,
@@ -94,6 +94,13 @@ def validate_ports(value, field):
     return ports
 
 
+def validate_power_ports(value, field):
+    ports = ensure_list(value or [], field)
+    for index, port in enumerate(ports):
+        ensure_mapping(port, f"{field}[{index}]")
+    return ports
+
+
 SIGNAL_SOURCE_TEXT_PARAMETERS = {"signalDomain", "waveType", "outputFormat", "rfModulation"}
 
 
@@ -145,10 +152,8 @@ def validate_executable_package(package):
         raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "simulationConfig.duration", "duration is outside the allowed range")
     if step_size < LIMITS["min_step_size"] or step_size > LIMITS["max_step_size"]:
         raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "simulationConfig.stepSize", "stepSize is outside the allowed range")
-    sample_count = math.ceil(duration / step_size)
-    if sample_count > LIMITS["max_samples"]:
-        raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "simulationConfig.samples", "sample count is outside the allowed range")
-
+    # Avoid rejecting an exact boundary such as 0.1 s / 1 µs because of a
+    # tiny floating-point remainder (for example, 100000.00000000001).
     nodes = ensure_list(package.get("nodes"), "nodes")
     edges = ensure_list(package.get("edges"), "edges")
     faults = ensure_list(package.get("faultInstances", []), "faultInstances")
@@ -173,6 +178,9 @@ def validate_executable_package(package):
             raise SimulationBackendError("UNSUPPORTED_NODE_TYPE", f"nodes[{index}].type", f"unsupported node type: {node_type}")
         validate_ports(node.get("inputs", []), f"nodes[{index}].inputs")
         validate_ports(node.get("outputs", []), f"nodes[{index}].outputs")
+        if node_type == "simulation_block":
+            validate_power_ports(node.get("powerInputs", []), f"nodes[{index}].powerInputs")
+            validate_power_ports(node.get("powerOutputs", []), f"nodes[{index}].powerOutputs")
         if node_type == "sum_block":
             validate_sum_block_parameters(node.get("parameters", {}), f"nodes[{index}].parameters")
         else:

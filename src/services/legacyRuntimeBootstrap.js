@@ -165,10 +165,13 @@ async function fetchDefaultFlightModelPackage(url = getDefaultFlightModelPackage
 
 function createExportMeta(state = {}) {
   const activeModelPackage = state.activeModelPackage ?? null;
+  const taskName = typeof state.taskName === 'string' && state.taskName.trim()
+    ? state.taskName.trim()
+    : null;
   if (activeModelPackage) {
     return {
       modelId: activeModelPackage.modelId ?? 'workbench-export',
-      modelName: activeModelPackage.modelName ?? 'Workbench Export',
+      modelName: taskName ?? activeModelPackage.modelName ?? 'Workbench Export',
       description: activeModelPackage.description ?? '',
       systemFamily: activeModelPackage.systemFamily ?? null,
       supportedFaultLibraries: Array.isArray(activeModelPackage.supportedFaultLibraries)
@@ -181,7 +184,7 @@ function createExportMeta(state = {}) {
 
   return {
     modelId: 'workbench-export',
-    modelName: 'Workbench Export',
+    modelName: taskName ?? 'Workbench Export',
     description: '',
     systemFamily: null,
     supportedFaultLibraries: [],
@@ -356,6 +359,8 @@ export function __resetLegacyRuntimeForTests() {
     if (runtimeListeners.simulationConfigInput) {
       document.getElementById('sim-dur')?.removeEventListener('input', runtimeListeners.simulationConfigInput);
       document.getElementById('sim-step')?.removeEventListener('input', runtimeListeners.simulationConfigInput);
+      document.getElementById('sim-dur-unit')?.removeEventListener('change', runtimeListeners.simulationConfigInput);
+      document.getElementById('sim-step-unit')?.removeEventListener('change', runtimeListeners.simulationConfigInput);
       document.getElementById('sim-dur')?.removeEventListener('change', runtimeListeners.simulationConfigInput);
       document.getElementById('sim-step')?.removeEventListener('change', runtimeListeners.simulationConfigInput);
     }

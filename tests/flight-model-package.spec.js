@@ -21,6 +21,8 @@ import {
   getComponentFaultVariables,
   normalizeModelNode
 } from '../src/services/modelStore.js';
+import { COMPONENT_REGISTRY } from '../src/services/componentRegistry.js';
+import { buildBackendExecutablePackage } from '../src/services/backendExecutablePackageService.js';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -268,7 +270,6 @@ describe('flightModelPackageService', () => {
     expect(result.ok).toBe(false);
     expect(result.errors).toContain('pythonModules[0].moduleId is required.');
     expect(result.errors).toContain('pythonModules[0].fileName is required.');
-    expect(result.errors).toContain('pythonModules[0].source is required.');
     expect(result.errors).toContain('pythonModules[0].entryFunction is required.');
     expect(result.errors).toContain('pythonModules[1].entryFunction is required.');
   });
@@ -383,7 +384,7 @@ describe('flightModelPackageService', () => {
     expect(applied.snapshot.faultInstances).toEqual(faultInstances);
   });
 
-  it('builds a flight model package with embedded python modules from bound simulation blocks', () => {
+  it('does not save custom python modules in a flight model package', () => {
     const packageData = buildFlightModelPackage({
       meta: {
         modelId: 'attitude-controller',
@@ -434,16 +435,12 @@ describe('flightModelPackageService', () => {
 
     expect(packageData.schemaVersion).toBe(1);
     expect(packageData.packageType).toBe('flight-control-model');
-    expect(packageData.pythonModules).toHaveLength(1);
-    expect(packageData.pythonModules[0]).toMatchObject({
-      moduleId: 'attitude_pid',
-      fileName: 'attitude_pid.py',
-      entryFunction: 'process'
-    });
+    expect(packageData.pythonModules).toEqual([]);
+    expect(packageData.workbenchSnapshot.modelNodes[0].pythonBinding).toBeNull();
     expect(packageData.workbenchSnapshot.modelNodes).toHaveLength(1);
   });
 
-  it('exports a single pythonModules entry when multiple simulation blocks bind to the same module', () => {
+  it('does not export custom python module references when multiple blocks bind to them', () => {
     const binding = createSimulationBlockPythonBinding({
       fileName: 'attitude_pid.py',
       moduleName: 'attitude_pid',
@@ -496,15 +493,8 @@ describe('flightModelPackageService', () => {
       faultLibrary: []
     });
 
-    expect(packageData.pythonModules).toHaveLength(1);
-    expect(packageData.pythonModules[0]).toMatchObject({
-      moduleId: 'attitude_pid',
-      fileName: 'attitude_pid.py',
-      entryFunction: 'process',
-      category: 'controllers',
-      sourcePackageId: 'evtol-small-nonlinear',
-      sourcePackageName: 'eVTOL Small Nonlinear Flight Control'
-    });
+    expect(packageData.pythonModules).toEqual([]);
+    expect(packageData.workbenchSnapshot.modelNodes.map((node) => node.pythonBinding)).toEqual([null, null]);
   });
 
   it('deep clones exported workbenchSnapshot.modelEdges so edits do not mutate the input snapshot', () => {
@@ -676,18 +666,8 @@ describe('flightModelPackageService', () => {
     });
 
     expect(binding.moduleId).toBe('attitude_pid');
-    expect(packageData.pythonModules).toHaveLength(1);
-    expect(packageData.pythonModules[0]).toMatchObject({
-      moduleId: 'attitude_pid',
-      fileName: 'attitude_pid.py',
-      entryFunction: 'process'
-    });
-    expect(packageData.workbenchSnapshot.modelNodes[0].pythonBinding).toMatchObject({
-      bound: true,
-      moduleId: 'attitude_pid',
-      fileName: 'attitude_pid.py',
-      entryFunction: 'process'
-    });
+    expect(packageData.pythonModules).toEqual([]);
+    expect(packageData.workbenchSnapshot.modelNodes[0].pythonBinding).toBeNull();
   });
 
   it('preserves package-aware python binding metadata through the factory and package export', () => {
@@ -753,18 +733,57 @@ describe('flightModelPackageService', () => {
       sourcePackageName: 'eVTOL Small Nonlinear Flight Control',
       executionMode: 'mock'
     });
+    expect(packageData.workbenchSnapshot.modelNodes[0].pythonBinding).toBeNull();
+    expect(packageData.pythonModules).toEqual([]);
+  });
+
+  it('keeps built-in vector simulation bindings executable after save and re-import', () => {
+    const template = COMPONENT_REGISTRY.scalar_to_vector4;
+    const simulationNode = {
+      id: 'scalar-to-vector-node',
+      type: 'simulation_block',
+      templateId: template.templateId,
+      props: JSON.parse(JSON.stringify(template.defaults)),
+      inputs: JSON.parse(JSON.stringify(template.ports.inputs)),
+      outputs: JSON.parse(JSON.stringify(template.ports.outputs)),
+      pythonBinding: JSON.parse(JSON.stringify(template.pythonBinding))
+    };
+    const packageData = buildFlightModelPackage({
+      meta: { modelId: 'vector-save-import', modelName: 'Vector Save Import' },
+      snapshot: { modelNodes: [simulationNode], modelEdges: [] }
+    });
+    const applied = applyFlightModelPackage(packageData);
+    const executable = buildBackendExecutablePackage(applied.snapshot);
+
+    expect(packageData.pythonModules).toEqual([]);
     expect(packageData.workbenchSnapshot.modelNodes[0].pythonBinding).toMatchObject({
       bound: true,
-      moduleId: 'attitude_pid',
-      moduleCategory: 'controllers',
-      sourcePackageId: 'evtol-small-nonlinear',
-      sourcePackageName: 'eVTOL Small Nonlinear Flight Control'
+      sourceKind: 'builtin',
+      moduleId: 'scalar_to_vector4'
     });
-    expect(packageData.pythonModules[0]).toMatchObject({
-      moduleId: 'attitude_pid',
-      category: 'controllers',
-      sourcePackageId: 'evtol-small-nonlinear',
-      sourcePackageName: 'eVTOL Small Nonlinear Flight Control'
+    expect(applied.ok).toBe(true);
+    expect(executable.nodes[0]).toMatchObject({
+      pythonBinding: { moduleId: 'scalar_to_vector4', entryFunction: 'process' },
+      outputs: [{ dataType: 'vector', vectorLength: 4 }]
+    });
+
+    const legacyPackage = {
+      ...packageData,
+      workbenchSnapshot: {
+        ...packageData.workbenchSnapshot,
+        modelNodes: packageData.workbenchSnapshot.modelNodes.map((node) => ({
+          ...node,
+          pythonBinding: null
+        }))
+      }
+    };
+    const legacyApplied = applyFlightModelPackage(legacyPackage);
+    const legacyExecutable = buildBackendExecutablePackage(legacyApplied.snapshot);
+
+    expect(legacyApplied.ok).toBe(true);
+    expect(legacyExecutable.nodes[0].pythonBinding).toEqual({
+      moduleId: 'scalar_to_vector4',
+      entryFunction: 'process'
     });
   });
 
@@ -816,8 +835,8 @@ describe('flightModelPackageService', () => {
       faultLibrary: []
     });
 
-    expect(packageData.pythonModules).toHaveLength(1);
-    expect(packageData.pythonModules[0].moduleId).toBe('attitude_pid');
+    expect(packageData.pythonModules).toEqual([]);
+    expect(packageData.workbenchSnapshot.modelNodes[0].pythonBinding).toBeNull();
     expect(packageData.workbenchSnapshot.modelNodes[1].pythonBinding).toBeNull();
   });
 

@@ -71,7 +71,7 @@ describe('Python binding UI and state helpers', () => {
     expect(counts).toEqual({ inputs: 2, outputs: 2, middleVars: 1 });
   });
 
-  it('returns deterministic values in mock execution mode', () => {
+  it('uses a transparent fallback in mock execution mode', () => {
     const result = executePythonBindingSync({
       adapterMode: 'mock',
       payload: {
@@ -82,9 +82,8 @@ describe('Python binding UI and state helpers', () => {
       }
     });
 
-    expect(result.outputs.output_0).toBeTypeOf('number');
-    expect(result.outputs.output_1).toBeTypeOf('number');
-    expect(result.middleVars.integral).toBeTypeOf('number');
+    expect(result.outputs).toEqual({ output_0: 0.5, output_1: 0.5 });
+    expect(result.middleVars).toEqual({ integral: 0 });
   });
 
   it('runs simple bound Python source in mock execution mode', () => {

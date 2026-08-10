@@ -1,4 +1,7 @@
 import {
+  RF_VECTOR_LENGTH_LIMITS,
+  formatRfVectorValues,
+  getRfVectorValues,
   SIGNAL_DOMAINS,
   normalizeSignalSourceProps
 } from './signalSourceDomainService.js';
@@ -114,7 +117,6 @@ const PROPERTY_SCHEMAS = {
         domains: ['analog'],
         fields: [
           { key: 'waveType', label: '波形', type: 'select', options: ['正弦', '阶跃', '常值', '脉冲', 'sine', 'step', 'constant', 'ramp', 'pulse', 'noise'], fallback: '正弦' },
-          { key: 'outputFormat', label: '输出格式', type: 'select', options: PORT_FORMATS, fallback: '标量', row: 'analog-format' },
           { key: 'amplitude', label: '幅值', type: 'text', fallback: '1.0', row: 'analog-basic', waveTypes: ['sine'] },
           { key: 'frequency', label: '频率 (Hz)', type: 'text', fallback: '1.0', row: 'analog-basic', waveTypes: ['sine'] },
           { key: 'phase', label: '相位 (°)', type: 'text', fallback: '0', row: 'analog-phase', waveTypes: ['sine'] },
@@ -137,6 +139,10 @@ const PROPERTY_SCHEMAS = {
         label: '射频信号配置',
         domains: ['rf'],
         fields: [
+          { key: 'outputFormat', label: '输出格式', type: 'select', options: ['标量', '向量'], fallback: '标量', row: 'rf-output' },
+          { key: 'rfVectorLength', label: '向量长度', type: 'number', valueType: 'integer', min: RF_VECTOR_LENGTH_LIMITS.min, max: RF_VECTOR_LENGTH_LIMITS.max, fallback: 4, row: 'rf-vector-mode', rfOutputFormats: ['向量'] },
+          { key: 'rfVectorConfigMode', label: '配置方式', type: 'select', options: [{ value: 'batch', label: '集中配置' }, { value: 'item', label: '逐项配置' }], fallback: 'batch', row: 'rf-vector-mode', rfOutputFormats: ['向量'] },
+          { key: 'rfVectorValues', label: '向量幅度系数', type: 'rfVectorValues', fallback: '1, 1, 1, 1', rfOutputFormats: ['向量'] },
           { key: 'centerFrequencyUnit', label: '\u9891\u7387\u5355\u4f4d', type: 'select', options: ['Hz', 'kHz', 'MHz', 'GHz'], fallback: 'GHz', row: 'rf-frequency', order: 2 },
           { key: 'centerFrequency', label: '中心频率', type: 'text', fallback: '', row: 'rf-frequency' },
           { key: 'power', label: '功率', type: 'text', fallback: '', row: 'rf-power' },
@@ -485,6 +491,34 @@ function renderDigitalGearConfigField(node, field, helpers = {}) {
     </div>`;
 }
 
+function renderRfVectorValuesField(node, field, helpers = {}) {
+  const escape = helpers.escapeHtml || escapeHtml;
+  const props = normalizeSignalSourceProps(node?.props ?? {});
+  const length = Math.min(
+    RF_VECTOR_LENGTH_LIMITS.max,
+    Math.max(RF_VECTOR_LENGTH_LIMITS.min, Number(props.rfVectorLength) || 4)
+  );
+  const values = getRfVectorValues(props.rfVectorValues, length);
+
+  if (props.rfVectorConfigMode === 'item') {
+    return `
+      <div class="rf-vector-config" data-rf-vector-config="item">
+        <div class="props-help">每项为相对射频波形的幅度系数。</div>
+        <div class="rf-vector-items">${values.map((value, index) => `
+          <div class="rf-vector-item">
+            <label>第 ${index + 1} 项</label>
+            <input type="number" step="any" data-rf-vector-value value="${escape(value)}" aria-label="向量第 ${index + 1} 项幅度系数">
+          </div>`).join('')}</div>
+      </div>`;
+  }
+
+  return `
+    <div class="rf-vector-config" data-rf-vector-config="batch">
+      <div class="props-help">按顺序输入 ${length} 项幅度系数，使用逗号分隔。</div>
+      <input id="prop-${field.key}" value="${escape(formatRfVectorValues(values, length))}" aria-label="向量幅度系数">
+    </div>`;
+}
+
 function renderField(node, field, helpers = {}) {
   const escape = helpers.escapeHtml || escapeHtml;
   const id = `prop-${field.key}`;
@@ -501,6 +535,10 @@ function renderField(node, field, helpers = {}) {
 
   if (field.type === 'digitalGearConfig') {
     return renderDigitalGearConfigField(node, field, helpers);
+  }
+
+  if (field.type === 'rfVectorValues') {
+    return renderRfVectorValuesField(node, field, helpers);
   }
 
   if (field.type === 'select') {
@@ -528,6 +566,7 @@ function renderFieldsInRows(node, fields, helpers) {
   const visibleFields = fields.filter((field) => (
     (!field.waveTypes || field.waveTypes.includes(waveType))
     && (!field.rfModulations || field.rfModulations.includes(rfModulation))
+    && (!field.rfOutputFormats || field.rfOutputFormats.includes(node?.props?.outputFormat || '标量'))
   ));
   const rows = [];
   const consumed = new Set();
@@ -647,6 +686,19 @@ export function readPropertyValuesFromSchema(schema, documentLike) {
       }
       if (maxValue) {
         values.maxValue = normalizeTextValue(maxValue.value, '100');
+      }
+      return;
+    }
+
+    if (field.type === 'rfVectorValues') {
+      const itemInputs = documentLike.querySelectorAll?.('[data-rf-vector-value]');
+      if (itemInputs?.length) {
+        values[field.key] = Array.from(itemInputs).map((input) => input.value).join(', ');
+        return;
+      }
+      const batchInput = documentLike.getElementById(`prop-${field.key}`);
+      if (batchInput) {
+        values[field.key] = normalizeTextValue(batchInput.value, field.fallback ?? '');
       }
       return;
     }

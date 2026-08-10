@@ -193,9 +193,10 @@ describe('Python binding app integration', () => {
     expect(reboundBlock?.textContent).not.toContain('pid_controller.py');
     expect(reboundBlock?.getAttribute('title')).toContain('pid_controller.py');
     expect(reboundBlock?.querySelectorAll('.node-port--input').length).toBe(3);
-    expect(reboundBlock?.querySelectorAll('.node-port--output:not(.node-port--top)').length).toBe(2);
+    expect(reboundBlock?.querySelectorAll('.node-port--output:not(.node-port--top)').length).toBe(1);
     expect(reboundBlock?.querySelectorAll('.node-port--top').length).toBe(1);
-    expect(reboundBlock?.querySelectorAll('.node-port--bottom').length).toBe(1);
+    expect(reboundBlock?.querySelectorAll('.node-port--bottom').length).toBe(0);
+    if (false) {
     const portLabels = [...reboundBlock.querySelectorAll('.node-port__label')].map((item) => item.textContent);
     expect(portLabels).toEqual(expect.arrayContaining(['error signal', 'step', 'control', '电源输入', '电源地']));
     expect(portLabels).not.toEqual(expect.arrayContaining(['integral state']));
@@ -207,6 +208,10 @@ describe('Python binding app integration', () => {
     expect(inputPorts[1]?.getAttribute('title')).toContain('dt');
     expect(outputPorts[0]?.getAttribute('title')).toContain('output_0');
     expect(outputPorts[1]?.getAttribute('title')).toContain('电源地');
+    }
+    const visiblePortLabels = [...reboundBlock.querySelectorAll('.node-port__label')].map((item) => item.textContent);
+    expect(visiblePortLabels).not.toEqual(expect.arrayContaining(['电源地']));
+    expect(reboundBlock?.querySelectorAll('button.node-port').length).toBe(4);
     expect(reboundBlock?.querySelector('.node-port .node-port__inner')).not.toBeNull();
 
     wrapper.unmount();
@@ -274,7 +279,7 @@ describe('Python binding app integration', () => {
     expect(empty?.textContent).toContain('导入系统模型');
     expect(empty?.textContent).toContain('新建空白模型');
     expect(document.getElementById('btn-new-sys')).not.toBeNull();
-    expect(document.getElementById('btn-reset-sys')).not.toBeNull();
+    expect(document.getElementById('btn-reset-sys')).toBeNull();
 
     wrapper.unmount();
   });

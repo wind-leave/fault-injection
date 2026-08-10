@@ -9,6 +9,12 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function parameterDefaultValues(parameters = []) {
+  return Object.fromEntries(parameters
+    .map((parameter) => [String(parameter?.key ?? '').trim(), Number(parameter?.default)])
+    .filter(([key, value]) => key && Number.isFinite(value)));
+}
+
 const SIMULATION_COMPONENT_MIN_WIDTH = 196;
 const SIMULATION_COMPONENT_MIN_HEIGHT = 116;
 const SIMULATION_COMPONENT_MAX_WIDTH = 320;
@@ -72,6 +78,7 @@ const DISPLAY_CONSOLE_TEMPLATES = createDisplayConsoleTemplates();
  */
 export function createPythonSimulationComponent({
   type,
+  group = 'simulation',
   simulationMenu,
   label,
   moduleType,
@@ -93,6 +100,10 @@ export function createPythonSimulationComponent({
   ffunctionNote = '',
   faultSlots = []
 }) {
+  // Simulation components use a supply terminal only; ground terminals are
+  // no longer part of their public interface.
+  powerOutputs = [];
+  powerInputs = powerInputs.map((port) => ({ ...port, supplyType: port.supplyType === 'AC' ? 'AC' : 'DC' }));
   const dimensions = resolveSimulationComponentDimensions(inputs, outputs, width, height);
   const fileName = `${type}.py`;
   const isVector = (item) => item.dataType === 'vector' || item.type === 'vector' || item.type === '向量';
@@ -172,7 +183,7 @@ export function createPythonSimulationComponent({
     type,
     nodeType: 'simulation_block',
     templateId: type,
-    group: 'simulation',
+    group,
     ...(simulationMenu ? { simulationMenu } : {}),
     label,
     badge,
@@ -202,11 +213,17 @@ export function createPythonSimulationComponent({
       powerInputs: clone(powerInputs),
       powerOutputs: clone(powerOutputs),
       parameters: clone(parameters),
+      parameterValues: parameterDefaultValues(parameters),
       ffunctionNote
     },
     ports,
     pythonBinding: {
       bound: true,
+      // Built-in modules are registered by the simulation backend, so they
+      // deliberately do not carry a copy of their Python source in every
+      // workbench node.  Mark them explicitly to keep save/import from
+      // mistaking the binding for an incomplete custom module.
+      sourceKind: 'builtin',
       moduleId: type,
       fileName,
       moduleName: type,
@@ -228,6 +245,7 @@ export function createPythonSimulationComponent({
 
 export const COMPONENT_GROUPS = [
   { id: 'signals', label: '系统信号', icon: '信', tone: 'system', defaultOpen: true },
+  { id: 'electrical', label: '电气组件', icon: '电', tone: 'system', defaultOpen: true },
   { id: 'simulation', label: '仿真组件', icon: '仿', tone: 'system', defaultOpen: true },
   { id: 'subsystem', label: '子系统', icon: '子', tone: 'system', defaultOpen: true },
   { id: 'faults', label: '故障组件', icon: '故', tone: 'fault', defaultOpen: true },
@@ -284,6 +302,7 @@ export const COMPONENT_REGISTRY = {
     width: 164,
     height: 84,
     palette: {
+      visible: false,
       icon: 'C',
       iconClass: 'source'
     },
@@ -304,6 +323,92 @@ export const COMPONENT_REGISTRY = {
     },
     defaults: createSignalSourceProps('rf')
   },
+  electrical_ac_power_source: createPythonSimulationComponent({
+    type: 'electrical_ac_power_source',
+    group: 'electrical',
+    label: '交流电源模块',
+    moduleType: '电气电源模型',
+    title: '输出可配置幅值与频率的交流电压',
+    palette: { icon: 'AC', iconClass: 'electrical' },
+    description: '交流电源仿真组件，输出单路交流电压。',
+    inputs: [],
+    outputs: [
+      { portId: 'output-0', name: '交流电输出', varName: 'ac_output', type: 'float', unit: 'VAC' }
+    ],
+    parameters: [
+      { key: 'voltage_rms', name: '有效值电压', default: 220, min: 0, unit: 'V' },
+      { key: 'frequency_hz', name: '频率', default: 50, min: 0, unit: 'Hz' },
+      { key: 'phase_deg', name: '初始相位', default: 0, min: -360, max: 360, unit: '°' }
+    ],
+    powerInputs: [],
+    powerOutputs: [],
+    ffunctionNote: '按设定有效值、频率和相位输出正弦交流电压。',
+    executionMode: 'backend'
+  }),
+  electrical_dc_boost: createPythonSimulationComponent({
+    type: 'electrical_dc_boost',
+    group: 'electrical',
+    label: '直流升压模块',
+    moduleType: '电气变换模型',
+    title: '单路直流电压输入，经升压后输出单路直流电压',
+    palette: { icon: 'DC↑', iconClass: 'electrical' },
+    description: '直流升压仿真组件，输入和输出均为直流电。',
+    inputs: [
+      { portId: 'input-0', name: '直流电输入', varName: 'dc_input', type: 'float', unit: 'VDC' }
+    ],
+    outputs: [
+      { portId: 'output-0', name: '直流电输出', varName: 'dc_output', type: 'float', unit: 'VDC' }
+    ],
+    parameters: [
+      { key: 'boost_ratio', name: '升压倍率', default: 2, min: 0, max: 100 },
+      { key: 'efficiency', name: '转换效率', default: 0.95, min: 0, max: 1 }
+    ],
+    powerInputs: [],
+    powerOutputs: [],
+    ffunctionNote: '输出直流电压等于输入直流电压乘以升压倍率和转换效率。',
+    executionMode: 'backend'
+  }),
+  electrical_ac_dc_matching: createPythonSimulationComponent({
+    type: 'electrical_ac_dc_matching',
+    group: 'electrical',
+    label: '直流匹配模块',
+    moduleType: '电气变换模型',
+    title: '单路交流电输入，经整流匹配后输出单路直流电压',
+    palette: { icon: 'AC/DC', iconClass: 'electrical' },
+    description: '直流匹配仿真组件，输入为交流电，输出为直流电。',
+    inputs: [
+      { portId: 'input-0', name: '交流电输入', varName: 'ac_input', type: 'float', unit: 'VAC' }
+    ],
+    outputs: [
+      { portId: 'output-0', name: '直流电输出', varName: 'dc_output', type: 'float', unit: 'VDC' }
+    ],
+    parameters: [
+      { key: 'conversion_gain', name: '匹配系数', default: 1, min: 0, max: 100 }
+    ],
+    powerInputs: [],
+    powerOutputs: [],
+    ffunctionNote: '对输入交流电进行全波整流，并按匹配系数输出直流电压。',
+    executionMode: 'backend'
+  }),
+  electrical_ground: createPythonSimulationComponent({
+    type: 'electrical_ground',
+    group: 'electrical',
+    label: '地面组件',
+    moduleType: '电气端接模型',
+    title: '单路电气输入的地面端接组件',
+    // Kept for loading legacy drawings only; it is no longer displayed in
+    // the electrical component palette.
+    palette: { visible: false, icon: 'GND', iconClass: 'electrical' },
+    description: '地面组件仅接收一路电气输入，不提供输出端口。',
+    inputs: [
+      { portId: 'input-0', name: '交流/直流电输入', varName: 'ground_input', type: 'float', unit: 'VAC/VDC' }
+    ],
+    outputs: [],
+    powerInputs: [],
+    powerOutputs: [],
+    ffunctionNote: '接收并端接一路电气输入，不输出后续信号。',
+    executionMode: 'backend'
+  }),
   middle_var_assign: {
     type: 'middle_var_assign',
     group: 'signals',
@@ -426,170 +531,13 @@ export const COMPONENT_REGISTRY = {
       ffunctionNote: '当前预留 Python 函数接口，可在后续导入函数定义。'
     }
   },
-  airspeed_sensor: {
-    type: 'airspeed_sensor',
-    nodeType: 'simulation_block',
-    templateId: 'airspeed_sensor',
-    group: 'simulation',
-    simulationMenu: 'sensing',
-    label: '空速传感器',
-    badge: '仿真',
-    className: 'b-sim',
-    width: 196,
-    height: 116,
-    title: '测量真实空速并输出带零偏和比例系数的空速信号',
-    palette: {
-      visible: false,
-      icon: '空',
-      iconClass: 'simulation'
-    },
-    defaults: {
-      name: '空速传感器',
-      moduleType: '传感器模型',
-      inputs: [{ name: '真实空速', type: '标量', varName: 'true_airspeed', unit: 'm/s' }],
-      outputs: [{ name: '测量空速', type: '标量', varName: 'measured_airspeed', unit: 'm/s' }],
-      middleVars: [],
-      powerInputs: [{ name: '电源输入', type: '电源', voltage: '28V' }],
-      powerOutputs: [{ name: '电源地', type: '电源', voltage: '0V' }],
-      parameters: [
-        { key: 'bias', name: '零偏', layer: 'physical', default: 0, unit: 'm/s' },
-        { key: 'scale', name: '比例系数', layer: 'physical', default: 1 }
-      ],
-      ffunctionNote: '内置空速传感器模型：measured_airspeed = (true_airspeed + bias) * scale'
-    },
-    ports: {
-      inputs: [
-        {
-          id: 'input-0',
-          portId: 'input-0',
-          signalId: 'airspeed_sensor.true_airspeed',
-          varName: 'true_airspeed',
-          name: '真实空速',
-          displayName: '真实空速',
-          type: 'float',
-          unit: 'm/s',
-          direction: 'input'
-        }
-      ],
-      outputs: [
-        {
-          id: 'output-0',
-          portId: 'output-0',
-          signalId: 'airspeed_sensor.measured_airspeed',
-          varName: 'measured_airspeed',
-          name: '测量空速',
-          displayName: '测量空速',
-          type: 'float',
-          unit: 'm/s',
-          direction: 'output'
-        }
-      ]
-    },
-    pythonBinding: {
-      bound: true,
-      moduleId: 'airspeed_sensor',
-      fileName: 'airspeed_sensor.py',
-      moduleName: 'airspeed_sensor',
-      moduleCategory: '传感器模型',
-      description: '空速传感器模型',
-      entryFunction: 'process',
-      parsedInterface: {
-        fileName: 'airspeed_sensor.py',
-        moduleName: 'airspeed_sensor',
-        description: '空速传感器模型',
-        entryFunction: 'process',
-        inputs: [
-          { name: 'true_airspeed', displayName: '真实空速', type: 'float', comment: '真实空速', default: null },
-          { name: 'bias', displayName: '零偏', type: 'float', comment: '零偏', default: 0 },
-          { name: 'scale', displayName: '比例系数', type: 'float', comment: '比例系数', default: 1 }
-        ],
-        outputs: [
-          { name: 'measured_airspeed', displayName: '测量空速', type: 'float', comment: '测量空速' }
-        ],
-        middleVars: [],
-        rawSource: 'def process(true_airspeed: float, bias: float = 0.0, scale: float = 1.0):\n    measured_airspeed = (true_airspeed + bias) * scale\n    return measured_airspeed\n'
-      },
-      rawSource: 'def process(true_airspeed: float, bias: float = 0.0, scale: float = 1.0):\n    measured_airspeed = (true_airspeed + bias) * scale\n    return measured_airspeed\n',
-      executionMode: 'mock',
-      portMapping: {
-        inputs: [
-          {
-            portId: 'input-0',
-            signalId: 'airspeed_sensor.true_airspeed',
-            varName: 'true_airspeed',
-            displayName: '真实空速',
-            type: 'float',
-            default: null,
-            comment: '真实空速',
-            connected: false
-          }
-        ],
-        outputs: [
-          {
-            portId: 'output-0',
-            signalId: 'airspeed_sensor.measured_airspeed',
-            varName: 'measured_airspeed',
-            displayName: '测量空速',
-            type: 'float',
-            comment: '测量空速'
-          }
-        ],
-        middleVars: []
-      }
-    },
-    faultSlots: [
-      {
-        slotId: 'physical:airspeed_bias',
-        slotName: '空速零偏',
-        displayName: '空速零偏',
-        layer: 'physical',
-        kind: 'parameter',
-        targetField: 'parameters.bias',
-        allowedModels: ['bias'],
-        allowedFaultTypeIds: ['airspeed_bias_offset']
-      },
-      {
-        slotId: 'physical:airspeed_scale',
-        slotName: '比例系数漂移',
-        displayName: '比例系数漂移',
-        layer: 'physical',
-        kind: 'parameter',
-        targetField: 'parameters.scale',
-        allowedModels: ['drift'],
-        allowedFaultTypeIds: ['airspeed_scale_drift']
-      }
-    ]
-  },
-  barometer_sensor: createPythonSimulationComponent({
-    type: 'barometer_sensor',
-    simulationMenu: 'sensing',
-    label: '气压高度传感器',
-    moduleType: '传感器模型',
-    title: '测量真实高度并输出带零偏和比例系数的高度信号',
-    palette: { visible: false, icon: '高', iconClass: 'simulation' },
-    description: '气压高度传感器模型',
-    inputs: [
-      { portId: 'input-0', name: '真实高度', varName: 'true_altitude', unit: 'm' }
-    ],
-    outputs: [
-      { portId: 'output-0', name: '测量高度', varName: 'measured_altitude', unit: 'm' }
-    ],
-    parameters: [
-      { key: 'bias', name: '零偏', default: 0, unit: 'm' },
-      { key: 'scale', name: '比例系数', default: 1 }
-    ],
-    ffunctionNote: '内置气压高度传感器模型：measured_altitude = (true_altitude + bias) * scale',
-    executionMode: 'backend',
-    faultSlots: [
-    ]
-  }),
   vector2_passthrough: createPythonSimulationComponent({
     type: 'vector2_passthrough',
     simulationMenu: 'signal-processing',
     label: '二维向量传递组件',
     moduleType: '向量处理模型',
     title: '将长度为 2 的输入向量逐元素传递到长度为 2 的输出向量',
-    palette: { icon: 'V2', iconClass: 'simulation' },
+    palette: { icon: 'V2', iconClass: 'simulation', visible: false },
     description: '二维向量传递仿真组件',
     inputs: [
       {
@@ -612,13 +560,41 @@ export const COMPONENT_REGISTRY = {
     ffunctionNote: '将输入二维向量逐元素传递至输出端口。',
     executionMode: 'backend'
   }),
+  scalar_to_vector4: createPythonSimulationComponent({
+    type: 'scalar_to_vector4',
+    simulationMenu: 'signal-processing',
+    label: '标量转四维向量',
+    moduleType: '信号转换模型',
+    title: '将一个标量输入复制为长度为 4 的输出向量',
+    palette: { icon: 'S4', iconClass: 'simulation' },
+    description: '标量复制为四维向量的仿真组件',
+    inputs: [
+      {
+        portId: 'input-0',
+        name: '标量输入',
+        varName: 'scalar_input',
+        type: 'float'
+      }
+    ],
+    outputs: [
+      {
+        portId: 'output-0',
+        name: '四维输出向量',
+        varName: 'vector_output',
+        type: 'vector',
+        vectorLength: 4
+      }
+    ],
+    ffunctionNote: '将标量输入值复制到四维输出向量的四个分量。',
+    executionMode: 'backend'
+  }),
   rf_four_channel_source: createPythonSimulationComponent({
     type: 'rf_four_channel_source',
     simulationMenu: 'rf-signal',
     label: '四通道射频数据源',
     moduleType: '射频信号源模型',
     title: '无输入，按仿真时间输出四路同步脉冲射频数据',
-    palette: { icon: 'RF4', iconClass: 'simulation' },
+    palette: { icon: 'RF4', iconClass: 'simulation', visible: false },
     description: '四通道射频数据源仿真组件',
     inputs: [],
     outputs: [
@@ -644,6 +620,65 @@ export const COMPONENT_REGISTRY = {
     ffunctionNote: '内置四通道射频脉冲源：每个仿真步按中心频率、脉宽和重周计算四路同步载波，脉冲窗口外输出为 0。',
     executionMode: 'backend'
   }),
+  rf_four_output_source: createPythonSimulationComponent({
+    type: 'rf_four_output_source',
+    simulationMenu: 'rf-signal',
+    label: '四接口射频信号输出',
+    moduleType: '射频信号源模型',
+    title: '无输入，按仿真时间从四个独立射频接口输出同步脉冲载波',
+    palette: { icon: 'RF4', iconClass: 'simulation' },
+    description: '四个独立标量输出接口的同步脉冲射频信号源',
+    inputs: [],
+    outputs: Array.from({ length: 4 }, (_, index) => ({
+      portId: `output-${index}`,
+      name: `射频输出 ${index + 1}`,
+      varName: `rf_output_${index + 1}`,
+      unit: 'V'
+    })),
+    parameters: [
+      { key: 'sample_1', name: '接口 1 幅度', default: 1.0, unit: 'V' },
+      { key: 'sample_2', name: '接口 2 幅度', default: 0.8, unit: 'V' },
+      { key: 'sample_3', name: '接口 3 幅度', default: 0.6, unit: 'V' },
+      { key: 'sample_4', name: '接口 4 幅度', default: 0.4, unit: 'V' },
+      { key: 'center_frequency_hz', name: '中心频率', default: 100, unit: 'Hz' },
+      { key: 'pulse_width_seconds', name: '脉宽', default: 0.001, unit: 's' },
+      { key: 'pulse_period_seconds', name: '重周', default: 0.001, unit: 's' },
+      { key: 'phase_deg', name: '初始相位', default: 0, unit: '°' }
+    ],
+    ffunctionNote: '四个接口输出共用载波频率、脉宽、重周和初始相位；各接口可分别设置幅度，脉冲窗口外输出为 0。',
+    executionMode: 'backend'
+  }),
+  rf_four_port_up_down_converter: createPythonSimulationComponent({
+    type: 'rf_four_port_up_down_converter',
+    simulationMenu: 'rf-signal',
+    label: '四接口上下变频器',
+    moduleType: '射频处理模型',
+    title: '前两路输入下变频、后两路输入上变频的四输入四输出变频组件',
+    palette: { icon: '↕RF', iconClass: 'simulation' },
+    description: '两路射频下变频与两路标量基带上变频的四接口组件',
+    inputs: [
+      { portId: 'input-0', name: '下变频射频输入 1', varName: 'downconvert_rf_input_1', unit: 'V' },
+      { portId: 'input-1', name: '下变频射频输入 2', varName: 'downconvert_rf_input_2', unit: 'V' },
+      { portId: 'input-2', name: '上变频基带输入 1（I）', varName: 'upconvert_baseband_input_1', unit: 'V' },
+      { portId: 'input-3', name: '上变频基带输入 2（I）', varName: 'upconvert_baseband_input_2', unit: 'V' }
+    ],
+    outputs: [
+      { portId: 'output-0', name: '下变频输出 1（I）', varName: 'downconverted_output_1', unit: 'V' },
+      { portId: 'output-1', name: '下变频输出 2（I）', varName: 'downconverted_output_2', unit: 'V' },
+      { portId: 'output-2', name: '上变频射频输出 1', varName: 'upconverted_output_1', unit: 'V' },
+      { portId: 'output-3', name: '上变频射频输出 2', varName: 'upconverted_output_2', unit: 'V' }
+    ],
+    parameters: [
+      { key: 'downconvert_lo_frequency_hz', name: '下变频本振频率', default: 100, unit: 'Hz' },
+      { key: 'upconvert_lo_frequency_hz', name: '上变频本振频率', default: 100, unit: 'Hz' },
+      { key: 'lo_phase_deg', name: '本振相位', default: 0, unit: '°' },
+      { key: 'downconversion_gain', name: '下变频增益', default: 1 },
+      { key: 'upconversion_gain', name: '上变频增益', default: 1 },
+      { key: 'downconvert_low_pass_cutoff_hz', name: '下变频低通截止频率', default: 20, unit: 'Hz' }
+    ],
+    ffunctionNote: '输入 1、2 分别下变频并输出 I 路基带；输入 3、4 作为 I 路基带信号上变频，Q 路固定为 0。',
+    executionMode: 'backend'
+  }),
   rf_pulse_feature_extractor: createPythonSimulationComponent({
     type: 'rf_pulse_feature_extractor',
     simulationMenu: 'rf-signal',
@@ -662,7 +697,7 @@ export const COMPONENT_REGISTRY = {
       { portId: 'output-3', name: '脉冲幅度', varName: 'pulse_amplitude_adc', unit: 'ADC(0-255)' }
     ],
     parameters: [
-      { key: 'fft_size', name: 'FFT 点数', default: 64 },
+      { key: 'fft_size', name: 'FFT 点数', default: 1024 },
       { key: 'adc_full_scale', name: 'A/D 满量程', default: 1, unit: 'V' },
       { key: 'envelope_threshold_adc', name: '包络门限', default: 12, unit: 'ADC' }
     ],
@@ -678,13 +713,27 @@ export const COMPONENT_REGISTRY = {
     palette: { icon: '↓RF', iconClass: 'simulation' },
     description: '单路射频下变频仿真组件',
     inputs: [
-      { portId: 'input-0', name: '射频输入', varName: 'rf_input', unit: 'V' }
+      { portId: 'input-0', name: '射频输入 1', varName: 'rf_input', unit: 'V' },
+      { portId: 'input-1', name: '射频输入 2', varName: 'rf_input_2', unit: 'V' }
     ],
     outputs: [
       { portId: 'output-0', name: '中频 I', varName: 'if_i', unit: 'V' },
       { portId: 'output-1', name: '中频 Q', varName: 'if_q', unit: 'V' }
     ],
     parameters: [
+      {
+        key: 'input_mode',
+        name: '输入选择模式',
+        default: 1,
+        min: 1,
+        max: 2,
+        step: 1,
+        control: 'stepper',
+        options: [
+          { value: 1, label: '模式 1：第一路输入' },
+          { value: 2, label: '模式 2：第二路输入' }
+        ]
+      },
       { key: 'lo_frequency_hz', name: '本振频率', default: 990000000, unit: 'Hz' },
       { key: 'lo_phase_deg', name: '本振相位', default: 0, unit: '°' },
       { key: 'conversion_gain', name: '变频增益', default: 1 },
@@ -693,28 +742,45 @@ export const COMPONENT_REGISTRY = {
     ffunctionNote: '单路实数射频信号与本振正交混频，输出低通后的中频 I/Q 两路标量；默认本振为 990 MHz，可将 1 GHz 射频下变至约 10 MHz 中频。',
     executionMode: 'backend'
   }),
-  Test: createPythonSimulationComponent({
-    type: 'Test',
+  11: createPythonSimulationComponent({
+    type: '11',
     simulationMenu: 'rf-signal',
-    label: '测试',
+    label: '11',
     moduleType: '测试',
     title: '无输入，按仿真时间输出四路同步脉冲射频数据',
     palette: { icon: 'T', iconClass: 'simulation' },
     description: '测试',
     inputs: [
       {
-        portId: 'output-0',
+        portId: 'input-0',
         name: '射频数据（四组）',
-        varName: 'sample_1',
+        varName: 'a',
+        type: 'vector',
+        vectorLength: 4
+      },
+      {
+        portId: 'input-1',
+        name: '射频数据（四组）',
+        varName: 'b',
         type: 'vector',
         vectorLength: 4
       }
     ],
     outputs: [
-      { portId: 'output-0', name: '射频数据 1', varName: 'rf_samples_1' },
-      { portId: 'output-1', name: '射频数据 2', varName: 'rf_samples_2' },
-      { portId: 'output-2', name: '射频数据 3', varName: 'rf_samples_3' },
-      { portId: 'output-3', name: '射频数据 4', varName: 'rf_samples_4' }
+      {
+        portId: 'output-0',
+        name: '射频数据（四组）',
+        varName: 'A',
+        type: 'vector',
+        vectorLength: 4
+      },
+      {
+        portId: 'output-1',
+        name: '射频数据（四组）',
+        varName: 'B',
+        type: 'vector',
+        vectorLength: 4
+      }
     ],
     parameters: [
     ],
@@ -748,13 +814,13 @@ export const COMPONENT_REGISTRY = {
     parameters: [
       { key: 'limit_amplitude', name: '限幅值', default: 1, unit: 'V' },
       { key: 'gain_db', name: '放大增益', default: 0, unit: 'dB' },
-      { key: 'lo_frequency_hz', name: '本振频率', default: 99, unit: 'Hz' },
+      { key: 'lo_frequency_hz', name: '本振频率', default: 5, unit: 'Hz' },
       { key: 'lo_phase_deg', name: '本振相位', default: 0, unit: '°' },
       { key: 'conversion_gain', name: '下变频增益', default: 1 },
       { key: 'low_pass_cutoff_hz', name: '下变频低通截止频率', default: 5, unit: 'Hz' },
       { key: 'split_insertion_loss_db', name: '功分插入损耗', default: 0, unit: 'dB' }
     ],
-    ffunctionNote: '处理顺序：四路输入分别执行限幅 → 放大 → 下变频与低通滤波（I 路）→ 1 分 2；默认差频为 1 Hz，最终输出八个独立标量。',
+    ffunctionNote: '处理顺序：四路输入分别执行限幅 → 放大 → 下变频与低通滤波（I 路）→ 1 分 2；默认限幅为 1 V、本振为 5 Hz，最终输出八个独立标量。',
     executionMode: 'backend'
   }),
   subsystem_block: {
@@ -902,12 +968,14 @@ export const COMPONENT_REGISTRY = {
       signal: '仿真块输出',
       inputPortName: '观测输入',
       frequencyRange: '0-16kHz',
+      tuningMode: 'startStop',
+      autoFrequencyRange: 'on',
       fftSize: '1024',
       windowFunction: 'Hann',
       amplitudeUnit: 'dB',
       referenceLevel: '10',
-      attenuation: '0',
-      preamp: 'off',
+      autoRange: 'off',
+      dynamicRange: '80',
       rbw: '0.1',
       vbw: '0.1',
       sweepTime: '100',
@@ -1051,26 +1119,71 @@ export const COMPONENT_REGISTRY = {
     group: 'can-lines',
     paletteKind: 'line-tool',
     lineType: 'can',
-    label: 'CAN 总线',
+    label: '电源线',
     badge: '连接',
     className: 'b-link',
     width: 154,
     height: 64,
     palette: {
-      icon: 'CAN',
+      icon: '电',
       iconClass: 'link'
     },
     defaults: {
-      name: 'CAN 总线',
-      linkType: 'CAN 总线',
-      sourcePort: '节点 A',
-      targetPort: '节点 B'
+      name: '电源线',
+      linkType: '电源线',
+      sourcePort: '电源输出',
+      targetPort: '电源输入'
     }
   }
 };
 
 // 以配置文件为准生成显控台模板。新增 DISPLAY_CONSOLE_PRESETS 项后，会自动出现在左侧显控组件栏。
 Object.assign(COMPONENT_REGISTRY, DISPLAY_CONSOLE_TEMPLATES);
+Object.assign(COMPONENT_REGISTRY.link_can, {
+  label: 'CAN 总线',
+  palette: { icon: 'CAN', iconClass: 'link' },
+  defaults: {
+    name: 'CAN 总线',
+    linkType: 'CAN 总线',
+    sourcePort: 'CAN 发送端',
+    targetPort: 'CAN 接收端'
+  }
+});
+const THREE_PHASE_AC_OUTPUTS = [
+  { id: 'output-0', portId: 'output-0', signalId: 'electrical_ac_power_source.ac_phase_a', varName: 'ac_phase_a', name: 'A 相交流输出', displayName: 'A 相交流输出', type: 'float', unit: 'VAC', direction: 'output' },
+  { id: 'output-1', portId: 'output-1', signalId: 'electrical_ac_power_source.ac_phase_b', varName: 'ac_phase_b', name: 'B 相交流输出', displayName: 'B 相交流输出', type: 'float', unit: 'VAC', direction: 'output' },
+  { id: 'output-2', portId: 'output-2', signalId: 'electrical_ac_power_source.ac_phase_c', varName: 'ac_phase_c', name: 'C 相交流输出', displayName: 'C 相交流输出', type: 'float', unit: 'VAC', direction: 'output' }
+];
+const threePhaseAcSource = COMPONENT_REGISTRY.electrical_ac_power_source;
+if (threePhaseAcSource) {
+  threePhaseAcSource.defaults.outputs = THREE_PHASE_AC_OUTPUTS.map((port) => ({
+    name: port.name, type: '标量', varName: port.varName, unit: port.unit
+  }));
+  threePhaseAcSource.ports.outputs = clone(THREE_PHASE_AC_OUTPUTS);
+  threePhaseAcSource.pythonBinding.parsedInterface.outputs = THREE_PHASE_AC_OUTPUTS.map((port) => ({
+    name: port.varName, displayName: port.displayName, type: port.type, comment: port.name
+  }));
+  threePhaseAcSource.pythonBinding.portMapping.outputs = THREE_PHASE_AC_OUTPUTS.map((port) => ({
+    portId: port.portId, signalId: port.signalId, varName: port.varName,
+    displayName: port.displayName, type: port.type, comment: port.name
+  }));
+}
+Object.values(COMPONENT_REGISTRY).forEach((component) => {
+  if (component?.group === 'electrical') {
+    component.className = 'b-electrical';
+    component.badge = '电气';
+  }
+});
+Object.values(COMPONENT_REGISTRY).forEach((component) => {
+  if (component?.nodeType === 'simulation_block' && component.defaults) {
+    component.defaults.powerOutputs = [];
+    component.defaults.powerInputs = (component.defaults.powerInputs || []).map((port) => ({
+      ...port,
+      supplyType: port.supplyType === 'AC' ? 'AC' : 'DC'
+    }));
+  }
+});
+delete COMPONENT_REGISTRY.electrical_ground;
 delete COMPONENT_REGISTRY.airspeed_sensor;
 delete COMPONENT_REGISTRY.barometer_sensor;
 

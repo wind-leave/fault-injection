@@ -108,6 +108,29 @@ describe('signal routing integration', () => {
     wrapper.unmount();
   });
 
+  it('connects scalar RF feature outputs to display-console inputs', async () => {
+    const wrapper = await mountWorkbench();
+
+    const extractor = window.createNode('rf_pulse_feature_extractor', 220, 220);
+    const displayConsole = window.createNode('display_console_1', 560, 220);
+    await flushRuntime();
+
+    const featureOutput = document.querySelector('.blk.b-sim .node-port--output');
+    const displayInput = document.querySelector('.blk.b-display-console .node-port--input');
+    dispatchClick(featureOutput);
+    dispatchClick(displayInput);
+    await flushRuntime();
+
+    expect(window.__GZ_STATE__.modelEdges).toEqual([expect.objectContaining({
+      sourceNodeId: extractor.id,
+      targetNodeId: displayConsole.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0
+    })]);
+
+    wrapper.unmount();
+  });
+
   it('presents flow_block as a signal adapter block in the palette and node card', async () => {
     const wrapper = await mountWorkbench();
 

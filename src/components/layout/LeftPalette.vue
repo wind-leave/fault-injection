@@ -19,7 +19,7 @@ function paletteKey(component) {
 }
 
 function isPaletteComponentAvailable(component) {
-  const isOneShotTemplate = component.group === 'simulation' || component.group === 'display-control';
+  const isOneShotTemplate = ['simulation', 'electrical', 'display-control'].includes(component.group);
   return !isOneShotTemplate || !consumedPaletteKeys.has(paletteKey(component));
 }
 
@@ -102,7 +102,7 @@ function lineToolClasses(component) {
   return {
     citem: true,
     'citem-line-tool': true,
-    'citem-can': component.lineType === 'can',
+    'citem-power': false,
     active: component.lineType === 'normal'
   };
 }
@@ -112,10 +112,10 @@ function lineSwatchStyle(component) {
     return {
       width: '18px',
       height: '3px',
-      background: 'var(--purple)',
+      background: '#8c7cf6',
       borderRadius: '1px',
       flexShrink: 0,
-      border: '1px solid var(--purple)'
+      border: '1px solid #8c7cf6'
     };
   }
 

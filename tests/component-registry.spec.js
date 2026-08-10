@@ -53,9 +53,45 @@ describe('component registry', () => {
     expect(explicit.height).toBe(180);
   });
 
+  it('initializes editable simulation parameter values from the component defaults', () => {
+    const component = createPythonSimulationComponent({
+      type: 'parameterized_test',
+      label: '参数化测试组件',
+      moduleType: '测试模型',
+      inputs: [],
+      outputs: [{ portId: 'output-0', varName: 'output', name: '输出' }],
+      parameters: [
+        { key: 'gain', name: '增益', default: 2 },
+        { key: 'bias', name: '偏置', default: -0.5 }
+      ]
+    });
+
+    expect(component.defaults.parameterValues).toEqual({ gain: 2, bias: -0.5 });
+  });
+
+  it('defines fixed-id electrical components with the requested AC/DC interfaces', () => {
+    const acSource = COMPONENT_REGISTRY.electrical_ac_power_source;
+    const dcBoost = COMPONENT_REGISTRY.electrical_dc_boost;
+    const acDcMatching = COMPONENT_REGISTRY.electrical_ac_dc_matching;
+
+    expect([acSource, dcBoost, acDcMatching].every((component) => (
+      component.group === 'electrical' && component.nodeType === 'simulation_block'
+    ))).toBe(true);
+    expect(acSource.templateId).toBe('electrical_ac_power_source');
+    expect(acSource.ports.outputs.map((port) => port.varName)).toEqual(['ac_phase_a', 'ac_phase_b', 'ac_phase_c']);
+    expect(dcBoost.templateId).toBe('electrical_dc_boost');
+    expect(acDcMatching.templateId).toBe('electrical_ac_dc_matching');
+    expect(dcBoost.ports.inputs).toEqual([expect.objectContaining({ varName: 'dc_input', unit: 'VDC' })]);
+    expect(dcBoost.ports.outputs).toEqual([expect.objectContaining({ varName: 'dc_output', unit: 'VDC' })]);
+    expect(acDcMatching.ports.inputs).toEqual([expect.objectContaining({ varName: 'ac_input', unit: 'VAC' })]);
+    expect(acDcMatching.ports.outputs).toEqual([expect.objectContaining({ varName: 'dc_output', unit: 'VDC' })]);
+    expect(COMPONENT_REGISTRY.electrical_ground).toBeUndefined();
+  });
+
   it('defines the existing left palette groups in display order', () => {
     expect(COMPONENT_GROUPS.map((group) => group.id)).toEqual([
       'signals',
+      'electrical',
       'simulation',
       'subsystem',
       'faults',
@@ -83,16 +119,19 @@ describe('component registry', () => {
       'instrument_multimeter',
       'instrument_scope',
       'instrument_spectrum',
-      'link_can',
       'link_normal',
+      'link_can',
       'middle_var_assign',
       'mux_block',
       'physical_fault_injector',
       'protocol_fault_injector',
       'rf_downconverter',
       'rf_four_channel_source',
+      'rf_four_output_source',
+      'rf_four_port_up_down_converter',
       'rf_limit_amplify_downconvert_split8',
       'rf_pulse_feature_extractor',
+      'scalar_to_vector4',
       'signal_source',
       'signal_source_command',
       'signal_source_digital',
@@ -129,6 +168,22 @@ describe('component registry', () => {
     });
   });
 
+  it('defines a scalar input to four-value vector simulation component', () => {
+    expect(COMPONENT_REGISTRY.scalar_to_vector4).toMatchObject({
+      nodeType: 'simulation_block',
+      templateId: 'scalar_to_vector4',
+      simulationMenu: 'signal-processing',
+      ports: {
+        inputs: [{ varName: 'scalar_input', type: 'float' }],
+        outputs: [{ varName: 'vector_output', dataType: 'vector', vectorLength: 4 }]
+      },
+      pythonBinding: {
+        moduleId: 'scalar_to_vector4',
+        executionMode: 'backend'
+      }
+    });
+  });
+
   it('derives display-console templates from the editable presets', () => {
     expect(COMPONENT_REGISTRY.display_console_1).toMatchObject({
       type: 'display_console_1',
@@ -138,7 +193,7 @@ describe('component registry', () => {
       label: '显控台 1',
       defaults: {
         consoleType: '射频参数显控',
-        inputPortNames: ['中心频率', '重复周期', '脉宽', '幅度']
+        inputPortNames: ['中心频率（MHz）', '重复周期（μs）', '脉宽（μs）', '幅度']
       }
     });
     expect(COMPONENT_REGISTRY.display_console_2).toMatchObject({
@@ -225,7 +280,7 @@ describe('component registry', () => {
     expect(component.ports.outputs.every((port) => port.type === 'float' && !port.dataType)).toBe(true);
   });
 
-  it('defines a single-channel RF downconverter with scalar I/Q outputs', () => {
+  it('defines a two-input RF downconverter with selectable scalar I/Q outputs', () => {
     const component = COMPONENT_REGISTRY.rf_downconverter;
 
     expect(component).toMatchObject({
@@ -236,24 +291,41 @@ describe('component registry', () => {
         executionMode: 'backend'
       }
     });
-    expect(component.ports.inputs).toEqual([expect.objectContaining({ varName: 'rf_input', type: 'float' })]);
+    expect(component.ports.inputs).toEqual([
+      expect.objectContaining({ varName: 'rf_input', type: 'float' }),
+      expect.objectContaining({ varName: 'rf_input_2', type: 'float' })
+    ]);
     expect(component.ports.outputs).toEqual([
       expect.objectContaining({ varName: 'if_i', type: 'float' }),
       expect.objectContaining({ varName: 'if_q', type: 'float' })
     ]);
+    expect(component.defaults.parameters).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'input_mode',
+        default: 1,
+        options: [
+          { value: 1, label: '模式 1：第一路输入' },
+          { value: 2, label: '模式 2：第二路输入' }
+        ]
+      })
+    ]));
   });
 
-  it('places the two-dimensional vector component in the signal-processing menu', () => {
+  it('hides retired simulation templates from the component palette', () => {
     const simulationComponents = getPaletteGroups()
       .find((group) => group.id === 'simulation')
       .components;
     const sections = getSimulationMenuSections(simulationComponents);
 
+    expect(simulationComponents.map((component) => component.type)).not.toEqual(expect.arrayContaining([
+      'vector2_passthrough',
+      'rf_four_channel_source',
+      'Test'
+    ]));
     expect(sections.find((section) => section.id === 'signal-processing')?.components)
-      .toEqual([expect.objectContaining({ type: 'vector2_passthrough' })]);
+      .toEqual([expect.objectContaining({ type: 'scalar_to_vector4' })]);
     expect(sections.find((section) => section.id === 'rf-signal')?.components)
       .toEqual(expect.arrayContaining([
-        expect.objectContaining({ type: 'rf_four_channel_source' }),
         expect.objectContaining({ type: 'rf_downconverter' }),
         expect.objectContaining({ type: 'rf_pulse_feature_extractor' }),
         expect.objectContaining({ type: 'rf_limit_amplify_downconvert_split8' })
@@ -439,12 +511,14 @@ describe('component registry', () => {
   it('groups palette components by registry group without mutating registry entries', () => {
     const paletteGroups = getPaletteGroups();
     const signals = paletteGroups.find((group) => group.id === 'signals');
+    const electrical = paletteGroups.find((group) => group.id === 'electrical');
     const simulation = paletteGroups.find((group) => group.id === 'simulation');
     const faults = paletteGroups.find((group) => group.id === 'faults');
     const canLines = paletteGroups.find((group) => group.id === 'can-lines');
 
     expect(paletteGroups.map((group) => group.id)).toEqual([
       'signals',
+      'electrical',
       'simulation',
       'subsystem',
       'faults',
@@ -456,17 +530,17 @@ describe('component registry', () => {
     expect(signals.components.map((item) => item.type)).toEqual([
       'signal_source',
       'signal_source_digital',
-      'signal_source_command',
       'signal_source_rf'
     ]);
+    expect(COMPONENT_REGISTRY.signal_source_command.palette?.visible).toBe(false);
     expect(COMPONENT_REGISTRY.middle_var_assign.palette?.visible).toBe(false);
     expect(paletteGroups.find((group) => group.id === 'signal-ops')).toBeUndefined();
     expect(simulation.components.map((item) => item.type)).toEqual([
-      'vector2_passthrough',
-      'rf_four_channel_source',
+      'scalar_to_vector4',
+      'rf_four_output_source',
+      'rf_four_port_up_down_converter',
       'rf_pulse_feature_extractor',
       'rf_downconverter',
-      'Test',
       'rf_limit_amplify_downconvert_split8'
     ]);
     expect(paletteGroups.find((group) => group.id === 'display-control').components.map((item) => item.type)).toEqual([
@@ -478,21 +552,23 @@ describe('component registry', () => {
       'electrical_fault_injector',
       'protocol_fault_injector'
     ]);
+    expect(COMPONENT_REGISTRY.protocol_fault_injector.palette?.visible).not.toBe(false);
     expect(paletteGroups.find((group) => group.id === 'instruments').components.map((item) => item.type)).toEqual([
       'instrument_scope',
       'instrument_spectrum',
       'instrument_multimeter'
     ]);
     expect(COMPONENT_REGISTRY.instrument_logger.palette?.visible).toBe(false);
+    expect(electrical.components).toEqual([]);
     expect(canLines.components.map((item) => item.type)).toEqual([
       'link_normal',
       'link_can'
     ]);
-    expect(simulation.components[0]).not.toBe(COMPONENT_REGISTRY.vector2_passthrough);
+    expect(simulation.components[0]).not.toBe(COMPONENT_REGISTRY.rf_pulse_feature_extractor);
     expect(faults.components[0]).not.toBe(COMPONENT_REGISTRY.physical_fault_injector);
     expect(canLines.components[0]).not.toBe(COMPONENT_REGISTRY.link_normal);
-    expect(simulation.components[0].defaults).not.toBe(COMPONENT_REGISTRY.vector2_passthrough.defaults);
+    expect(simulation.components[0].defaults).not.toBe(COMPONENT_REGISTRY.rf_pulse_feature_extractor.defaults);
     simulation.components[0].defaults.inputs[0].name = 'changed input';
-    expect(COMPONENT_REGISTRY.vector2_passthrough.defaults.inputs[0].name).not.toBe('changed input');
+    expect(COMPONENT_REGISTRY.rf_pulse_feature_extractor.defaults.inputs[0].name).not.toBe('changed input');
   });
 });

@@ -54,5 +54,6 @@ class GraphCompilerTests(unittest.TestCase):
         self.assertEqual(context.exception.field, "edges[0]")
 
 
+
 if __name__ == "__main__":
     unittest.main()

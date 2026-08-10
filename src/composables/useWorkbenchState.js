@@ -59,6 +59,10 @@ export function createSimulationBlockPythonBinding(parsedInterface, options = {}
         varName: item.name,
         displayName: resolvePortDisplayName(item),
         type: item.type ?? 'any',
+        ...(item.dataType ? { dataType: item.dataType } : {}),
+        ...(Number.isInteger(item.vectorLength) && item.vectorLength > 0
+          ? { vectorLength: item.vectorLength }
+          : {}),
         default: item.default ?? null,
         comment: item.comment ?? '',
         connected: false
@@ -68,6 +72,10 @@ export function createSimulationBlockPythonBinding(parsedInterface, options = {}
         varName: item.name,
         displayName: resolvePortDisplayName(item),
         type: item.type ?? 'any',
+        ...(item.dataType ? { dataType: item.dataType } : {}),
+        ...(Number.isInteger(item.vectorLength) && item.vectorLength > 0
+          ? { vectorLength: item.vectorLength }
+          : {}),
         comment: item.comment ?? ''
       })),
       middleVars: (parsedInterface.middleVars ?? []).map((item, index) => ({
@@ -75,6 +83,10 @@ export function createSimulationBlockPythonBinding(parsedInterface, options = {}
         varName: item.name,
         displayName: resolvePortDisplayName(item),
         type: item.type ?? 'any',
+        ...(item.dataType ? { dataType: item.dataType } : {}),
+        ...(Number.isInteger(item.vectorLength) && item.vectorLength > 0
+          ? { vectorLength: item.vectorLength }
+          : {}),
         comment: item.comment ?? ''
       }))
     }

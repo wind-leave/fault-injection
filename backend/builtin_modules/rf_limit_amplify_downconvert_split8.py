@@ -12,7 +12,7 @@ def process(
     rf_input=None,
     limit_amplitude=1.0,
     gain_db=0.0,
-    lo_frequency_hz=99.0,
+    lo_frequency_hz=5.0,
     lo_phase_deg=0.0,
     conversion_gain=1.0,
     low_pass_cutoff_hz=5.0,

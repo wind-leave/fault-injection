@@ -74,7 +74,7 @@ textarea{
 header{
   height:56px;
   display:grid;
-  grid-template-columns:var(--workbench-left-w,220px) minmax(330px,1fr) minmax(540px,max-content);
+  grid-template-columns:var(--workbench-left-w,220px) minmax(330px,1fr) max-content;
   align-items:center;
   background:#ffffff;
   border-bottom:1px solid var(--border);
@@ -479,12 +479,12 @@ header{
   color:#0e6027;
 }
 
-.citem-can,
-.citem-line-tool.active.citem-can{
-  border-color:#a6c8ff!important;
-  border-left-color:#0043ce!important;
-  background:#ffffff!important;
-  color:#0043ce!important;
+.citem-power,
+.citem-line-tool.active.citem-power{
+  border-color:#fecaca!important;
+  border-left-color:#dc2626!important;
+  background:#fff7f7!important;
+  color:#b91c1c!important;
 }
 
 .citem-line-tool.active{
@@ -544,6 +544,7 @@ header{
   background:#f4f4f4;
   box-shadow:none;
   white-space:nowrap;
+  justify-content:flex-start;
 }
 
 .simbar-title{
@@ -564,6 +565,22 @@ header{
   font-weight:600;
 }
 
+.simbar-title__name-input{
+  width:100%;
+  min-width:0;
+  padding:0;
+  border:0;
+  border-bottom:1px solid transparent;
+  outline:0;
+  background:transparent;
+  font:inherit;
+}
+
+.simbar-title__name-input:hover,
+.simbar-title__name-input:focus{
+  border-bottom-color:var(--blue);
+}
+
 .simbar-params{
   flex:1;
   min-width:0;
@@ -576,6 +593,10 @@ header{
   flex:0 1 auto;
   min-width:max-content;
   padding-right:4px;
+}
+
+.canvas-sim-dock .simbar-btns{
+  margin-left:auto;
 }
 
 .sim-field{
@@ -905,6 +926,7 @@ header{
 
 .canvas-wrap__button,
 .canvas-arrange__button,
+.canvas-line-view__button,
 .canvas-check__button{
   min-width:auto;
   height:34px;
@@ -920,6 +942,7 @@ header{
 
 .canvas-wrap__button:hover:not(:disabled),
 .canvas-arrange__button:hover,
+.canvas-line-view__button:hover,
 .canvas-check__button:hover{
   transform:none;
   border-color:#a6c8ff;
@@ -952,10 +975,16 @@ header{
   font-weight:600;
 }
 
-.canvas-mode__chip.can{
-  border-color:#78a9ff;
-  background:#edf5ff;
-  color:#002d9c;
+.canvas-mode__chip.power{
+  border-color:#fecaca;
+  background:#fff1f1;
+  color:#b91c1c;
+}
+
+.canvas-line-view__button{
+  color:#005d5d;
+  border-color:#8dd3d3;
+  background:#edffff;
 }
 
 .canvas-zoom{
@@ -1977,6 +2006,16 @@ header{
   display:grid;
   grid-template-columns:minmax(0,1fr);
   gap:6px;
+}
+
+.canvas-wrap[data-view="canvas"] .canvas-node--electrical{
+  --node-accent:#c77d00;
+  --node-tint:#fff8df;
+}
+
+.canvas-wrap[data-view="canvas"] .canvas-node--electrical::before{
+  border-radius:4px;
+  clip-path:polygon(12px 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%,0 12px);
 }
 
 .edge-testpoint-fault-component{
@@ -3133,6 +3172,53 @@ header{
   box-shadow:none;
 }
 
+.props-panel-shell--component .rf-vector-config{
+  display:grid;
+  gap:8px;
+}
+
+.props-panel-shell--component .rf-vector-config > input{
+  width:100%;
+  min-width:0;
+  min-height:34px;
+  padding:0 10px;
+  border:1px solid var(--border);
+  border-radius:0;
+  background:#ffffff;
+  color:var(--text);
+  font-family:var(--font-data);
+  font-size:12px;
+}
+
+.props-panel-shell--component .rf-vector-items{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+}
+
+.props-panel-shell--component .rf-vector-item{
+  display:grid;
+  gap:4px;
+}
+
+.props-panel-shell--component .rf-vector-item label{
+  color:var(--text2);
+  font-size:11px;
+  font-weight:600;
+}
+
+.props-panel-shell--component .rf-vector-item input{
+  width:100%;
+  min-width:0;
+  min-height:32px;
+  padding:0 8px;
+  border:1px solid var(--border);
+  border-radius:0;
+  background:#ffffff;
+  color:var(--text);
+  font-family:var(--font-data);
+}
+
 .props-panel-shell--component .props-actions,
 .props-panel-shell--edge .props-actions,
 .props-panel-shell--fault-injector .props-actions{
@@ -3871,6 +3957,17 @@ header{
 }
 
 /* Responsive header recovery: keep global actions visible before the layout reaches tablet mode. */
+/* Keep the remaining global actions anchored to the right edge after toolbar items are removed. */
+header .toolbar{
+  border-left:0;
+  padding-left:0;
+  justify-content:flex-end;
+}
+
+header .toolbar .tbtn:first-child{
+  border-left:1px solid var(--border);
+}
+
 @media (min-width:1281px) and (max-width:1900px){
   .gz-app{
     grid-template-rows:56px minmax(0,1fr);
@@ -3882,7 +3979,7 @@ header{
 
   header{
     height:56px;
-    grid-template-columns:minmax(168px,var(--workbench-left-w,220px)) minmax(300px,1fr) minmax(520px,max-content);
+    grid-template-columns:minmax(168px,var(--workbench-left-w,220px)) minmax(300px,1fr) max-content;
     grid-template-rows:56px;
   }
 
@@ -3922,7 +4019,7 @@ header{
     grid-column:3;
     height:56px;
     max-width:none;
-    border-left:1px solid var(--border);
+    border-left:0;
     border-top:0;
     background:#ffffff;
     overflow-x:auto;

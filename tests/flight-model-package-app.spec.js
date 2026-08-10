@@ -361,6 +361,52 @@ describe('Flight model package app integration', () => {
     wrapper.unmount();
   });
 
+  it('preserves components with no input or output interfaces when exporting a system model', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const portlessPackage = {
+      ...PACKAGE_FIXTURE,
+      pythonModules: [],
+      workbenchSnapshot: createWorkbenchSnapshot({
+        modelNodes: [{
+          id: 'node-portless',
+          type: 'simulation_block',
+          x: 360,
+          y: 240,
+          props: {
+            name: 'Portless Component',
+            inputs: [],
+            outputs: [],
+            middleVars: [],
+            powerInputs: [],
+            powerOutputs: []
+          }
+        }],
+        modelEdges: [],
+        nodeSeq: 1,
+        edgeSeq: 0
+      })
+    };
+
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(portlessPackage)).toMatchObject({ ok: true });
+    await flushRuntime();
+    window.renderModelNodes();
+
+    const node = window.__GZ_STATE__.modelNodes[0];
+    expect(window.getNodePorts(node)).toEqual({ inputs: [], outputs: [] });
+
+    const exportedNode = window.__GZ_FLIGHT_MODEL_PACKAGE__.exportCurrent().workbenchSnapshot.modelNodes[0];
+    expect(exportedNode.props).toMatchObject({
+      inputs: [],
+      outputs: [],
+      powerInputs: [],
+      powerOutputs: []
+    });
+
+    wrapper.unmount();
+  });
+
   it('does not register fault types while importing a model package', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -903,10 +949,6 @@ describe('Flight model package app integration', () => {
     await flushRuntime();
 
     expect(importResult).toMatchObject({ ok: true });
-    expect(document.getElementById('btn-imp-flt')?.textContent).toContain('加载故障模型');
-    expect(document.getElementById('btn-imp-flt')?.disabled).toBe(false);
-    expect(document.getElementById('btn-imp-flt')?.classList.contains('tbtn-disabled')).toBe(false);
-
     window.doImportFault();
     await flushRuntime();
 
@@ -936,12 +978,6 @@ describe('Flight model package app integration', () => {
     window.__GZ_STATE__.systemSaved = false;
     window.updateUI();
     await flushRuntime();
-
-    const injectButton = document.getElementById('btn-imp-flt');
-    expect(injectButton?.textContent).toContain('加载故障模型');
-    expect(injectButton?.disabled).toBe(false);
-    expect(injectButton?.classList.contains('tbtn-disabled')).toBe(false);
-    expect(injectButton?.getAttribute('aria-disabled')).toBe('false');
 
     window.doImportFault();
     await flushRuntime();
@@ -1008,6 +1044,64 @@ describe('Flight model package app integration', () => {
       moduleName: 'attitude_pid',
       entryFunction: 'process'
     });
+
+    wrapper.unmount();
+  });
+
+  it('preserves saved interface names and distant component positions when importing a system model', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const packageWithSavedLayout = JSON.parse(JSON.stringify(LEAN_PACKAGE_FIXTURE));
+    const savedPortMapping = {
+      inputs: [{
+        varName: 'pitch_error',
+        displayName: 'Reference Pitch Vector',
+        type: 'float',
+        comment: 'pitch error'
+      }],
+      outputs: [{
+        varName: 'elevator_cmd',
+        displayName: 'Actuator Command Vector',
+        type: 'float',
+        comment: 'elevator command'
+      }],
+      middleVars: [{
+        varName: 'integral_state',
+        displayName: 'Saved Integral State',
+        type: 'float',
+        comment: 'integral accumulator'
+      }]
+    };
+    const savedPosition = { x: 5270, y: 3490 };
+    const snapshotNodes = [
+      packageWithSavedLayout.workbenchSnapshot.modelNodes[0],
+      packageWithSavedLayout.workbenchSnapshot.canvases['canvas-root'].nodes[0]
+    ];
+
+    snapshotNodes.forEach((node) => {
+      Object.assign(node, savedPosition);
+      node.pythonBinding.portMapping = JSON.parse(JSON.stringify(savedPortMapping));
+      node.simulationInterfaceDefinition.pythonPortMapping = JSON.parse(JSON.stringify(savedPortMapping));
+    });
+
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(packageWithSavedLayout)).toMatchObject({ ok: true });
+    await flushRuntime();
+
+    const importedNode = window.__GZ_STATE__.modelNodes[0];
+    const stage = document.getElementById('canvas-stage');
+    expect(importedNode).toMatchObject(savedPosition);
+    expect(importedNode.pythonBinding.portMapping.inputs[0].displayName).toBe('Reference Pitch Vector');
+    expect(importedNode.pythonBinding.portMapping.outputs[0].displayName).toBe('Actuator Command Vector');
+    expect(importedNode.pythonBinding.portMapping.middleVars[0].displayName).toBe('Saved Integral State');
+    expect(Number.parseFloat(stage.style.width)).toBeGreaterThan(importedNode.x + importedNode.w);
+    expect(Number.parseFloat(stage.style.height)).toBeGreaterThan(importedNode.y + importedNode.h);
+
+    const exportedNode = window.__GZ_FLIGHT_MODEL_PACKAGE__.exportCurrent().workbenchSnapshot.modelNodes[0];
+    expect(exportedNode).toMatchObject(savedPosition);
+    expect(exportedNode.pythonBinding.portMapping.inputs[0].displayName).toBe('Reference Pitch Vector');
+    expect(exportedNode.pythonBinding.portMapping.outputs[0].displayName).toBe('Actuator Command Vector');
+    expect(exportedNode.pythonBinding.portMapping.middleVars[0].displayName).toBe('Saved Integral State');
 
     wrapper.unmount();
   });

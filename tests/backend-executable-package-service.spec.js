@@ -63,6 +63,115 @@ describe('backendExecutablePackageService', () => {
     expect(pkg.simulationConfig).toEqual({ duration: 10, stepSize: 0.1 });
   });
 
+  it('exports an unbound simulation block as a transparent backend component', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'unbound-block',
+        type: 'simulation_block',
+        props: {
+          inputs: [{ name: '输入 1' }],
+          outputs: [{ name: '输出 1' }]
+        },
+        pythonBinding: { entryFunction: 'process' }
+      }],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].pythonBinding).toEqual({ moduleId: 'passthrough', entryFunction: 'process' });
+  });
+
+  it('exports edited simulation component parameter values for backend execution', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'barometer',
+        type: 'simulation_block',
+        props: {
+          parameters: [
+            { key: 'bias', name: '高度偏置', default: 0 },
+            { key: 'scale', name: '高度比例', default: 1 }
+          ],
+          parameterValues: { bias: 12.5, scale: 0.8 }
+        },
+        pythonBinding: { moduleId: 'barometer_sensor', entryFunction: 'process' }
+      }],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].parameters).toMatchObject({ bias: 12.5, scale: 0.8 });
+  });
+
+  it.skip('exports simulation power terminals and power-line metadata separately from signal ports', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'source', type: 'signal_source', props: { value: 28 }, outputs: [{ name: 'out' }]
+      }, {
+        id: 'powered-component',
+        type: 'simulation_block',
+        props: {
+          inputs: [{ name: 'signal' }],
+          outputs: [{ name: 'output' }],
+          powerInputs: [{ portId: 'supply', name: '电源输入', voltage: '28V' }],
+          powerOutputs: [{ portId: 'ground', name: '电源地', voltage: '0V' }]
+        },
+        pythonBinding: { moduleId: 'passthrough', entryFunction: 'process' }
+      }],
+      modelEdges: [{
+        id: 'supply-edge', sourceNodeId: 'source', sourcePortIndex: 0,
+        targetNodeId: 'powered-component', targetPortIndex: 1, lineType: 'power'
+      }]
+    });
+
+    expect(pkg.nodes[1]).toEqual(expect.objectContaining({
+      powerInputs: [{ id: 'supply', name: '电源输入', voltage: '28V' }],
+      powerOutputs: [{ id: 'ground', name: '电源地', voltage: '0V' }]
+    }));
+    expect(pkg.edges[0].lineType).toBe('power');
+  });
+
+  it('exports a simulation supply terminal without a ground terminal', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'source', type: 'signal_source', props: { value: 28 }, outputs: [{ name: 'out' }]
+      }, {
+        id: 'powered-component', type: 'simulation_block',
+        props: {
+          inputs: [{ name: 'signal' }], outputs: [{ name: 'output' }],
+          powerInputs: [{ portId: 'supply', name: '电源输入', voltage: '28V' }],
+          powerOutputs: [{ portId: 'legacy-ground', name: '电源地', voltage: '0V' }]
+        },
+        pythonBinding: { moduleId: 'passthrough', entryFunction: 'process' }
+      }],
+      modelEdges: [{
+        id: 'supply-edge', sourceNodeId: 'source', sourcePortIndex: 0,
+        targetNodeId: 'powered-component', targetPortIndex: 1
+      }]
+    });
+
+    expect(pkg.nodes[1]).toEqual(expect.objectContaining({
+      powerInputs: [{ id: 'supply', name: '电源输入', voltage: '28V' }],
+      powerOutputs: []
+    }));
+    expect(pkg.edges[0].lineType).toBe('normal');
+  });
+
+  it('exports a downconverter LO edited as 980 MHz in backend Hz', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'downconverter',
+        type: 'simulation_block',
+        props: {
+          parameters: [{ key: 'lo_frequency_hz', name: '本振频率', default: 990000000, unit: 'Hz' }],
+          parameterValues: { lo_frequency_hz: 980000000 },
+          parameterUnits: { lo_frequency_hz: 'MHz' }
+        },
+        pythonBinding: { moduleId: 'rf_downconverter', entryFunction: 'process' }
+      }],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].parameters.lo_frequency_hz).toBe(980000000);
+  });
+
   it('preserves fixed-length vector port definitions and constant vector values', () => {
     const pkg = buildBackendExecutablePackage({
       modelNodes: [{
@@ -109,6 +218,51 @@ describe('backendExecutablePackageService', () => {
     ]);
   });
 
+  it('exports dynamic oscilloscope inputs and inherits the connected signal contract', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [
+        {
+          id: 'vectorizer',
+          type: 'simulation_block',
+          props: {
+            outputs: [{ varName: 'vector_output', type: 'vector', vectorLength: 4 }]
+          },
+          pythonBinding: { moduleId: 'scalar_to_vector4' }
+        },
+        {
+          id: 'scope',
+          type: 'instrument_scope',
+          props: {
+            inputPortNameCh1: 'CH1',
+            inputPortNameCh2: 'CH2',
+            vectorChannelCh1: 3
+          }
+        }
+      ],
+      modelEdges: [{
+        id: 'vectorizer-scope',
+        sourceNodeId: 'vectorizer',
+        sourcePortIndex: 0,
+        targetNodeId: 'scope',
+        targetPortIndex: 0
+      }]
+    });
+
+    const scope = pkg.nodes.find((node) => node.id === 'scope');
+    expect(scope.inputs).toEqual([
+      { id: 'ch1', name: 'CH1', dataType: 'vector', vectorLength: 4 },
+      { id: 'ch2', name: 'CH2', dataType: 'scalar' }
+    ]);
+    expect(pkg.edges).toContainEqual(expect.objectContaining({
+      id: 'vectorizer-scope',
+      targetPortIndex: 0,
+      lineType: 'normal'
+    }));
+    expect(pkg.measurementPoints).toEqual([
+      expect.objectContaining({ id: 'scope.ch1', vectorIndex: 2 })
+    ]);
+  });
+
   it('exports numeric scalar fallbacks for all signal source domains', () => {
     const pkg = buildBackendExecutablePackage({
       modelNodes: [
@@ -126,6 +280,65 @@ describe('backendExecutablePackageService', () => {
       expect.objectContaining({ id: 'command', parameters: expect.objectContaining({ payloadValue: 7, value: 7 }) }),
       expect.objectContaining({ id: 'rf', parameters: expect.objectContaining({ power: 10, value: 10 }) })
     ]);
+  });
+
+  it('creates a scalar output port for a signal source whose canvas node has no explicit output declaration', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'rf-source',
+        type: 'signal_source',
+        outputs: [],
+        props: {
+          signalDomain: 'rf',
+          outputPortName: 'RF output',
+          centerFrequency: '10',
+          centerFrequencyUnit: 'Hz',
+          power: '1',
+          powerUnit: 'dBm'
+        }
+      }],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].outputs).toEqual([{
+      id: 'signal',
+      name: 'RF output',
+      dataType: 'scalar'
+    }]);
+  });
+
+  it('exports configurable RF vector output values and a fixed-length vector port', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'rf-vector',
+        type: 'signal_source',
+        props: {
+          signalDomain: 'rf',
+          outputFormat: '向量',
+          outputPortName: '多通道射频',
+          rfVectorLength: 3,
+          rfVectorValues: '1, 0.5, 0.25',
+          centerFrequency: '2.4',
+          centerFrequencyUnit: 'GHz',
+          power: '10'
+        }
+      }],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0]).toEqual(expect.objectContaining({
+      parameters: expect.objectContaining({
+        value: [1, 0.5, 0.25],
+        rfVectorLength: 3,
+        rfVectorValues: [1, 0.5, 0.25]
+      }),
+      outputs: [{
+        id: 'signal',
+        name: '多通道射频',
+        dataType: 'vector',
+        vectorLength: 3
+      }]
+    }));
   });
 
   it('exports analog signal waveform parameters for backend execution', () => {

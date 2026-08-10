@@ -9,6 +9,8 @@ const FAULT_PARAMETER_LABELS = {
   rate: '漂移速率',
   step: '突变量',
   scale: '衰减系数',
+  attenuation_db: '衰减量 (dB)',
+  attenuationDb: '衰减量 (dB)',
   delay_steps: '延迟步数',
   delay_seconds: '延迟时间',
   drop_rate: '丢包率',

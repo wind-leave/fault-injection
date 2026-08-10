@@ -149,6 +149,9 @@ class FaultRuntime:
             return result + float(params.get("rate", 0.0)) * max(0.0, time - start)
         if fault_type == "sensor_bias":
             return result + float(params.get("bias", 0.0))
+        if fault_type == "signal_attenuation":
+            attenuation_db = max(0.0, float(params.get("attenuation_db", params.get("attenuationDb", 0.0))))
+            return result * (10.0 ** (-attenuation_db / 20.0))
         if fault_type == "noise_increase":
             amplitude = float(params.get("amplitude", params.get("std", 0.1)))
             return result + self._bounded_noise(
@@ -160,6 +163,8 @@ class FaultRuntime:
             if "value" in params:
                 return float(params["value"])
             return self._frozen_signal_value(fault, target_id, target_field, result)
+        if fault_type == "signal_cutoff":
+            return 0.0
         if fault_type == "intermittent":
             start = float(fault.get("startTime", params.get("start", 0.0)))
             period = max(float(params.get("period", 1.0)), 1e-9)

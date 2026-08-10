@@ -36,6 +36,32 @@ class FaultRuntimeTests(unittest.TestCase):
 
         self.assertEqual(runtime.apply_node_output("motor-1", 8.0, 0.1), 2.0)
 
+    def test_signal_attenuation_reduces_signal_amplitude_in_decibels(self):
+        runtime = FaultRuntime([
+            {
+                "faultId": "fault-attenuation",
+                "faultType": "signal_attenuation",
+                "targetId": "rf-1",
+                "parameters": {"attenuation_db": 6.0},
+            }
+        ])
+
+        self.assertAlmostEqual(runtime.apply_node_output("rf-1", 1.0, 0.0), 10.0 ** (-6.0 / 20.0))
+
+    def test_signal_cutoff_sets_data_to_zero_from_its_start_time(self):
+        runtime = FaultRuntime([
+            {
+                "faultId": "fault-cutoff",
+                "faultType": "signal_cutoff",
+                "targetId": "rf-1",
+                "startTime": 2.0,
+                "parameters": {},
+            }
+        ])
+
+        self.assertEqual(runtime.apply_node_output("rf-1", 3.5, 1.9), 3.5)
+        self.assertEqual(runtime.apply_node_output("rf-1", 3.5, 2.0), 0.0)
+
     def test_parameter_degradation_scales_a_module_parameter(self):
         runtime = FaultRuntime([
             {

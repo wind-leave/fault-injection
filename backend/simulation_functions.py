@@ -42,6 +42,137 @@ def clamp(value, minimum, maximum):
     return min(upper, max(lower, as_float(value, lower)))
 
 
+def floor_power_of_two(value):
+    """返回不大于输入值的最大 2 的整数次幂。
+
+    参数：
+        value：待规范化的数值，例如 FFT 点数配置。
+
+    返回：
+        不大于 ``value`` 的最大正整数 2 的幂；输入小于 1 或无效时返回 1。
+        可用于将任意 FFT 点数约束为基 2 FFT 支持的长度。
+    """
+    limit = max(1, int(as_float(value, 1)))
+    size = 1
+    while size * 2 <= limit:
+        size *= 2
+    return size
+
+
+def fft_radix2(values):
+    """计算基 2 的离散傅里叶变换（FFT）。
+
+    参数：
+        values：时域样本序列；序列长度必须是 2 的整数次幂，元素可为实数或复数。
+
+    返回：
+        与输入等长的复数频域序列。频率索引 ``k`` 对应
+        ``k * 采样率 / 样本数``。
+
+    异常：
+        ValueError：输入为空或长度不是 2 的整数次幂。
+    """
+    count = len(values)
+    if count <= 0 or count & (count - 1):
+        raise ValueError("FFT 输入长度必须是 2 的整数次幂")
+
+    result = [complex(value) for value in values]
+    bit_reversed = 0
+    for index in range(1, count):
+        bit = count >> 1
+        while bit_reversed & bit:
+            bit_reversed ^= bit
+            bit >>= 1
+        bit_reversed ^= bit
+        if index < bit_reversed:
+            result[index], result[bit_reversed] = result[bit_reversed], result[index]
+
+    span = 2
+    while span <= count:
+        step = complex(math.cos(-2.0 * math.pi / span), math.sin(-2.0 * math.pi / span))
+        for start in range(0, count, span):
+            factor = 1.0 + 0.0j
+            half = span // 2
+            for offset in range(half):
+                even = result[start + offset]
+                odd = factor * result[start + offset + half]
+                result[start + offset] = even + odd
+                result[start + offset + half] = even - odd
+                factor *= step
+        span *= 2
+    return result
+
+
+def quantize_bipolar_sample(sample, full_scale_amplitude=1.0, maximum_code=255):
+    """将双极性模拟采样值量化为无符号 ADC 码。
+
+    参数：
+        sample：待量化的模拟采样值。
+        full_scale_amplitude：正、负满量程的绝对幅度；无效或为 0 时按 1 处理。
+        maximum_code：ADC 最大码值，例如 8 位 ADC 使用 255。
+
+    返回：
+        位于 ``[0, maximum_code]`` 的整数码。``-full_scale_amplitude`` 对应 0，
+        ``+full_scale_amplitude`` 对应最大码值。
+    """
+    full_scale = max(1e-12, abs(as_float(full_scale_amplitude, 1.0)))
+    code_max = max(1, int(as_float(maximum_code, 255)))
+    normalized = clamp(as_float(sample) / full_scale, -1.0, 1.0)
+    return int(round((normalized + 1.0) * code_max / 2.0))
+
+
+def dequantize_bipolar_code(code, full_scale_amplitude=1.0, maximum_code=255):
+    """将无符号 ADC 码恢复为双极性模拟幅度近似值。
+
+    参数：
+        code：待恢复的无符号码值，超出范围时自动限幅。
+        full_scale_amplitude：正、负满量程的绝对幅度。
+        maximum_code：ADC 最大码值，应与量化时保持一致。
+
+    返回：
+        位于 ``[-full_scale_amplitude, +full_scale_amplitude]`` 的浮点采样值。
+    """
+    full_scale = max(1e-12, abs(as_float(full_scale_amplitude, 1.0)))
+    code_max = max(1, int(as_float(maximum_code, 255)))
+    bounded_code = clamp(code, 0, code_max)
+    return (bounded_code / code_max * 2.0 - 1.0) * full_scale
+
+
+def estimate_fft_peak_frequency(samples, sample_period, window="hann"):
+    """利用单边 FFT 主峰估计实数信号的中心频率。
+
+    参数：
+        samples：等间隔实数采样序列，长度必须为 2 的整数次幂。
+        sample_period：相邻样本的时间间隔，单位 s。
+        window：窗函数类型；当前支持 ``"hann"`` 和 ``"rectangular"``。
+
+    返回：
+        非直流单边频谱中幅度最大的频点，单位 Hz。样本不足 4 个、采样周期无效
+        或没有可用的非直流频点时返回 0。
+    """
+    count = len(samples)
+    step = as_float(sample_period)
+    if count < 4 or step <= 0.0:
+        return 0.0
+    if count & (count - 1):
+        raise ValueError("中心频率估计的样本长度必须是 2 的整数次幂")
+
+    kind = str(window or "hann").strip().lower()
+    if kind == "rectangular":
+        windowed = [as_float(sample) for sample in samples]
+    else:
+        windowed = [
+            as_float(sample) * (0.5 - 0.5 * math.cos(2.0 * math.pi * index / (count - 1)))
+            for index, sample in enumerate(samples)
+        ]
+    spectrum = fft_radix2(windowed)
+    half = count // 2
+    if half <= 1:
+        return 0.0
+    peak_bin = max(range(1, half), key=lambda index: abs(spectrum[index]))
+    return peak_bin / (count * step)
+
+
 def limit_rf_amplitude(sample, maximum_amplitude):
     """对单个射频时域采样值执行对称限幅。
 
@@ -115,7 +246,7 @@ def amplify_rf_power(
     return limit_rf_amplitude(output, maximum_peak_amplitude)
 
 
-def amplify_rf_final_power_16(
+def amplify_rf_final_power_2(
     small_signal_inputs,
     gate_controls=None,
     gain_db=0.0,
@@ -123,32 +254,32 @@ def amplify_rf_final_power_16(
     impedance_ohms=50.0,
     gate_threshold=0.5,
 ):
-    """16 元末级功放：小信号功率放大与栅极控制。
+    """2 元末级功放：小信号功率放大与栅极控制。
 
     参数：
-        small_signal_inputs：16 路小信号序列；不足 16 路按 0 补齐。若传入
+        small_signal_inputs：2 路小信号序列；不足 2 路按 0 补齐。若传入
             单个数值，则作为公共激励复制给全部阵元。
-        gate_controls：16 路栅极控制量或单个公共控制量；未提供时全部导通。
+        gate_controls：2 路栅极控制量或单个公共控制量；未提供时全部导通。
         gain_db：每个末级功放的增益，单位 dB。
         maximum_output_power_watts：每个末级功放的最大输出平均功率，单位 W。
         impedance_ohms：每个末级功放的负载阻抗，单位欧姆。
         gate_threshold：数值型栅极控制量的导通阈值。
 
     返回：
-        固定长度为 16 的输出元组；未导通阵元对应输出为 0。
+        固定长度为 2 的输出元组；未导通阵元对应输出为 0。
     """
     if isinstance(small_signal_inputs, (tuple, list)):
-        inputs = tuple(as_float(value) for value in small_signal_inputs[:16])
-        inputs += (0.0,) * (16 - len(inputs))
+        inputs = tuple(as_float(value) for value in small_signal_inputs[:2])
+        inputs += (0.0,) * (2 - len(inputs))
     else:
-        inputs = (as_float(small_signal_inputs),) * 16
+        inputs = (as_float(small_signal_inputs),) * 2
 
     if gate_controls is None:
-        gates = (True,) * 16
+        gates = (True,) * 2
     elif isinstance(gate_controls, (tuple, list)):
-        gates = tuple(gate_controls[:16]) + (0.0,) * (16 - len(gate_controls))
+        gates = tuple(gate_controls[:2]) + (0.0,) * (2 - len(gate_controls))
     else:
-        gates = (gate_controls,) * 16
+        gates = (gate_controls,) * 2
 
     threshold = as_float(gate_threshold, 0.5)
     outputs = []
@@ -537,15 +668,16 @@ def band_pass_rf_filter(
         dt：仿真步长，单位秒。
 
     返回：
-        当前仿真步的带通输出。调用方应保存 ``sample``、高通级输出和本函数
-        返回值，分别用于下一步的前三个状态参数。
+        ``(high_pass_output, band_pass_output)``。调用方应保存 ``sample``、
+        高通级输出和带通输出，分别用于下一步的状态参数。
 
     该函数由一阶高通和一阶低通串联构成。频率范围无效或步长非正时保持上一输出。
     """
+    previous_high_pass = as_float(previous_high_pass_output)
     previous = as_float(previous_output)
     band = _valid_rf_band(low_cutoff_frequency_hz, high_cutoff_frequency_hz)
     if band is None or as_float(dt) <= 0.0:
-        return previous
+        return previous_high_pass, previous
     low_cutoff, high_cutoff = band
     high_pass_output = high_pass_rf_filter(
         sample,
@@ -554,7 +686,8 @@ def band_pass_rf_filter(
         low_cutoff,
         dt,
     )
-    return low_pass_rf_filter(high_pass_output, previous, high_cutoff, dt)
+    band_pass_output = low_pass_rf_filter(high_pass_output, previous, high_cutoff, dt)
+    return high_pass_output, band_pass_output
 
 
 def band_stop_rf_filter(
@@ -583,7 +716,7 @@ def band_stop_rf_filter(
         return previous
     low_cutoff, high_cutoff = band
     previous_band_pass_output = as_float(previous_input) - previous
-    band_pass_output = band_pass_rf_filter(
+    _next_high_pass_output, band_pass_output = band_pass_rf_filter(
         sample,
         previous_input,
         previous_high_pass_output,
@@ -668,7 +801,7 @@ def upconvert_rf_signal(
     )
 
 
-def _split_rf_power(sample, output_count, insertion_loss_db):
+def _split_rf_power(sample, output_count, insertion_loss_db = 0.0):
     """将单路射频时域样本等功率分配到多路输出。
 
     参数：
@@ -985,6 +1118,10 @@ def deterministic_noise(seed, step_index=0, time=0.0):
     raw = math.sin(phase) * 43758.5453
     return (raw - math.floor(raw)) * 2.0 - 1.0
 
+def select_rf_switch_n(inputs, number=0, mode=1):
+    """射频多选N"""
+    mode = max(1, int(mode))
+    return inputs[(mode-1)*number:number*mode]
 
 __all__ = [
     "as_float",
@@ -1022,5 +1159,6 @@ __all__ = [
     "sp2t_switch",
     "split_rf_power_2_to_8",
     "control_excitation_power_split",
+    "select_rf_switch_n",
     "upconvert_rf_signal",
 ]

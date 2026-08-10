@@ -1,5 +1,7 @@
 export function getCanvasModeLabel(lineType = 'normal') {
-  return lineType === 'can' ? 'CAN 总线' : '普通连接线';
+  if (lineType === 'power') return '电源线';
+  if (lineType === 'can') return 'CAN 总线';
+  return '普通连接线';
 }
 
 export function getPythonBindingPortCounts(node) {

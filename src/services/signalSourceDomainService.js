@@ -11,6 +11,34 @@ function numberOrFallback(value, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+export const RF_VECTOR_LENGTH_LIMITS = { min: 2, max: 16 };
+
+export function normalizeRfVectorLength(value, fallback = 4) {
+  const numeric = Math.trunc(Number(value));
+  const base = Number.isFinite(numeric) ? numeric : fallback;
+  return Math.min(RF_VECTOR_LENGTH_LIMITS.max, Math.max(RF_VECTOR_LENGTH_LIMITS.min, base));
+}
+
+export function getRfVectorValues(value, length = 4) {
+  const expectedLength = normalizeRfVectorLength(length);
+  const source = Array.isArray(value)
+    ? value
+    : String(value ?? '').split(/[,，;；\s]+/);
+  const values = source
+    .map((item) => Number(String(item ?? '').trim()))
+    .filter(Number.isFinite);
+  return Array.from({ length: expectedLength }, (_, index) => values[index] ?? 1);
+}
+
+export function formatRfVectorValues(value, length = 4) {
+  return getRfVectorValues(value, length).join(', ');
+}
+
+export function isRfVectorOutput(props = {}) {
+  return normalizeSignalDomain(props.signalDomain) === 'rf'
+    && ['vector', '向量'].includes(String(props.outputFormat ?? '').trim().toLowerCase());
+}
+
 export const SIGNAL_DOMAINS = [
   { value: 'digital', label: '数字信号' },
   { value: 'command', label: '指令信号' },
@@ -73,7 +101,9 @@ const DOMAIN_DEFAULTS = {
     signalDomain: 'rf',
     centerFrequency: '',
     bandwidth: '',
-    power: '',
+    // 0 dBm corresponds to a non-zero, 50-ohm RF carrier.  A source with an
+    // unspecified level should not silently become a zero-amplitude source.
+    power: '0',
     powerUnit: 'dBm',
     modulation: 'cw',
     modulationDepth: '',
@@ -91,7 +121,10 @@ const DOMAIN_DEFAULTS = {
     channel: '',
     polarization: '',
     rfProfile: '',
-    outputFormat: '矩阵'
+    outputFormat: '标量',
+    rfVectorLength: 4,
+    rfVectorConfigMode: 'batch',
+    rfVectorValues: '1, 1, 1, 1'
   }
 };
 
@@ -120,6 +153,15 @@ export function normalizeSignalSourceProps(props = {}) {
 
   // 将旧模型中“250us”这类带单位的时长拆分成数值与单位，便于属性面板继续编辑。
   if (signalDomain === 'rf') {
+    // Older canvases stored an empty string for an unedited RF power field.
+    // Treat that as the source default so the backend does not export a zero
+    // carrier solely because a legacy model lacks this optional UI value.
+    if (!String(normalized.power ?? '').trim()) {
+      normalized.power = '0';
+    }
+    normalized.rfVectorLength = normalizeRfVectorLength(normalized.rfVectorLength);
+    normalized.rfVectorConfigMode = normalized.rfVectorConfigMode === 'item' ? 'item' : 'batch';
+    normalized.rfVectorValues = formatRfVectorValues(normalized.rfVectorValues, normalized.rfVectorLength);
     ['pulseWidth', 'pulsePeriod'].forEach((key) => {
       const unitKey = `${key}Unit`;
       if (Object.prototype.hasOwnProperty.call(original, unitKey)) return;
@@ -163,7 +205,8 @@ export function summarizeSignalSource(node = {}) {
   }
 
   if (props.signalDomain === 'rf') {
-    const fallbackSignal = props.modulation || (props.power ? `${props.power}${props.powerUnit || ''}` : '');
+    const level = props.power === '' ? '' : `${props.power}${props.powerUnit || ''}`;
+    const fallbackSignal = [props.modulation, level].filter(Boolean).join(' · ');
     return ['射频', props.centerFrequency || '未设置频点', props.bandwidth || '未设置带宽', fallbackSignal]
       .filter(Boolean)
       .join(' · ');

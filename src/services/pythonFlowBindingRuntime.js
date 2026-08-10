@@ -88,8 +88,7 @@ export function executeFlowBlockPythonBindingSync({
     inputNames: inputs.map((item) => item.varName),
     outputNames: outputs.map((item) => item.varName),
     middleVarNames: middleVars.map((item) => item.varName),
-    source: binding?.rawSource ?? '',
-    endpoint: adapterEndpoint
+    source: binding?.rawSource ?? ''
   };
 
   const response = executeSync({

@@ -26,6 +26,44 @@ function pushLimitedSample(list, sample, limit = DEFAULT_SAMPLE_LIMIT) {
   }
 }
 
+function parseSpectrumSampleRateHz(value, fallback = 10) {
+  const text = String(value ?? '').trim();
+  const amount = Number.parseFloat(text);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return fallback;
+  }
+  if (/ghz$/i.test(text)) return amount * 1e9;
+  if (/mhz$/i.test(text)) return amount * 1e6;
+  if (/khz$/i.test(text)) return amount * 1e3;
+  return amount;
+}
+
+function shouldCaptureSpectrumSample(sim, instrumentId, configuredRate, time) {
+  sim.spectrumSampling ??= {};
+  const sampleState = sim.spectrumSampling[instrumentId] ?? { lastTime: null };
+  const sampleInterval = 1 / parseSpectrumSampleRateHz(configuredRate);
+  if (
+    sampleState.lastTime !== null
+    && time >= sampleState.lastTime
+    && time - sampleState.lastTime < sampleInterval * (1 - 1e-9)
+  ) {
+    return false;
+  }
+  sampleState.lastTime = time;
+  sim.spectrumSampling[instrumentId] = sampleState;
+  return true;
+}
+
+function spectrumAnalysisSampleLimit(node) {
+  const requested = Math.round(Number(node?.props?.fftSize));
+  const capped = Math.min(Math.max(Number.isFinite(requested) ? requested : 1024, 16), 4096);
+  let size = 16;
+  while (size < capped && size < 4096) {
+    size *= 2;
+  }
+  return size;
+}
+
 function workbenchItems(state, key) {
   const fallbackKey = key === 'modelNodes' ? 'nodes' : key === 'modelEdges' ? 'edges' : key;
   const canvasKey = key === 'modelNodes' ? 'nodes' : key === 'modelEdges' ? 'edges' : key;
@@ -39,43 +77,117 @@ function workbenchItems(state, key) {
   return Array.from(new Map(items.filter((item) => item?.id).map((item) => [item.id, item])).values());
 }
 
-function outputValueForPort(outputs, node, portIndex = 0, vectorIndex = null) {
-  if (Number.isFinite(Number(outputs))) {
-    return Number(outputs);
+function outputPortsForNode(node) {
+  const candidates = [
+    node?.outputs,
+    node?.props?.outputs,
+    node?.pythonBinding?.portMapping?.outputs
+  ];
+  return candidates.find((ports) => Array.isArray(ports) && ports.length) ?? [];
+}
+
+function cloneRuntimeSignal(value) {
+  return Array.isArray(value)
+    ? value.map(cloneRuntimeSignal)
+    : value;
+}
+
+function outputSignalForPort(outputs, node, portIndex = 0) {
+  const index = Math.max(0, Math.trunc(Number(portIndex) || 0));
+  if (Array.isArray(outputs) || Number.isFinite(Number(outputs))) {
+    return index === 0 ? cloneRuntimeSignal(outputs) : undefined;
   }
-  if (!outputs || typeof outputs !== 'object' || Array.isArray(outputs)) {
-    return NaN;
+  if (!outputs || typeof outputs !== 'object') {
+    return undefined;
   }
 
-  const ports = node?.outputs ?? node?.props?.outputs ?? [];
-  const port = Array.isArray(ports) ? ports[Number(portIndex) || 0] : null;
+  const port = outputPortsForNode(node)[index];
   const candidates = [
+    port?.varName,
     port?.name,
     port?.key,
-    port?.varName,
+    port?.portId,
     port?.id,
-    'output',
-    'out',
-    'value'
+    port?.displayName,
+    port?.label,
+    port?.pythonVariable,
+    index === 0 ? 'output' : `output-${index + 1}`,
+    `output-${index}`,
+    index === 0 ? 'out' : '',
+    index === 0 ? 'value' : ''
   ].filter(Boolean);
 
-  const selectValue = (value) => {
-    if (Array.isArray(value)) {
-      const index = Math.max(0, Math.trunc(Number(vectorIndex) || 0));
-      return Number(value[index]);
-    }
-    return Number(value);
-  };
-
   for (const key of candidates) {
-    const value = selectValue(outputs[key]);
-    if (Number.isFinite(value)) {
-      return value;
+    if (Object.prototype.hasOwnProperty.call(outputs, key)) {
+      return cloneRuntimeSignal(outputs[key]);
     }
   }
+  return cloneRuntimeSignal(Object.values(outputs)[index]);
+}
 
-  const values = Object.values(outputs).map(selectValue).filter(Number.isFinite);
-  return values.length === 1 ? values[0] : NaN;
+function orderedBackendNodeOutputs(outputs, node) {
+  if (Array.isArray(outputs) || Number.isFinite(Number(outputs))) {
+    return [cloneRuntimeSignal(outputs)];
+  }
+  if (!outputs || typeof outputs !== 'object') {
+    return [];
+  }
+  const ports = outputPortsForNode(node);
+  const count = ports.length || Object.keys(outputs).length;
+  return Array.from({ length: count }, (_, index) => outputSignalForPort(outputs, node, index));
+}
+
+function syncBackendRuntimeState(target, componentSteps) {
+  const sim = getSimulationState(target);
+  const latestStep = componentSteps.at(-1);
+  if (!sim || !latestStep) {
+    return;
+  }
+
+  const state = getWorkbenchState(target);
+  const nodes = workbenchItems(state, 'modelNodes');
+  const edges = workbenchItems(state, 'modelEdges');
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+
+  ['actual', 'reference'].forEach((mode) => {
+    const runtimeBucket = sim[mode] ??= {};
+    runtimeBucket.nodeStates ??= {};
+    runtimeBucket.edgeStates ??= {};
+    const stepOutputs = latestStep?.[mode];
+    if (!stepOutputs || typeof stepOutputs !== 'object') {
+      return;
+    }
+
+    Object.entries(stepOutputs).forEach(([nodeId, outputs]) => {
+      const orderedOutputs = orderedBackendNodeOutputs(outputs, nodesById.get(nodeId));
+      if (!orderedOutputs.length) {
+        return;
+      }
+      const nodeState = runtimeBucket.nodeStates[nodeId] ??= {};
+      nodeState.lastOutputs = orderedOutputs.map(cloneRuntimeSignal);
+      nodeState.lastOutput = cloneRuntimeSignal(orderedOutputs[0]);
+    });
+
+    edges.forEach((edge) => {
+      const sourceState = runtimeBucket.nodeStates[edge.sourceNodeId];
+      const portIndex = Math.max(0, Math.trunc(Number(edge.sourcePortIndex) || 0));
+      const value = sourceState?.lastOutputs?.[portIndex];
+      if (value === undefined) {
+        return;
+      }
+      const edgeState = runtimeBucket.edgeStates[edge.id] ??= {};
+      edgeState.lastOutput = cloneRuntimeSignal(value);
+    });
+  });
+}
+
+function outputValueForPort(outputs, node, portIndex = 0, vectorIndex = null) {
+  const signal = outputSignalForPort(outputs, node, portIndex);
+  const selected = Array.isArray(signal)
+    ? signal[Math.max(0, Math.trunc(Number(vectorIndex) || 0))]
+    : signal;
+  const value = Number(selected);
+  return Number.isFinite(value) ? value : NaN;
 }
 
 function selectedInstrumentVectorIndex(node) {
@@ -222,7 +334,11 @@ function appendBackendInstrumentSamples(target, componentSteps, componentTimes, 
       }
 
       if (spectrumOnly) {
-        pushLimitedSample(actualSamples, { t: time, actual }, sampleLimit);
+        if (!shouldCaptureSpectrumSample(sim, node.id, node.props?.sampleRate, time)) {
+          return;
+        }
+        // 频谱分析只需保留最近一个 FFT 窗口；分析时样本数即 min(已采集样本数, FFT 点数)。
+        pushLimitedSample(actualSamples, { t: time, actual }, spectrumAnalysisSampleLimit(node));
         return;
       }
 
@@ -300,6 +416,7 @@ function refreshRuntimeViews(target, status = 'stepped') {
   target.renderScopeWindows?.();
   target.renderMultimeterWindow?.();
   target.renderSpectrumInstrument?.();
+  target.refreshDisplayConsolePanel?.();
   target.renderSimulationViewPanel?.();
   target.updateUI?.();
   target.publishSimulationRuntimeSummary?.(status);
@@ -360,6 +477,7 @@ function resetBackendRuntimeSamples(sim) {
     sim.reference.instrumentSamples = {};
   }
   sim.componentOutputs = { time: [], steps: [] };
+  sim.spectrumSampling = {};
   sim.hasSamples = false;
 }
 
@@ -396,20 +514,21 @@ export function appendBackendSimulationChunk(target, chunk, { sampleLimit = DEFA
         : Number.isFinite(Number(times[index]))
           ? Number(times[index])
           : Number(sim.time || 0);
-    componentOutputTrace.time.push(time);
-    componentOutputTrace.steps.push({
+    pushLimitedSample(componentOutputTrace.time, time, sampleLimit);
+    pushLimitedSample(componentOutputTrace.steps, {
       ...cloneComponentOutputStep(step),
       time
-    });
+    }, sampleLimit);
   });
 
+  syncBackendRuntimeState(target, componentSteps);
   appendBackendInstrumentSamples(target, componentSteps, componentTimes, times, sampleLimit);
 
   const metrics = chunk?.metrics ?? {};
   if (Number.isFinite(Number(metrics.time))) {
     sim.time = Number(metrics.time);
   } else if (times.length) {
-    sim.time = Number((Number(times.at(-1)) + Number(sim.stepSize || 0)).toFixed(6));
+    sim.time = Number(times.at(-1)) + Number(sim.stepSize || 0);
   }
   if (Number.isFinite(Number(metrics.stepIndex))) {
     sim.stepIndex = Number(metrics.stepIndex);
@@ -446,6 +565,23 @@ function callLegacy(options, callback) {
   }
 }
 
+async function discardBackendSession(sim, api, options = {}) {
+  const sessionId = sim?.backendSessionId || sim?.staleBackendSessionId;
+  if (sim) {
+    sim.backendSessionId = '';
+    sim.backendRunId = '';
+    sim.staleBackendSessionId = '';
+  }
+  if (!sessionId || !api?.deleteSession) {
+    return;
+  }
+  try {
+    await api.deleteSession(sessionId);
+  } catch (error) {
+    options.onError?.(error);
+  }
+}
+
 async function ensureBackendSession(target, legacy, options = {}) {
   const sim = getSimulationState(target);
   const state = getWorkbenchState(target);
@@ -455,6 +591,10 @@ async function ensureBackendSession(target, legacy, options = {}) {
   }
 
   if (!sim.inited) {
+    // A topology or parameter edit marks the legacy simulation as uninitialized.
+    // Its backend session is otherwise still alive and would keep the old
+    // executable package (for example, the previous downconverter LO value).
+    await discardBackendSession(sim, api, options);
     legacy.simInit?.(options.silentInit ?? true);
   }
   if (!sim.inited) {
@@ -516,11 +656,17 @@ export function installBackendStepSimulationRuntime(target = globalThis, options
 
   target.simInit = function backendSimInit(silent = false) {
     const sim = getSimulationState(target);
+    const api = getBackendApi(target);
+    const staleSessionId = sim?.backendSessionId || sim?.staleBackendSessionId;
     const result = legacy.simInit?.(silent);
     if (sim) {
       sim.backendSessionId = '';
       sim.backendRunId = '';
+      sim.staleBackendSessionId = '';
       sim.componentOutputs = { time: [], steps: [] };
+    }
+    if (staleSessionId && api?.deleteSession) {
+      Promise.resolve(api.deleteSession(staleSessionId)).catch((error) => options.onError?.(error));
     }
     return result;
   };
@@ -548,12 +694,14 @@ export function installBackendStepSimulationRuntime(target = globalThis, options
       return callLegacy(options, () => legacy.simRun?.());
     }
     if (!sim.inited) {
+      await discardBackendSession(sim, getBackendApi(target), options);
       legacy.simInit?.();
       if (!sim.inited) {
         return undefined;
       }
     }
     if (sim.time >= sim.duration) {
+      await discardBackendSession(sim, getBackendApi(target), options);
       legacy.simInit?.(true);
     }
 

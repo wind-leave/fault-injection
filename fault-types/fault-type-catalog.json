@@ -157,6 +157,23 @@
       "displayPlan": "波形对比显示斜率和幅值改变，属性面板显示 scale factor。"
     },
     {
+      "id": "electrical_signal_attenuation",
+      "name": "信号衰减故障",
+      "layer": "electrical",
+      "modelClass": "衰减故障",
+      "formula": "y_fault = y * 10^(-attenuation_db / 20)",
+      "typicalTargets": ["RF_Input", "IF_Output", "Sensor_Output", "Electrical_Supply_Output"],
+      "defaultParameters": { "attenuation_db": 6, "start": 0, "duration": null },
+      "platformImplementation": {
+        "currentSupport": "supported",
+        "existingModule": "electrical_fault_injector",
+        "recommendedModule": "fault_signal_attenuation",
+        "pythonFunction": "signal_attenuation"
+      },
+      "observableSignals": ["signal_amplitude", "supply_voltage", "spectrum_power", "residual"],
+      "displayPlan": "按衰减量（dB）降低目标信号或电压幅值，可通过示波器或频谱分析仪观察幅度下降。"
+    },
+    {
       "id": "noise_increase",
       "name": "噪声增强",
       "layer": "electrical",

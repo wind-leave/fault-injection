@@ -99,19 +99,18 @@ function buildMockExecutionResult(payload) {
 
   const values = Object.values(payload.inputs ?? {});
   const baseValue = typeof values[0] === 'number' ? values[0] : Number(values[0] ?? 0);
-  const aggregate = values.reduce((sum, value) => sum + Number(value ?? 0), 0);
 
   return {
     outputs: Object.fromEntries(
-      (payload.outputNames ?? []).map((name, index) => [
+      (payload.outputNames ?? []).map((name) => [
         name,
-        Number((baseValue + aggregate * 0.12 + index * 0.1).toFixed(6))
+        baseValue
       ])
     ),
     middleVars: Object.fromEntries(
-      (payload.middleVarNames ?? []).map((name, index) => [
+      (payload.middleVarNames ?? []).map((name) => [
         name,
-        Number(((aggregate || baseValue) * (index + 1) * 0.1).toFixed(6))
+        0
       ])
     )
   };

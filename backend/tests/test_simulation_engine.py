@@ -13,6 +13,94 @@ class SimulationEngineTests(unittest.TestCase):
         for actual_value, expected_value in zip(actual, expected):
             self.assertAlmostEqual(actual_value, expected_value, places=10)
 
+    def test_simulation_component_output_is_not_gated_by_power_connection(self):
+        package = {
+            "schemaVersion": 1,
+            "packageId": "power-gating",
+            "simulationConfig": {"duration": 0.1, "stepSize": 0.1},
+            "nodes": [
+                {"id": "signal", "type": "signal_source", "parameters": {"value": 5}, "outputs": [{"name": "out"}]},
+                {"id": "supply", "type": "signal_source", "parameters": {"value": 220}, "outputs": [{"name": "out", "unit": "VDC"}]},
+                {
+                    "id": "component", "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "passthrough", "entryFunction": "process"},
+                    "inputs": [{"name": "input"}], "outputs": [{"name": "output"}],
+                    "powerInputs": [{"name": "supply", "voltage": "220VDC", "supplyType": "DC"}], "powerOutputs": [],
+                },
+            ],
+            "edges": [
+                {"id": "signal-edge", "sourceNodeId": "signal", "sourcePortIndex": 0, "targetNodeId": "component", "targetPortIndex": 0},
+            ],
+            "faultInstances": [], "measurementPoints": [],
+        }
+        registry = ModuleRegistry.from_builtin_manifest()
+        unpowered = run_simulation(compile_graph(package, registry))
+        self.assertEqual(unpowered["componentOutputs"]["steps"][0]["actual"]["component"]["output"], 5.0)
+
+        package["edges"].append(
+            {"id": "supply-edge", "sourceNodeId": "supply", "sourcePortIndex": 0, "targetNodeId": "component", "targetPortIndex": 1}
+        )
+        powered = run_simulation(compile_graph(package, registry))
+        self.assertEqual(powered["componentOutputs"]["steps"][0]["actual"]["component"]["output"], 5.0)
+
+        package["nodes"][1]["parameters"]["value"] = 200
+        mismatched = run_simulation(compile_graph(package, registry))
+        self.assertEqual(mismatched["componentOutputs"]["steps"][0]["actual"]["component"]["output"], 5.0)
+
+        package["nodes"][1]["parameters"]["value"] = 220
+        package["nodes"][1]["outputs"][0]["unit"] = "VAC"
+        wrong_supply_type = run_simulation(compile_graph(package, registry))
+        self.assertEqual(wrong_supply_type["componentOutputs"]["steps"][0]["actual"]["component"]["output"], 5.0)
+
+    def test_dc_matching_and_boost_output_can_power_a_simulation_component_at_its_rated_voltage(self):
+        package = {
+            "schemaVersion": 1,
+            "packageId": "matched-dc-power",
+            "simulationConfig": {"duration": 0.04, "stepSize": 0.01},
+            "nodes": [
+                {"id": "signal", "type": "signal_source", "parameters": {"value": 5}, "outputs": [{"name": "out"}]},
+                {
+                    "id": "ac-source", "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "electrical_ac_power_source", "entryFunction": "process"},
+                    "parameters": {"voltage_rms": 220, "frequency_hz": 50, "phase_deg": 0},
+                    "inputs": [], "outputs": [{"name": "ac_phase_a", "unit": "VAC"}],
+                },
+                {
+                    "id": "dc-matcher", "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "electrical_ac_dc_matching", "entryFunction": "process"},
+                    "parameters": {"conversion_gain": 1},
+                    "inputs": [{"name": "ac_input", "unit": "VAC"}],
+                    "outputs": [{"name": "dc_output", "unit": "VDC"}],
+                },
+                {
+                    "id": "dc-boost", "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "electrical_dc_boost", "entryFunction": "process"},
+                    "parameters": {"boost_ratio": 2, "efficiency": 0.95},
+                    "inputs": [{"name": "dc_input", "unit": "VDC"}],
+                    "outputs": [{"name": "dc_output"}],
+                },
+                {
+                    "id": "component", "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "passthrough", "entryFunction": "process"},
+                    "inputs": [{"name": "input"}], "outputs": [{"name": "output"}],
+                    "powerInputs": [{"name": "supply", "voltage": "418V", "supplyType": "DC"}], "powerOutputs": [],
+                },
+            ],
+            "edges": [
+                {"id": "signal-edge", "sourceNodeId": "signal", "sourcePortIndex": 0, "targetNodeId": "component", "targetPortIndex": 0},
+                {"id": "ac-edge", "sourceNodeId": "ac-source", "sourcePortIndex": 0, "targetNodeId": "dc-matcher", "targetPortIndex": 0},
+                {"id": "dc-boost-input", "sourceNodeId": "dc-matcher", "sourcePortIndex": 0, "targetNodeId": "dc-boost", "targetPortIndex": 0},
+                {"id": "dc-supply-edge", "sourceNodeId": "dc-boost", "sourcePortIndex": 0, "targetNodeId": "component", "targetPortIndex": 1},
+            ],
+            "faultInstances": [], "measurementPoints": [],
+        }
+
+        result = run_simulation(compile_graph(package, ModuleRegistry.from_builtin_manifest()))
+        for step in result["componentOutputs"]["steps"]:
+            self.assertEqual(step["actual"]["dc-matcher"]["dc_output"], 220.0)
+            self.assertEqual(step["actual"]["dc-boost"]["dc_output"], 418.0)
+            self.assertEqual(step["actual"]["component"]["output"], 5.0)
+
     def test_routes_a_fixed_length_vector_through_component_input_and_output_ports(self):
         package = {
             "schemaVersion": 1,
@@ -51,6 +139,28 @@ class SimulationEngineTests(unittest.TestCase):
 
         self.assertEqual(result["componentOutputs"]["steps"][0]["actual"]["imu"]["output"], [1.0, 2.0, 3.0, 4.0])
         self.assertEqual(result["curves"]["channels"]["scope.ch1.actual"], [3.0])
+
+    def test_legacy_signal_source_without_port_metadata_feeds_scalar_to_vector4(self):
+        package = {
+            "schemaVersion": 1,
+            "packageId": "implicit-signal-source-port",
+            "simulationConfig": {"duration": 0.2, "stepSize": 0.1},
+            "nodes": [
+                {"id": "source", "type": "signal_source", "parameters": {"value": 2}, "outputs": []},
+                {
+                    "id": "vectorizer", "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "scalar_to_vector4", "entryFunction": "process"},
+                    "inputs": [{"name": "scalar_input"}],
+                    "outputs": [{"name": "vector_output", "dataType": "vector", "vectorLength": 4}],
+                },
+            ],
+            "edges": [{"id": "source-vectorizer", "sourceNodeId": "source", "sourcePortIndex": 0, "targetNodeId": "vectorizer", "targetPortIndex": 0, "lineType": "normal"}],
+            "faultInstances": [], "measurementPoints": [],
+        }
+
+        result = run_simulation(compile_graph(package, ModuleRegistry.from_builtin_manifest()))
+
+        self.assertEqual(result["componentOutputs"]["steps"][0]["actual"]["vectorizer"]["vector_output"], [2.0, 2.0, 2.0, 2.0])
 
     def test_returns_reference_and_actual_curves(self):
         graph = compile_graph(valid_package(), ModuleRegistry.from_builtin_manifest())
@@ -618,6 +728,73 @@ class SimulationEngineTests(unittest.TestCase):
             result["curves"]["channels"]["scope-1.ch1.actual"],
             [0.0, 1.1755705045849463, 1.902113032590307],
         )
+
+    def test_rf_one_hundred_ghz_carrier_has_nonzero_samples_at_one_picosecond_step(self):
+        package = {
+            "schemaVersion": 1,
+            "packageId": "rf-nanosecond-package",
+            "simulationConfig": {"duration": 1e-11, "stepSize": 1e-12},
+            "nodes": [
+                {
+                    "id": "rf-source",
+                    "type": "signal_source",
+                    "parameters": {
+                        "signalDomain": "rf",
+                        "rfModulation": "cw",
+                        "amplitude": 1,
+                        "centerFrequencyHz": 1e11,
+                    },
+                    "outputs": [{"name": "out"}],
+                },
+                {"id": "scope-1", "type": "instrument_scope", "inputs": [{"name": "CH1"}]},
+            ],
+            "edges": [
+                {"id": "edge-rf-scope", "sourceNodeId": "rf-source", "sourcePortIndex": 0, "targetNodeId": "scope-1", "targetPortIndex": 0},
+            ],
+            "faultInstances": [],
+            "measurementPoints": [{"id": "scope-1.ch1", "scopeNodeId": "scope-1", "channel": "ch1"}],
+        }
+
+        session = SimulationSession(compile_graph(package, ModuleRegistry.from_builtin_manifest()))
+        result = session.step(10)
+        samples = result["curves"]["channels"]["scope-1.ch1.actual"]
+
+        self.assertEqual(result["curves"]["time"], [round(index * 1e-12, 15) for index in range(10)])
+        self.assertTrue(any(abs(value) > 0.1 for value in samples[1:]))
+
+    def test_rf_downconverter_uses_source_phasor_at_interactive_step_sizes(self):
+        package = {
+            "schemaVersion": 1,
+            "packageId": "rf-downconverter-phasor",
+            "simulationConfig": {"duration": 0.003, "stepSize": 0.001},
+            "nodes": [
+                {
+                    "id": "rf-source", "type": "signal_source",
+                    "parameters": {
+                        "signalDomain": "rf", "rfModulation": "cw",
+                        "amplitude": 1, "centerFrequencyHz": 1_000_000_000,
+                    },
+                    "outputs": [{"name": "out"}],
+                },
+                {
+                    "id": "downconverter", "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "rf_downconverter", "entryFunction": "process"},
+                    "parameters": {"lo_frequency_hz": 980_000_000, "low_pass_cutoff_hz": 20_000_000},
+                    "inputs": [{"name": "rf_input"}, {"name": "rf_input_2"}],
+                    "outputs": [{"name": "if_i"}, {"name": "if_q"}],
+                },
+                {"id": "scope", "type": "instrument_scope", "inputs": [{"name": "CH1"}]},
+            ],
+            "edges": [
+                {"id": "rf-input", "sourceNodeId": "rf-source", "sourcePortIndex": 0, "targetNodeId": "downconverter", "targetPortIndex": 0},
+                {"id": "if-i", "sourceNodeId": "downconverter", "sourcePortIndex": 0, "targetNodeId": "scope", "targetPortIndex": 0},
+            ],
+            "faultInstances": [],
+            "measurementPoints": [{"id": "scope.ch1", "scopeNodeId": "scope", "channel": "ch1"}],
+        }
+
+        result = run_simulation(compile_graph(package, ModuleRegistry.from_builtin_manifest()))
+        self.assertFloatSeriesEqual(result["curves"]["channels"]["scope.ch1.actual"], [1.0, 1.0, 1.0])
 
     def test_analog_ramp_noise_and_radian_phase_match_frontend_semantics(self):
         class AnalogNode:

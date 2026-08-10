@@ -128,6 +128,22 @@ describe('Oscilloscope app integration', () => {
     wrapper.unmount();
   });
 
+  it('anchors a newly opened scope window at the lower right of its component', async () => {
+    const wrapper = await mountWorkbench();
+
+    const scope = window.createNode('instrument_scope', 10, 220);
+    await flushRuntime();
+
+    window.openScope(scope.id);
+    await flushRuntime();
+
+    const scopeWindow = document.querySelector(`.scope-window[data-scope-id="${scope.id}"]`);
+    expect(Number.parseInt(scopeWindow?.style.left || '0', 10)).toBe(scope.x + scope.w + 16);
+    expect(Number.parseInt(scopeWindow?.style.top || '0', 10)).toBe(scope.y + scope.h + 16);
+
+    wrapper.unmount();
+  });
+
   it('imports the compact fault scope demo with prewired scope waveforms', async () => {
     const wrapper = await mountWorkbench();
 
@@ -460,7 +476,7 @@ describe('Oscilloscope app integration', () => {
     wrapper.unmount();
   });
 
-  it('defaults to realtime playback and draws floating scopes with a fixed sliding time window', async () => {
+  it('uses realtime playback and draws floating scopes with a fixed sliding time window', async () => {
     const fillTexts = [];
     HTMLCanvasElement.prototype.getContext.mockImplementation(() => ({
       ...createCanvasContextStub(),
@@ -471,7 +487,7 @@ describe('Oscilloscope app integration', () => {
 
     const wrapper = await mountWorkbench();
 
-    expect(document.getElementById('sim-rt')?.checked).toBe(true);
+    expect(document.getElementById('sim-rt')).toBeNull();
     expect(window.__GZ_SIM__.realtime).toBe(true);
 
     window.createNode('instrument_scope', 460, 260);
@@ -539,8 +555,18 @@ describe('Oscilloscope app integration', () => {
 
     const ch2Button = document.querySelector(`[data-scope-id="${scope.id}"] [data-scope-mode="ch2"]`);
     const windowButton = document.querySelector(`[data-scope-id="${scope.id}"] [data-scope-window-size="8"]`);
+    const closeButton = document.querySelector(`[data-scope-id="${scope.id}"] .scope-window__close`);
     expect(ch2Button).not.toBeNull();
     expect(windowButton).not.toBeNull();
+    expect(closeButton).not.toBeNull();
+
+    window.__GZ_SIM__.running = true;
+    window.renderScopeWindows();
+    await flushRuntime();
+
+    expect(ch2Button.isConnected).toBe(true);
+    expect(windowButton.isConnected).toBe(true);
+    expect(closeButton.isConnected).toBe(true);
 
     window.runSimulationTick();
     await flushRuntime();

@@ -218,16 +218,97 @@ describe('canvas layout cleanup', () => {
 
     const durationInput = document.getElementById('sim-dur');
     const stepInput = document.getElementById('sim-step');
-    durationInput.value = '4';
-    stepInput.value = '0.2';
+    const durationUnit = document.getElementById('sim-dur-unit');
+    const stepUnit = document.getElementById('sim-step-unit');
+    expect(durationInput.value).toBe('10');
+    expect(durationUnit.value).toBe('s');
+    durationInput.value = '250';
+    durationUnit.value = 'ms';
+    stepInput.value = '100';
+    stepUnit.value = 'us';
 
     durationInput.dispatchEvent(new Event('input', { bubbles: true }));
+    durationUnit.dispatchEvent(new Event('change', { bubbles: true }));
     stepInput.dispatchEvent(new Event('input', { bubbles: true }));
+    stepUnit.dispatchEvent(new Event('change', { bubbles: true }));
 
-    expect(window.__GZ_STATE__.simulationConfig).toEqual({ duration: 4, stepSize: 0.2 });
+    expect(window.__GZ_STATE__.simulationConfig).toEqual({ duration: 0.25, stepSize: 0.0001 });
 
     const pkg = window.__GZ_BACKEND_SIMULATION__.buildExecutablePackage(window.__GZ_STATE__);
-    expect(pkg.simulationConfig).toEqual({ duration: 4, stepSize: 0.2 });
+    expect(pkg.simulationConfig).toEqual({ duration: 0.25, stepSize: 0.0001 });
+
+    wrapper.unmount();
+  });
+
+  it('rejects simulation startup when the step size exceeds the duration', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const durationInput = document.getElementById('sim-dur');
+    const stepInput = document.getElementById('sim-step');
+    const durationUnit = document.getElementById('sim-dur-unit');
+    const stepUnit = document.getElementById('sim-step-unit');
+    durationInput.value = '1';
+    durationUnit.value = 'ms';
+    stepInput.value = '2';
+    stepUnit.value = 'ms';
+
+    durationInput.dispatchEvent(new Event('input', { bubbles: true }));
+    durationUnit.dispatchEvent(new Event('change', { bubbles: true }));
+    stepInput.dispatchEvent(new Event('input', { bubbles: true }));
+    stepUnit.dispatchEvent(new Event('change', { bubbles: true }));
+    await window.simRun();
+    await flushRuntime();
+
+    expect(window.__GZ_SIM__.inited).toBe(false);
+    expect(window.__GZ_SIM__.running).toBe(false);
+    expect(document.body.textContent).toContain('仿真步长不能大于仿真时长');
+
+    wrapper.unmount();
+  });
+
+  it('shows simulation progress in the selected duration unit', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    document.getElementById('sim-dur-unit').value = 'ms';
+    document.getElementById('sim-dur-unit').dispatchEvent(new Event('change', { bubbles: true }));
+    window.__GZ_SIM__.duration = 0.01;
+    window.__GZ_SIM__.time = 0.002;
+    window.__GZ_SIM__.running = true;
+    window.__GZ_SIM__.paused = false;
+    window.updateUI();
+    await flushRuntime();
+
+    expect(document.getElementById('stxt')?.textContent).toContain('t = 2ms / 10ms');
+
+    wrapper.unmount();
+  });
+
+  it('uses the editable task name when saving a system model', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const taskNameInput = document.getElementById('task-name');
+    expect(document.querySelector('.simbar-title__kicker')?.textContent).toBe('任务名称');
+    expect(taskNameInput).not.toBeNull();
+
+    window.doCreateBlankWorkspace();
+    window.createNode('signal_source', 320, 220);
+    taskNameInput.value = '姿态控制回归任务';
+    taskNameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await flushRuntime();
+
+    expect(window.__GZ_STATE__.taskName).toBe('姿态控制回归任务');
+    const exportedPackage = window.__GZ_FLIGHT_MODEL_PACKAGE__.exportCurrent();
+    expect(exportedPackage.modelName).toBe('姿态控制回归任务');
+    expect(exportedPackage.workbenchSnapshot.taskName).toBe('姿态控制回归任务');
+
+    window.doSaveSys();
+    await flushRuntime();
+    const savedSnapshot = JSON.parse(window.localStorage.getItem('gz-workbench-system-model'));
+    expect(savedSnapshot.taskName).toBe('姿态控制回归任务');
 
     wrapper.unmount();
   });
@@ -417,7 +498,7 @@ describe('canvas layout cleanup', () => {
     expect(ibmCss).toContain('grid-template-rows:56px minmax(0,1fr)');
     expect(ibmCss).toContain('grid-template-rows:104px minmax(0,1fr)');
     expect(ibmCss).toContain('grid-column:1 / -1;');
-    expect(ibmCss).toContain('minmax(520px,max-content)');
+    expect(ibmCss).toContain('grid-template-columns:minmax(168px,var(--workbench-left-w,220px)) minmax(300px,1fr) max-content');
     expect(ibmCss).toContain('grid-template-rows:70px 48px');
     expect(ibmCss).toContain('top:118px');
     expect(ibmCss).toContain('top:130px');
@@ -790,6 +871,28 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('formats status-bar simulation time using the duration unit', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.__GZ_STATUS_BAR__.publishSimulationSummary({
+      datasetName: 'millisecond-run',
+      duration: 0.25,
+      elapsedSeconds: 0.0042,
+      stepSize: 0.0001,
+      timeUnit: 'ms',
+      status: 'running',
+      stepIndex: 42
+    });
+    await flushRuntime();
+
+    expect(document.querySelector('[data-log-entry][data-view="results"]')?.textContent).toContain('250ms');
+    expect(document.querySelector('[data-log-entry][data-view="performance"]')?.textContent).toContain('elapsed 4.2ms');
+    expect(document.querySelector('[data-log-entry][data-view="performance"]')?.textContent).toContain('step 0.1ms');
+
+    wrapper.unmount();
+  });
+
   it('supports undo and redo for canvas model editing commands', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -1131,7 +1234,7 @@ describe('canvas layout cleanup', () => {
     await flushRuntime();
 
     const addResult = window.addDiagnosticTestPointFromEdge('edge-controller-output');
-    expect(addResult).toMatchObject({ ok: true });
+    expect(addResult).toMatchObject({ ok: true, point: { pointType: 'virtual' } });
     expect(window.installDiagnosticTestPoint(addResult.point.pointId)).toBe(true);
 
     window.setCanvasView('dmatrix');

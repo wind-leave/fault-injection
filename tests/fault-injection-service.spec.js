@@ -93,6 +93,41 @@ describe('faultInjectionService', () => {
     })).toBeCloseTo(1.25);
   });
 
+  it('provides an electrical attenuation model that applies a dB amplitude reduction', () => {
+    const attenuation = faultCatalog.faultTypes.find((item) => item.id === 'electrical_signal_attenuation');
+
+    expect(attenuation).toMatchObject({
+      name: '信号衰减故障',
+      layer: 'electrical',
+      defaultParameters: { attenuation_db: 6 },
+      platformImplementation: expect.objectContaining({ existingModule: 'electrical_fault_injector' })
+    });
+    expect(getFaultRuntimeBehavior(attenuation)).toBe('attenuation');
+    expect(applyScalarFault(1, {
+      faultModel: attenuation,
+      injectedFault: createInjectedFaultPayload(attenuation),
+      time: 0,
+      state: {}
+    })).toBeCloseTo(Math.pow(10, -6 / 20));
+  });
+
+  it('cuts electrical data to zero from the configured start time onward', () => {
+    const model = { runtimeBehavior: 'data_cutoff' };
+
+    expect(applyScalarFault(3.5, {
+      faultModel: model,
+      params: { start: 2 },
+      time: 1.9,
+      state: {}
+    })).toBe(3.5);
+    expect(applyScalarFault(3.5, {
+      faultModel: model,
+      params: { start: 2 },
+      time: 2,
+      state: {}
+    })).toBe(0);
+  });
+
   it('applies representative physical, electrical, and protocol faults with state', () => {
     expect(applyScalarFault(1, {
       faultModel: { id: 'physical_parameter_drift', defaultParameters: { rate: 0.5, start: 2 } },

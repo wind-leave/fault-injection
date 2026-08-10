@@ -1,4 +1,5 @@
 import unittest
+import math
 
 from backend.simulation_functions import (
     as_float,
@@ -18,18 +19,23 @@ from backend.simulation_functions import (
     control_signal_amplitude_phase,
     control_excitation_power_split,
     dac_convert_rf,
+    dequantize_bipolar_code,
     dbf_form_baseband_signal,
     deterministic_noise,
     downconvert_rf_signal,
     first_numeric,
     first_order_response,
+    floor_power_of_two,
+    fft_radix2,
     high_pass_rf_filter,
     limit_rf_amplitude,
     low_pass_rf_filter,
     multiplex_wavelength_division,
     normalized_iq_to_dac_codes,
+    estimate_fft_peak_frequency,
     periodic_gate,
     pulse_train,
+    quantize_bipolar_sample,
     process_rf_frontend,
     rate_limit,
     select_excitation_signal,
@@ -47,6 +53,17 @@ class SimulationFunctionsTests(unittest.TestCase):
         self.assertEqual(clamp(9, 0, 5), 5.0)
         self.assertEqual(clamp(-1, 5, 0), 0.0)
         self.assertEqual(first_numeric({"invalid": "x", "value": 3}, ("invalid", "value")), 3.0)
+
+    def test_fft_helpers_estimate_sine_frequency_and_adc_conversion(self):
+        sample_rate = 64.0
+        samples = [math.sin(2.0 * math.pi * 8.0 * index / sample_rate) for index in range(64)]
+
+        self.assertEqual(floor_power_of_two(100), 64)
+        self.assertEqual(len(fft_radix2(samples)), 64)
+        self.assertAlmostEqual(estimate_fft_peak_frequency(samples, 1.0 / sample_rate), 8.0)
+        self.assertEqual(quantize_bipolar_sample(-1.0, 1.0), 0)
+        self.assertEqual(quantize_bipolar_sample(1.0, 1.0), 255)
+        self.assertAlmostEqual(dequantize_bipolar_code(128, 1.0), 1.0 / 255.0)
 
     def test_dynamic_helpers(self):
         self.assertEqual(first_order_response(0, 10, 1, 1), 5.0)
@@ -156,17 +173,18 @@ class SimulationFunctionsTests(unittest.TestCase):
     def test_rf_band_pass_filter_cascades_high_and_low_pass_stages(self):
         cutoff_low = 1.0 / (4.0 * 3.141592653589793)
         cutoff_high = 1.0 / (2.0 * 3.141592653589793)
-        output = band_pass_rf_filter(
+        high_pass_output, output = band_pass_rf_filter(
             1.0, 0.0, 0.0, 0.0, cutoff_low, cutoff_high, 1.0
         )
 
+        self.assertAlmostEqual(high_pass_output, 2.718281828459045 ** -0.5)
         self.assertAlmostEqual(
             output,
             (2.718281828459045 ** -0.5) * (1.0 - 2.718281828459045 ** -1.0),
         )
         self.assertEqual(
             band_pass_rf_filter(1.0, 0.0, 0.0, output, 2.0, 1.0, 1.0),
-            output,
+            (0.0, output),
         )
 
     def test_rf_band_stop_filter_rejects_band_pass_component(self):

@@ -1,76 +1,17 @@
 """Extract pulse-RF features from an A/D sampled scalar RF signal."""
 
-import math
-
-
-def _clamp(value, lower, upper):
-    return max(lower, min(upper, value))
-
-
-def _power_of_two(value):
-    size = 1
-    while size * 2 <= value:
-        size *= 2
-    return size
-
-
-def _fft(values):
-    """Iterative radix-2 FFT; the input size must be a power of two."""
-    count = len(values)
-    result = [complex(value, 0.0) for value in values]
-    bit_reversed = 0
-    for index in range(1, count):
-        bit = count >> 1
-        while bit_reversed & bit:
-            bit_reversed ^= bit
-            bit >>= 1
-        bit_reversed ^= bit
-        if index < bit_reversed:
-            result[index], result[bit_reversed] = result[bit_reversed], result[index]
-
-    span = 2
-    while span <= count:
-        step = complex(math.cos(-2.0 * math.pi / span), math.sin(-2.0 * math.pi / span))
-        for start in range(0, count, span):
-            factor = 1.0 + 0.0j
-            half = span // 2
-            for offset in range(half):
-                even = result[start + offset]
-                odd = factor * result[start + offset + half]
-                result[start + offset] = even + odd
-                result[start + offset + half] = even - odd
-                factor *= step
-        span *= 2
-    return result
-
-
-def _adc_quantize(value, full_scale):
-    normalized = _clamp(float(value) / full_scale, -1.0, 1.0)
-    return int(round((normalized + 1.0) * 127.5))
-
-
-def _adc_dequantize(code, full_scale):
-    return ((float(code) / 127.5) - 1.0) * full_scale
-
-
-def _estimate_center_frequency(samples, sample_period):
-    count = len(samples)
-    if count < 4 or sample_period <= 0.0:
-        return 0.0
-    # Hann window suppresses the leakage caused by the finite pulse window.
-    windowed = [
-        sample * (0.5 - 0.5 * math.cos(2.0 * math.pi * index / (count - 1)))
-        for index, sample in enumerate(samples)
-    ]
-    spectrum = _fft(windowed)
-    half = count // 2
-    peak_bin = max(range(1, half), key=lambda index: abs(spectrum[index]))
-    return peak_bin / (count * sample_period)
+from backend.simulation_functions import (
+    clamp,
+    dequantize_bipolar_code,
+    estimate_fft_peak_frequency,
+    floor_power_of_two,
+    quantize_bipolar_sample,
+)
 
 
 def process(
     rf_signal=0.0,
-    fft_size=64.0,
+    fft_size=1024.0,
     adc_full_scale=1.0,
     envelope_threshold_adc=12.0,
     time=0.0,
@@ -86,10 +27,10 @@ def process(
     previous = dict(state or {})
     full_scale = max(1e-12, abs(float(adc_full_scale)))
     configured_size = max(4, int(round(float(fft_size))))
-    size = _power_of_two(configured_size)
+    size = floor_power_of_two(configured_size)
     sample_period = max(0.0, float(dt))
-    adc_code = _adc_quantize(rf_signal, full_scale)
-    adc_sample = _adc_dequantize(adc_code, full_scale)
+    adc_code = quantize_bipolar_sample(rf_signal, full_scale, maximum_code=255)
+    adc_sample = dequantize_bipolar_code(adc_code, full_scale, maximum_code=255)
 
     samples = list(previous.get("samples") or [])
     samples.append(adc_sample)
@@ -97,9 +38,9 @@ def process(
 
     center_frequency = float(previous.get("center_frequency_hz", 0.0))
     if len(samples) == size and sample_period > 0.0:
-        center_frequency = _estimate_center_frequency(samples, sample_period)
+        center_frequency = estimate_fft_peak_frequency(samples, sample_period, window="hann")
 
-    threshold = _clamp(float(envelope_threshold_adc), 0.0, 255.0)
+    threshold = clamp(float(envelope_threshold_adc), 0.0, 255.0)
     sample_magnitude = abs(adc_code - 127.5) / 127.5 * 255.0
     envelope = 0.78 * float(previous.get("envelope", 0.0)) + 0.22 * sample_magnitude
     active = envelope >= threshold
@@ -123,7 +64,7 @@ def process(
     elif was_active:
         if rising_time is not None:
             pulse_width = max(0.0, now - float(rising_time))
-        amplitude = int(_clamp(pulse_peak, 0, 255))
+        amplitude = int(clamp(pulse_peak, 0, 255))
         pulse_peak = 0
 
     reported_amplitude = pulse_peak if active else amplitude
@@ -144,7 +85,7 @@ def process(
             "center_frequency_hz": center_frequency,
             "pulse_period_seconds": pulse_period,
             "pulse_width_seconds": pulse_width,
-            "pulse_amplitude_adc": int(_clamp(reported_amplitude, 0, 255)),
+            "pulse_amplitude_adc": int(clamp(reported_amplitude, 0, 255)),
         },
         "state": next_state,
     }

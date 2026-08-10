@@ -121,6 +121,7 @@ describe('property panel schema service', () => {
     expect(html).not.toContain('id="prop-signalDomain"');
     expect(html).toContain('id="prop-waveType"');
     expect(html).toContain('id="prop-amplitude"');
+    expect(html).not.toContain('id="prop-outputFormat"');
     expect(html).not.toContain('id="prop-centerFrequency"');
     expect(html).not.toContain('id="prop-messageId"');
   });
@@ -418,6 +419,36 @@ describe('property panel schema service', () => {
     expect(html).not.toContain('id="prop-rfKind"');
     expect(html).not.toContain('id="prop-waveType"');
     expect(html).not.toContain('id="prop-digitalMode"');
+  });
+
+  it('renders and reads RF vector values in batch and item configuration modes', () => {
+    const schema = getComponentPropertySchema('signal_source');
+    const scalarHtml = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'rf', outputFormat: '标量' }
+    }, schema);
+    const batchHtml = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'rf', outputFormat: '向量', rfVectorLength: 3, rfVectorValues: '1, 0.8, 0.6' }
+    }, schema);
+    const itemHtml = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'rf', outputFormat: '向量', rfVectorLength: 3, rfVectorConfigMode: 'item', rfVectorValues: '1, 0.8, 0.6' }
+    }, schema);
+
+    expect(scalarHtml).not.toContain('id="prop-rfVectorLength"');
+    expect(batchHtml).toContain('id="prop-rfVectorLength"');
+    expect(batchHtml).toContain('id="prop-rfVectorValues"');
+    expect(itemHtml.match(/data-rf-vector-value/g)).toHaveLength(3);
+
+    document.body.innerHTML = itemHtml;
+    document.querySelectorAll('[data-rf-vector-value]')[1].value = '0.75';
+    expect(readPropertyValuesFromSchema(schema, document)).toEqual(expect.objectContaining({
+      outputFormat: '向量',
+      rfVectorLength: 3,
+      rfVectorConfigMode: 'item',
+      rfVectorValues: '1, 0.75, 0.6'
+    }));
   });
 
   it('labels analog and PM phase inputs in radians', () => {

@@ -124,6 +124,38 @@ function renderPowerInterfaceGroup(props, helpers = {}) {
     </div>`;
 }
 
+function renderSupplyInterfaceGroup(props, helpers = {}) {
+  const escape = helpers.escapeHtml || escapeHtml;
+  const inputs = list(props.powerInputs).length
+    ? list(props.powerInputs)
+    : [{ name: '电源输入', voltage: '28V', supplyType: 'DC' }];
+
+  return `
+    <div class="pgroup" data-simulation-supply-interface>
+      <div class="pglbl">电源接口</div>
+      <div class="props-help">只有接入类型和额定电压均匹配的电源，仿真组件才能运行。</div>
+      <div class="props-port-list">${inputs.map((item, index) => `
+        <div class="props-port-card">
+          <div class="props-port-card__head">
+            <span class="props-port-card__kind">电源输入 ${index + 1}</span>
+            <span class="pv pv-ok">已配置</span>
+          </div>
+          <div class="props-row">
+            <div class="props-field"><label>电源类型</label><select data-simulation-power-type="${index}">${buildSelectOptions(['DC', 'AC'], item?.supplyType || 'DC', helpers.buildSelectOptions)}</select></div>
+            <div class="props-field"><label>额定电压（V）</label><input type="number" min="0" step="any" data-simulation-power-voltage="${index}" value="${escape(String(item?.voltage || '28').replace(/\s*V(?:AC|DC)?\s*$/i, ''))}"></div>
+          </div>
+          <div class="props-port-card__meta"><span>${escape(item?.name || '电源输入')}</span><span>${escape(item?.supplyType || 'DC')} · ${escape(item?.voltage || '28V')}</span></div>
+        </div>`).join('')}</div>
+    </div>`;
+}
+
+function shouldRenderSupplyInterface(node, helpers = {}) {
+  if (typeof helpers.isElectricalComponent === 'function') {
+    return !helpers.isElectricalComponent(node);
+  }
+  return !String(node?.templateId || node?.type || '').startsWith('electrical_');
+}
+
 function renderUnboundSimulationFields(node, helpers = {}) {
   const escape = helpers.escapeHtml || escapeHtml;
   const props = node?.props || {};
@@ -169,8 +201,9 @@ function renderUnboundSimulationFields(node, helpers = {}) {
         </div>
         <div class="sim-intf-list">${middleVars.length ? renderSimulationInterfaceRows(middleVars, '中间变量', helpers) : '<div class="sim-intf-note">当前没有暴露的中间变量端口。</div>'}</div>
       </div>
-      ${renderPowerInterfaceGroup(props, helpers)}
+      ${shouldRenderSupplyInterface(node, helpers) ? renderSupplyInterfaceGroup(props, helpers) : ''}
       <div class="props-field"><label>函数说明</label><textarea id="prop-ffunctionNote">${escape(props.ffunctionNote || '')}</textarea></div>
+      ${renderSimulationParameterFields(node, helpers)}
       <div class="pgroup">
         <div class="pglbl">Python 绑定</div>
         <div class="props-help">仿真块可以绑定 Python 文件。绑定后输入、输出和中间变量端口会由 Python 接口自动生成，端口显示名优先使用代码注释中的中文说明。</div>
@@ -208,12 +241,132 @@ function renderPythonPortRows(binding, kind, helpers) {
   }).join('')}</div>`;
 }
 
+function simulationParameters(props = {}) {
+  return list(props.parameters)
+    .map((item, index) => {
+      const key = textValue(item?.key ?? item?.varName ?? item?.name, '');
+      if (!key) return null;
+      const baseUnit = textValue(item?.unit, '');
+      const selectedUnit = frequencyUnits(baseUnit).includes(props.parameterUnits?.[key])
+        ? props.parameterUnits[key]
+        : baseUnit;
+      const storedValue = props.parameterValues?.[key] ?? item?.value ?? item?.default ?? '';
+      return {
+        key,
+        name: textValue(item?.name ?? item?.displayName, key),
+        baseUnit,
+        unit: selectedUnit,
+        value: convertFrequencyValue(storedValue, baseUnit, selectedUnit),
+        min: item?.min,
+        max: item?.max,
+        step: item?.step,
+        control: textValue(item?.control, ''),
+        options: list(item?.options)
+          .map((option) => ({
+            value: option?.value,
+            label: textValue(option?.label, option?.value)
+          }))
+          .filter((option) => option.value !== undefined && option.value !== null),
+        index
+      };
+    })
+    .filter(Boolean);
+}
+
+const FREQUENCY_UNIT_FACTORS = {
+  hz: 1,
+  khz: 1e3,
+  mhz: 1e6,
+  ghz: 1e9
+};
+
+function normalizeFrequencyUnit(value) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return Object.hasOwn(FREQUENCY_UNIT_FACTORS, normalized) ? normalized : '';
+}
+
+function frequencyUnits(baseUnit) {
+  return normalizeFrequencyUnit(baseUnit)
+    ? ['Hz', 'kHz', 'MHz', 'GHz']
+    : [];
+}
+
+function convertFrequencyValue(value, fromUnit, toUnit) {
+  const numeric = Number(value);
+  const fromFactor = FREQUENCY_UNIT_FACTORS[normalizeFrequencyUnit(fromUnit)];
+  const toFactor = FREQUENCY_UNIT_FACTORS[normalizeFrequencyUnit(toUnit)];
+  return Number.isFinite(numeric) && fromFactor && toFactor
+    ? numeric * fromFactor / toFactor
+    : value;
+}
+
+function renderSimulationParameterFields(node, helpers = {}) {
+  const escape = helpers.escapeHtml || escapeHtml;
+  const parameters = simulationParameters(node?.props);
+  if (!parameters.length) {
+    return '';
+  }
+
+  return `
+      <div class="pgroup" data-simulation-parameters>
+        <div class="pglbl">模型参数</div>
+        <div class="props-help">修改后将在下一次初始化仿真时应用到后端模型。</div>
+        ${parameters.map((parameter) => {
+          const limits = [parameter.min !== undefined ? `min="${escape(parameter.min)}"` : '', parameter.max !== undefined ? `max="${escape(parameter.max)}"` : '', parameter.step !== undefined ? `step="${escape(parameter.step)}"` : 'step="any"'].filter(Boolean).join(' ');
+          const units = frequencyUnits(parameter.baseUnit);
+          const unit = units.length
+            ? `<select class="props-unit-select" data-simulation-parameter-unit="${escape(parameter.key)}">${buildSelectOptions(units, parameter.unit, helpers.buildSelectOptions)}</select>`
+            : parameter.unit ? `<span class="props-unit">${escape(parameter.unit)}</span>` : '';
+          const selectedOption = parameter.options.find((option) => String(option.value) === String(parameter.value)) || parameter.options[0];
+          const input = parameter.options.length && parameter.control === 'stepper'
+            ? `<div class="simulation-parameter-mode-switch" data-simulation-parameter-mode-switch="${escape(parameter.key)}">${parameter.options.map((option) => `<button type="button" class="${String(option.value) === String(selectedOption?.value) ? 'is-active' : ''}" data-simulation-parameter-mode-select="${escape(option.value)}" data-simulation-parameter-mode-key="${escape(parameter.key)}">${escape(option.label)}</button>`).join('')}<input type="hidden" data-simulation-parameter="${escape(parameter.key)}" value="${escape(selectedOption?.value ?? parameter.value)}"></div>`
+            : parameter.options.length
+              ? `<select data-simulation-parameter="${escape(parameter.key)}">${parameter.options.map((option) => `<option value="${escape(option.value)}" ${String(option.value) === String(parameter.value) ? 'selected' : ''}>${escape(option.label)}</option>`).join('')}</select>`
+            : `<input id="sim-parameter-${parameter.index}" data-simulation-parameter="${escape(parameter.key)}" type="number" ${limits} value="${escape(parameter.value)}">`;
+          return `
+            <div class="props-field" data-simulation-parameter-row="${escape(parameter.key)}">
+              <label for="sim-parameter-${parameter.index}">${escape(parameter.name)}</label>
+              <div class="props-input-with-unit">
+                ${input}
+                ${unit}
+              </div>
+            </div>`;
+        }).join('')}
+      </div>`;
+}
+
+function readSimulationParameterValues(node, documentLike) {
+  const existing = node?.props?.parameterValues && typeof node.props.parameterValues === 'object'
+    ? node.props.parameterValues
+    : {};
+  const definitions = new Map(simulationParameters(node?.props).map((parameter) => [parameter.key, parameter]));
+  const values = { ...existing };
+  [...(documentLike?.querySelectorAll?.('[data-simulation-parameter]') || [])].forEach((element) => {
+    const key = String(element.dataset?.simulationParameter ?? '').trim();
+    const parameter = definitions.get(key);
+    const numeric = Number(element.value);
+    if (!key || !parameter || !Number.isFinite(numeric)) return;
+    const selectedUnit = documentLike?.querySelector?.(`[data-simulation-parameter-unit="${key}"]`)?.value || parameter.unit;
+    values[key] = convertFrequencyValue(numeric, selectedUnit, parameter.baseUnit);
+  });
+  return values;
+}
+
+function readSimulationParameterUnits(node, documentLike) {
+  const definitions = new Map(simulationParameters(node?.props).map((parameter) => [parameter.key, parameter]));
+  const units = { ...(node?.props?.parameterUnits ?? {}) };
+  [...(documentLike?.querySelectorAll?.('[data-simulation-parameter-unit]') || [])].forEach((element) => {
+    const key = String(element.dataset?.simulationParameterUnit ?? '').trim();
+    if (key && definitions.has(key) && frequencyUnits(definitions.get(key).baseUnit).includes(element.value)) {
+      units[key] = element.value;
+    }
+  });
+  return units;
+}
+
 function renderBoundSimulationFields(node, binding, helpers = {}) {
   const escape = helpers.escapeHtml || escapeHtml;
   const props = node?.props || {};
-  const summary = typeof helpers.getPythonBindingSummary === 'function'
-    ? helpers.getPythonBindingSummary(node)
-    : '';
 
   return `
       <div class="pgroup">
@@ -234,19 +387,8 @@ function renderBoundSimulationFields(node, binding, helpers = {}) {
         <div class="pglbl">输出端口</div>
         ${renderPythonPortRows(binding, 'outputs', helpers)}
       </div>
-      <div class="pgroup">
-        <div class="pglbl">中间变量观测端口</div>
-        ${renderPythonPortRows(binding, 'middleVars', helpers)}
-        <div class="props-help">中间变量仅作为内部观测数据，不显示为画布端口；如需在仿真过程中对其赋值，请使用“中间变量赋值块”。</div>
-      </div>
-      ${renderPowerInterfaceGroup(props, helpers)}
-      <div class="pgroup">
-        <div class="pglbl">执行方式</div>
-        <div class="prow"><span class="pk">执行模式</span><span class="pv">${escape(binding?.executionMode || 'mock')}</span></div>
-        <div class="prow"><span class="pk">执行说明</span><span class="pv">${binding?.executionMode === 'backend' ? '后端执行' : '前端模拟'}</span></div>
-        <div class="prow"><span class="pk">来源模型包</span><span class="pv">${escape(binding?.sourcePackageName || '未关联模型包')}</span></div>
-        <div class="prow"><span class="pk">接口摘要</span><span class="pv">${escape(summary)}</span></div>
-      </div>`;
+      ${shouldRenderSupplyInterface(node, helpers) ? renderSupplyInterfaceGroup(props, helpers) : ''}
+      ${renderSimulationParameterFields(node, helpers)}`;
 }
 
 function renderReadOnlySimulationInterface(html) {
@@ -256,6 +398,21 @@ function renderReadOnlySimulationInterface(html) {
     .replace(/(<(?:input|select) data-sim-field="(?:name|type)"[^>]*)(>)/g, '$1 disabled$2')
     .replace(/(<input data-python-port-display-name[^>]*)(>)/g, '$1 disabled$2')
     .replace(/<button class="props-secondary" type="button" onclick="syncSimulationInterfaceCounts\(\)">[\s\S]*?<\/button>/, '');
+}
+
+function readPowerInputs(props, documentLike) {
+  const current = list(props.powerInputs).length
+    ? list(props.powerInputs)
+    : [{ name: '电源输入', voltage: '28V', supplyType: 'DC' }];
+  return current.map((item, index) => {
+    const type = String(documentLike?.querySelector?.(`[data-simulation-power-type="${index}"]`)?.value || item?.supplyType || 'DC').toUpperCase() === 'AC' ? 'AC' : 'DC';
+    const voltageValue = Number(documentLike?.querySelector?.(`[data-simulation-power-voltage="${index}"]`)?.value);
+    const fallback = Number.parseFloat(String(item?.voltage || '28'));
+    const voltage = Number.isFinite(voltageValue) && voltageValue >= 0
+      ? voltageValue
+      : (Number.isFinite(fallback) ? fallback : 28);
+    return { ...item, name: item?.name || '电源输入', type: '电源', supplyType: type, voltage: `${voltage}V` };
+  });
 }
 
 export function renderSimulationBlockFieldsFromSchema(node, helpers = {}) {
@@ -269,10 +426,17 @@ export function renderSimulationBlockFieldsFromSchema(node, helpers = {}) {
 export function readSimulationBlockValuesFromPanel(node, documentLike, helpers = {}) {
   const props = node?.props || {};
   const binding = helpers.binding || null;
+  const supplyValues = shouldRenderSupplyInterface(node, helpers)
+    ? { powerInputs: readPowerInputs(props, documentLike), powerOutputs: [] }
+    : {};
 
   if (binding?.bound) {
     return {
-      values: {},
+      values: {
+        parameterValues: readSimulationParameterValues(node, documentLike),
+        parameterUnits: readSimulationParameterUnits(node, documentLike),
+        ...supplyValues
+      },
       shouldPruneInvalidEdges: false
     };
   }
@@ -280,7 +444,10 @@ export function readSimulationBlockValuesFromPanel(node, documentLike, helpers =
   return {
     values: {
       moduleType: documentLike?.getElementById?.('prop-moduleType')?.value || props.moduleType,
-      ffunctionNote: textValue(documentLike?.getElementById?.('prop-ffunctionNote')?.value, props.ffunctionNote || '')
+      ffunctionNote: textValue(documentLike?.getElementById?.('prop-ffunctionNote')?.value, props.ffunctionNote || ''),
+      parameterValues: readSimulationParameterValues(node, documentLike),
+      parameterUnits: readSimulationParameterUnits(node, documentLike),
+      ...supplyValues
     },
     shouldPruneInvalidEdges: false
   };

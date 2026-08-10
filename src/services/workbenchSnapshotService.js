@@ -37,6 +37,14 @@ function normalizePythonBinding(binding) {
   };
 
   delete safeBinding.executionConfig;
+  // Python implementation files are deployed and registered by the backend.
+  // Model snapshots persist only the file/entry reference, never source code.
+  delete safeBinding.rawSource;
+  delete safeBinding.source;
+  if (isPlainObject(safeBinding.parsedInterface)) {
+    delete safeBinding.parsedInterface.rawSource;
+    delete safeBinding.parsedInterface.source;
+  }
   safeBinding.portMapping = {
     ...createDefaultPythonBinding().portMapping,
     ...normalizePortMapping(binding.portMapping)
@@ -190,6 +198,7 @@ export function createWorkbenchSnapshot(state) {
     canvasTrail: layeredFields.canvasTrail,
     canvases: layeredFields.canvases,
     activeLineType: safeState.activeLineType ?? 'normal',
+    taskName: typeof safeState.taskName === 'string' ? safeState.taskName : '',
     workspaceSource: typeof safeState.workspaceSource === 'string' ? safeState.workspaceSource : '',
     faultedBlks: toSafeArray(safeState.faultedBlks),
     importedFaultModels: toSafeArray(safeState.importedFaultModels),
@@ -225,6 +234,7 @@ export function restoreWorkbenchSnapshot(snapshot) {
     canvasTrail: layeredFields.canvasTrail,
     canvases: layeredFields.canvases,
     activeLineType: safeSnapshot.activeLineType ?? 'normal',
+    taskName: typeof safeSnapshot.taskName === 'string' ? safeSnapshot.taskName : '',
     workspaceSource: typeof safeSnapshot.workspaceSource === 'string' ? safeSnapshot.workspaceSource : '',
     faultedBlks: toSafeArray(safeSnapshot.faultedBlks),
     importedFaultModels: toSafeArray(safeSnapshot.importedFaultModels),

@@ -1,5 +1,7 @@
 import {
+  getRfVectorValues,
   getSignalSourceScalarFallback,
+  isRfVectorOutput,
   normalizeSignalSourceProps
 } from './signalSourceDomainService.js';
 
@@ -111,6 +113,13 @@ function addSignalSourceExecutionParameters(parameters, rawProps = {}, normalize
     parameters.symbolRateHz = Math.max(0, parseFrequencyHz(normalizedProps.symbolRate, 0));
     parameters.sampleRateHz = Math.max(0, parseFrequencyHz(normalizedProps.sampleRate, 0));
     parameters.snrDb = sanitizeNumber(normalizedProps.snr, 0);
+    if (isRfVectorOutput(normalizedProps)) {
+      parameters.rfVectorLength = Number(normalizedProps.rfVectorLength);
+      parameters.rfVectorValues = getRfVectorValues(
+        normalizedProps.rfVectorValues,
+        normalizedProps.rfVectorLength
+      );
+    }
     if (modulation === 'cw') {
       // The backend already evaluates generic sine sources from these fields.
       // Map CW to that executable representation instead of its scalar fallback.
@@ -157,6 +166,7 @@ function normalizePorts(ports = []) {
         name,
         id,
         dataType,
+        ...(port?.unit ? { unit: String(port.unit) } : {}),
         ...(dataType === 'vector' && Number.isInteger(vectorLength) && vectorLength > 0
           ? { vectorLength }
           : {})
@@ -165,15 +175,115 @@ function normalizePorts(ports = []) {
     : [];
 }
 
+function defaultScopeInput(index, props = {}) {
+  const channel = `CH${index + 1}`;
+  return {
+    name: String(props[`inputPortNameCh${index + 1}`] || channel),
+    id: channel.toLowerCase(),
+    dataType: 'scalar'
+  };
+}
+
+function normalizeScopeInputs(node = {}, props = {}) {
+  const candidates = [node.inputs, node.props?.inputs, node.ports?.inputs];
+  const declared = candidates
+    .map(normalizePorts)
+    .find((ports) => ports.length);
+  return declared ?? [defaultScopeInput(0, props), defaultScopeInput(1, props)];
+}
+
+function alignScopeInputsWithConnectedSignals(nodes, edges) {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  edges.forEach((edge) => {
+    if (edge.lineType === 'power') return;
+    const target = nodesById.get(edge.targetNodeId);
+    if (target?.type !== 'instrument_scope') return;
+    const source = nodesById.get(edge.sourceNodeId);
+    const sourcePort = source?.outputs?.[Number(edge.sourcePortIndex) || 0];
+    if (!sourcePort) return;
+
+    const targetPortIndex = Math.max(0, Math.trunc(Number(edge.targetPortIndex) || 0));
+    while (target.inputs.length <= targetPortIndex) {
+      target.inputs.push(defaultScopeInput(target.inputs.length));
+    }
+    const current = target.inputs[targetPortIndex];
+    target.inputs[targetPortIndex] = {
+      ...current,
+      dataType: sourcePort.dataType,
+      ...(sourcePort.dataType === 'vector' && Number.isInteger(sourcePort.vectorLength)
+        ? { vectorLength: sourcePort.vectorLength }
+        : {})
+    };
+    if (sourcePort.dataType !== 'vector') {
+      delete target.inputs[targetPortIndex].vectorLength;
+    }
+  });
+}
+
+function normalizePowerPorts(ports = []) {
+  return Array.isArray(ports)
+    ? ports.map((port, index) => ({
+      id: String(port?.portId ?? port?.id ?? `power-${index}`),
+      name: String(port?.name ?? port?.displayName ?? `power-${index}`),
+      voltage: String(port?.voltage ?? ''),
+      supplyType: String(port?.supplyType ?? 'DC').toUpperCase() === 'AC' ? 'AC' : 'DC'
+    })).filter((port) => port.name)
+    : [];
+}
+
+function pickDeclaredSimulationParameters(props = {}) {
+  const definitions = Array.isArray(props.parameters) ? props.parameters : [];
+  const configured = props.parameterValues && typeof props.parameterValues === 'object'
+    ? props.parameterValues
+    : {};
+  return Object.fromEntries(definitions.flatMap((definition) => {
+    const key = String(definition?.key ?? definition?.varName ?? definition?.name ?? '').trim();
+    if (!key) return [];
+    const value = configured[key] ?? definition?.value ?? definition?.default;
+    return Number.isFinite(Number(value)) ? [[key, Number(value)]] : [];
+  }));
+}
+
+function normalizeSignalSourceOutputs(node, props) {
+  // Older canvases can carry an empty top-level `outputs` array while the
+  // actual port declaration lives in props (or is implicit for a source).
+  // An empty declaration must not cause graph compilation to classify a
+  // normal signal edge as a power edge and silently drop the source value.
+  const directOutputs = normalizePorts(node.outputs);
+  const outputs = directOutputs.length
+    ? directOutputs
+    : normalizePorts(node.props?.outputs);
+  const primary = outputs[0] ?? {};
+  if (!isRfVectorOutput(props)) {
+    return outputs.length ? outputs : [{
+      name: String(props.outputPortName || 'output'),
+      id: 'signal',
+      dataType: 'scalar'
+    }];
+  }
+  const vectorLength = Number(props.rfVectorLength);
+  return [{
+    name: primary.name || String(props.outputPortName || '输出'),
+    id: primary.id || 'signal',
+    dataType: 'vector',
+    ...(Number.isInteger(vectorLength) && vectorLength > 0 ? { vectorLength } : {})
+  }];
+}
+
 function normalizeNode(node) {
   const rawProps = node.props ?? node.parameters ?? {};
   const props = node.type === 'signal_source'
     ? normalizeSignalSourceProps(rawProps)
     : rawProps;
-  const parameters = pickNumericParameters(rawProps);
+  const parameters = {
+    ...pickNumericParameters(rawProps),
+    ...(node.type === 'simulation_block' ? pickDeclaredSimulationParameters(rawProps) : {})
+  };
   if (node.type === 'signal_source') {
     addSignalSourceExecutionParameters(parameters, rawProps, props);
-    parameters.value = sanitizeNumericVector(rawProps.value) ?? getSignalSourceScalarFallback(props);
+    parameters.value = isRfVectorOutput(props)
+      ? getRfVectorValues(props.rfVectorValues, props.rfVectorLength)
+      : (sanitizeNumericVector(rawProps.value) ?? getSignalSourceScalarFallback(props));
   }
   if (node.type === 'sum_block') {
     addSumBlockExecutionParameters(parameters, rawProps);
@@ -183,15 +293,27 @@ function normalizeNode(node) {
     id: String(node.id),
     type: node.type,
     parameters,
-    inputs: normalizePorts(node.inputs ?? node.props?.inputs),
-    outputs: normalizePorts(node.outputs ?? node.props?.outputs)
+    inputs: node.type === 'instrument_scope'
+      ? normalizeScopeInputs(node, props)
+      : normalizePorts(node.inputs ?? node.props?.inputs),
+    outputs: node.type === 'signal_source'
+      ? normalizeSignalSourceOutputs(node, props)
+      : normalizePorts(node.outputs ?? node.props?.outputs)
   };
 
   if (node.type === 'simulation_block') {
+    const moduleId = String(node.pythonBinding?.moduleId ?? '').trim() || 'passthrough';
     normalized.pythonBinding = {
-      moduleId: String(node.pythonBinding?.moduleId ?? ''),
+      // A blank simulation block is a connection-only component until a
+      // Python model is bound.  It must not make the whole backend session
+      // invalid merely because it is present on the canvas.
+      moduleId,
       entryFunction: String(node.pythonBinding?.entryFunction ?? 'process')
     };
+    // Power terminals are deliberately separate from model signal ports: they
+    // carry the execution precondition, rather than an argument to Python.
+    normalized.powerInputs = normalizePowerPorts(rawProps.powerInputs);
+    normalized.powerOutputs = [];
   }
 
   return normalized;
@@ -203,7 +325,8 @@ function normalizeEdge(edge) {
     sourceNodeId: String(edge.sourceNodeId),
     sourcePortIndex: sanitizeNumber(edge.sourcePortIndex, 0),
     targetNodeId: String(edge.targetNodeId),
-    targetPortIndex: sanitizeNumber(edge.targetPortIndex, 0)
+    targetPortIndex: sanitizeNumber(edge.targetPortIndex, 0),
+    lineType: ['power', 'can'].includes(edge.lineType) ? edge.lineType : 'normal'
   };
 }
 
@@ -262,8 +385,14 @@ function normalizeFaultType(fault = {}) {
   if (/stuck|freeze|lock/.test(key)) {
     return 'signal_stuck';
   }
+  if (/data_cutoff|disconnect|cutoff/.test(key)) {
+    return 'signal_cutoff';
+  }
   if (/noise/.test(key)) {
     return 'noise_increase';
+  }
+  if (/attenuation|attenuate/.test(key)) {
+    return 'signal_attenuation';
   }
   if (/efficiency/.test(key)) {
     return 'motor_efficiency_loss';
@@ -312,6 +441,9 @@ function normalizeFaultParameters(fault = {}) {
   }
   if (parameters.scale !== undefined) {
     parameters.scale = sanitizeNumber(parameters.scale, 1);
+  }
+  if (parameters.attenuation_db !== undefined || parameters.attenuationDb !== undefined) {
+    parameters.attenuation_db = Math.max(0, sanitizeNumber(firstPresent(parameters.attenuation_db, parameters.attenuationDb), 0));
   }
   if (parameters.seed !== undefined) {
     parameters.seed = sanitizeNumber(parameters.seed, 1);
@@ -460,6 +592,7 @@ export function buildBackendExecutablePackage(state = {}) {
   const edges = (state.modelEdges ?? state.edges ?? [])
     .filter((edge) => nodeIds.has(String(edge?.sourceNodeId)) && nodeIds.has(String(edge?.targetNodeId)))
     .map(normalizeEdge);
+  alignScopeInputsWithConnectedSignals(nodes, edges);
   return {
     schemaVersion: 1,
     packageId: String(state.packageId ?? state.modelPackageId ?? 'frontend-package'),

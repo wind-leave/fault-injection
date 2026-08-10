@@ -19,6 +19,47 @@
       }
     },
     {
+      "moduleId": "electrical_ac_power_source",
+      "importPath": "backend.builtin_modules.electrical_ac_power_source",
+      "entryFunction": "process",
+      "inputs": [],
+      "outputs": ["ac_phase_a", "ac_phase_b", "ac_phase_c"],
+      "parameters": {
+        "voltage_rms": {"type": "number", "min": 0, "max": 1000000, "default": 220},
+        "frequency_hz": {"type": "number", "min": 0, "max": 1000000000, "default": 50},
+        "phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0}
+      }
+    },
+    {
+      "moduleId": "electrical_dc_boost",
+      "importPath": "backend.builtin_modules.electrical_dc_boost",
+      "entryFunction": "process",
+      "inputs": ["dc_input"],
+      "outputs": ["dc_output"],
+      "parameters": {
+        "boost_ratio": {"type": "number", "min": 0, "max": 100, "default": 2},
+        "efficiency": {"type": "number", "min": 0, "max": 1, "default": 0.95}
+      }
+    },
+    {
+      "moduleId": "electrical_ac_dc_matching",
+      "importPath": "backend.builtin_modules.electrical_ac_dc_matching",
+      "entryFunction": "process",
+      "inputs": ["ac_input"],
+      "outputs": ["dc_output"],
+      "parameters": {
+        "conversion_gain": {"type": "number", "min": 0, "max": 100, "default": 1}
+      }
+    },
+    {
+      "moduleId": "electrical_ground",
+      "importPath": "backend.builtin_modules.electrical_ground",
+      "entryFunction": "process",
+      "inputs": ["ground_input"],
+      "outputs": [],
+      "parameters": {}
+    },
+    {
       "moduleId": "command_shaper",
       "importPath": "backend.builtin_modules.command_shaper",
       "entryFunction": "process",
@@ -212,6 +253,14 @@
       "parameters": {}
     },
     {
+      "moduleId": "scalar_to_vector4",
+      "importPath": "backend.builtin_modules.scalar_to_vector4",
+      "entryFunction": "process",
+      "inputs": ["scalar_input"],
+      "outputs": ["vector_output"],
+      "parameters": {}
+    },
+    {
       "moduleId": "rf_four_channel_source",
       "importPath": "backend.builtin_modules.rf_four_channel_source",
       "entryFunction": "process",
@@ -229,12 +278,55 @@
       }
     },
     {
+      "moduleId": "rf_four_output_source",
+      "importPath": "backend.builtin_modules.rf_four_output_source",
+      "entryFunction": "process",
+      "inputs": [],
+      "outputs": ["rf_output_1", "rf_output_2", "rf_output_3", "rf_output_4"],
+      "parameters": {
+        "sample_1": {"type": "number", "min": -1000000, "max": 1000000, "default": 1.0},
+        "sample_2": {"type": "number", "min": -1000000, "max": 1000000, "default": 0.8},
+        "sample_3": {"type": "number", "min": -1000000, "max": 1000000, "default": 0.6},
+        "sample_4": {"type": "number", "min": -1000000, "max": 1000000, "default": 0.4},
+        "center_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 100},
+        "pulse_width_seconds": {"type": "number", "min": 0, "max": 3600, "default": 0.001},
+        "pulse_period_seconds": {"type": "number", "min": 0.000000001, "max": 3600, "default": 0.001},
+        "phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0}
+      }
+    },
+    {
+      "moduleId": "rf_four_port_up_down_converter",
+      "importPath": "backend.builtin_modules.rf_four_port_up_down_converter",
+      "entryFunction": "process",
+      "inputs": [
+        "downconvert_rf_input_1",
+        "downconvert_rf_input_2",
+        "upconvert_baseband_input_1",
+        "upconvert_baseband_input_2"
+      ],
+      "outputs": [
+        "downconverted_output_1",
+        "downconverted_output_2",
+        "upconverted_output_1",
+        "upconverted_output_2"
+      ],
+      "parameters": {
+        "downconvert_lo_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 100},
+        "upconvert_lo_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 100},
+        "lo_phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0},
+        "downconversion_gain": {"type": "number", "min": 0, "max": 1000000, "default": 1},
+        "upconversion_gain": {"type": "number", "min": 0, "max": 1000000, "default": 1},
+        "downconvert_low_pass_cutoff_hz": {"type": "number", "min": 0, "max": 1000000000, "default": 20}
+      }
+    },
+    {
       "moduleId": "rf_downconverter",
       "importPath": "backend.builtin_modules.rf_downconverter",
       "entryFunction": "process",
-      "inputs": ["rf_input"],
+      "inputs": ["rf_input", "rf_input_2"],
       "outputs": ["if_i", "if_q"],
       "parameters": {
+        "input_mode": {"type": "integer", "min": 1, "max": 2, "enum": [1, 2], "default": 1},
         "lo_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 990000000},
         "lo_phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0},
         "conversion_gain": {"type": "number", "min": 0, "max": 1000000, "default": 1},
@@ -253,17 +345,17 @@
         "pulse_amplitude_adc"
       ],
       "parameters": {
-        "fft_size": {"type": "number", "min": 4, "max": 4096, "default": 64},
+        "fft_size": {"type": "number", "min": 4, "max": 4096, "default": 1024},
         "adc_full_scale": {"type": "number", "min": 0.000000001, "max": 1000000, "default": 1},
         "envelope_threshold_adc": {"type": "number", "min": 0, "max": 255, "default": 12}
       }
     },
     {
-      "moduleId": "Test",
-      "importPath": "backend.builtin_modules.Test",
+      "moduleId": "11",
+      "importPath": "backend.builtin_modules.11",
       "entryFunction": "process",
-      "inputs": ["sample_1"],
-      "outputs": ["rf_samples_1", "rf_samples_2", "rf_samples_3", "rf_samples_4"],
+      "inputs": ["a", "b"],
+      "outputs": ["A", "B" ],
       "parameters": {
       }
     },
@@ -279,7 +371,7 @@
       "parameters": {
         "limit_amplitude": {"type": "number", "min": 0, "max": 1000000, "default": 1},
         "gain_db": {"type": "number", "min": -120, "max": 120, "default": 0},
-        "lo_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 99},
+        "lo_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 5},
         "lo_phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0},
         "conversion_gain": {"type": "number", "min": 0, "max": 1000000, "default": 1},
         "low_pass_cutoff_hz": {"type": "number", "min": 0, "max": 1000000000, "default": 5},

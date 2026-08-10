@@ -15,25 +15,23 @@
     </div>
     <div class="simbar-params">
       <div class="sim-field">
-        <span class="sim-field-lbl">数据集名称</span>
-        <input class="sim-field-inp" id="sim-name" value="test" style="width:68px;text-align:left;">
-      </div>
-      <div class="sim-field">
         <span class="sim-field-lbl">仿真时长</span>
-        <input class="sim-field-inp" id="sim-dur" value="1000" type="number" min="1">
+        <div class="sim-time-control">
+          <input class="sim-field-inp" id="sim-dur" value="10" type="text" inputmode="decimal" aria-label="仿真时长数值">
+          <select class="sim-time-unit" id="sim-dur-unit" aria-label="仿真时长单位">
+            <option value="s" selected>s</option><option value="ms">ms</option><option value="us">µs</option><option value="ns">ns</option><option value="ps">ps</option>
+          </select>
+        </div>
       </div>
       <div class="sim-field" style="border-right:none;margin-right:0;">
         <span class="sim-field-lbl">仿真步长</span>
-        <input class="sim-field-inp" id="sim-step" value="0.1" type="number" min="0.001" step="0.01">
+        <div class="sim-time-control">
+          <input class="sim-field-inp" id="sim-step" value="0.1" type="text" inputmode="decimal" aria-label="仿真步长数值">
+          <select class="sim-time-unit" id="sim-step-unit" aria-label="仿真步长单位">
+            <option value="s" selected>s</option><option value="ms">ms</option><option value="us">µs</option><option value="ns">ns</option><option value="ps">ps</option>
+          </select>
+        </div>
       </div>
-    </div>
-    <div class="simbar-rt">
-      <span class="simbar-rt-lbl">实时模式</span>
-      <label class="toggle-wrap">
-        <input type="checkbox" id="sim-rt" onchange="onRtToggle(this)" checked>
-        <div class="toggle-track"></div>
-        <div class="toggle-thumb"></div>
-      </label>
     </div>
     <div class="simbar-btns">
       <button class="sim-btn sim-btn-disabled" id="sbtn-init" onclick="simInit()" title="初始化">

@@ -61,12 +61,31 @@ export function markTopologyDirty(state = {}, simulation = null, scope = 'system
   }
 
   if (simulation && typeof simulation === 'object') {
+    // Backend sessions capture component parameters at creation time.  Keep
+    // the old ID for asynchronous cleanup, but invalidate it immediately so
+    // a subsequent Run/Step cannot use stale parameters.
+    if (simulation.backendSessionId) {
+      simulation.staleBackendSessionId = simulation.backendSessionId;
+    }
+    simulation.backendSessionId = '';
+    simulation.backendRunId = '';
     simulation.inited = false;
     simulation.running = false;
     simulation.paused = false;
     simulation.hasSamples = false;
     simulation.time = 0;
     simulation.stepIndex = 0;
+    if (simulation.actual) {
+      simulation.actual.scopeSamples = {};
+      simulation.actual.instrumentSamples = {};
+    }
+    if (simulation.reference) {
+      simulation.reference.scopeSamples = {};
+      simulation.reference.instrumentSamples = {};
+    }
+    simulation.componentOutputs = { time: [], steps: [] };
+    simulation.spectrumSampling = {};
+    simulation.spectrumAnalyzerTraces = {};
   }
 
   if (scope === 'system') {

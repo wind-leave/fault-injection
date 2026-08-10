@@ -364,14 +364,29 @@ function formatSimulationNumber(value, fractionDigits = 2) {
   return Number(number.toFixed(fractionDigits)).toString();
 }
 
+function normalizeSimulationTimeUnit(value) {
+  const unit = String(value || 's').trim().toLowerCase();
+  if (unit === 'us' || unit === 'µs' || unit === 'μs') {
+    return 'µs';
+  }
+  return ['s', 'ms', 'ns', 'ps'].includes(unit) ? unit : 's';
+}
+
+function formatSimulationTime(value, unit, fractionDigits) {
+  const scales = { s: 1, ms: 1e-3, 'µs': 1e-6, ns: 1e-9, ps: 1e-12 };
+  return formatSimulationNumber(Number(value) / scales[unit], fractionDigits);
+}
+
 function normalizeSimulationSummary(summary = {}) {
-  const duration = formatSimulationNumber(summary.duration, 2);
-  const elapsedSeconds = formatSimulationNumber(summary.elapsedSeconds ?? summary.time ?? 0, 2);
-  const stepSize = formatSimulationNumber(summary.stepSize, 4);
+  const timeUnit = normalizeSimulationTimeUnit(summary.timeUnit ?? summary.durationUnit);
+  const duration = formatSimulationTime(summary.duration, timeUnit, 2);
+  const elapsedSeconds = formatSimulationTime(summary.elapsedSeconds ?? summary.time ?? 0, timeUnit, 2);
+  const stepSize = formatSimulationTime(summary.stepSize, timeUnit, 4);
   return {
     datasetName: String(summary.datasetName || summary.name || 'test'),
     duration,
     elapsedSeconds,
+    timeUnit,
     faults: toMetricNumber(summary.faults, 0),
     sampleRate: String(summary.sampleRate || '-'),
     status: String(summary.status || 'updated'),
@@ -386,13 +401,13 @@ export function publishSimulationSummary(summary = {}) {
     level: normalized.status === 'completed' ? 'ok' : 'info',
     source: '仿真结果',
     view: 'results',
-    message: `${normalized.datasetName} · ${normalized.status} · ${normalized.stepIndex} steps · ${normalized.duration}s · faults ${normalized.faults}`
+    message: `${normalized.datasetName} · ${normalized.status} · ${normalized.stepIndex} steps · ${normalized.duration}${normalized.timeUnit} · faults ${normalized.faults}`
   });
   const performance = pushStatusEntry({
     level: 'info',
     source: '性能趋势',
     view: 'performance',
-    message: `${normalized.datasetName} · ${normalized.sampleRate} · elapsed ${normalized.elapsedSeconds}s · step ${normalized.stepSize}s · ${normalized.stepIndex} samples`
+    message: `${normalized.datasetName} · ${normalized.sampleRate} · elapsed ${normalized.elapsedSeconds}${normalized.timeUnit} · step ${normalized.stepSize}${normalized.timeUnit} · ${normalized.stepIndex} samples`
   });
   return {
     ok: result.ok && performance.ok,

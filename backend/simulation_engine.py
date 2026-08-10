@@ -1,5 +1,6 @@
 import copy
 import math
+import re
 
 from backend.fault_runtime import FaultRuntime
 from backend.schemas import SimulationBackendError, ensure_number
@@ -7,7 +8,7 @@ from backend.simulation_functions import deterministic_noise, first_numeric as _
 
 
 def _round_time(value):
-    return round(float(value) + 0.0, 10)
+    return round(float(value) + 0.0, 15)
 
 
 def _text(value):
@@ -108,6 +109,59 @@ def _source_value(node, time):
         ("value", "amplitude", "initialState", "payloadValue", "commandValue", "power"),
         0.0,
     )
+
+
+def _rf_input_descriptor(graph, node, input_index, mode, fault_runtime, time):
+    """Describe a directly connected RF source without sampling its carrier."""
+    edge = next(
+        (
+            candidate for candidate in graph.incoming.get(node.id, [])
+            if candidate.target_port_index == input_index
+        ),
+        None,
+    )
+    if edge is None:
+        return None
+    source = graph.nodes[edge.source_node_id]
+    if source.type != "signal_source" or _text(source.parameters.get("signalDomain")) != "rf":
+        return None
+
+    params = source.parameters
+    amplitude = _first_numeric(params, ("amplitude", "power", "value"), 0.0)
+    modulation = _text(params.get("rfModulation")) or "cw"
+    phase_rad = _first_numeric(params, ("phase",), 0.0)
+    modulation_rate = max(1e-6, _first_numeric(params, ("modulationRateHz",), 1.0))
+    modulation_phase = 2.0 * math.pi * modulation_rate * time
+    if modulation == "am":
+        depth = min(1.0, max(0.0, _first_numeric(params, ("modulationDepthRatio",), 0.0)))
+        amplitude *= 1.0 + depth * math.sin(modulation_phase)
+    elif modulation == "fm":
+        deviation = max(0.0, _first_numeric(params, ("frequencyDeviationHz",), 0.0))
+        phase_rad += min(deviation / modulation_rate, 1000.0) * math.sin(modulation_phase)
+    elif modulation == "pm":
+        phase_rad += _first_numeric(params, ("phaseDeviationRad",), 0.0) * math.sin(modulation_phase)
+    elif modulation == "pulse":
+        period = _first_numeric(params, ("pulsePeriodSeconds",), 0.0)
+        width = min(period, max(0.0, _first_numeric(params, ("pulseWidthSeconds",), 0.0)))
+        if period <= 0.0 or not periodic_gate(time, period, width):
+            amplitude = 0.0
+    elif modulation == "digital":
+        symbol_rate = max(1e-6, _first_numeric(params, ("symbolRateHz", "bandwidthHz"), 1.0))
+        symbol = 1.0 if _rf_noise(source.id, math.floor(time * symbol_rate), time) >= 0.0 else -1.0
+        amplitude *= symbol
+    elif modulation == "noise":
+        # Preserve the sampled implementation for noise-like waveforms.
+        return None
+
+    if mode == "actual":
+        amplitude = fault_runtime.apply_edge_value(edge.id, amplitude, time)
+        input_name = node.module.inputs[input_index] if input_index < len(node.module.inputs) else "rf_input"
+        amplitude = fault_runtime.apply_node_input(node.id, input_name, amplitude, time)
+    return {
+        "frequency_hz": max(0.0, _first_numeric(params, ("centerFrequencyHz", "frequency"), 0.0)),
+        "amplitude": amplitude,
+        "phase_rad": phase_rad,
+    }
 
 
 def _node_output_names(node):
@@ -216,6 +270,115 @@ def _edge_value(graph, edge, mode, time, cache, fault_runtime, module_states, dt
     return fault_runtime.apply_edge_value(edge.id, value, time) if mode == "actual" else value
 
 
+def _power_type(port):
+    declared = str(port.get("supplyType", "")).upper()
+    if declared in {"AC", "DC"}:
+        return declared
+    unit = str(port.get("unit", "")).upper()
+    if "AC" in unit:
+        return "AC"
+    if "DC" in unit:
+        return "DC"
+    return ""
+
+
+def _source_supply_type(node, port):
+    """Resolve an electrical source's supply type even if port units are absent."""
+    declared = _power_type(port)
+    if declared:
+        return declared
+    module_id = getattr(node.module, "module_id", "")
+    if module_id in {"electrical_ac_dc_matching", "electrical_dc_boost"}:
+        return "DC"
+    if module_id == "electrical_ac_power_source":
+        return "AC"
+    return ""
+
+
+def _power_voltage(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value or "").strip().upper()
+    match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)", text)
+    if not match:
+        return None
+    try:
+        return float(match.group(0))
+    except ValueError:
+        return None
+
+
+def _source_power_voltage(graph, node, visited=None):
+    """Resolve a source's rated output voltage, including electrical converters."""
+    visited = set(visited or ())
+    if node.id in visited:
+        return None
+    visited.add(node.id)
+
+    for key in ("voltage_rms", "output_voltage", "voltage", "value"):
+        value = _power_voltage(node.parameters.get(key))
+        if value is not None:
+            return value
+
+    module_id = getattr(node.module, "module_id", "")
+    if module_id not in {"electrical_ac_dc_matching", "electrical_dc_boost"}:
+        return None
+
+    source_voltage = None
+    for edge in graph.edges:
+        if edge.target_node_id != node.id or edge.target_port_index >= len(node.input_ports):
+            continue
+        source_node = graph.nodes[edge.source_node_id]
+        source_voltage = _source_power_voltage(graph, source_node, visited)
+        if source_voltage is not None:
+            break
+    if source_voltage is None:
+        return None
+
+    if module_id == "electrical_ac_dc_matching":
+        return source_voltage * max(0.0, float(node.parameters.get("conversion_gain", 1.0)))
+    return source_voltage * max(0.0, float(node.parameters.get("boost_ratio", 1.0))) * max(
+        0.0, float(node.parameters.get("efficiency", 1.0))
+    )
+
+
+def _input_rated_voltage(graph, node):
+    """Return the rated voltage of the first connected signal input source."""
+    for edge in graph.edges:
+        if edge.target_node_id != node.id or edge.target_port_index >= len(node.input_ports):
+            continue
+        voltage = _source_power_voltage(graph, graph.nodes[edge.source_node_id])
+        if voltage is not None:
+            return voltage
+    return None
+
+
+def _is_powered(graph, node):
+    """A supply must be connected with the configured type and rated voltage."""
+    if not node.requires_power:
+        return True
+    supply_start = len(node.input_ports)
+    for edge in graph.edges:
+        if edge.target_node_id != node.id or not (supply_start <= edge.target_port_index < supply_start + len(node.power_input_ports)):
+            continue
+        source_node = graph.nodes[edge.source_node_id]
+        if edge.source_port_index >= len(source_node.output_ports):
+            continue
+        source_port = source_node.output_ports[edge.source_port_index]
+        required_port = node.power_input_ports[edge.target_port_index - supply_start]
+        if _source_supply_type(source_node, source_port) != _power_type(required_port):
+            continue
+        source_voltage = _source_power_voltage(graph, source_node)
+        required_voltage = _power_voltage(required_port.get("voltage"))
+        if source_voltage is None or required_voltage is None:
+            continue
+        if abs(source_voltage - required_voltage) <= max(0.01, abs(required_voltage) * 0.01):
+            return True
+    return False
+
+
 def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_states, dt, visiting, previous_values, next_values, component_outputs):
     key = (mode, node_id)
     if key in cache:
@@ -237,6 +400,7 @@ def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_stat
         value = _source_value(node, time)
         outputs = {output_names[0]: _ensure_port_value(node, "output", 0, value)}
     elif node.type == "simulation_block":
+        # 供电匹配校验暂不参与仿真执行；电源接口仍保留在模型中供建模和展示使用。
         module_inputs = {}
         for index, input_name in enumerate(node.module.inputs):
             input_value = inputs[index] if index < len(inputs) else 0.0
@@ -256,12 +420,24 @@ def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_stat
             else module_parameters
         )
         mode_states = module_states.setdefault(mode, {})
+        module_state = dict(mode_states.get(node_id, {}))
+        if node.module.module_id == "electrical_ac_dc_matching":
+            input_rms = _input_rated_voltage(graph, node)
+            if input_rms is not None:
+                module_state["ac_input_rms"] = input_rms
+        if node.module.module_id == "rf_downconverter":
+            selected_index = 1 if int(float(module_parameters.get("input_mode", 1))) == 2 else 0
+            descriptor = _rf_input_descriptor(graph, node, selected_index, mode, fault_runtime, time)
+            if descriptor is None:
+                module_state.pop("rf_input_descriptor", None)
+            else:
+                module_state["rf_input_descriptor"] = descriptor
         module_result = node.module.call(
             module_inputs,
             module_parameters,
             time=time,
             dt=dt,
-            state=mode_states.get(node_id, {}),
+            state=module_state,
         )
         mode_states[node_id] = dict(module_result.get("state") or {})
         output_map = module_result["outputs"]
@@ -312,6 +488,10 @@ def _time_values(duration, step_size):
         values.append(_round_time(current))
         current += step_size
     return values
+
+
+def _step_count(duration, step_size):
+    return max(0, int(math.ceil(float(duration) / float(step_size) - 1e-12)))
 
 
 def _evaluate_measurement(graph, measurement, mode, time, cache, fault_runtime, module_states, dt, previous_values, next_values, component_outputs):
@@ -379,7 +559,10 @@ class SimulationSession:
     def __init__(self, graph, run_id=""):
         self.graph = graph
         self.run_id = run_id
-        self.times = _time_values(graph.duration, graph.step_size)
+        # Keep the timeline implicit. High-frequency simulations can have a
+        # very large number of possible samples, while interactive sessions
+        # request only a small batch at a time.
+        self.total_steps = _step_count(graph.duration, graph.step_size)
         self.step_index = 0
         self.fault_runtime = FaultRuntime(graph.fault_instances)
         self.module_states = {"actual": {}, "reference": {}}
@@ -387,13 +570,13 @@ class SimulationSession:
 
     @property
     def done(self):
-        return self.step_index >= len(self.times)
+        return self.step_index >= self.total_steps
 
     @property
     def current_time(self):
         if self.done:
             return _round_time(self.graph.duration)
-        return self.times[self.step_index]
+        return _round_time(self.step_index * self.graph.step_size)
 
     def restart(self):
         current_faults = self.fault_runtime.fault_instances
@@ -404,11 +587,11 @@ class SimulationSession:
 
     def run_from_zero(self):
         self.restart()
-        return self.step(len(self.times))
+        return self.step(self.total_steps)
 
     def step(self, steps=1):
         requested_steps = max(0, int(steps))
-        remaining_steps = max(0, len(self.times) - self.step_index)
+        remaining_steps = max(0, self.total_steps - self.step_index)
         sample_count = min(requested_steps, remaining_steps)
         times = []
         channels = _empty_channels(self.graph)
@@ -416,7 +599,7 @@ class SimulationSession:
         events = []
 
         for _ in range(sample_count):
-            time = self.times[self.step_index]
+            time = _round_time(self.step_index * self.graph.step_size)
             times.append(time)
             cache = {}
             next_values = {}
@@ -501,4 +684,4 @@ class SimulationSession:
 
 def run_simulation(graph, run_id=""):
     session = SimulationSession(graph, run_id=run_id)
-    return session.step(len(session.times))
+    return session.step(session.total_steps)

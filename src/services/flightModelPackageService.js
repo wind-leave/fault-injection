@@ -11,6 +11,7 @@ import {
   normalizeModelStoreSnapshot
 } from './modelStore.js';
 import { lockSimulationInterfaces } from './simulationInterfaceLockService.js';
+import { COMPONENT_REGISTRY } from './componentRegistry.js';
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -26,7 +27,6 @@ function normalizeModule(module) {
     category: safeModule.category ?? 'uncategorized',
     sourcePackageId: safeModule.sourcePackageId ?? null,
     sourcePackageName: safeModule.sourcePackageName ?? null,
-    source: safeModule.source ?? '',
     parsedInterface: safeModule.parsedInterface ?? null
   };
 }
@@ -236,12 +236,54 @@ function mapSnapshotNodes(snapshot, transformNode) {
   return safeSnapshot;
 }
 
+function isBuiltinSimulationBinding(binding) {
+  return Boolean(
+    binding?.bound
+      && (binding?.sourceKind === 'builtin'
+        // Models saved before sourceKind was introduced retain this shape.
+        || (binding?.executionMode === 'backend'
+          && hasUsableText(binding?.moduleId)
+          && isPlainObject(binding?.parsedInterface)
+          && !hasUsableText(binding?.rawSource ?? binding?.source)))
+  );
+}
+
+function recoverBuiltinSimulationBinding(node) {
+  if (!isPlainObject(node) || node.type !== 'simulation_block' || node?.pythonBinding?.bound) {
+    return node;
+  }
+
+  const template = COMPONENT_REGISTRY[node.templateId];
+  const binding = template?.nodeType === 'simulation_block'
+    ? template.pythonBinding
+    : null;
+  if (!isBuiltinSimulationBinding(binding)) {
+    return node;
+  }
+
+  const recoveredBinding = clone(binding);
+  const existingDefinition = isPlainObject(node.simulationInterfaceDefinition)
+    ? node.simulationInterfaceDefinition
+    : null;
+  return {
+    ...node,
+    pythonBinding: recoveredBinding,
+    ...(existingDefinition
+      ? {
+          simulationInterfaceDefinition: {
+            ...existingDefinition,
+            pythonPortMapping: clone(recoveredBinding.portMapping)
+          }
+        }
+      : {})
+  };
+}
+
 function isHydratedBinding(binding) {
   return Boolean(
     binding?.bound
       && hasUsableText(binding.entryFunction)
-      && hasUsableText(binding.rawSource ?? binding.source)
-      && isPlainObject(binding.parsedInterface)
+      && (hasUsableText(binding.moduleId) || hasUsableText(binding.fileName))
   );
 }
 
@@ -256,7 +298,6 @@ function hydrateSimulationBinding(binding, moduleEntry) {
 
   const hydrated = createSimulationBlockPythonBinding({
     ...moduleEntry.parsedInterface,
-    rawSource: moduleEntry.source
   }, {
     moduleId: moduleEntry.moduleId,
     moduleCategory: moduleEntry.category,
@@ -278,8 +319,11 @@ function hydrateSimulationBinding(binding, moduleEntry) {
     description: binding.description || hydrated.description,
     entryFunction: binding.entryFunction ?? moduleEntry.entryFunction,
     parsedInterface: binding.parsedInterface ?? clone(moduleEntry.parsedInterface),
-    rawSource: binding.rawSource || moduleEntry.source,
-    portMapping: hydrated.portMapping
+    // Keep the interface labels saved with the model.  Rebuilding the mapping
+    // from module metadata here can silently replace user-facing port names.
+    portMapping: isPlainObject(binding.portMapping)
+      ? clone(binding.portMapping)
+      : hydrated.portMapping
   };
   delete mergedBinding.executionConfig;
   return mergedBinding;
@@ -343,11 +387,10 @@ function exportSimulationNode(node) {
   const moduleId = binding.moduleId;
   const fileName = binding.fileName;
   const entryFunction = binding.entryFunction;
-  const source = binding.rawSource ?? binding.source ?? '';
   const exportable = hasUsableText(moduleId)
     && hasUsableText(fileName)
     && hasUsableText(entryFunction)
-    && hasUsableText(source);
+    && isBuiltinSimulationBinding(binding);
 
   return {
     ...clone(node),
@@ -361,29 +404,8 @@ function collectPythonModulesFromSnapshot(snapshot) {
       return modules;
     }
 
-    const binding = node.pythonBinding;
-    const moduleId = binding.moduleId;
-    const fileName = binding.fileName;
-    const entryFunction = binding.entryFunction;
-    const source = binding.rawSource ?? binding.source ?? '';
-
-    if (!hasUsableText(moduleId) || !hasUsableText(fileName) || !hasUsableText(entryFunction) || !hasUsableText(source)) {
-      return modules;
-    }
-
-    if (!modules.has(moduleId)) {
-      modules.set(moduleId, normalizeModule({
-        moduleId,
-        fileName,
-        entryFunction,
-        category: binding.moduleCategory ?? 'uncategorized',
-        sourcePackageId: binding.sourcePackageId ?? null,
-        sourcePackageName: binding.sourcePackageName ?? null,
-        source,
-        parsedInterface: binding.parsedInterface ?? null
-      }));
-    }
-
+    // System-model packages refer only to components registered in the
+    // backend built-in manifest. Custom Python module records are not saved.
     return modules;
   }, new Map());
 }
@@ -445,10 +467,6 @@ export function validateFlightModelPackage(pkg) {
 
       if (!hasUsableText(module.entryFunction)) {
         errors.push(`pythonModules[${index}].entryFunction is required.`);
-      }
-
-      if (!hasUsableText(module.source)) {
-        errors.push(`pythonModules[${index}].source is required.`);
       }
 
       if (hasUsableText(module.moduleId)) {
@@ -579,7 +597,8 @@ export function applyFlightModelPackage(pkg, { existingSnapshot = null } = {}) {
     ...normalizedPackage.workbenchSnapshot,
     faultInstances: packageFaultInstances
   });
-  const hydratedSnapshot = hydrateSnapshotBindings(restoredSnapshot, pythonModules);
+  const recoveredSnapshot = mapSnapshotNodes(restoredSnapshot, recoverBuiltinSimulationBinding);
+  const hydratedSnapshot = hydrateSnapshotBindings(recoveredSnapshot, pythonModules);
 
   if (hydratedSnapshot.errors.length > 0) {
     return {

@@ -84,7 +84,20 @@ describe('canvas selection service', () => {
       paused: true,
       hasSamples: true,
       time: 12,
-      stepIndex: 7
+      stepIndex: 7,
+      backendSessionId: 'session-before-edit',
+      backendRunId: 'run-before-edit',
+      actual: {
+        scopeSamples: { 'scope-1': { ch1: [{ t: 0, actual: 1 }] } },
+        instrumentSamples: { 'spectrum-1': [{ t: 0, actual: 10 }] }
+      },
+      reference: {
+        scopeSamples: { 'scope-1': { ch1: [{ t: 0, actual: 1 }] } },
+        instrumentSamples: { 'spectrum-1': [{ t: 0, actual: 10 }] }
+      },
+      componentOutputs: { time: [0], steps: [{ time: 0 }] },
+      spectrumSampling: { 'spectrum-1': { lastTime: 0 } },
+      spectrumAnalyzerTraces: { 'spectrum-1': { levels: [-20] } }
     };
 
     markTopologyDirty(state, simulation, 'fault');
@@ -93,6 +106,9 @@ describe('canvas selection service', () => {
     expect(state.simDone).toBe(false);
     expect(state.step).toBe(2);
     expect(simulation).toMatchObject({
+      backendSessionId: '',
+      backendRunId: '',
+      staleBackendSessionId: 'session-before-edit',
       inited: false,
       running: false,
       paused: false,
@@ -100,6 +116,11 @@ describe('canvas selection service', () => {
       time: 0,
       stepIndex: 0
     });
+    expect(simulation.actual).toEqual({ scopeSamples: {}, instrumentSamples: {} });
+    expect(simulation.reference).toEqual({ scopeSamples: {}, instrumentSamples: {} });
+    expect(simulation.componentOutputs).toEqual({ time: [], steps: [] });
+    expect(simulation.spectrumSampling).toEqual({});
+    expect(simulation.spectrumAnalyzerTraces).toEqual({});
 
     markTopologyDirty(state, simulation, 'system');
     expect(state.systemSaved).toBe(false);

@@ -5,30 +5,28 @@
     <div class="canvas-sim-dock" aria-label="仿真任务控制">
       <div class="simbar" id="simbar">
         <div class="simbar-title">
-          <span class="simbar-title__kicker">任务控制</span>
-          <span class="simbar-title__name">仿真参数</span>
+          <span class="simbar-title__kicker">任务名称</span>
+          <input class="simbar-title__name simbar-title__name-input" id="task-name" value="仿真参数" type="text" maxlength="80" aria-label="任务名称">
         </div>
         <div class="simbar-params">
           <div class="sim-field">
-            <span class="sim-field-lbl">数据集名称</span>
-            <input class="sim-field-inp" id="sim-name" value="test" style="width:68px;text-align:left;">
-          </div>
-          <div class="sim-field">
             <span class="sim-field-lbl">仿真时长</span>
-            <input class="sim-field-inp" id="sim-dur" value="1000" type="number" min="1">
+            <div class="sim-time-control">
+              <input class="sim-field-inp" id="sim-dur" value="10" type="text" inputmode="decimal" aria-label="仿真时长数值">
+              <select class="sim-time-unit" id="sim-dur-unit" aria-label="仿真时长单位">
+                <option value="s" selected>s</option><option value="ms">ms</option><option value="us">µs</option><option value="ns">ns</option><option value="ps">ps</option>
+              </select>
+            </div>
           </div>
           <div class="sim-field" style="border-right:none;margin-right:0;">
             <span class="sim-field-lbl">仿真步长</span>
-            <input class="sim-field-inp" id="sim-step" value="0.1" type="number" min="0.001" step="0.01">
+            <div class="sim-time-control">
+              <input class="sim-field-inp" id="sim-step" value="0.1" type="text" inputmode="decimal" aria-label="仿真步长数值">
+              <select class="sim-time-unit" id="sim-step-unit" aria-label="仿真步长单位">
+                <option value="s" selected>s</option><option value="ms">ms</option><option value="us">µs</option><option value="ns">ns</option><option value="ps">ps</option>
+              </select>
+            </div>
           </div>
-        </div>
-        <div class="simbar-rt">
-          <span class="simbar-rt-lbl">实时模式</span>
-          <label class="toggle-wrap">
-            <input type="checkbox" id="sim-rt" onchange="onRtToggle(this)" checked>
-            <div class="toggle-track"></div>
-            <div class="toggle-thumb"></div>
-          </label>
         </div>
         <div class="simbar-btns">
           <button class="sim-btn sim-btn-disabled" id="sbtn-init" onclick="simInit()" title="初始化">
@@ -111,6 +109,7 @@
     </div>
     <div class="canvas-floating">
       <div class="canvas-group-actions">
+        <button type="button" class="canvas-line-view__button" id="canvas-line-view-toggle" onclick="cycleCanvasLineView()">全部</button>
         <button type="button" class="canvas-wrap__button" id="canvas-wrap-selection" onclick="wrapSelectionIntoSubsystem()" disabled>封装为子系统</button>
         <button type="button" class="canvas-arrange__button" onclick="autoArrangeCanvas()">一键整理</button>
       </div>
@@ -134,6 +133,9 @@
           <defs>
             <marker id="edge-arrow-normal" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
               <path d="M1 1L8 5L1 9" fill="none" stroke="#84aee0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </marker>
+            <marker id="edge-arrow-power" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+              <path d="M1 1L8 5L1 9" fill="none" stroke="#dc2626" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
             </marker>
             <marker id="edge-arrow-can" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
               <path d="M1 1L8 5L1 9" fill="none" stroke="#8c7cf6" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>

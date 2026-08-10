@@ -64,4 +64,16 @@ describe('canvas render service', () => {
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith('edge-1', expect.any(MouseEvent));
   });
+
+  it('renders a power line with its dedicated style and arrow marker', () => {
+    const result = createEdgeDomElements(document, {
+      edge: { id: 'edge-power', lineType: 'power' },
+      edgePath: 'M 0 0 C 10 0, 20 0, 30 0',
+      labelText: '电源线'
+    });
+
+    expect(result.path.getAttribute('class')).toBe('edge-path edge-path--power');
+    expect(result.path.getAttribute('marker-end')).toBe('url(#edge-arrow-power)');
+    expect(result.label.textContent).toBe('电源线');
+  });
 });

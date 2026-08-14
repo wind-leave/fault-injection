@@ -43,6 +43,10 @@ function mapPortList(items, direction, moduleName) {
       name,
       displayName: name,
       type: text(item.type, 'any'),
+      dataType: text(item.dataType, text(item.type, 'any')),
+      vectorLength: Number.isInteger(Number(item.vectorLength ?? item.length)) && Number(item.vectorLength ?? item.length) > 1
+        ? Number(item.vectorLength ?? item.length)
+        : undefined,
       comment: text(item.comment),
       direction
     };
@@ -118,6 +122,8 @@ function mapPropsPorts(items) {
     name: item.displayName,
     displayName: item.displayName,
     type: item.type,
+    dataType: item.dataType,
+    vectorLength: item.vectorLength,
     comment: item.comment
   }));
 }

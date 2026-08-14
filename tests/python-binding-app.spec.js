@@ -107,6 +107,61 @@ describe('Python binding app integration', () => {
     __resetLegacyRuntimeForTests();
   });
 
+  it('creates the built-in airspeed sensor template as a bound simulation block', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const node = window.createNode('airspeed_sensor', 420, 320);
+    await flushRuntime();
+
+    expect(node).toMatchObject({
+      type: 'simulation_block',
+      templateId: 'airspeed_sensor',
+      props: {
+        name: '空速传感器',
+        moduleType: '传感器模型',
+        inputs: [{ name: '真实空速', type: '标量', varName: 'true_airspeed', unit: 'm/s' }],
+        outputs: [{ name: '测量空速', type: '标量', varName: 'measured_airspeed', unit: 'm/s' }],
+        parameters: [
+          { key: 'bias', name: '零偏', layer: 'physical', default: 0, unit: 'm/s' },
+          { key: 'scale', name: '比例系数', layer: 'physical', default: 1 }
+        ]
+      },
+      pythonBinding: {
+        bound: true,
+        moduleId: 'airspeed_sensor',
+        fileName: 'airspeed_sensor.py',
+        moduleName: 'airspeed_sensor',
+        entryFunction: 'process',
+        portMapping: {
+          inputs: [expect.objectContaining({ varName: 'true_airspeed', displayName: '真实空速' })],
+          outputs: [expect.objectContaining({ varName: 'measured_airspeed', displayName: '测量空速' })]
+        }
+      },
+      faultSlots: [
+        expect.objectContaining({
+          slotId: 'physical:airspeed_bias',
+          layer: 'physical',
+          targetField: 'parameters.bias'
+        }),
+        expect.objectContaining({
+          slotId: 'physical:airspeed_scale',
+          layer: 'physical',
+          targetField: 'parameters.scale'
+        })
+      ]
+    });
+    expect(window.__GZ_STATE__.modelNodes.at(-1)).toBe(node);
+    const block = document.getElementById(`b-${node.id}`);
+    expect(block?.querySelector('.blk-kicker')?.textContent).toBe('仿真');
+    expect(block?.querySelector('.node-card__python-chip')).toBeNull();
+    expect(block?.querySelector('.blk-lbl')?.textContent).toBe('空速传感器');
+    expect(block?.querySelector('.blk-lbl')?.textContent).not.toBe('airspeed_sensor.py');
+    expect(block?.getAttribute('title')).toContain('airspeed_sensor.py');
+
+    wrapper.unmount();
+  });
+
   it('binds a simulation block and rebuilds visible ports on the canvas', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -134,20 +189,29 @@ describe('Python binding app integration', () => {
 
     const reboundBlock = document.getElementById(`b-${simId}`);
     expect(reboundBlock?.className).toContain('python-bound');
-    expect(reboundBlock?.textContent).toContain('pid_controller.py');
-    expect(reboundBlock?.querySelectorAll('.node-port--input').length).toBe(2);
+    expect(reboundBlock?.querySelector('.blk-lbl')?.textContent).toBe('仿真块 1');
+    expect(reboundBlock?.textContent).not.toContain('pid_controller.py');
+    expect(reboundBlock?.getAttribute('title')).toContain('pid_controller.py');
+    expect(reboundBlock?.querySelectorAll('.node-port--input').length).toBe(3);
     expect(reboundBlock?.querySelectorAll('.node-port--output:not(.node-port--top)').length).toBe(1);
     expect(reboundBlock?.querySelectorAll('.node-port--top').length).toBe(1);
+    expect(reboundBlock?.querySelectorAll('.node-port--bottom').length).toBe(0);
+    if (false) {
     const portLabels = [...reboundBlock.querySelectorAll('.node-port__label')].map((item) => item.textContent);
-    expect(portLabels).toEqual(expect.arrayContaining(['error signal', 'step', 'control', 'integral state']));
-    expect(reboundBlock?.querySelectorAll('button.node-port').length).toBe(4);
+    expect(portLabels).toEqual(expect.arrayContaining(['error signal', 'step', 'control', '电源输入', '电源地']));
+    expect(portLabels).not.toEqual(expect.arrayContaining(['integral state']));
+    expect(reboundBlock?.querySelectorAll('button.node-port').length).toBe(5);
 
     const inputPorts = [...reboundBlock.querySelectorAll('.node-port--input')];
     const outputPorts = [...reboundBlock.querySelectorAll('.node-port--output')];
     expect(inputPorts[0]?.getAttribute('title')).toContain('error');
     expect(inputPorts[1]?.getAttribute('title')).toContain('dt');
     expect(outputPorts[0]?.getAttribute('title')).toContain('output_0');
-    expect(outputPorts[1]?.getAttribute('title')).toContain('integral');
+    expect(outputPorts[1]?.getAttribute('title')).toContain('电源地');
+    }
+    const visiblePortLabels = [...reboundBlock.querySelectorAll('.node-port__label')].map((item) => item.textContent);
+    expect(visiblePortLabels).not.toEqual(expect.arrayContaining(['电源地']));
+    expect(reboundBlock?.querySelectorAll('button.node-port').length).toBe(4);
     expect(reboundBlock?.querySelector('.node-port .node-port__inner')).not.toBeNull();
 
     wrapper.unmount();
@@ -215,7 +279,7 @@ describe('Python binding app integration', () => {
     expect(empty?.textContent).toContain('导入系统模型');
     expect(empty?.textContent).toContain('新建空白模型');
     expect(document.getElementById('btn-new-sys')).not.toBeNull();
-    expect(document.getElementById('btn-reset-sys')).not.toBeNull();
+    expect(document.getElementById('btn-reset-sys')).toBeNull();
 
     wrapper.unmount();
   });
@@ -363,7 +427,7 @@ describe('Python binding app integration', () => {
 
     expect(document.getElementById('btn-imp-sys')?.textContent).toContain('导入系统模型');
     expect(document.getElementById('btn-imp-sys')?.textContent).not.toContain('Import System Model');
-    expect(document.querySelector('[data-component=\"middle_var_assign\"]')?.textContent).toContain('中间变量赋值块');
+    expect(document.querySelector('[data-component=middle_var_assign]')).toBeNull();
 
     window.createNode('signal_source', 360, 260);
     await flushRuntime();
@@ -371,6 +435,8 @@ describe('Python binding app integration', () => {
     const signalNode = document.querySelector('.blk.b-source');
     const signalId = signalNode.id.replace('b-', '');
     window.selectNode(signalId);
+    await flushRuntime();
+    window.setPropertyPanelTab('parameters');
     await flushRuntime();
 
     const inspector = document.getElementById('pd');

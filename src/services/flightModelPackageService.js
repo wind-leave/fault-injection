@@ -10,6 +10,8 @@ import {
 import {
   normalizeModelStoreSnapshot
 } from './modelStore.js';
+import { lockSimulationInterfaces } from './simulationInterfaceLockService.js';
+import { COMPONENT_REGISTRY } from './componentRegistry.js';
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -25,7 +27,6 @@ function normalizeModule(module) {
     category: safeModule.category ?? 'uncategorized',
     sourcePackageId: safeModule.sourcePackageId ?? null,
     sourcePackageName: safeModule.sourcePackageName ?? null,
-    source: safeModule.source ?? '',
     parsedInterface: safeModule.parsedInterface ?? null
   };
 }
@@ -85,6 +86,133 @@ function collectSnapshotNodes(snapshot) {
   return nodes;
 }
 
+function collectSnapshotEdges(snapshot) {
+  const edges = [];
+  const seenEdgeIds = new Set();
+  const appendEdges = (items) => {
+    if (!Array.isArray(items)) {
+      return;
+    }
+
+    items.forEach((edge) => {
+      if (!isPlainObject(edge)) {
+        return;
+      }
+
+      const edgeId = hasUsableText(edge.id) ? edge.id : null;
+      if (edgeId && seenEdgeIds.has(edgeId)) {
+        return;
+      }
+
+      if (edgeId) {
+        seenEdgeIds.add(edgeId);
+      }
+      edges.push(edge);
+    });
+  };
+
+  appendEdges(snapshot?.modelEdges);
+
+  if (isPlainObject(snapshot?.canvases)) {
+    Object.values(snapshot.canvases).forEach((canvas) => {
+      appendEdges(canvas?.edges);
+    });
+  }
+
+  return edges;
+}
+
+function faultModelIdFromRecord(record = {}) {
+  return record?.modelId
+    || record?.faultModelId
+    || record?.faultTypeId
+    || record?.faultId
+    || '';
+}
+
+function createEmbeddedFaultModel(record = {}) {
+  const payload = isPlainObject(record?.injectedFault) ? record.injectedFault : record;
+  const id = faultModelIdFromRecord(payload) || faultModelIdFromRecord(record);
+  if (!hasUsableText(id)) {
+    return null;
+  }
+
+  return {
+    id,
+    name: payload.name
+      || payload.displayName
+      || record.name
+      || record.displayName
+      || record.faultModelName
+      || id,
+    layer: payload.layer || payload.layerKey || record.layer || record.layerKey || 'electrical',
+    layerKey: payload.layerKey || payload.layer || record.layerKey || record.layer || 'electrical',
+    modelClass: payload.modelClass || payload.faultClass || payload.faultKind
+      || record.modelClass || record.faultClass || record.faultKind || '',
+    runtimeBehavior: payload.runtimeBehavior || record.runtimeBehavior || '',
+    defaultParameters: clone(payload.parameters || record.parameters || {})
+  };
+}
+
+function collectEmbeddedFaultModels(snapshot = {}) {
+  const records = [
+    ...(Array.isArray(snapshot.faultInstances) ? snapshot.faultInstances : []),
+    ...(Array.isArray(snapshot.faultTags) ? snapshot.faultTags : [])
+  ];
+
+  [...collectSnapshotNodes(snapshot), ...collectSnapshotEdges(snapshot)].forEach((target) => {
+    if (isPlainObject(target?.injectedFault)) {
+      records.push(target.injectedFault);
+    }
+    if (Array.isArray(target?.faultBindings)) {
+      records.push(...target.faultBindings);
+    }
+  });
+
+  const models = new Map();
+  records.forEach((record) => {
+    const model = createEmbeddedFaultModel(record);
+    // Later records come from the bound target itself and normally carry the
+    // complete runtime payload, unlike the compact faultInstances entry.
+    if (model) {
+      models.set(model.id, model);
+    }
+  });
+
+  return Array.from(models.values());
+}
+
+function embedReferencedFaultModels(pkg = {}) {
+  const nextPackage = clone(pkg ?? {});
+  const existingLibrary = Array.isArray(nextPackage.faultLibrary) ? nextPackage.faultLibrary : [];
+  const existingIds = new Set();
+
+  const registerIds = (models) => {
+    if (!Array.isArray(models)) {
+      return;
+    }
+    models.forEach((model) => {
+      if (isPlainObject(model) && hasUsableText(model.id)) {
+        existingIds.add(model.id);
+      }
+    });
+  };
+
+  registerIds(existingLibrary);
+  registerIds(nextPackage.diagnosticModel?.faultCases);
+  registerIds(nextPackage.workbenchSnapshot?.importedFaultModels);
+
+  const embeddedModels = collectEmbeddedFaultModels(nextPackage.workbenchSnapshot);
+  const missingModels = embeddedModels.filter((model) => !existingIds.has(model.id));
+  if (missingModels.length > 0) {
+    nextPackage.faultLibrary = [...existingLibrary, ...missingModels];
+  } else if (Array.isArray(nextPackage.faultLibrary)) {
+    nextPackage.faultLibrary = existingLibrary;
+  }
+
+  return nextPackage;
+}
+
 function mapSnapshotNodes(snapshot, transformNode) {
   const safeSnapshot = clone(snapshot ?? {});
 
@@ -108,12 +236,54 @@ function mapSnapshotNodes(snapshot, transformNode) {
   return safeSnapshot;
 }
 
+function isBuiltinSimulationBinding(binding) {
+  return Boolean(
+    binding?.bound
+      && (binding?.sourceKind === 'builtin'
+        // Models saved before sourceKind was introduced retain this shape.
+        || (binding?.executionMode === 'backend'
+          && hasUsableText(binding?.moduleId)
+          && isPlainObject(binding?.parsedInterface)
+          && !hasUsableText(binding?.rawSource ?? binding?.source)))
+  );
+}
+
+function recoverBuiltinSimulationBinding(node) {
+  if (!isPlainObject(node) || node.type !== 'simulation_block' || node?.pythonBinding?.bound) {
+    return node;
+  }
+
+  const template = COMPONENT_REGISTRY[node.templateId];
+  const binding = template?.nodeType === 'simulation_block'
+    ? template.pythonBinding
+    : null;
+  if (!isBuiltinSimulationBinding(binding)) {
+    return node;
+  }
+
+  const recoveredBinding = clone(binding);
+  const existingDefinition = isPlainObject(node.simulationInterfaceDefinition)
+    ? node.simulationInterfaceDefinition
+    : null;
+  return {
+    ...node,
+    pythonBinding: recoveredBinding,
+    ...(existingDefinition
+      ? {
+          simulationInterfaceDefinition: {
+            ...existingDefinition,
+            pythonPortMapping: clone(recoveredBinding.portMapping)
+          }
+        }
+      : {})
+  };
+}
+
 function isHydratedBinding(binding) {
   return Boolean(
     binding?.bound
       && hasUsableText(binding.entryFunction)
-      && hasUsableText(binding.rawSource ?? binding.source)
-      && isPlainObject(binding.parsedInterface)
+      && (hasUsableText(binding.moduleId) || hasUsableText(binding.fileName))
   );
 }
 
@@ -128,7 +298,6 @@ function hydrateSimulationBinding(binding, moduleEntry) {
 
   const hydrated = createSimulationBlockPythonBinding({
     ...moduleEntry.parsedInterface,
-    rawSource: moduleEntry.source
   }, {
     moduleId: moduleEntry.moduleId,
     moduleCategory: moduleEntry.category,
@@ -137,7 +306,7 @@ function hydrateSimulationBinding(binding, moduleEntry) {
     executionMode: binding.executionMode
   });
 
-  return {
+  const mergedBinding = {
     ...hydrated,
     ...clone(binding),
     bound: true,
@@ -150,10 +319,14 @@ function hydrateSimulationBinding(binding, moduleEntry) {
     description: binding.description || hydrated.description,
     entryFunction: binding.entryFunction ?? moduleEntry.entryFunction,
     parsedInterface: binding.parsedInterface ?? clone(moduleEntry.parsedInterface),
-    rawSource: binding.rawSource || moduleEntry.source,
-    portMapping: hydrated.portMapping,
-    executionConfig: isPlainObject(binding.executionConfig) ? binding.executionConfig : hydrated.executionConfig
+    // Keep the interface labels saved with the model.  Rebuilding the mapping
+    // from module metadata here can silently replace user-facing port names.
+    portMapping: isPlainObject(binding.portMapping)
+      ? clone(binding.portMapping)
+      : hydrated.portMapping
   };
+  delete mergedBinding.executionConfig;
+  return mergedBinding;
 }
 
 function hydrateSnapshotBindings(snapshot, pythonModules) {
@@ -214,11 +387,10 @@ function exportSimulationNode(node) {
   const moduleId = binding.moduleId;
   const fileName = binding.fileName;
   const entryFunction = binding.entryFunction;
-  const source = binding.rawSource ?? binding.source ?? '';
   const exportable = hasUsableText(moduleId)
     && hasUsableText(fileName)
     && hasUsableText(entryFunction)
-    && hasUsableText(source);
+    && isBuiltinSimulationBinding(binding);
 
   return {
     ...clone(node),
@@ -232,29 +404,8 @@ function collectPythonModulesFromSnapshot(snapshot) {
       return modules;
     }
 
-    const binding = node.pythonBinding;
-    const moduleId = binding.moduleId;
-    const fileName = binding.fileName;
-    const entryFunction = binding.entryFunction;
-    const source = binding.rawSource ?? binding.source ?? '';
-
-    if (!hasUsableText(moduleId) || !hasUsableText(fileName) || !hasUsableText(entryFunction) || !hasUsableText(source)) {
-      return modules;
-    }
-
-    if (!modules.has(moduleId)) {
-      modules.set(moduleId, normalizeModule({
-        moduleId,
-        fileName,
-        entryFunction,
-        category: binding.moduleCategory ?? 'uncategorized',
-        sourcePackageId: binding.sourcePackageId ?? null,
-        sourcePackageName: binding.sourcePackageName ?? null,
-        source,
-        parsedInterface: binding.parsedInterface ?? null
-      }));
-    }
-
+    // System-model packages refer only to components registered in the
+    // backend built-in manifest. Custom Python module records are not saved.
     return modules;
   }, new Map());
 }
@@ -316,10 +467,6 @@ export function validateFlightModelPackage(pkg) {
 
       if (!hasUsableText(module.entryFunction)) {
         errors.push(`pythonModules[${index}].entryFunction is required.`);
-      }
-
-      if (!hasUsableText(module.source)) {
-        errors.push(`pythonModules[${index}].source is required.`);
       }
 
       if (hasUsableText(module.moduleId)) {
@@ -429,8 +576,12 @@ export function createFlightModelPackageDescriptor(pkg = {}) {
   };
 }
 
-export function applyFlightModelPackage(pkg) {
-  const validation = validateFlightModelPackage(pkg);
+export function applyFlightModelPackage(pkg, { existingSnapshot = null } = {}) {
+  // Older workbench exports stored generated fault instance IDs only in the
+  // snapshot. Rebuild their lightweight model definitions before validation so
+  // those packages remain importable, while new exports are self-contained.
+  const normalizedPackage = embedReferencedFaultModels(pkg);
+  const validation = validateFlightModelPackage(normalizedPackage);
   if (!validation.ok) {
     return {
       ok: false,
@@ -438,15 +589,16 @@ export function applyFlightModelPackage(pkg) {
     };
   }
 
-  const pythonModules = clone(Array.isArray(pkg.pythonModules) ? pkg.pythonModules : []);
-  const packageFaultInstances = Array.isArray(pkg.faultInstances)
-    ? pkg.faultInstances
-    : pkg.workbenchSnapshot?.faultInstances;
+  const pythonModules = clone(Array.isArray(normalizedPackage.pythonModules) ? normalizedPackage.pythonModules : []);
+  const packageFaultInstances = Array.isArray(normalizedPackage.faultInstances)
+    ? normalizedPackage.faultInstances
+    : normalizedPackage.workbenchSnapshot?.faultInstances;
   const restoredSnapshot = restoreWorkbenchSnapshot({
-    ...pkg.workbenchSnapshot,
+    ...normalizedPackage.workbenchSnapshot,
     faultInstances: packageFaultInstances
   });
-  const hydratedSnapshot = hydrateSnapshotBindings(restoredSnapshot, pythonModules);
+  const recoveredSnapshot = mapSnapshotNodes(restoredSnapshot, recoverBuiltinSimulationBinding);
+  const hydratedSnapshot = hydrateSnapshotBindings(recoveredSnapshot, pythonModules);
 
   if (hydratedSnapshot.errors.length > 0) {
     return {
@@ -456,15 +608,16 @@ export function applyFlightModelPackage(pkg) {
   }
 
   const normalizedSnapshot = normalizeModelStoreSnapshot(hydratedSnapshot.snapshot, {
-    faultCapabilityMap: pkg.faultCapabilityMap
+    faultCapabilityMap: normalizedPackage.faultCapabilityMap
   });
+  const lockedSnapshot = lockSimulationInterfaces(normalizedSnapshot, { existingSnapshot });
 
   return {
     ok: true,
-    snapshot: normalizedSnapshot,
-    descriptor: createFlightModelPackageDescriptor(pkg),
-    faultLibrary: clone(Array.isArray(pkg.faultLibrary) ? pkg.faultLibrary : []),
-    diagnosticModel: isPlainObject(pkg.diagnosticModel) ? clone(pkg.diagnosticModel) : null,
+    snapshot: lockedSnapshot,
+    descriptor: createFlightModelPackageDescriptor(normalizedPackage),
+    faultLibrary: clone(Array.isArray(normalizedPackage.faultLibrary) ? normalizedPackage.faultLibrary : []),
+    diagnosticModel: isPlainObject(normalizedPackage.diagnosticModel) ? clone(normalizedPackage.diagnosticModel) : null,
     pythonModules
   };
 }
@@ -474,9 +627,17 @@ export function buildFlightModelPackage({ meta = {}, snapshot = {}, faultLibrary
     faultCapabilityMap: meta.faultCapabilityMap
   });
   const exportedSnapshot = mapSnapshotNodes(normalizedSnapshot, exportSimulationNode);
+  const rootCanvas = exportedSnapshot.canvases?.[exportedSnapshot.rootCanvasId];
+  const hierarchicalSnapshot = rootCanvas
+    ? {
+        ...exportedSnapshot,
+        modelNodes: clone(rootCanvas.nodes ?? []),
+        modelEdges: clone(rootCanvas.edges ?? [])
+      }
+    : exportedSnapshot;
   const pythonModulesById = collectPythonModulesFromSnapshot(normalizedSnapshot);
 
-  return {
+  return embedReferencedFaultModels({
     schemaVersion: FLIGHT_MODEL_SCHEMA_VERSION,
     packageType: FLIGHT_MODEL_PACKAGE_TYPE,
     modelId: meta.modelId ?? null,
@@ -491,8 +652,8 @@ export function buildFlightModelPackage({ meta = {}, snapshot = {}, faultLibrary
     pythonModules: Array.from(pythonModulesById.values()),
     faultLibrary: clone(faultLibrary ?? []),
     faultInstances: clone(Array.isArray(normalizedSnapshot.faultInstances) ? normalizedSnapshot.faultInstances : []),
-    workbenchSnapshot: exportedSnapshot
-  };
+    workbenchSnapshot: hierarchicalSnapshot
+  });
 }
 
 export function exportFlightModelPackage({ meta = {}, state = {}, faultLibrary = [] } = {}) {

@@ -1,3 +1,5 @@
+import { normalizeSignalSourceProps } from './signalSourceDomainService.js';
+
 export const FAULT_MATH_MODEL_DEFINITIONS = Object.freeze({
   physical: [
     {
@@ -28,7 +30,7 @@ export const FAULT_MATH_MODEL_DEFINITIONS = Object.freeze({
       id: 'freeze',
       name: '卡死模型',
       formula: 'p_fault = hold(p, start)',
-      defaultParameters: { start: 0, duration: '' }
+      defaultParameters: { start: 0 }
     },
     {
       id: 'random',
@@ -157,6 +159,32 @@ function normalizeFaultSlot(slot = {}, target = {}, fallback = {}) {
   };
 }
 
+function vectorLengthOf(item = {}) {
+  const shapeLength = Array.isArray(item?.shape) ? Number(item.shape[0]) : NaN;
+  const literal = item?.default ?? item?.value ?? item?.initialValue;
+  let literalLength = NaN;
+  if (Array.isArray(literal)) {
+    literalLength = literal.length;
+  } else if (typeof literal === 'string') {
+    try {
+      const parsed = JSON.parse(literal);
+      literalLength = Array.isArray(parsed) ? parsed.length : NaN;
+    } catch {
+      // A non-JSON default is not a fixed-length vector declaration.
+    }
+  }
+  return [item?.vectorLength, item?.length, shapeLength, literalLength]
+    .map(Number)
+    .find((value) => Number.isInteger(value) && value > 1) ?? 0;
+}
+
+function vectorMetadataOf(item = {}) {
+  const vectorLength = vectorLengthOf(item);
+  return vectorLength > 1
+    ? { dataType: text(item?.dataType ?? item?.type ?? item?.format, 'vector'), vectorLength }
+    : {};
+}
+
 function createPortSlot(layer, role, item = {}, index = 0) {
   const key = text(item.key ?? item.id ?? item.name ?? item.varName, `${role}_${index + 1}`)
     .replace(/\s+/g, '_');
@@ -165,12 +193,13 @@ function createPortSlot(layer, role, item = {}, index = 0) {
     slotId: `${layer}:${role}:${key}`,
     slotName: text(item.name ?? item.label ?? item.varName, `${role} ${index + 1}`),
     layer,
-    targetField: `${role}.${key}`,
+    targetField: text(item.targetField, `${role}.${key}`),
     allowedModels: layer === 'physical'
       ? FAULT_MATH_MODEL_DEFINITIONS.physical.map((model) => model.id)
       : EDGE_ELECTRICAL_MODELS.slice(),
     parameterKey: text(item.key ?? item.id ?? item.name ?? item.varName),
-    unit: text(item.unit)
+    unit: text(item.unit),
+    ...vectorMetadataOf(item)
   };
 }
 
@@ -226,7 +255,9 @@ function createComponentFaultVariable(role, item = {}, index = 0) {
     signalId: text(source.signalId),
     unit: text(source.unit),
     type: text(source.type ?? source.format),
-    parameterKey: role === 'parameter' ? key : ''
+    parameterKey: role === 'parameter' ? key : '',
+    default: source.default,
+    ...vectorMetadataOf(source)
   };
 }
 
@@ -258,6 +289,21 @@ function pythonBindingParameterInputs(node = {}) {
   return source.filter(hasDefaultParameterValue);
 }
 
+function variableAliasValues(item = {}) {
+  if (!isPlainObject(item)) {
+    return [];
+  }
+  return [
+    item.key,
+    item.id,
+    item.varName,
+    item.name,
+    item.displayName,
+    item.label,
+    item.comment
+  ].map((value) => text(value)).filter(Boolean);
+}
+
 function pythonBindingInterfaceItems(node = {}, group = 'inputs') {
   const binding = isPlainObject(node.pythonBinding) ? node.pythonBinding : {};
   const parsedItems = arrayOrEmpty(binding.parsedInterface?.[group]);
@@ -268,19 +314,22 @@ export function getComponentFaultVariables(node = {}) {
   const props = isPlainObject(node.props) ? node.props : {};
   const variables = [];
   const seen = new Set();
+  const inputItems = arrayOrEmpty(props.inputs);
+  const outputItems = arrayOrEmpty(props.outputs);
+  const middleItems = arrayOrEmpty(props.middleVars);
+  const interfaceAliases = new Set([...inputItems, ...outputItems, ...middleItems].flatMap(variableAliasValues));
+  const pythonParameterItems = pythonBindingParameterInputs(node)
+    .filter((item) => !variableAliasValues(item).some((alias) => interfaceAliases.has(alias)));
   [
     ['parameter', arrayOrEmpty(props.parameters)],
     ['parameter', arrayOrEmpty(props.modelParameters)],
     ['parameter', arrayOrEmpty(props.physicalParameters)],
     ['parameter', arrayOrEmpty(node.parameters)],
     ['parameter', arrayOrEmpty(node.physicalParameters)],
-    ['parameter', pythonBindingParameterInputs(node)],
-    ['input', arrayOrEmpty(props.inputs)],
-    ['input', pythonBindingInterfaceItems(node, 'inputs')],
-    ['output', arrayOrEmpty(props.outputs)],
-    ['output', pythonBindingInterfaceItems(node, 'outputs')],
-    ['middle', arrayOrEmpty(props.middleVars)],
-    ['middle', pythonBindingInterfaceItems(node, 'middleVars')]
+    ['parameter', pythonParameterItems],
+    ['input', inputItems.length ? inputItems : pythonBindingInterfaceItems(node, 'inputs')],
+    ['output', outputItems.length ? outputItems : pythonBindingInterfaceItems(node, 'outputs')],
+    ['middle', middleItems.length ? middleItems : pythonBindingInterfaceItems(node, 'middleVars')]
   ].forEach(([role, items]) => {
     items.forEach((item, index) => pushUniqueVariable(variables, seen, role, item, index));
   });
@@ -343,7 +392,8 @@ function createDeclaredComponentSlot(layer, item, variable, index) {
     variableRole,
     signalId: text(extra.signalId, variable?.signalId || ''),
     unit: text(extra.unit, variable?.unit || ''),
-    parameterKey: text(extra.parameterKey, variable?.parameterKey || '')
+    parameterKey: text(extra.parameterKey, variable?.parameterKey || ''),
+    ...vectorMetadataOf({ ...variable, ...extra })
   };
 }
 
@@ -504,6 +554,10 @@ function capabilitySlotsForTarget(target = {}, targetKind = 'node', capabilityMa
 
 export function normalizeModelNode(node = {}, { faultCapabilityMap = [] } = {}) {
   const safeNode = isPlainObject(node) ? clone(node) : {};
+  if (safeNode.type === 'signal_source') {
+    safeNode.props = normalizeSignalSourceProps(safeNode.props ?? {});
+  }
+
   if (hasComponentFaultDeclaration(safeNode)) {
     return {
       ...safeNode,

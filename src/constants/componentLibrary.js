@@ -22,5 +22,7 @@ export const instrumentComponents = [
 
 export const edgeComponents = [
   { type: 'normal', label: '普通连接线' },
-  { type: 'can', label: 'CAN 总线' }
+  { type: 'power', label: '电源线' }
 ];
+
+edgeComponents.splice(1, 1, { type: 'can', label: 'CAN 总线' });

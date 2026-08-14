@@ -1,0 +1,2693 @@
+{
+  "schemaVersion": 1,
+  "packageType": "flight-control-model",
+  "modelId": "cabinet-signal-source-model",
+  "modelName": "信号源与机柜仿真模型",
+  "description": "包含一个模拟信号源和三个按指定端口连接关系配置的机柜仿真组件。",
+  "systemFamily": "cabinet-signal-simulation",
+  "supportedFaultLibraries": [],
+  "capabilities": {},
+  "source": {},
+  "pythonModules": [
+    {
+      "moduleId": "cabinet01_module",
+      "fileName": "cabinet01.py",
+      "entryFunction": "process",
+      "category": "cabinet-simulation",
+      "sourcePackageId": null,
+      "sourcePackageName": null,
+      "source": "def process(socket02: float):\n    \"\"\"机柜1：将输入信号直接转发到输出端口。\"\"\"\n    socket03 = float(socket02)\n    return {\"outputs\": {\"socket03\": socket03}}\n",
+      "parsedInterface": {
+        "fileName": "cabinet01.py",
+        "moduleName": "cabinet01_module",
+        "description": "机柜1单通道信号转发",
+        "entryFunction": "process",
+        "inputs": [
+          {
+            "name": "socket02",
+            "displayName": "socket02",
+            "type": "float",
+            "default": null,
+            "comment": "输入端口"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "socket03",
+            "displayName": "socket03",
+            "type": "float",
+            "comment": "输出端口"
+          }
+        ],
+        "middleVars": []
+      }
+    },
+    {
+      "moduleId": "cabinet02_module",
+      "fileName": "cabinet02.py",
+      "entryFunction": "process",
+      "category": "cabinet-simulation",
+      "sourcePackageId": null,
+      "sourcePackageName": null,
+      "source": "def process(socket02: float, socket03: float):\n    \"\"\"机柜2：按 60%/40% 融合两路输入并从 socket04 输出。\"\"\"\n    socket04 = 0.6 * float(socket02) + 0.4 * float(socket03)\n    return {\"outputs\": {\"socket04\": socket04}}\n",
+      "parsedInterface": {
+        "fileName": "cabinet02.py",
+        "moduleName": "cabinet02_module",
+        "description": "机柜2双输入加权融合",
+        "entryFunction": "process",
+        "inputs": [
+          {
+            "name": "socket02",
+            "displayName": "socket02",
+            "type": "float",
+            "default": null,
+            "comment": "输入端口1"
+          },
+          {
+            "name": "socket03",
+            "displayName": "socket03",
+            "type": "float",
+            "default": null,
+            "comment": "输入端口2"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "socket04",
+            "displayName": "socket04",
+            "type": "float",
+            "comment": "融合输出端口"
+          }
+        ],
+        "middleVars": []
+      }
+    },
+    {
+      "moduleId": "cabinet03_module",
+      "fileName": "cabinet03.py",
+      "entryFunction": "process",
+      "category": "cabinet-simulation",
+      "sourcePackageId": null,
+      "sourcePackageName": null,
+      "source": "def process(socket03: float):\n    \"\"\"机柜3：对输入执行 2% 线路损耗后从 socket05 输出。\"\"\"\n    socket05 = 0.98 * float(socket03)\n    return {\"outputs\": {\"socket05\": socket05}}\n",
+      "parsedInterface": {
+        "fileName": "cabinet03.py",
+        "moduleName": "cabinet03_module",
+        "description": "机柜3单通道线路损耗模型",
+        "entryFunction": "process",
+        "inputs": [
+          {
+            "name": "socket03",
+            "displayName": "socket03",
+            "type": "float",
+            "default": null,
+            "comment": "输入端口"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "socket05",
+            "displayName": "socket05",
+            "type": "float",
+            "comment": "输出端口"
+          }
+        ],
+        "middleVars": []
+      }
+    }
+  ],
+  "faultLibrary": [
+    {
+      "id": "layered-node-6-cabinet01-electrical-input-socket02",
+      "name": "电气层注入 - 机柜1",
+      "layer": "electrical",
+      "layerKey": "electrical",
+      "modelClass": "连续信号故障",
+      "runtimeBehavior": "bias",
+      "defaultParameters": {
+        "bias": "1",
+        "start": "0",
+        "duration": ""
+      }
+    },
+    {
+      "id": "layered-node-7-cabinet02-electrical-input-socket03",
+      "name": "电气层注入 - 机柜2",
+      "layer": "electrical",
+      "layerKey": "electrical",
+      "modelClass": "连续信号故障",
+      "runtimeBehavior": "noise",
+      "defaultParameters": {
+        "std": 1,
+        "start": 0,
+        "duration": "",
+        "noise_type": "gaussian"
+      }
+    }
+  ],
+  "faultInstances": [
+    {
+      "instanceId": "layered-node-6-cabinet01-electrical-input-socket02",
+      "faultTypeId": "layered-node-6-cabinet01-electrical-input-socket02",
+      "targetKind": "node",
+      "targetId": "cabinet01",
+      "slotId": "electrical:input:socket02",
+      "slotName": "socket02",
+      "layer": "electrical",
+      "runtimeBehavior": "bias",
+      "injectionForm": "module-variable",
+      "bindingObject": "socket02",
+      "targetVariable": "socket02",
+      "targetField": "input.socket02",
+      "displayName": "电气层注入 - 机柜1",
+      "parameters": {
+        "bias": "1",
+        "start": "0",
+        "duration": ""
+      },
+      "active": true,
+      "visual": {
+        "expanded": false
+      }
+    },
+    {
+      "instanceId": "layered-node-7-cabinet02-electrical-input-socket03",
+      "faultTypeId": "layered-node-7-cabinet02-electrical-input-socket03",
+      "targetKind": "node",
+      "targetId": "cabinet02",
+      "slotId": "electrical:input:socket03",
+      "slotName": "socket03",
+      "layer": "electrical",
+      "runtimeBehavior": "noise",
+      "injectionForm": "module-variable",
+      "bindingObject": "socket03",
+      "targetVariable": "socket03",
+      "targetField": "input.socket03",
+      "displayName": "电气层注入 - 机柜2",
+      "parameters": {
+        "std": 1,
+        "start": 0,
+        "duration": "",
+        "noise_type": "gaussian"
+      },
+      "active": false,
+      "visual": {
+        "expanded": false
+      },
+      "enabled": false
+    }
+  ],
+  "workbenchSnapshot": {
+    "version": 1,
+    "modelNodes": [
+      {
+        "id": "cabinet_module1",
+        "type": "signal_source",
+        "x": 100,
+        "y": 250,
+        "w": 164,
+        "h": 84,
+        "props": {
+          "signalName": "机柜输入信号",
+          "signalId": "cabinet_module1.signal",
+          "unit": "V",
+          "description": "",
+          "outputPortName": "输出",
+          "name": "信号源",
+          "signalDomain": "analog",
+          "analogKind": "generic",
+          "waveType": "正弦",
+          "amplitude": "1.0",
+          "frequency": "1.0",
+          "phase": "0",
+          "offset": "0",
+          "sampleRate": "",
+          "minValue": "",
+          "maxValue": "",
+          "outputFormat": "标量"
+        },
+        "pythonBinding": null,
+        "faultSlots": []
+      },
+      {
+        "id": "cabinet01",
+        "type": "simulation_block",
+        "x": 430,
+        "y": 83,
+        "w": 196,
+        "h": 116,
+        "props": {
+          "name": "机柜1",
+          "moduleType": "机柜仿真",
+          "inputs": [
+            {
+              "id": "socket02",
+              "portId": "socket02",
+              "name": "socket02",
+              "displayName": "socket02",
+              "varName": "socket02",
+              "type": "float",
+              "unit": "V",
+              "direction": "input"
+            }
+          ],
+          "outputs": [
+            {
+              "id": "socket03",
+              "portId": "socket03",
+              "name": "socket03",
+              "displayName": "socket03",
+              "varName": "socket03",
+              "type": "float",
+              "unit": "V",
+              "direction": "output"
+            }
+          ],
+          "middleVars": [],
+          "parameters": [],
+          "ffunctionNote": "socket03 = socket02"
+        },
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "cabinet01_module",
+          "fileName": "cabinet01.py",
+          "moduleName": "cabinet01_module",
+          "moduleCategory": "cabinet-simulation",
+          "sourcePackageId": null,
+          "sourcePackageName": null,
+          "description": "机柜1单通道信号转发",
+          "entryFunction": "process",
+          "parsedInterface": {
+            "fileName": "cabinet01.py",
+            "moduleName": "cabinet01_module",
+            "description": "机柜1单通道信号转发",
+            "entryFunction": "process",
+            "inputs": [
+              {
+                "name": "socket02",
+                "displayName": "socket02",
+                "type": "float",
+                "default": null,
+                "comment": "输入端口"
+              }
+            ],
+            "outputs": [
+              {
+                "name": "socket03",
+                "displayName": "socket03",
+                "type": "float",
+                "comment": "输出端口"
+              }
+            ],
+            "middleVars": []
+          },
+          "rawSource": "def process(socket02: float):\n    \"\"\"机柜1：将输入信号直接转发到输出端口。\"\"\"\n    socket03 = float(socket02)\n    return {\"outputs\": {\"socket03\": socket03}}\n",
+          "executionMode": "mock",
+          "executionConfig": {
+            "timeoutMs": 3000
+          },
+          "portMapping": {
+            "inputs": [
+              {
+                "portId": "socket02",
+                "signalId": "cabinet01.socket02",
+                "varName": "socket02",
+                "displayName": "socket02",
+                "type": "float",
+                "default": null,
+                "comment": "输入端口",
+                "connected": false
+              }
+            ],
+            "outputs": [
+              {
+                "portId": "socket03",
+                "signalId": "cabinet01.socket03",
+                "varName": "socket03",
+                "displayName": "socket03",
+                "type": "float",
+                "comment": "输出端口"
+              }
+            ],
+            "middleVars": []
+          }
+        },
+        "simulationInterfaceDefinition": {
+          "name": "机柜1",
+          "ports": {
+            "inputs": [
+              {
+                "id": "socket02",
+                "portId": "socket02",
+                "name": "socket02",
+                "displayName": "socket02",
+                "varName": "socket02",
+                "type": "float",
+                "unit": "V",
+                "direction": "input"
+              }
+            ],
+            "outputs": [
+              {
+                "id": "socket03",
+                "portId": "socket03",
+                "name": "socket03",
+                "displayName": "socket03",
+                "varName": "socket03",
+                "type": "float",
+                "unit": "V",
+                "direction": "output"
+              }
+            ],
+            "middleVars": []
+          },
+          "pythonPortMapping": {
+            "inputs": [
+              {
+                "portId": "socket02",
+                "signalId": "cabinet01.socket02",
+                "varName": "socket02",
+                "displayName": "socket02",
+                "type": "float",
+                "default": null,
+                "comment": "输入端口",
+                "connected": false
+              }
+            ],
+            "outputs": [
+              {
+                "portId": "socket03",
+                "signalId": "cabinet01.socket03",
+                "varName": "socket03",
+                "displayName": "socket03",
+                "type": "float",
+                "comment": "输出端口"
+              }
+            ],
+            "middleVars": []
+          }
+        },
+        "faultSlots": [
+          {
+            "slotId": "electrical:input:socket02",
+            "slotName": "socket02",
+            "layer": "electrical",
+            "targetField": "input.socket02",
+            "allowedModels": [
+              "bias",
+              "noise",
+              "freeze",
+              "intermittent"
+            ],
+            "parameterKey": "socket02",
+            "unit": "V"
+          },
+          {
+            "slotId": "electrical:output:socket03",
+            "slotName": "socket03",
+            "layer": "electrical",
+            "targetField": "output.socket03",
+            "allowedModels": [
+              "bias",
+              "noise",
+              "freeze",
+              "intermittent"
+            ],
+            "parameterKey": "socket03",
+            "unit": "V"
+          }
+        ],
+        "injectedFault": {
+          "instanceId": "layered-node-6-cabinet01-electrical-input-socket02",
+          "modelId": "layered-node-6-cabinet01-electrical-input-socket02",
+          "faultTypeId": "layered-node-6-cabinet01-electrical-input-socket02",
+          "name": "电气层注入 - 机柜1",
+          "layer": "electrical",
+          "layerKey": "electrical",
+          "modelClass": "连续信号故障",
+          "runtimeBehavior": "bias",
+          "slotId": "electrical:input:socket02",
+          "slotName": "socket02",
+          "bindingObject": "socket02",
+          "targetVariable": "socket02",
+          "targetField": "input.socket02",
+          "targetKind": "node",
+          "targetId": "cabinet01",
+          "injectionForm": "module-variable",
+          "parameters": {
+            "bias": "1",
+            "start": "0",
+            "duration": ""
+          }
+        },
+        "faultBindings": [
+          {
+            "bindingId": "layered-node-6-cabinet01-electrical-input-socket02::cabinet01",
+            "faultModelId": "layered-node-6-cabinet01-electrical-input-socket02",
+            "name": "电气层注入 - 机柜1",
+            "layer": "electrical",
+            "layerKey": "electrical",
+            "runtimeBehavior": "bias",
+            "parameters": {
+              "bias": "1",
+              "start": "0",
+              "duration": ""
+            },
+            "targetKind": "node",
+            "targetId": "cabinet01",
+            "slotId": "electrical:input:socket02",
+            "slotName": "socket02",
+            "bindingObject": "socket02",
+            "targetVariable": "socket02",
+            "targetField": "input.socket02",
+            "injectionForm": "module-variable",
+            "visualRole": "fault-source",
+            "propagationMode": "signalTransform",
+            "canPropagate": true,
+            "active": true,
+            "injectedFault": {
+              "instanceId": "layered-node-6-cabinet01-electrical-input-socket02",
+              "modelId": "layered-node-6-cabinet01-electrical-input-socket02",
+              "faultTypeId": "layered-node-6-cabinet01-electrical-input-socket02",
+              "name": "电气层注入 - 机柜1",
+              "layer": "electrical",
+              "layerKey": "electrical",
+              "modelClass": "连续信号故障",
+              "runtimeBehavior": "bias",
+              "slotId": "electrical:input:socket02",
+              "slotName": "socket02",
+              "bindingObject": "socket02",
+              "targetVariable": "socket02",
+              "targetField": "input.socket02",
+              "targetKind": "node",
+              "targetId": "cabinet01",
+              "injectionForm": "module-variable",
+              "parameters": {
+                "bias": "1",
+                "start": "0",
+                "duration": ""
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "cabinet02",
+        "type": "simulation_block",
+        "x": 702,
+        "y": 196,
+        "w": 196,
+        "h": 116,
+        "props": {
+          "name": "机柜2",
+          "moduleType": "机柜仿真",
+          "inputs": [
+            {
+              "id": "socket02",
+              "portId": "socket02",
+              "name": "socket02",
+              "displayName": "socket02",
+              "varName": "socket02",
+              "type": "float",
+              "unit": "V",
+              "direction": "input"
+            },
+            {
+              "id": "socket03",
+              "portId": "socket03",
+              "name": "socket03",
+              "displayName": "socket03",
+              "varName": "socket03",
+              "type": "float",
+              "unit": "V",
+              "direction": "input"
+            }
+          ],
+          "outputs": [
+            {
+              "id": "socket04",
+              "portId": "socket04",
+              "name": "socket04",
+              "displayName": "socket04",
+              "varName": "socket04",
+              "type": "float",
+              "unit": "V",
+              "direction": "output"
+            }
+          ],
+          "middleVars": [],
+          "parameters": [],
+          "ffunctionNote": "socket04 = 0.6 × socket02 + 0.4 × socket03"
+        },
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "cabinet02_module",
+          "fileName": "cabinet02.py",
+          "moduleName": "cabinet02_module",
+          "moduleCategory": "cabinet-simulation",
+          "sourcePackageId": null,
+          "sourcePackageName": null,
+          "description": "机柜2双输入加权融合",
+          "entryFunction": "process",
+          "parsedInterface": {
+            "fileName": "cabinet02.py",
+            "moduleName": "cabinet02_module",
+            "description": "机柜2双输入加权融合",
+            "entryFunction": "process",
+            "inputs": [
+              {
+                "name": "socket02",
+                "displayName": "socket02",
+                "type": "float",
+                "default": null,
+                "comment": "输入端口1"
+              },
+              {
+                "name": "socket03",
+                "displayName": "socket03",
+                "type": "float",
+                "default": null,
+                "comment": "输入端口2"
+              }
+            ],
+            "outputs": [
+              {
+                "name": "socket04",
+                "displayName": "socket04",
+                "type": "float",
+                "comment": "融合输出端口"
+              }
+            ],
+            "middleVars": []
+          },
+          "rawSource": "def process(socket02: float, socket03: float):\n    \"\"\"机柜2：按 60%/40% 融合两路输入并从 socket04 输出。\"\"\"\n    socket04 = 0.6 * float(socket02) + 0.4 * float(socket03)\n    return {\"outputs\": {\"socket04\": socket04}}\n",
+          "executionMode": "mock",
+          "executionConfig": {
+            "timeoutMs": 3000
+          },
+          "portMapping": {
+            "inputs": [
+              {
+                "portId": "socket02",
+                "signalId": "cabinet02.socket02",
+                "varName": "socket02",
+                "displayName": "socket02",
+                "type": "float",
+                "default": null,
+                "comment": "输入端口1",
+                "connected": false
+              },
+              {
+                "portId": "socket03",
+                "signalId": "cabinet02.socket03",
+                "varName": "socket03",
+                "displayName": "socket03",
+                "type": "float",
+                "default": null,
+                "comment": "输入端口2",
+                "connected": false
+              }
+            ],
+            "outputs": [
+              {
+                "portId": "socket04",
+                "signalId": "cabinet02.socket04",
+                "varName": "socket04",
+                "displayName": "socket04",
+                "type": "float",
+                "comment": "融合输出端口"
+              }
+            ],
+            "middleVars": []
+          }
+        },
+        "simulationInterfaceDefinition": {
+          "name": "机柜2",
+          "ports": {
+            "inputs": [
+              {
+                "id": "socket02",
+                "portId": "socket02",
+                "name": "socket02",
+                "displayName": "socket02",
+                "varName": "socket02",
+                "type": "float",
+                "unit": "V",
+                "direction": "input"
+              },
+              {
+                "id": "socket03",
+                "portId": "socket03",
+                "name": "socket03",
+                "displayName": "socket03",
+                "varName": "socket03",
+                "type": "float",
+                "unit": "V",
+                "direction": "input"
+              }
+            ],
+            "outputs": [
+              {
+                "id": "socket04",
+                "portId": "socket04",
+                "name": "socket04",
+                "displayName": "socket04",
+                "varName": "socket04",
+                "type": "float",
+                "unit": "V",
+                "direction": "output"
+              }
+            ],
+            "middleVars": []
+          },
+          "pythonPortMapping": {
+            "inputs": [
+              {
+                "portId": "socket02",
+                "signalId": "cabinet02.socket02",
+                "varName": "socket02",
+                "displayName": "socket02",
+                "type": "float",
+                "default": null,
+                "comment": "输入端口1",
+                "connected": false
+              },
+              {
+                "portId": "socket03",
+                "signalId": "cabinet02.socket03",
+                "varName": "socket03",
+                "displayName": "socket03",
+                "type": "float",
+                "default": null,
+                "comment": "输入端口2",
+                "connected": false
+              }
+            ],
+            "outputs": [
+              {
+                "portId": "socket04",
+                "signalId": "cabinet02.socket04",
+                "varName": "socket04",
+                "displayName": "socket04",
+                "type": "float",
+                "comment": "融合输出端口"
+              }
+            ],
+            "middleVars": []
+          }
+        },
+        "faultSlots": [
+          {
+            "slotId": "electrical:input:socket02",
+            "slotName": "socket02",
+            "layer": "electrical",
+            "targetField": "input.socket02",
+            "allowedModels": [
+              "bias",
+              "noise",
+              "freeze",
+              "intermittent"
+            ],
+            "parameterKey": "socket02",
+            "unit": "V"
+          },
+          {
+            "slotId": "electrical:input:socket03",
+            "slotName": "socket03",
+            "layer": "electrical",
+            "targetField": "input.socket03",
+            "allowedModels": [
+              "bias",
+              "noise",
+              "freeze",
+              "intermittent"
+            ],
+            "parameterKey": "socket03",
+            "unit": "V"
+          },
+          {
+            "slotId": "electrical:output:socket04",
+            "slotName": "socket04",
+            "layer": "electrical",
+            "targetField": "output.socket04",
+            "allowedModels": [
+              "bias",
+              "noise",
+              "freeze",
+              "intermittent"
+            ],
+            "parameterKey": "socket04",
+            "unit": "V"
+          }
+        ],
+        "injectedFault": {
+          "instanceId": "layered-node-7-cabinet02-electrical-input-socket03",
+          "modelId": "layered-node-7-cabinet02-electrical-input-socket03",
+          "faultTypeId": "layered-node-7-cabinet02-electrical-input-socket03",
+          "name": "电气层注入 - 机柜2",
+          "layer": "electrical",
+          "layerKey": "electrical",
+          "modelClass": "连续信号故障",
+          "runtimeBehavior": "noise",
+          "slotId": "electrical:input:socket03",
+          "slotName": "socket03",
+          "bindingObject": "socket03",
+          "targetVariable": "socket03",
+          "targetField": "input.socket03",
+          "targetKind": "node",
+          "targetId": "cabinet02",
+          "injectionForm": "module-variable",
+          "parameters": {
+            "std": 1,
+            "start": 0,
+            "duration": "",
+            "noise_type": "gaussian"
+          },
+          "active": false,
+          "enabled": false
+        },
+        "faultBindings": [
+          {
+            "bindingId": "layered-node-7-cabinet02-electrical-input-socket03::cabinet02",
+            "faultModelId": "layered-node-7-cabinet02-electrical-input-socket03",
+            "name": "电气层注入 - 机柜2",
+            "layer": "electrical",
+            "layerKey": "electrical",
+            "runtimeBehavior": "noise",
+            "parameters": {
+              "std": 1,
+              "start": 0,
+              "duration": "",
+              "noise_type": "gaussian"
+            },
+            "targetKind": "node",
+            "targetId": "cabinet02",
+            "slotId": "electrical:input:socket03",
+            "slotName": "socket03",
+            "bindingObject": "socket03",
+            "targetVariable": "socket03",
+            "targetField": "input.socket03",
+            "injectionForm": "module-variable",
+            "visualRole": "fault-source",
+            "propagationMode": "signalTransform",
+            "canPropagate": true,
+            "active": false,
+            "injectedFault": {
+              "instanceId": "layered-node-7-cabinet02-electrical-input-socket03",
+              "modelId": "layered-node-7-cabinet02-electrical-input-socket03",
+              "faultTypeId": "layered-node-7-cabinet02-electrical-input-socket03",
+              "name": "电气层注入 - 机柜2",
+              "layer": "electrical",
+              "layerKey": "electrical",
+              "modelClass": "连续信号故障",
+              "runtimeBehavior": "noise",
+              "slotId": "electrical:input:socket03",
+              "slotName": "socket03",
+              "bindingObject": "socket03",
+              "targetVariable": "socket03",
+              "targetField": "input.socket03",
+              "targetKind": "node",
+              "targetId": "cabinet02",
+              "injectionForm": "module-variable",
+              "parameters": {
+                "std": 1,
+                "start": 0,
+                "duration": "",
+                "noise_type": "gaussian"
+              },
+              "active": false,
+              "enabled": false
+            }
+          }
+        ]
+      },
+      {
+        "id": "cabinet03",
+        "type": "simulation_block",
+        "x": 986,
+        "y": 165,
+        "w": 196,
+        "h": 116,
+        "props": {
+          "name": "机柜3",
+          "moduleType": "机柜仿真",
+          "inputs": [
+            {
+              "id": "socket03",
+              "portId": "socket03",
+              "name": "socket03",
+              "displayName": "socket03",
+              "varName": "socket03",
+              "type": "float",
+              "unit": "V",
+              "direction": "input"
+            }
+          ],
+          "outputs": [
+            {
+              "id": "socket05",
+              "portId": "socket05",
+              "name": "socket05",
+              "displayName": "socket05",
+              "varName": "socket05",
+              "type": "float",
+              "unit": "V",
+              "direction": "output"
+            }
+          ],
+          "middleVars": [],
+          "parameters": [],
+          "ffunctionNote": "socket05 = 0.98 × socket03"
+        },
+        "pythonBinding": {
+          "bound": true,
+          "moduleId": "cabinet03_module",
+          "fileName": "cabinet03.py",
+          "moduleName": "cabinet03_module",
+          "moduleCategory": "cabinet-simulation",
+          "sourcePackageId": null,
+          "sourcePackageName": null,
+          "description": "机柜3单通道线路损耗模型",
+          "entryFunction": "process",
+          "parsedInterface": {
+            "fileName": "cabinet03.py",
+            "moduleName": "cabinet03_module",
+            "description": "机柜3单通道线路损耗模型",
+            "entryFunction": "process",
+            "inputs": [
+              {
+                "name": "socket03",
+                "displayName": "socket03",
+                "type": "float",
+                "default": null,
+                "comment": "输入端口"
+              }
+            ],
+            "outputs": [
+              {
+                "name": "socket05",
+                "displayName": "socket05",
+                "type": "float",
+                "comment": "输出端口"
+              }
+            ],
+            "middleVars": []
+          },
+          "rawSource": "def process(socket03: float):\n    \"\"\"机柜3：对输入执行 2% 线路损耗后从 socket05 输出。\"\"\"\n    socket05 = 0.98 * float(socket03)\n    return {\"outputs\": {\"socket05\": socket05}}\n",
+          "executionMode": "mock",
+          "executionConfig": {
+            "timeoutMs": 3000
+          },
+          "portMapping": {
+            "inputs": [
+              {
+                "portId": "socket03",
+                "signalId": "cabinet03.socket03",
+                "varName": "socket03",
+                "displayName": "socket03",
+                "type": "float",
+                "default": null,
+                "comment": "输入端口",
+                "connected": false
+              }
+            ],
+            "outputs": [
+              {
+                "portId": "socket05",
+                "signalId": "cabinet03.socket05",
+                "varName": "socket05",
+                "displayName": "socket05",
+                "type": "float",
+                "comment": "输出端口"
+              }
+            ],
+            "middleVars": []
+          }
+        },
+        "simulationInterfaceDefinition": {
+          "name": "机柜3",
+          "ports": {
+            "inputs": [
+              {
+                "id": "socket03",
+                "portId": "socket03",
+                "name": "socket03",
+                "displayName": "socket03",
+                "varName": "socket03",
+                "type": "float",
+                "unit": "V",
+                "direction": "input"
+              }
+            ],
+            "outputs": [
+              {
+                "id": "socket05",
+                "portId": "socket05",
+                "name": "socket05",
+                "displayName": "socket05",
+                "varName": "socket05",
+                "type": "float",
+                "unit": "V",
+                "direction": "output"
+              }
+            ],
+            "middleVars": []
+          },
+          "pythonPortMapping": {
+            "inputs": [
+              {
+                "portId": "socket03",
+                "signalId": "cabinet03.socket03",
+                "varName": "socket03",
+                "displayName": "socket03",
+                "type": "float",
+                "default": null,
+                "comment": "输入端口",
+                "connected": false
+              }
+            ],
+            "outputs": [
+              {
+                "portId": "socket05",
+                "signalId": "cabinet03.socket05",
+                "varName": "socket05",
+                "displayName": "socket05",
+                "type": "float",
+                "comment": "输出端口"
+              }
+            ],
+            "middleVars": []
+          }
+        },
+        "faultSlots": [
+          {
+            "slotId": "electrical:input:socket03",
+            "slotName": "socket03",
+            "layer": "electrical",
+            "targetField": "input.socket03",
+            "allowedModels": [
+              "bias",
+              "noise",
+              "freeze",
+              "intermittent"
+            ],
+            "parameterKey": "socket03",
+            "unit": "V"
+          },
+          {
+            "slotId": "electrical:output:socket05",
+            "slotName": "socket05",
+            "layer": "electrical",
+            "targetField": "output.socket05",
+            "allowedModels": [
+              "bias",
+              "noise",
+              "freeze",
+              "intermittent"
+            ],
+            "parameterKey": "socket05",
+            "unit": "V"
+          }
+        ]
+      },
+      {
+        "id": "node-8",
+        "type": "instrument_scope",
+        "x": 1327,
+        "y": 189,
+        "w": 150,
+        "h": 74,
+        "props": {
+          "name": "示波器 1",
+          "instrumentType": "波形监测",
+          "sampleRate": "64kHz",
+          "signal": "流程块输出",
+          "inputPortNameCh1": "CH1",
+          "inputPortNameCh2": "CH2"
+        },
+        "pythonBinding": null,
+        "faultSlots": []
+      }
+    ],
+    "modelEdges": [
+      {
+        "id": "edge-1",
+        "lineType": "normal",
+        "sourceNodeId": "cabinet_module1",
+        "targetNodeId": "cabinet01",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "sourcePort": {
+          "index": 0,
+          "varName": null,
+          "displayName": "输出",
+          "type": "any"
+        },
+        "targetPort": {
+          "index": 0,
+          "varName": "socket02",
+          "displayName": "输入端口",
+          "type": "float"
+        },
+        "sourcePortMeta": {
+          "kind": "output",
+          "varName": null,
+          "displayName": "输出",
+          "type": "any",
+          "default": null
+        },
+        "targetPortMeta": {
+          "kind": "input",
+          "varName": "socket02",
+          "displayName": "输入端口",
+          "type": "float",
+          "default": null
+        },
+        "faultSlots": [
+          {
+            "slotId": "electrical:signal_value",
+            "slotName": "信号值",
+            "layer": "electrical",
+            "targetField": "signal.value",
+            "allowedModels": [
+              "bias",
+              "noise",
+              "freeze",
+              "intermittent"
+            ],
+            "signalId": "",
+            "lineType": "normal"
+          }
+        ]
+      },
+      {
+        "id": "edge-2",
+        "lineType": "normal",
+        "sourceNodeId": "cabinet01",
+        "targetNodeId": "cabinet02",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "sourcePort": {
+          "index": 0,
+          "varName": "socket03",
+          "displayName": "输出端口",
+          "type": "float"
+        },
+        "targetPort": {
+          "index": 0,
+          "varName": "socket02",
+          "displayName": "输入端口1",
+          "type": "float"
+        },
+        "sourcePortMeta": {
+          "kind": "output",
+          "varName": "socket03",
+          "displayName": "输出端口",
+          "type": "float",
+          "default": null
+        },
+        "targetPortMeta": {
+          "kind": "input",
+          "varName": "socket02",
+          "displayName": "输入端口1",
+          "type": "float",
+          "default": null
+        },
+        "faultSlots": [
+          {
+            "slotId": "electrical:signal_value",
+            "slotName": "信号值",
+            "layer": "electrical",
+            "targetField": "signal.value",
+            "allowedModels": [
+              "bias",
+              "noise",
+              "freeze",
+              "intermittent"
+            ],
+            "signalId": "",
+            "lineType": "normal"
+          }
+        ]
+      },
+      {
+        "id": "edge-3",
+        "lineType": "normal",
+        "sourceNodeId": "cabinet_module1",
+        "targetNodeId": "cabinet02",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 1,
+        "sourcePort": {
+          "index": 0,
+          "varName": null,
+          "displayName": "输出",
+          "type": "any"
+        },
+        "targetPort": {
+          "index": 1,
+          "varName": "socket03",
+          "displayName": "输入端口2",
+          "type": "float"
+        },
+        "sourcePortMeta": {
+          "kind": "output",
+          "varName": null,
+          "displayName": "输出",
+          "type": "any",
+          "default": null
+        },
+        "targetPortMeta": {
+          "kind": "input",
+          "varName": "socket03",
+          "displayName": "输入端口2",
+          "type": "float",
+          "default": null
+        },
+        "faultSlots": [
+          {
+            "slotId": "electrical:signal_value",
+            "slotName": "信号值",
+            "layer": "electrical",
+            "targetField": "signal.value",
+            "allowedModels": [
+              "bias",
+              "noise",
+              "freeze",
+              "intermittent"
+            ],
+            "signalId": "",
+            "lineType": "normal"
+          }
+        ]
+      },
+      {
+        "id": "edge-4",
+        "lineType": "normal",
+        "sourceNodeId": "cabinet02",
+        "targetNodeId": "cabinet03",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "sourcePort": {
+          "index": 0,
+          "varName": "socket04",
+          "displayName": "融合输出端口",
+          "type": "float"
+        },
+        "targetPort": {
+          "index": 0,
+          "varName": "socket03",
+          "displayName": "输入端口",
+          "type": "float"
+        },
+        "sourcePortMeta": {
+          "kind": "output",
+          "varName": "socket04",
+          "displayName": "融合输出端口",
+          "type": "float",
+          "default": null
+        },
+        "targetPortMeta": {
+          "kind": "input",
+          "varName": "socket03",
+          "displayName": "输入端口",
+          "type": "float",
+          "default": null
+        },
+        "faultSlots": [
+          {
+            "slotId": "electrical:signal_value",
+            "slotName": "信号值",
+            "layer": "electrical",
+            "targetField": "signal.value",
+            "allowedModels": [
+              "bias",
+              "noise",
+              "freeze",
+              "intermittent"
+            ],
+            "signalId": "",
+            "lineType": "normal"
+          }
+        ]
+      },
+      {
+        "id": "edge-6",
+        "lineType": "normal",
+        "sourceNodeId": "cabinet03",
+        "targetNodeId": "node-8",
+        "sourcePortIndex": 0,
+        "targetPortIndex": 0,
+        "sourcePort": {
+          "index": 0,
+          "varName": "socket05",
+          "displayName": "输出端口",
+          "type": "float"
+        },
+        "targetPort": {
+          "index": 0,
+          "varName": null,
+          "displayName": "CH1",
+          "type": "any"
+        },
+        "sourcePortMeta": {
+          "kind": "output",
+          "varName": "socket05",
+          "displayName": "输出端口",
+          "type": "float",
+          "default": null
+        },
+        "targetPortMeta": {
+          "kind": "input",
+          "varName": null,
+          "displayName": "CH1",
+          "type": "any",
+          "default": null
+        },
+        "faultSlots": [
+          {
+            "slotId": "electrical:signal_value",
+            "slotName": "信号值",
+            "layer": "electrical",
+            "targetField": "signal.value",
+            "allowedModels": [
+              "bias",
+              "noise",
+              "freeze",
+              "intermittent"
+            ],
+            "signalId": "",
+            "lineType": "normal"
+          }
+        ]
+      }
+    ],
+    "nodeSeq": 8,
+    "edgeSeq": 6,
+    "rootCanvasId": "canvas-root",
+    "activeCanvasId": "canvas-root",
+    "canvasTrail": [
+      "canvas-root"
+    ],
+    "canvases": {
+      "canvas-root": {
+        "id": "canvas-root",
+        "name": "顶层",
+        "parentSubsystemNodeId": null,
+        "viewport": {
+          "scale": 1,
+          "offsetX": -774.2116106818703,
+          "offsetY": -50.8706234202665
+        },
+        "nodes": [
+          {
+            "id": "cabinet_module1",
+            "type": "signal_source",
+            "x": 100,
+            "y": 250,
+            "w": 164,
+            "h": 84,
+            "props": {
+              "signalName": "机柜输入信号",
+              "signalId": "cabinet_module1.signal",
+              "unit": "V",
+              "description": "",
+              "outputPortName": "输出",
+              "name": "信号源",
+              "signalDomain": "analog",
+              "analogKind": "generic",
+              "waveType": "正弦",
+              "amplitude": "1.0",
+              "frequency": "1.0",
+              "phase": "0",
+              "offset": "0",
+              "sampleRate": "",
+              "minValue": "",
+              "maxValue": "",
+              "outputFormat": "标量"
+            },
+            "pythonBinding": null,
+            "faultSlots": []
+          },
+          {
+            "id": "cabinet01",
+            "type": "simulation_block",
+            "x": 430,
+            "y": 83,
+            "w": 196,
+            "h": 116,
+            "props": {
+              "name": "机柜1",
+              "moduleType": "机柜仿真",
+              "inputs": [
+                {
+                  "id": "socket02",
+                  "portId": "socket02",
+                  "name": "socket02",
+                  "displayName": "socket02",
+                  "varName": "socket02",
+                  "type": "float",
+                  "unit": "V",
+                  "direction": "input"
+                }
+              ],
+              "outputs": [
+                {
+                  "id": "socket03",
+                  "portId": "socket03",
+                  "name": "socket03",
+                  "displayName": "socket03",
+                  "varName": "socket03",
+                  "type": "float",
+                  "unit": "V",
+                  "direction": "output"
+                }
+              ],
+              "middleVars": [],
+              "parameters": [],
+              "ffunctionNote": "socket03 = socket02"
+            },
+            "pythonBinding": {
+              "bound": true,
+              "moduleId": "cabinet01_module",
+              "fileName": "cabinet01.py",
+              "moduleName": "cabinet01_module",
+              "moduleCategory": "cabinet-simulation",
+              "sourcePackageId": null,
+              "sourcePackageName": null,
+              "description": "机柜1单通道信号转发",
+              "entryFunction": "process",
+              "parsedInterface": {
+                "fileName": "cabinet01.py",
+                "moduleName": "cabinet01_module",
+                "description": "机柜1单通道信号转发",
+                "entryFunction": "process",
+                "inputs": [
+                  {
+                    "name": "socket02",
+                    "displayName": "socket02",
+                    "type": "float",
+                    "default": null,
+                    "comment": "输入端口"
+                  }
+                ],
+                "outputs": [
+                  {
+                    "name": "socket03",
+                    "displayName": "socket03",
+                    "type": "float",
+                    "comment": "输出端口"
+                  }
+                ],
+                "middleVars": []
+              },
+              "rawSource": "def process(socket02: float):\n    \"\"\"机柜1：将输入信号直接转发到输出端口。\"\"\"\n    socket03 = float(socket02)\n    return {\"outputs\": {\"socket03\": socket03}}\n",
+              "executionMode": "mock",
+              "executionConfig": {
+                "timeoutMs": 3000
+              },
+              "portMapping": {
+                "inputs": [
+                  {
+                    "portId": "socket02",
+                    "signalId": "cabinet01.socket02",
+                    "varName": "socket02",
+                    "displayName": "socket02",
+                    "type": "float",
+                    "default": null,
+                    "comment": "输入端口",
+                    "connected": false
+                  }
+                ],
+                "outputs": [
+                  {
+                    "portId": "socket03",
+                    "signalId": "cabinet01.socket03",
+                    "varName": "socket03",
+                    "displayName": "socket03",
+                    "type": "float",
+                    "comment": "输出端口"
+                  }
+                ],
+                "middleVars": []
+              }
+            },
+            "simulationInterfaceDefinition": {
+              "name": "机柜1",
+              "ports": {
+                "inputs": [
+                  {
+                    "id": "socket02",
+                    "portId": "socket02",
+                    "name": "socket02",
+                    "displayName": "socket02",
+                    "varName": "socket02",
+                    "type": "float",
+                    "unit": "V",
+                    "direction": "input"
+                  }
+                ],
+                "outputs": [
+                  {
+                    "id": "socket03",
+                    "portId": "socket03",
+                    "name": "socket03",
+                    "displayName": "socket03",
+                    "varName": "socket03",
+                    "type": "float",
+                    "unit": "V",
+                    "direction": "output"
+                  }
+                ],
+                "middleVars": []
+              },
+              "pythonPortMapping": {
+                "inputs": [
+                  {
+                    "portId": "socket02",
+                    "signalId": "cabinet01.socket02",
+                    "varName": "socket02",
+                    "displayName": "socket02",
+                    "type": "float",
+                    "default": null,
+                    "comment": "输入端口",
+                    "connected": false
+                  }
+                ],
+                "outputs": [
+                  {
+                    "portId": "socket03",
+                    "signalId": "cabinet01.socket03",
+                    "varName": "socket03",
+                    "displayName": "socket03",
+                    "type": "float",
+                    "comment": "输出端口"
+                  }
+                ],
+                "middleVars": []
+              }
+            },
+            "faultSlots": [
+              {
+                "slotId": "electrical:input:socket02",
+                "slotName": "socket02",
+                "layer": "electrical",
+                "targetField": "input.socket02",
+                "allowedModels": [
+                  "bias",
+                  "noise",
+                  "freeze",
+                  "intermittent"
+                ],
+                "parameterKey": "socket02",
+                "unit": "V"
+              },
+              {
+                "slotId": "electrical:output:socket03",
+                "slotName": "socket03",
+                "layer": "electrical",
+                "targetField": "output.socket03",
+                "allowedModels": [
+                  "bias",
+                  "noise",
+                  "freeze",
+                  "intermittent"
+                ],
+                "parameterKey": "socket03",
+                "unit": "V"
+              }
+            ],
+            "injectedFault": {
+              "instanceId": "layered-node-6-cabinet01-electrical-input-socket02",
+              "modelId": "layered-node-6-cabinet01-electrical-input-socket02",
+              "faultTypeId": "layered-node-6-cabinet01-electrical-input-socket02",
+              "name": "电气层注入 - 机柜1",
+              "layer": "electrical",
+              "layerKey": "electrical",
+              "modelClass": "连续信号故障",
+              "runtimeBehavior": "bias",
+              "slotId": "electrical:input:socket02",
+              "slotName": "socket02",
+              "bindingObject": "socket02",
+              "targetVariable": "socket02",
+              "targetField": "input.socket02",
+              "targetKind": "node",
+              "targetId": "cabinet01",
+              "injectionForm": "module-variable",
+              "parameters": {
+                "bias": "1",
+                "start": "0",
+                "duration": ""
+              }
+            },
+            "faultBindings": [
+              {
+                "bindingId": "layered-node-6-cabinet01-electrical-input-socket02::cabinet01",
+                "faultModelId": "layered-node-6-cabinet01-electrical-input-socket02",
+                "name": "电气层注入 - 机柜1",
+                "layer": "electrical",
+                "layerKey": "electrical",
+                "runtimeBehavior": "bias",
+                "parameters": {
+                  "bias": "1",
+                  "start": "0",
+                  "duration": ""
+                },
+                "targetKind": "node",
+                "targetId": "cabinet01",
+                "slotId": "electrical:input:socket02",
+                "slotName": "socket02",
+                "bindingObject": "socket02",
+                "targetVariable": "socket02",
+                "targetField": "input.socket02",
+                "injectionForm": "module-variable",
+                "visualRole": "fault-source",
+                "propagationMode": "signalTransform",
+                "canPropagate": true,
+                "active": true,
+                "injectedFault": {
+                  "instanceId": "layered-node-6-cabinet01-electrical-input-socket02",
+                  "modelId": "layered-node-6-cabinet01-electrical-input-socket02",
+                  "faultTypeId": "layered-node-6-cabinet01-electrical-input-socket02",
+                  "name": "电气层注入 - 机柜1",
+                  "layer": "electrical",
+                  "layerKey": "electrical",
+                  "modelClass": "连续信号故障",
+                  "runtimeBehavior": "bias",
+                  "slotId": "electrical:input:socket02",
+                  "slotName": "socket02",
+                  "bindingObject": "socket02",
+                  "targetVariable": "socket02",
+                  "targetField": "input.socket02",
+                  "targetKind": "node",
+                  "targetId": "cabinet01",
+                  "injectionForm": "module-variable",
+                  "parameters": {
+                    "bias": "1",
+                    "start": "0",
+                    "duration": ""
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": "cabinet02",
+            "type": "simulation_block",
+            "x": 702,
+            "y": 196,
+            "w": 196,
+            "h": 116,
+            "props": {
+              "name": "机柜2",
+              "moduleType": "机柜仿真",
+              "inputs": [
+                {
+                  "id": "socket02",
+                  "portId": "socket02",
+                  "name": "socket02",
+                  "displayName": "socket02",
+                  "varName": "socket02",
+                  "type": "float",
+                  "unit": "V",
+                  "direction": "input"
+                },
+                {
+                  "id": "socket03",
+                  "portId": "socket03",
+                  "name": "socket03",
+                  "displayName": "socket03",
+                  "varName": "socket03",
+                  "type": "float",
+                  "unit": "V",
+                  "direction": "input"
+                }
+              ],
+              "outputs": [
+                {
+                  "id": "socket04",
+                  "portId": "socket04",
+                  "name": "socket04",
+                  "displayName": "socket04",
+                  "varName": "socket04",
+                  "type": "float",
+                  "unit": "V",
+                  "direction": "output"
+                }
+              ],
+              "middleVars": [],
+              "parameters": [],
+              "ffunctionNote": "socket04 = 0.6 × socket02 + 0.4 × socket03"
+            },
+            "pythonBinding": {
+              "bound": true,
+              "moduleId": "cabinet02_module",
+              "fileName": "cabinet02.py",
+              "moduleName": "cabinet02_module",
+              "moduleCategory": "cabinet-simulation",
+              "sourcePackageId": null,
+              "sourcePackageName": null,
+              "description": "机柜2双输入加权融合",
+              "entryFunction": "process",
+              "parsedInterface": {
+                "fileName": "cabinet02.py",
+                "moduleName": "cabinet02_module",
+                "description": "机柜2双输入加权融合",
+                "entryFunction": "process",
+                "inputs": [
+                  {
+                    "name": "socket02",
+                    "displayName": "socket02",
+                    "type": "float",
+                    "default": null,
+                    "comment": "输入端口1"
+                  },
+                  {
+                    "name": "socket03",
+                    "displayName": "socket03",
+                    "type": "float",
+                    "default": null,
+                    "comment": "输入端口2"
+                  }
+                ],
+                "outputs": [
+                  {
+                    "name": "socket04",
+                    "displayName": "socket04",
+                    "type": "float",
+                    "comment": "融合输出端口"
+                  }
+                ],
+                "middleVars": []
+              },
+              "rawSource": "def process(socket02: float, socket03: float):\n    \"\"\"机柜2：按 60%/40% 融合两路输入并从 socket04 输出。\"\"\"\n    socket04 = 0.6 * float(socket02) + 0.4 * float(socket03)\n    return {\"outputs\": {\"socket04\": socket04}}\n",
+              "executionMode": "mock",
+              "executionConfig": {
+                "timeoutMs": 3000
+              },
+              "portMapping": {
+                "inputs": [
+                  {
+                    "portId": "socket02",
+                    "signalId": "cabinet02.socket02",
+                    "varName": "socket02",
+                    "displayName": "socket02",
+                    "type": "float",
+                    "default": null,
+                    "comment": "输入端口1",
+                    "connected": false
+                  },
+                  {
+                    "portId": "socket03",
+                    "signalId": "cabinet02.socket03",
+                    "varName": "socket03",
+                    "displayName": "socket03",
+                    "type": "float",
+                    "default": null,
+                    "comment": "输入端口2",
+                    "connected": false
+                  }
+                ],
+                "outputs": [
+                  {
+                    "portId": "socket04",
+                    "signalId": "cabinet02.socket04",
+                    "varName": "socket04",
+                    "displayName": "socket04",
+                    "type": "float",
+                    "comment": "融合输出端口"
+                  }
+                ],
+                "middleVars": []
+              }
+            },
+            "simulationInterfaceDefinition": {
+              "name": "机柜2",
+              "ports": {
+                "inputs": [
+                  {
+                    "id": "socket02",
+                    "portId": "socket02",
+                    "name": "socket02",
+                    "displayName": "socket02",
+                    "varName": "socket02",
+                    "type": "float",
+                    "unit": "V",
+                    "direction": "input"
+                  },
+                  {
+                    "id": "socket03",
+                    "portId": "socket03",
+                    "name": "socket03",
+                    "displayName": "socket03",
+                    "varName": "socket03",
+                    "type": "float",
+                    "unit": "V",
+                    "direction": "input"
+                  }
+                ],
+                "outputs": [
+                  {
+                    "id": "socket04",
+                    "portId": "socket04",
+                    "name": "socket04",
+                    "displayName": "socket04",
+                    "varName": "socket04",
+                    "type": "float",
+                    "unit": "V",
+                    "direction": "output"
+                  }
+                ],
+                "middleVars": []
+              },
+              "pythonPortMapping": {
+                "inputs": [
+                  {
+                    "portId": "socket02",
+                    "signalId": "cabinet02.socket02",
+                    "varName": "socket02",
+                    "displayName": "socket02",
+                    "type": "float",
+                    "default": null,
+                    "comment": "输入端口1",
+                    "connected": false
+                  },
+                  {
+                    "portId": "socket03",
+                    "signalId": "cabinet02.socket03",
+                    "varName": "socket03",
+                    "displayName": "socket03",
+                    "type": "float",
+                    "default": null,
+                    "comment": "输入端口2",
+                    "connected": false
+                  }
+                ],
+                "outputs": [
+                  {
+                    "portId": "socket04",
+                    "signalId": "cabinet02.socket04",
+                    "varName": "socket04",
+                    "displayName": "socket04",
+                    "type": "float",
+                    "comment": "融合输出端口"
+                  }
+                ],
+                "middleVars": []
+              }
+            },
+            "faultSlots": [
+              {
+                "slotId": "electrical:input:socket02",
+                "slotName": "socket02",
+                "layer": "electrical",
+                "targetField": "input.socket02",
+                "allowedModels": [
+                  "bias",
+                  "noise",
+                  "freeze",
+                  "intermittent"
+                ],
+                "parameterKey": "socket02",
+                "unit": "V"
+              },
+              {
+                "slotId": "electrical:input:socket03",
+                "slotName": "socket03",
+                "layer": "electrical",
+                "targetField": "input.socket03",
+                "allowedModels": [
+                  "bias",
+                  "noise",
+                  "freeze",
+                  "intermittent"
+                ],
+                "parameterKey": "socket03",
+                "unit": "V"
+              },
+              {
+                "slotId": "electrical:output:socket04",
+                "slotName": "socket04",
+                "layer": "electrical",
+                "targetField": "output.socket04",
+                "allowedModels": [
+                  "bias",
+                  "noise",
+                  "freeze",
+                  "intermittent"
+                ],
+                "parameterKey": "socket04",
+                "unit": "V"
+              }
+            ],
+            "injectedFault": {
+              "instanceId": "layered-node-7-cabinet02-electrical-input-socket03",
+              "modelId": "layered-node-7-cabinet02-electrical-input-socket03",
+              "faultTypeId": "layered-node-7-cabinet02-electrical-input-socket03",
+              "name": "电气层注入 - 机柜2",
+              "layer": "electrical",
+              "layerKey": "electrical",
+              "modelClass": "连续信号故障",
+              "runtimeBehavior": "noise",
+              "slotId": "electrical:input:socket03",
+              "slotName": "socket03",
+              "bindingObject": "socket03",
+              "targetVariable": "socket03",
+              "targetField": "input.socket03",
+              "targetKind": "node",
+              "targetId": "cabinet02",
+              "injectionForm": "module-variable",
+              "parameters": {
+                "std": 1,
+                "start": 0,
+                "duration": "",
+                "noise_type": "gaussian"
+              },
+              "active": false,
+              "enabled": false
+            },
+            "faultBindings": [
+              {
+                "bindingId": "layered-node-7-cabinet02-electrical-input-socket03::cabinet02",
+                "faultModelId": "layered-node-7-cabinet02-electrical-input-socket03",
+                "name": "电气层注入 - 机柜2",
+                "layer": "electrical",
+                "layerKey": "electrical",
+                "runtimeBehavior": "noise",
+                "parameters": {
+                  "std": 1,
+                  "start": 0,
+                  "duration": "",
+                  "noise_type": "gaussian"
+                },
+                "targetKind": "node",
+                "targetId": "cabinet02",
+                "slotId": "electrical:input:socket03",
+                "slotName": "socket03",
+                "bindingObject": "socket03",
+                "targetVariable": "socket03",
+                "targetField": "input.socket03",
+                "injectionForm": "module-variable",
+                "visualRole": "fault-source",
+                "propagationMode": "signalTransform",
+                "canPropagate": true,
+                "active": false,
+                "injectedFault": {
+                  "instanceId": "layered-node-7-cabinet02-electrical-input-socket03",
+                  "modelId": "layered-node-7-cabinet02-electrical-input-socket03",
+                  "faultTypeId": "layered-node-7-cabinet02-electrical-input-socket03",
+                  "name": "电气层注入 - 机柜2",
+                  "layer": "electrical",
+                  "layerKey": "electrical",
+                  "modelClass": "连续信号故障",
+                  "runtimeBehavior": "noise",
+                  "slotId": "electrical:input:socket03",
+                  "slotName": "socket03",
+                  "bindingObject": "socket03",
+                  "targetVariable": "socket03",
+                  "targetField": "input.socket03",
+                  "targetKind": "node",
+                  "targetId": "cabinet02",
+                  "injectionForm": "module-variable",
+                  "parameters": {
+                    "std": 1,
+                    "start": 0,
+                    "duration": "",
+                    "noise_type": "gaussian"
+                  },
+                  "active": false,
+                  "enabled": false
+                }
+              }
+            ]
+          },
+          {
+            "id": "cabinet03",
+            "type": "simulation_block",
+            "x": 986,
+            "y": 165,
+            "w": 196,
+            "h": 116,
+            "props": {
+              "name": "机柜3",
+              "moduleType": "机柜仿真",
+              "inputs": [
+                {
+                  "id": "socket03",
+                  "portId": "socket03",
+                  "name": "socket03",
+                  "displayName": "socket03",
+                  "varName": "socket03",
+                  "type": "float",
+                  "unit": "V",
+                  "direction": "input"
+                }
+              ],
+              "outputs": [
+                {
+                  "id": "socket05",
+                  "portId": "socket05",
+                  "name": "socket05",
+                  "displayName": "socket05",
+                  "varName": "socket05",
+                  "type": "float",
+                  "unit": "V",
+                  "direction": "output"
+                }
+              ],
+              "middleVars": [],
+              "parameters": [],
+              "ffunctionNote": "socket05 = 0.98 × socket03"
+            },
+            "pythonBinding": {
+              "bound": true,
+              "moduleId": "cabinet03_module",
+              "fileName": "cabinet03.py",
+              "moduleName": "cabinet03_module",
+              "moduleCategory": "cabinet-simulation",
+              "sourcePackageId": null,
+              "sourcePackageName": null,
+              "description": "机柜3单通道线路损耗模型",
+              "entryFunction": "process",
+              "parsedInterface": {
+                "fileName": "cabinet03.py",
+                "moduleName": "cabinet03_module",
+                "description": "机柜3单通道线路损耗模型",
+                "entryFunction": "process",
+                "inputs": [
+                  {
+                    "name": "socket03",
+                    "displayName": "socket03",
+                    "type": "float",
+                    "default": null,
+                    "comment": "输入端口"
+                  }
+                ],
+                "outputs": [
+                  {
+                    "name": "socket05",
+                    "displayName": "socket05",
+                    "type": "float",
+                    "comment": "输出端口"
+                  }
+                ],
+                "middleVars": []
+              },
+              "rawSource": "def process(socket03: float):\n    \"\"\"机柜3：对输入执行 2% 线路损耗后从 socket05 输出。\"\"\"\n    socket05 = 0.98 * float(socket03)\n    return {\"outputs\": {\"socket05\": socket05}}\n",
+              "executionMode": "mock",
+              "executionConfig": {
+                "timeoutMs": 3000
+              },
+              "portMapping": {
+                "inputs": [
+                  {
+                    "portId": "socket03",
+                    "signalId": "cabinet03.socket03",
+                    "varName": "socket03",
+                    "displayName": "socket03",
+                    "type": "float",
+                    "default": null,
+                    "comment": "输入端口",
+                    "connected": false
+                  }
+                ],
+                "outputs": [
+                  {
+                    "portId": "socket05",
+                    "signalId": "cabinet03.socket05",
+                    "varName": "socket05",
+                    "displayName": "socket05",
+                    "type": "float",
+                    "comment": "输出端口"
+                  }
+                ],
+                "middleVars": []
+              }
+            },
+            "simulationInterfaceDefinition": {
+              "name": "机柜3",
+              "ports": {
+                "inputs": [
+                  {
+                    "id": "socket03",
+                    "portId": "socket03",
+                    "name": "socket03",
+                    "displayName": "socket03",
+                    "varName": "socket03",
+                    "type": "float",
+                    "unit": "V",
+                    "direction": "input"
+                  }
+                ],
+                "outputs": [
+                  {
+                    "id": "socket05",
+                    "portId": "socket05",
+                    "name": "socket05",
+                    "displayName": "socket05",
+                    "varName": "socket05",
+                    "type": "float",
+                    "unit": "V",
+                    "direction": "output"
+                  }
+                ],
+                "middleVars": []
+              },
+              "pythonPortMapping": {
+                "inputs": [
+                  {
+                    "portId": "socket03",
+                    "signalId": "cabinet03.socket03",
+                    "varName": "socket03",
+                    "displayName": "socket03",
+                    "type": "float",
+                    "default": null,
+                    "comment": "输入端口",
+                    "connected": false
+                  }
+                ],
+                "outputs": [
+                  {
+                    "portId": "socket05",
+                    "signalId": "cabinet03.socket05",
+                    "varName": "socket05",
+                    "displayName": "socket05",
+                    "type": "float",
+                    "comment": "输出端口"
+                  }
+                ],
+                "middleVars": []
+              }
+            },
+            "faultSlots": [
+              {
+                "slotId": "electrical:input:socket03",
+                "slotName": "socket03",
+                "layer": "electrical",
+                "targetField": "input.socket03",
+                "allowedModels": [
+                  "bias",
+                  "noise",
+                  "freeze",
+                  "intermittent"
+                ],
+                "parameterKey": "socket03",
+                "unit": "V"
+              },
+              {
+                "slotId": "electrical:output:socket05",
+                "slotName": "socket05",
+                "layer": "electrical",
+                "targetField": "output.socket05",
+                "allowedModels": [
+                  "bias",
+                  "noise",
+                  "freeze",
+                  "intermittent"
+                ],
+                "parameterKey": "socket05",
+                "unit": "V"
+              }
+            ]
+          },
+          {
+            "id": "node-8",
+            "type": "instrument_scope",
+            "x": 1327,
+            "y": 189,
+            "w": 150,
+            "h": 74,
+            "props": {
+              "name": "示波器 1",
+              "instrumentType": "波形监测",
+              "sampleRate": "64kHz",
+              "signal": "流程块输出",
+              "inputPortNameCh1": "CH1",
+              "inputPortNameCh2": "CH2"
+            },
+            "pythonBinding": null,
+            "faultSlots": []
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge-1",
+            "lineType": "normal",
+            "sourceNodeId": "cabinet_module1",
+            "targetNodeId": "cabinet01",
+            "sourcePortIndex": 0,
+            "targetPortIndex": 0,
+            "sourcePort": {
+              "index": 0,
+              "varName": null,
+              "displayName": "输出",
+              "type": "any"
+            },
+            "targetPort": {
+              "index": 0,
+              "varName": "socket02",
+              "displayName": "输入端口",
+              "type": "float"
+            },
+            "sourcePortMeta": {
+              "kind": "output",
+              "varName": null,
+              "displayName": "输出",
+              "type": "any",
+              "default": null
+            },
+            "targetPortMeta": {
+              "kind": "input",
+              "varName": "socket02",
+              "displayName": "输入端口",
+              "type": "float",
+              "default": null
+            },
+            "faultSlots": [
+              {
+                "slotId": "electrical:signal_value",
+                "slotName": "信号值",
+                "layer": "electrical",
+                "targetField": "signal.value",
+                "allowedModels": [
+                  "bias",
+                  "noise",
+                  "freeze",
+                  "intermittent"
+                ],
+                "signalId": "",
+                "lineType": "normal"
+              }
+            ]
+          },
+          {
+            "id": "edge-2",
+            "lineType": "normal",
+            "sourceNodeId": "cabinet01",
+            "targetNodeId": "cabinet02",
+            "sourcePortIndex": 0,
+            "targetPortIndex": 0,
+            "sourcePort": {
+              "index": 0,
+              "varName": "socket03",
+              "displayName": "输出端口",
+              "type": "float"
+            },
+            "targetPort": {
+              "index": 0,
+              "varName": "socket02",
+              "displayName": "输入端口1",
+              "type": "float"
+            },
+            "sourcePortMeta": {
+              "kind": "output",
+              "varName": "socket03",
+              "displayName": "输出端口",
+              "type": "float",
+              "default": null
+            },
+            "targetPortMeta": {
+              "kind": "input",
+              "varName": "socket02",
+              "displayName": "输入端口1",
+              "type": "float",
+              "default": null
+            },
+            "faultSlots": [
+              {
+                "slotId": "electrical:signal_value",
+                "slotName": "信号值",
+                "layer": "electrical",
+                "targetField": "signal.value",
+                "allowedModels": [
+                  "bias",
+                  "noise",
+                  "freeze",
+                  "intermittent"
+                ],
+                "signalId": "",
+                "lineType": "normal"
+              }
+            ]
+          },
+          {
+            "id": "edge-3",
+            "lineType": "normal",
+            "sourceNodeId": "cabinet_module1",
+            "targetNodeId": "cabinet02",
+            "sourcePortIndex": 0,
+            "targetPortIndex": 1,
+            "sourcePort": {
+              "index": 0,
+              "varName": null,
+              "displayName": "输出",
+              "type": "any"
+            },
+            "targetPort": {
+              "index": 1,
+              "varName": "socket03",
+              "displayName": "输入端口2",
+              "type": "float"
+            },
+            "sourcePortMeta": {
+              "kind": "output",
+              "varName": null,
+              "displayName": "输出",
+              "type": "any",
+              "default": null
+            },
+            "targetPortMeta": {
+              "kind": "input",
+              "varName": "socket03",
+              "displayName": "输入端口2",
+              "type": "float",
+              "default": null
+            },
+            "faultSlots": [
+              {
+                "slotId": "electrical:signal_value",
+                "slotName": "信号值",
+                "layer": "electrical",
+                "targetField": "signal.value",
+                "allowedModels": [
+                  "bias",
+                  "noise",
+                  "freeze",
+                  "intermittent"
+                ],
+                "signalId": "",
+                "lineType": "normal"
+              }
+            ]
+          },
+          {
+            "id": "edge-4",
+            "lineType": "normal",
+            "sourceNodeId": "cabinet02",
+            "targetNodeId": "cabinet03",
+            "sourcePortIndex": 0,
+            "targetPortIndex": 0,
+            "sourcePort": {
+              "index": 0,
+              "varName": "socket04",
+              "displayName": "融合输出端口",
+              "type": "float"
+            },
+            "targetPort": {
+              "index": 0,
+              "varName": "socket03",
+              "displayName": "输入端口",
+              "type": "float"
+            },
+            "sourcePortMeta": {
+              "kind": "output",
+              "varName": "socket04",
+              "displayName": "融合输出端口",
+              "type": "float",
+              "default": null
+            },
+            "targetPortMeta": {
+              "kind": "input",
+              "varName": "socket03",
+              "displayName": "输入端口",
+              "type": "float",
+              "default": null
+            },
+            "faultSlots": [
+              {
+                "slotId": "electrical:signal_value",
+                "slotName": "信号值",
+                "layer": "electrical",
+                "targetField": "signal.value",
+                "allowedModels": [
+                  "bias",
+                  "noise",
+                  "freeze",
+                  "intermittent"
+                ],
+                "signalId": "",
+                "lineType": "normal"
+              }
+            ]
+          },
+          {
+            "id": "edge-6",
+            "lineType": "normal",
+            "sourceNodeId": "cabinet03",
+            "targetNodeId": "node-8",
+            "sourcePortIndex": 0,
+            "targetPortIndex": 0,
+            "sourcePort": {
+              "index": 0,
+              "varName": "socket05",
+              "displayName": "输出端口",
+              "type": "float"
+            },
+            "targetPort": {
+              "index": 0,
+              "varName": null,
+              "displayName": "CH1",
+              "type": "any"
+            },
+            "sourcePortMeta": {
+              "kind": "output",
+              "varName": "socket05",
+              "displayName": "输出端口",
+              "type": "float",
+              "default": null
+            },
+            "targetPortMeta": {
+              "kind": "input",
+              "varName": null,
+              "displayName": "CH1",
+              "type": "any",
+              "default": null
+            },
+            "faultSlots": [
+              {
+                "slotId": "electrical:signal_value",
+                "slotName": "信号值",
+                "layer": "electrical",
+                "targetField": "signal.value",
+                "allowedModels": [
+                  "bias",
+                  "noise",
+                  "freeze",
+                  "intermittent"
+                ],
+                "signalId": "",
+                "lineType": "normal"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "activeLineType": "normal",
+    "workspaceSource": "imported",
+    "faultedBlks": [
+      "cabinet01",
+      "cabinet02"
+    ],
+    "importedFaultModels": [],
+    "faultInstances": [
+      {
+        "instanceId": "layered-node-6-cabinet01-electrical-input-socket02",
+        "faultTypeId": "layered-node-6-cabinet01-electrical-input-socket02",
+        "targetKind": "node",
+        "targetId": "cabinet01",
+        "slotId": "electrical:input:socket02",
+        "slotName": "socket02",
+        "layer": "electrical",
+        "runtimeBehavior": "bias",
+        "injectionForm": "module-variable",
+        "bindingObject": "socket02",
+        "targetVariable": "socket02",
+        "targetField": "input.socket02",
+        "displayName": "电气层注入 - 机柜1",
+        "parameters": {
+          "bias": "1",
+          "start": "0",
+          "duration": ""
+        },
+        "active": true,
+        "visual": {
+          "expanded": false
+        }
+      },
+      {
+        "instanceId": "layered-node-7-cabinet02-electrical-input-socket03",
+        "faultTypeId": "layered-node-7-cabinet02-electrical-input-socket03",
+        "targetKind": "node",
+        "targetId": "cabinet02",
+        "slotId": "electrical:input:socket03",
+        "slotName": "socket03",
+        "layer": "electrical",
+        "runtimeBehavior": "noise",
+        "injectionForm": "module-variable",
+        "bindingObject": "socket03",
+        "targetVariable": "socket03",
+        "targetField": "input.socket03",
+        "displayName": "电气层注入 - 机柜2",
+        "parameters": {
+          "std": 1,
+          "start": 0,
+          "duration": "",
+          "noise_type": "gaussian"
+        },
+        "active": false,
+        "visual": {
+          "expanded": false
+        },
+        "enabled": false
+      }
+    ],
+    "faultTags": [
+      {
+        "id": "fault-tag-layered-node-6-cabinet01-electrical-input-socket02",
+        "type": "fault_tag",
+        "faultModelId": "layered-node-6-cabinet01-electrical-input-socket02",
+        "faultModelName": "电气层注入 - 机柜1",
+        "name": "电气层注入 - 机柜1",
+        "layer": "electrical",
+        "layerKey": "electrical",
+        "modelClass": "连续信号故障",
+        "runtimeBehavior": "bias",
+        "targetKind": "node",
+        "targetId": "cabinet01",
+        "hostNodeId": "cabinet01",
+        "targetName": "机柜1",
+        "active": true,
+        "positionMode": "manual",
+        "expanded": true,
+        "collapsed": false,
+        "slotId": "electrical:input:socket02",
+        "slotName": "socket02",
+        "bindingObject": "socket02",
+        "targetVariable": "socket02",
+        "targetField": "input.socket02",
+        "injectionForm": "module-variable",
+        "parameters": {
+          "bias": "1",
+          "start": "0",
+          "duration": ""
+        },
+        "injectedFault": {
+          "instanceId": "layered-node-6-cabinet01-electrical-input-socket02",
+          "modelId": "layered-node-6-cabinet01-electrical-input-socket02",
+          "faultTypeId": "layered-node-6-cabinet01-electrical-input-socket02",
+          "name": "电气层注入 - 机柜1",
+          "layer": "electrical",
+          "layerKey": "electrical",
+          "modelClass": "连续信号故障",
+          "runtimeBehavior": "bias",
+          "slotId": "electrical:input:socket02",
+          "slotName": "socket02",
+          "bindingObject": "socket02",
+          "targetVariable": "socket02",
+          "targetField": "input.socket02",
+          "targetKind": "node",
+          "targetId": "cabinet01",
+          "injectionForm": "module-variable",
+          "parameters": {
+            "bias": "1",
+            "start": "0",
+            "duration": ""
+          }
+        },
+        "x": 615,
+        "y": 44,
+        "w": 204,
+        "h": 76
+      },
+      {
+        "id": "fault-tag-layered-node-7-cabinet02-electrical-input-socket03",
+        "type": "fault_tag",
+        "faultModelId": "layered-node-7-cabinet02-electrical-input-socket03",
+        "faultModelName": "电气层注入 - 机柜2",
+        "name": "电气层注入 - 机柜2",
+        "layer": "electrical",
+        "layerKey": "electrical",
+        "modelClass": "连续信号故障",
+        "runtimeBehavior": "noise",
+        "targetKind": "node",
+        "targetId": "cabinet02",
+        "hostNodeId": "cabinet02",
+        "targetName": "机柜2",
+        "active": true,
+        "positionMode": "manual",
+        "expanded": false,
+        "collapsed": true,
+        "slotId": "electrical:input:socket03",
+        "slotName": "socket03",
+        "bindingObject": "socket03",
+        "targetVariable": "socket03",
+        "targetField": "input.socket03",
+        "injectionForm": "module-variable",
+        "parameters": {
+          "std": 1,
+          "start": 0,
+          "duration": "",
+          "noise_type": "gaussian"
+        },
+        "injectedFault": {
+          "instanceId": "layered-node-7-cabinet02-electrical-input-socket03",
+          "modelId": "layered-node-7-cabinet02-electrical-input-socket03",
+          "faultTypeId": "layered-node-7-cabinet02-electrical-input-socket03",
+          "name": "电气层注入 - 机柜2",
+          "layer": "electrical",
+          "layerKey": "electrical",
+          "modelClass": "连续信号故障",
+          "runtimeBehavior": "noise",
+          "slotId": "electrical:input:socket03",
+          "slotName": "socket03",
+          "bindingObject": "socket03",
+          "targetVariable": "socket03",
+          "targetField": "input.socket03",
+          "targetKind": "node",
+          "targetId": "cabinet02",
+          "injectionForm": "module-variable",
+          "parameters": {
+            "std": 1,
+            "start": 0,
+            "duration": "",
+            "noise_type": "gaussian"
+          },
+          "active": false,
+          "enabled": false
+        },
+        "x": 792,
+        "y": 89,
+        "w": 204,
+        "h": 76,
+        "runtimeEnabled": false
+      }
+    ],
+    "faultInjectionLinks": [
+      {
+        "id": "fault-link-layered-node-6-cabinet01-electrical-input-socket02-target",
+        "faultModelId": "layered-node-6-cabinet01-electrical-input-socket02",
+        "sourceTagId": "fault-tag-layered-node-6-cabinet01-electrical-input-socket02",
+        "targetNodeId": "cabinet01",
+        "targetEdgeId": null,
+        "role": "fault-tag-attachment",
+        "label": "故障注入"
+      },
+      {
+        "id": "fault-link-layered-node-7-cabinet02-electrical-input-socket03-target",
+        "faultModelId": "layered-node-7-cabinet02-electrical-input-socket03",
+        "sourceTagId": "fault-tag-layered-node-7-cabinet02-electrical-input-socket03",
+        "targetNodeId": "cabinet02",
+        "targetEdgeId": null,
+        "role": "fault-tag-attachment",
+        "label": "故障注入"
+      }
+    ],
+    "diagnosticTestPoints": [],
+    "testPoints": [],
+    "manualDiagnosticTestPoints": [
+      {
+        "pointId": "tp-edge-3-1",
+        "id": "tp-edge-3-1",
+        "shortName": "M1",
+        "name": "信号源 -> 机柜2",
+        "edgeId": "edge-3",
+        "signalId": "",
+        "channelId": "",
+        "sourceName": "信号源",
+        "targetName": "机柜2",
+        "detects": [],
+        "manuallyAdded": true,
+        "nameZh": "信号源 -> 机柜2",
+        "labelZh": "信号源 -> 机柜2",
+        "positionNameZh": "信号源 -> 机柜2",
+        "pointType": "physical"
+      },
+      {
+        "pointId": "tp-edge-4-1",
+        "id": "tp-edge-4-1",
+        "shortName": "M2",
+        "name": "机柜2 -> 机柜3",
+        "edgeId": "edge-4",
+        "signalId": "",
+        "channelId": "",
+        "sourceName": "机柜2",
+        "targetName": "机柜3",
+        "detects": [
+          "layered-node-6-cabinet01-electrical-input-socket02",
+          "layered-node-7-cabinet02-electrical-input-socket03"
+        ],
+        "manuallyAdded": true,
+        "nameZh": "机柜2 -> 机柜3",
+        "labelZh": "机柜2 -> 机柜3",
+        "positionNameZh": "机柜2 -> 机柜3",
+        "pointType": "virtual"
+      },
+      {
+        "pointId": "tp-edge-5-1",
+        "id": "tp-edge-5-1",
+        "shortName": "M3",
+        "name": "机柜3 -> 频谱分析仪 1",
+        "edgeId": "edge-5",
+        "signalId": "",
+        "channelId": "",
+        "sourceName": "机柜3",
+        "targetName": "频谱分析仪 1",
+        "detects": [
+          "layered-node-6-cabinet01-electrical-input-socket02",
+          "layered-node-7-cabinet02-electrical-input-socket03"
+        ],
+        "manuallyAdded": true,
+        "nameZh": "机柜3 -> 频谱分析仪 1",
+        "labelZh": "机柜3 -> 频谱分析仪 1",
+        "positionNameZh": "机柜3 -> 频谱分析仪 1",
+        "pointType": "physical"
+      },
+      {
+        "pointId": "tp-edge-2-1",
+        "id": "tp-edge-2-1",
+        "shortName": "M4",
+        "name": "机柜1 -> 机柜2",
+        "edgeId": "edge-2",
+        "signalId": "",
+        "channelId": "",
+        "sourceName": "机柜1",
+        "targetName": "机柜2",
+        "detects": [
+          "layered-node-6-cabinet01-electrical-input-socket02"
+        ],
+        "manuallyAdded": true,
+        "nameZh": "机柜1 -> 机柜2",
+        "labelZh": "机柜1 -> 机柜2",
+        "positionNameZh": "机柜1 -> 机柜2",
+        "pointType": "virtual"
+      },
+      {
+        "pointId": "tp-edge-6-1",
+        "id": "tp-edge-6-1",
+        "shortName": "M5",
+        "name": "机柜3 -> 示波器 1",
+        "edgeId": "edge-6",
+        "signalId": "",
+        "channelId": "",
+        "sourceName": "机柜3",
+        "targetName": "示波器 1",
+        "detects": [
+          "layered-node-6-cabinet01-electrical-input-socket02",
+          "layered-node-7-cabinet02-electrical-input-socket03"
+        ],
+        "manuallyAdded": true,
+        "nameZh": "机柜3 -> 示波器 1",
+        "labelZh": "机柜3 -> 示波器 1",
+        "positionNameZh": "机柜3 -> 示波器 1",
+        "pointType": "physical"
+      }
+    ],
+    "installedDiagnosticTestPointIds": [
+      "tp-edge-3-1",
+      "tp-edge-4-1",
+      "tp-edge-2-1",
+      "tp-edge-6-1"
+    ],
+    "diagnosticTestPointManualCleared": false
+  }
+}

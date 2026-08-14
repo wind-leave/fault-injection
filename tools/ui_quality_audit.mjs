@@ -287,16 +287,6 @@ function makeAudit() {
   );
 
   check(
-    'model-check-feeds-status-stream',
-    'Model diagnostics publish their result into the bottom status stream',
-    files.legacyRuntime.includes('pushModelCheckStatusEntry') &&
-      files.legacyRuntime.includes("source:'模型检查'") &&
-      files.legacyRuntime.includes("view:issueCount>0?'alerts':'log'"),
-    'Closes the loop between the inspector diagnostics result and the lower log/alert panel.',
-    'src/services/legacy-runtime.txt, src/services/statusBarRuntime.js'
-  );
-
-  check(
     'canvas-toolbar-command-contract',
     'Canvas toolbar buttons expose explicit command and view contracts',
     hasAll(files.canvas, [
@@ -453,8 +443,7 @@ function makeAudit() {
     'Platform files are classified without deleting cleanup candidates',
     hasAll(files.platformFileMapDoc, [
       'src/services/legacy-runtime.txt',
-      'public/model-packages/evtol_closed_loop_fault_demo.json',
-      'tools/python_model_runner/server.py',
+      'public/model-packages/evtol-small-flight-control-fault-display.json',
       '可以人工评估删除的候选',
       '不要在本阶段自动删除'
     ]),

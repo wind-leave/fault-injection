@@ -5,30 +5,28 @@
     <div class="canvas-sim-dock" aria-label="仿真任务控制">
       <div class="simbar" id="simbar">
         <div class="simbar-title">
-          <span class="simbar-title__kicker">任务控制</span>
-          <span class="simbar-title__name">仿真参数</span>
+          <span class="simbar-title__kicker">任务名称</span>
+          <input class="simbar-title__name simbar-title__name-input" id="task-name" value="仿真参数" type="text" maxlength="80" aria-label="任务名称">
         </div>
         <div class="simbar-params">
           <div class="sim-field">
-            <span class="sim-field-lbl">数据集名称</span>
-            <input class="sim-field-inp" id="sim-name" value="test" style="width:68px;text-align:left;">
-          </div>
-          <div class="sim-field">
             <span class="sim-field-lbl">仿真时长</span>
-            <input class="sim-field-inp" id="sim-dur" value="1000" type="number" min="1">
+            <div class="sim-time-control">
+              <input class="sim-field-inp" id="sim-dur" value="10" type="text" inputmode="decimal" aria-label="仿真时长数值">
+              <select class="sim-time-unit" id="sim-dur-unit" aria-label="仿真时长单位">
+                <option value="s" selected>s</option><option value="ms">ms</option><option value="us">µs</option><option value="ns">ns</option><option value="ps">ps</option>
+              </select>
+            </div>
           </div>
           <div class="sim-field" style="border-right:none;margin-right:0;">
             <span class="sim-field-lbl">仿真步长</span>
-            <input class="sim-field-inp" id="sim-step" value="0.1" type="number" min="0.001" step="0.01">
+            <div class="sim-time-control">
+              <input class="sim-field-inp" id="sim-step" value="0.1" type="text" inputmode="decimal" aria-label="仿真步长数值">
+              <select class="sim-time-unit" id="sim-step-unit" aria-label="仿真步长单位">
+                <option value="s" selected>s</option><option value="ms">ms</option><option value="us">µs</option><option value="ns">ns</option><option value="ps">ps</option>
+              </select>
+            </div>
           </div>
-        </div>
-        <div class="simbar-rt">
-          <span class="simbar-rt-lbl">实时模式</span>
-          <label class="toggle-wrap">
-            <input type="checkbox" id="sim-rt" onchange="onRtToggle(this)" checked>
-            <div class="toggle-track"></div>
-            <div class="toggle-thumb"></div>
-          </label>
         </div>
         <div class="simbar-btns">
           <button class="sim-btn sim-btn-disabled" id="sbtn-init" onclick="simInit()" title="初始化">
@@ -56,12 +54,9 @@
     </div>
     <div class="canvas-tabs">
       <button type="button" class="canvas-tab is-active" data-canvas-view="canvas">画布</button>
-      <button type="button" class="canvas-tab" data-canvas-view="components">&#25925;&#38556;&#35270;&#22270;</button>
+      <button type="button" class="canvas-tab" data-canvas-view="components">仿真视图</button>
       <button type="button" class="canvas-tab" data-canvas-view="dataflow">多信号流图</button>
       <button type="button" class="canvas-tab" data-canvas-view="dmatrix">D矩阵</button>
-    </div>
-    <div class="fault-view-tools" data-fault-view-tools>
-      <button type="button" data-toggle-fault-view-testpoints aria-pressed="false">显示测点</button>
     </div>
     <div class="canvas-tools">
       <button type="button" class="canvas-tool is-active" title="选择" data-canvas-command="select">⌖</button>
@@ -70,7 +65,7 @@
       <button type="button" class="canvas-tool" title="缩小" data-canvas-command="zoom-out">－</button>
       <span class="canvas-tools__divider"></span>
       <button type="button" class="canvas-tool" title="自动整理" data-canvas-command="auto-arrange">⇄</button>
-      <button type="button" class="canvas-tool" title="模型检查" data-canvas-command="model-check">✓</button>
+      <div class="canvas-testpoint-tools" data-canvas-testpoint-tools></div>
       <span class="canvas-tools__spacer"></span>
       <button type="button" class="canvas-tool" title="撤销" data-canvas-command="undo" disabled>↶</button>
       <button type="button" class="canvas-tool" title="重做" data-canvas-command="redo" disabled>↷</button>
@@ -82,8 +77,14 @@
       <button type="button" class="canvas-tool" title="全屏" data-canvas-command="fullscreen">⛶</button>
     </div>
   </div>
+  <button type="button" class="canvas-top-toggle" data-testid="canvas-top-toggle" aria-label="切换顶部工具栏" title="切换顶部工具栏" onclick="window.dispatchEvent(new CustomEvent('gz:toggle-canvas-top-chrome'))">
+    <span class="canvas-top-toggle__icon" aria-hidden="true">⌃</span>
+  </button>
 
     <div class="canvas-breadcrumbs" id="canvas-breadcrumbs" data-testid="canvas-breadcrumbs"></div>
+    <div class="simulation-panel" id="simulation-panel" aria-live="polite">
+      <div class="simulation-panel__empty">切换到仿真视图后，将显示物理测点在仿真过程中的组件输出数据。</div>
+    </div>
     <div class="dataflow-panel" id="dataflow-panel" aria-live="polite">
       <div class="dataflow-panel__empty">切换到数据流视图后，将显示多信号流图、边状态和故障传播指标。</div>
     </div>
@@ -110,22 +111,25 @@
       </div>
     </div>
     <div class="canvas-floating">
-      <div class="canvas-group-actions">
-        <button type="button" class="canvas-wrap__button" id="canvas-wrap-selection" onclick="wrapSelectionIntoSubsystem()" disabled>封装为子系统</button>
-        <button type="button" class="canvas-arrange__button" onclick="autoArrangeCanvas()">一键整理</button>
-        <button type="button" class="canvas-check__button" onclick="runModelCheck()">模型检查</button>
-      </div>
-      <div class="canvas-mode">
-        <span class="canvas-mode__label">当前连接</span>
-        <span class="canvas-mode__chip" id="line-mode-chip">普通连接线</span>
-      </div>
-      <div class="canvas-zoom">
-        <button type="button" class="canvas-zoom__button" onclick="handleCanvasZoomOut()">-</button>
-        <div class="canvas-zoom__track">
-          <span class="canvas-zoom__fill" id="canvas-zoom-fill" style="width:100%"></span>
+      <button type="button" class="canvas-floating-toggle" data-testid="canvas-floating-toggle" aria-label="显示画布浮动工具" title="显示画布浮动工具" onclick="window.dispatchEvent(new CustomEvent('gz:toggle-canvas-floating-controls'))">⋮</button>
+      <div class="canvas-floating-content">
+        <div class="canvas-group-actions">
+          <button type="button" class="canvas-line-view__button" id="canvas-line-view-toggle" onclick="cycleCanvasLineView()">全部</button>
+          <button type="button" class="canvas-wrap__button" id="canvas-wrap-selection" onclick="wrapSelectionIntoSubsystem()" disabled>封装为子系统</button>
+          <button type="button" class="canvas-arrange__button" onclick="autoArrangeCanvas()">一键整理</button>
         </div>
-        <button type="button" class="canvas-zoom__button" onclick="handleCanvasZoomIn()">+</button>
-        <button type="button" class="canvas-zoom__reset" id="canvas-zoom-reset" onclick="handleCanvasZoomReset()">100%</button>
+        <div class="canvas-mode">
+          <span class="canvas-mode__label">当前连接</span>
+          <span class="canvas-mode__chip" id="line-mode-chip">普通连接线</span>
+        </div>
+        <div class="canvas-zoom">
+          <button type="button" class="canvas-zoom__button" onclick="handleCanvasZoomOut()">-</button>
+          <div class="canvas-zoom__track">
+            <span class="canvas-zoom__fill" id="canvas-zoom-fill" style="width:100%"></span>
+          </div>
+          <button type="button" class="canvas-zoom__button" onclick="handleCanvasZoomIn()">+</button>
+          <button type="button" class="canvas-zoom__reset" id="canvas-zoom-reset" onclick="handleCanvasZoomReset()">100%</button>
+        </div>
       </div>
     </div>
     <div class="canvas-viewport" id="canvas-viewport">
@@ -135,6 +139,9 @@
           <defs>
             <marker id="edge-arrow-normal" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
               <path d="M1 1L8 5L1 9" fill="none" stroke="#84aee0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </marker>
+            <marker id="edge-arrow-power" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+              <path d="M1 1L8 5L1 9" fill="none" stroke="#dc2626" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
             </marker>
             <marker id="edge-arrow-can" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
               <path d="M1 1L8 5L1 9" fill="none" stroke="#8c7cf6" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
@@ -148,6 +155,9 @@
         </svg>
         <div class="node-layer" id="node-layer"></div>
         <div class="scope-window-layer" id="scope-window-layer" aria-live="polite"></div>
+        <div class="multimeter-window-layer" id="multimeter-window-layer" aria-live="polite"></div>
+        <div class="spectrum-window-layer" id="spectrum-window-layer" aria-live="polite"></div>
+        <div class="display-console-window-layer" id="display-console-window-layer" aria-live="polite"></div>
       </div>
     </div>
   </div>

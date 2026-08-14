@@ -1,5 +1,8 @@
 ﻿node_modules/
 dist/
 .npm-cache/
+.worktrees/
 *.log
 *.err.log
+__pycache__/
+*.pyc

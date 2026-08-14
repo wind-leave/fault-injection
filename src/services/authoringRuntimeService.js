@@ -87,10 +87,8 @@ function commitPackage(state, modelPackage) {
   state.sysLoaded = true;
   state.systemSaved = false;
   state.workspaceSource = state.workspaceSource || 'authored';
-  if (Array.isArray(modelPackage.faultTypeCatalog)) {
-    state.faultLibrary = arrayOrEmpty(modelPackage.faultTypeCatalog);
-    state.faults = state.faultLibrary;
-  }
+  state.faultLibrary = arrayOrEmpty(state.faultLibrary);
+  state.faults = state.faultLibrary;
 }
 
 function refreshRuntime(selectedNodeId = '') {

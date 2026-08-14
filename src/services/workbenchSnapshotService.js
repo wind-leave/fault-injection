@@ -1,4 +1,5 @@
 import { createDefaultPythonBinding } from '../composables/useWorkbenchState.js';
+import { initializeSimulationInterfaceLock } from './simulationInterfaceLockService.js';
 
 const ROOT_CANVAS_ID = 'canvas-root';
 const ROOT_CANVAS_NAME = '顶层';
@@ -25,15 +26,6 @@ function normalizePortMapping(bindingPortMapping) {
   };
 }
 
-function normalizeExecutionConfig(bindingExecutionConfig) {
-  const safeExecutionConfig = clone(bindingExecutionConfig ?? {});
-
-  return {
-    ...createDefaultPythonBinding().executionConfig,
-    ...safeExecutionConfig
-  };
-}
-
 function normalizePythonBinding(binding) {
   if (!binding || typeof binding !== 'object') {
     return createDefaultPythonBinding();
@@ -44,7 +36,15 @@ function normalizePythonBinding(binding) {
     ...clone(binding)
   };
 
-  safeBinding.executionConfig = normalizeExecutionConfig(binding.executionConfig);
+  delete safeBinding.executionConfig;
+  // Python implementation files are deployed and registered by the backend.
+  // Model snapshots persist only the file/entry reference, never source code.
+  delete safeBinding.rawSource;
+  delete safeBinding.source;
+  if (isPlainObject(safeBinding.parsedInterface)) {
+    delete safeBinding.parsedInterface.rawSource;
+    delete safeBinding.parsedInterface.source;
+  }
   safeBinding.portMapping = {
     ...createDefaultPythonBinding().portMapping,
     ...normalizePortMapping(binding.portMapping)
@@ -76,13 +76,16 @@ function inferLayeredSequence(canvases, key, prefix) {
 
 function normalizeNode(node) {
   const safeNode = isPlainObject(node) ? clone(node) : {};
-
-  return {
+  const normalizedNode = {
     ...safeNode,
     pythonBinding: safeNode.type === 'simulation_block'
       ? normalizePythonBinding(safeNode.pythonBinding)
       : safeNode.pythonBinding ?? null
   };
+
+  return normalizedNode.type === 'simulation_block'
+    ? initializeSimulationInterfaceLock(normalizedNode)
+    : normalizedNode;
 }
 
 function normalizeEdge(edge) {
@@ -195,12 +198,18 @@ export function createWorkbenchSnapshot(state) {
     canvasTrail: layeredFields.canvasTrail,
     canvases: layeredFields.canvases,
     activeLineType: safeState.activeLineType ?? 'normal',
+    taskName: typeof safeState.taskName === 'string' ? safeState.taskName : '',
     workspaceSource: typeof safeState.workspaceSource === 'string' ? safeState.workspaceSource : '',
     faultedBlks: toSafeArray(safeState.faultedBlks),
     importedFaultModels: toSafeArray(safeState.importedFaultModels),
     faultInstances: toSafeArray(safeState.faultInstances),
     faultTags: toSafeArray(safeState.faultTags),
-    faultInjectionLinks: toSafeArray(safeState.faultInjectionLinks)
+    faultInjectionLinks: toSafeArray(safeState.faultInjectionLinks),
+    diagnosticTestPoints: toSafeArray(safeState.diagnosticTestPoints),
+    testPoints: toSafeArray(safeState.testPoints),
+    manualDiagnosticTestPoints: toSafeArray(safeState.manualDiagnosticTestPoints),
+    installedDiagnosticTestPointIds: toSafeArray(safeState.installedDiagnosticTestPointIds),
+    diagnosticTestPointManualCleared: Boolean(safeState.diagnosticTestPointManualCleared)
   });
 }
 
@@ -225,11 +234,17 @@ export function restoreWorkbenchSnapshot(snapshot) {
     canvasTrail: layeredFields.canvasTrail,
     canvases: layeredFields.canvases,
     activeLineType: safeSnapshot.activeLineType ?? 'normal',
+    taskName: typeof safeSnapshot.taskName === 'string' ? safeSnapshot.taskName : '',
     workspaceSource: typeof safeSnapshot.workspaceSource === 'string' ? safeSnapshot.workspaceSource : '',
     faultedBlks: toSafeArray(safeSnapshot.faultedBlks),
     importedFaultModels: toSafeArray(safeSnapshot.importedFaultModels),
     faultInstances: toSafeArray(safeSnapshot.faultInstances),
     faultTags: toSafeArray(safeSnapshot.faultTags),
-    faultInjectionLinks: toSafeArray(safeSnapshot.faultInjectionLinks)
+    faultInjectionLinks: toSafeArray(safeSnapshot.faultInjectionLinks),
+    diagnosticTestPoints: toSafeArray(safeSnapshot.diagnosticTestPoints),
+    testPoints: toSafeArray(safeSnapshot.testPoints),
+    manualDiagnosticTestPoints: toSafeArray(safeSnapshot.manualDiagnosticTestPoints),
+    installedDiagnosticTestPointIds: toSafeArray(safeSnapshot.installedDiagnosticTestPointIds),
+    diagnosticTestPointManualCleared: Boolean(safeSnapshot.diagnosticTestPointManualCleared)
   });
 }

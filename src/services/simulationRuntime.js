@@ -1,4 +1,4 @@
-import { executePythonBinding, executePythonBindingSync } from './pythonExecutionAdapter.js';
+import { executePythonBindingSync } from './pythonExecutionAdapter.js';
 import {
   executeFlowBlockPythonBindingSync,
   executeSimulationBlockPythonBindingSync,
@@ -27,6 +27,13 @@ import {
   isFaultCompatibleWithModel,
   isFaultLibraryCompatibleWithModel
 } from './modelFaultCompatibilityService.js';
+import { buildBackendExecutablePackage } from './backendExecutablePackageService.js';
+import {
+  createBackendSimulationSession,
+  deleteBackendSimulationSession,
+  runBackendSimulation,
+  stepBackendSimulationSession
+} from './backendSimulationClient.js';
 
 export function createSimulationRuntimeFacade() {
   return {
@@ -45,11 +52,17 @@ export function createSimulationRuntimeFacade() {
     stop() {
       window.simStop?.();
     },
-    executePythonBinding,
     executePythonBindingSync,
     executeFlowBlockPythonBindingSync,
     executeSimulationBlockPythonBindingSync,
     getPythonBindingDefaultValue,
+    backend: {
+      buildExecutablePackage: buildBackendExecutablePackage,
+      runSimulation: runBackendSimulation,
+      createSession: createBackendSimulationSession,
+      stepSession: stepBackendSimulationSession,
+      deleteSession: deleteBackendSimulationSession
+    },
     faultInjection: {
       applyScalarFault,
       applyScalarFaultBindings,
@@ -78,7 +91,6 @@ export function createSimulationRuntimeFacade() {
 
 if (typeof window !== 'undefined') {
   window.__GZ_PYTHON_RUNTIME__ = {
-    executePythonBinding,
     executePythonBindingSync,
     executeFlowBlockPythonBindingSync,
     executeSimulationBlockPythonBindingSync,
@@ -106,5 +118,12 @@ if (typeof window !== 'undefined') {
       isFaultCompatibleWithModel,
       isFaultLibraryCompatibleWithModel
     }
+  };
+  window.__GZ_BACKEND_SIMULATION__ = {
+    buildExecutablePackage: buildBackendExecutablePackage,
+    runSimulation: runBackendSimulation,
+    createSession: createBackendSimulationSession,
+    stepSession: stepBackendSimulationSession,
+    deleteSession: deleteBackendSimulationSession
   };
 }

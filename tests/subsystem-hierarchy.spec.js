@@ -79,10 +79,7 @@ describe('subsystem hierarchy snapshot compatibility', () => {
     expect(snapshot.canvasTrail).toEqual(['canvas-root', 'canvas-child']);
     expect(snapshot.modelNodes).toEqual(snapshot.canvases['canvas-child'].nodes);
     expect(snapshot.modelEdges).toEqual(snapshot.canvases['canvas-child'].edges);
-    expect(snapshot.canvases['canvas-child'].nodes[1].pythonBinding.executionConfig).toMatchObject({
-      endpoint: 'http://127.0.0.1:8765/api/python-flow/execute',
-      timeoutMs: 1234
-    });
+    expect(snapshot.canvases['canvas-child'].nodes[1].pythonBinding).not.toHaveProperty('executionConfig');
   });
 
   it('falls back to empty layered defaults when canvases are missing', () => {

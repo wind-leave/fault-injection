@@ -4,6 +4,20 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: './',
   plugins: [vue()],
+  server: {
+    host: '0.0.0.0',
+    port: 5173,
+    proxy: {
+      '/api/simulations': {
+        target: 'http://127.0.0.1:8766',
+        changeOrigin: true
+      },
+      '/api/troubleshooting': {
+        target: 'http://127.0.0.1:8766',
+        changeOrigin: true
+      }
+    }
+  },
   test: {
     environment: 'jsdom',
     globals: true,

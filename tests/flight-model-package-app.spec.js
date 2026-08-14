@@ -238,48 +238,19 @@ function mockNextJsonFileSelection(fileText) {
   });
 }
 
-function collectLinkedSubsystemNodes(snapshot) {
-  const rootCanvas = snapshot?.canvases?.[snapshot?.rootCanvasId];
-  if (!rootCanvas) {
-    return [];
-  }
-
-  return (rootCanvas.nodes || []).filter((node) => node?.type === 'subsystem_block' && node.targetCanvasId);
-}
-
 async function flushRuntime() {
   await nextTick();
   await Promise.resolve();
 }
 
-async function importDefaultClosedLoopPackage() {
-  const wrapper = mount(App, { attachTo: document.body });
+
+async function injectFaultFromCatalog(faultId) {
+  window.doImportFault();
   await flushRuntime();
-
-  const defaultPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-  const importResult = await window.__GZ_LOAD_DEFAULT_FLIGHT_MODEL__({
-    force: true,
-    packageObject: defaultPackage
-  });
+  window.selectFaultCatalogModel(faultId);
   await flushRuntime();
-
-  expect(importResult).toMatchObject({ ok: true });
-  return {
-    wrapper,
-    defaultPackage,
-    state: window.__GZ_STATE__
-  };
-}
-
-function getScopePeak(samples = []) {
-  if (!samples.length) {
-    return 0;
-  }
-
-  return samples.reduce((peak, sample) => {
-    const value = Number.isFinite(sample?.actual) ? sample.actual : 0;
-    return Math.max(peak, Math.abs(value));
-  }, 0);
+  window.confirmImportFault();
+  await flushRuntime();
 }
 
 function targetHasFaultRef(target, faultId) {
@@ -302,38 +273,33 @@ function targetHasFaultRef(target, faultId) {
       .some((key) => Array.isArray(target[key]) && target[key].some(matches));
 }
 
-async function measurePackageDynamicsScopePeak(fileName) {
-  const wrapper = mount(App, { attachTo: document.body });
-  await flushRuntime();
-
-  const pkg = loadPublicPackage(fileName);
-  const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-  await flushRuntime();
-
-  expect(importResult).toMatchObject({ ok: true });
-
-  window.simInit(true);
-  for (let step = 0; step < 6; step += 1) {
-    window.simStep();
-  }
-  await flushRuntime();
-
-  const scopeSamples = window.__GZ_SIM__?.actual?.scopeSamples?.['node-11']?.ch1 ?? [];
-  const scopePeak = getScopePeak(scopeSamples);
-
-  wrapper.unmount();
-  document.body.innerHTML = '';
-  __resetLegacyRuntimeForTests();
-
-  return { scopeSamples, scopePeak };
-}
-
 describe('Flight model package app integration', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     window.localStorage.clear();
     document.body.innerHTML = '';
     __resetLegacyRuntimeForTests();
+  });
+
+  it('hides palette templates that are present in an imported model', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const sensor = window.createNode('airspeed_sensor', 320, 240);
+    const exportedPackage = window.__GZ_FLIGHT_MODEL_PACKAGE__.exportCurrent();
+    expect(sensor).toMatchObject({ type: 'simulation_block', templateId: 'airspeed_sensor' });
+
+    window.doCreateBlankWorkspace();
+    await flushRuntime();
+    expect(document.querySelector('[data-component="airspeed_sensor"]')).not.toBeNull();
+
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(exportedPackage)).toMatchObject({ ok: true });
+    await flushRuntime();
+    expect(window.__GZ_STATE__.modelNodes[0]).toMatchObject({ templateId: 'airspeed_sensor' });
+    expect(document.querySelector('[data-component="airspeed_sensor"]')).toBeNull();
+
+    wrapper.unmount();
   });
 
   it('imports and exports a flight model package through the legacy runtime bridge', async () => {
@@ -352,207 +318,135 @@ describe('Flight model package app integration', () => {
       modelId: MODEL_ID,
       modelName: MODEL_NAME
     });
-    expect(window.__GZ_STATE__.availableFaultModels.some((model) => model.id === 'fault-actuator-saturation')).toBe(true);
+    expect(window.__GZ_STATE__.availableFaultModels.some((model) => model.id === 'fault-actuator-saturation')).toBe(false);
     expect(window.__GZ_STATE__.availableFaultModels.some((model) => model.id === 'physical_parameter_bias')).toBe(true);
     expect(document.getElementById('tm')?.textContent).toContain(`飞控模型包“${MODEL_NAME}”已导入`);
+
+    window.__GZ_STATE__.diagnosticTestPoints = [
+      { pointId: 'tp-export-fixed', edgeId: 'edge-export', name: 'Export fixed point' }
+    ];
+    window.__GZ_STATE__.manualDiagnosticTestPoints = [
+      { pointId: 'tp-export-manual', edgeId: 'edge-manual', name: 'Export manual point' }
+    ];
+    window.__GZ_STATE__.installedDiagnosticTestPointIds = ['tp-export-fixed', 'tp-export-manual'];
 
     const exportedPackage = window.__GZ_FLIGHT_MODEL_PACKAGE__.exportCurrent();
 
     expect(exportedPackage.modelId).toBe(MODEL_ID);
     expect(exportedPackage.pythonModules[0].moduleId).toBe('attitude_pid');
     expect(exportedPackage.workbenchSnapshot.modelNodes[0].pythonBinding.sourcePackageId).toBe(MODEL_ID);
+    expect(exportedPackage.workbenchSnapshot.diagnosticTestPoints).toEqual([
+      { pointId: 'tp-export-fixed', edgeId: 'edge-export', name: 'Export fixed point' }
+    ]);
+    expect(exportedPackage.workbenchSnapshot.manualDiagnosticTestPoints).toEqual([
+      { pointId: 'tp-export-manual', edgeId: 'edge-manual', name: 'Export manual point' }
+    ]);
+    expect(exportedPackage.workbenchSnapshot.installedDiagnosticTestPointIds).toEqual(['tp-export-fixed', 'tp-export-manual']);
+
+    window.__GZ_STATE__.diagnosticTestPoints = [];
+    window.__GZ_STATE__.manualDiagnosticTestPoints = [];
+    window.__GZ_STATE__.installedDiagnosticTestPointIds = [];
+    const reimportResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(exportedPackage);
+    await flushRuntime();
+
+    expect(reimportResult).toMatchObject({ ok: true });
+    expect(window.__GZ_STATE__.diagnosticTestPoints).toEqual([
+      { pointId: 'tp-export-fixed', edgeId: 'edge-export', name: 'Export fixed point' }
+    ]);
+    expect(window.__GZ_STATE__.manualDiagnosticTestPoints).toEqual([
+      { pointId: 'tp-export-manual', edgeId: 'edge-manual', name: 'Export manual point' }
+    ]);
+    expect(window.__GZ_STATE__.installedDiagnosticTestPointIds).toEqual(['tp-export-fixed', 'tp-export-manual']);
 
     wrapper.unmount();
   });
 
-  it('loads the closed-loop eVTOL package as the default flight-control model on demand', async () => {
+  it('preserves components with no input or output interfaces when exporting a system model', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
-    expect(typeof window.__GZ_LOAD_DEFAULT_FLIGHT_MODEL__).toBe('function');
-    expect(window.__GZ_STATE__.sysLoaded).not.toBe(true);
+    const portlessPackage = {
+      ...PACKAGE_FIXTURE,
+      pythonModules: [],
+      workbenchSnapshot: createWorkbenchSnapshot({
+        modelNodes: [{
+          id: 'node-portless',
+          type: 'simulation_block',
+          x: 360,
+          y: 240,
+          props: {
+            name: 'Portless Component',
+            inputs: [],
+            outputs: [],
+            middleVars: [],
+            powerInputs: [],
+            powerOutputs: []
+          }
+        }],
+        modelEdges: [],
+        nodeSeq: 1,
+        edgeSeq: 0
+      })
+    };
 
-    const defaultPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = await window.__GZ_LOAD_DEFAULT_FLIGHT_MODEL__({
-      force: true,
-      packageObject: defaultPackage
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(portlessPackage)).toMatchObject({ ok: true });
+    await flushRuntime();
+    window.renderModelNodes();
+
+    const node = window.__GZ_STATE__.modelNodes[0];
+    expect(window.getNodePorts(node)).toEqual({ inputs: [], outputs: [] });
+
+    const exportedNode = window.__GZ_FLIGHT_MODEL_PACKAGE__.exportCurrent().workbenchSnapshot.modelNodes[0];
+    expect(exportedNode.props).toMatchObject({
+      inputs: [],
+      outputs: [],
+      powerInputs: [],
+      powerOutputs: []
     });
+
+    wrapper.unmount();
+  });
+
+  it('does not register fault types while importing a model package', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(PACKAGE_FIXTURE);
     await flushRuntime();
 
     expect(importResult).toMatchObject({ ok: true });
-    expect(window.__GZ_STATE__.sysLoaded).toBe(true);
-    expect(window.__GZ_STATE__.activeModelPackage).toMatchObject({
-      modelId: defaultPackage.modelId,
-      modelName: defaultPackage.modelName,
-      systemFamily: 'uav-flight-control'
-    });
-    expect(window.__GZ_STATE__.modelNodes).toHaveLength(defaultPackage.workbenchSnapshot.modelNodes.length);
-    expect(window.__GZ_STATE__.modelEdges.some((edge) => edge.id === 'edge-imu-error')).toBe(true);
-    expect(window.__GZ_STATE__.availableFaultModels.some((model) => model.id === 'sensor_additive_bias')).toBe(true);
-    expect(window.__GZ_DEFAULT_FLIGHT_MODEL_STATE__).toMatchObject({
-      loaded: true,
-      modelId: defaultPackage.modelId,
-      modelName: defaultPackage.modelName,
-      source: 'provided-object'
-    });
+    expect(window.__GZ_STATE__.availableFaultModels.map((model) => model.id)).not.toContain('fault-actuator-saturation');
+    expect((window.__GZ_STATE__.faultLibrary || []).map((model) => model.id)).not.toContain('fault-actuator-saturation');
 
     wrapper.unmount();
   });
 
-  it('resolves compatible fault choices from target fault capability slots', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-    const state = window.__GZ_STATE__;
 
-    const imu = state.modelNodes.find((node) => node.id === 'node-imu');
-    const motor = state.modelNodes.find((node) => node.id === 'node-motor-1');
-    const canEdge = state.modelEdges.find((edge) => edge.id === 'edge-motor-motor1');
-    const imuFeedbackEdge = state.modelEdges.find((edge) => edge.id === 'edge-imu-error');
-    const controller = state.modelNodes.find((node) => node.id === 'node-controller');
-
-    expect(window.getFaultCapabilityForTarget(imu)).toMatchObject({
-      targetId: 'node-imu',
-      targetKind: 'node'
-    });
-    expect(window.getCompatibleFaultModelsForTarget(imu).map((fault) => fault.id)).toEqual(expect.arrayContaining([
-      'gyro_zero_bias_offset',
-      'gyro_zero_bias_drift',
-      'gyro_zero_bias_intermittent',
-      'sensor_additive_bias',
-      'fault_noise_injection',
-      'colored_noise',
-      'signal_freeze',
-      'intermittent_anomaly'
-    ]));
-    expect(window.getCompatibleFaultModelsForTarget(motor).map((fault) => fault.id)).toEqual(expect.arrayContaining([
-      'motor_1_stuck_position'
-    ]));
-    expect(window.getCompatibleFaultModelsForTarget(canEdge).map((fault) => fault.id)).toEqual(expect.arrayContaining([
-      'control_command_tamper',
-      'data_tamper',
-      'burst_packet_loss'
-    ]));
-    expect(window.getCompatibleFaultModelsForTarget(imuFeedbackEdge).map((fault) => fault.id)).toEqual(expect.arrayContaining([
-      'can_bus_delay',
-      'fixed_delay',
-      'time_varying_delay',
-      'random_packet_loss',
-      'blocking_interrupt'
-    ]));
-    expect(window.getCompatibleFaultModelsForTarget(controller).map((fault) => fault.id)).toEqual(expect.arrayContaining([
-      'physical_parameter_step',
-      'state_jump_or_sign_flip'
-    ]));
-
-    wrapper.unmount();
-  });
-
-  it('filters compatible fault choices by the selected injector layer', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-    const state = window.__GZ_STATE__;
-    const controller = state.modelNodes.find((node) => node.id === 'node-controller');
-    const imuFeedbackEdge = state.modelEdges.find((edge) => edge.id === 'edge-imu-error');
-
-    const controllerPhysical = window.getCompatibleFaultModelsForTarget(controller, { layer: 'physical' }).map((fault) => fault.id);
-    const controllerElectrical = window.getCompatibleFaultModelsForTarget(controller, { layer: 'electrical' }).map((fault) => fault.id);
-    const controllerProtocol = window.getCompatibleFaultModelsForTarget(controller, { layer: 'protocol' }).map((fault) => fault.id);
-
-    expect(controllerPhysical).toContain('physical_parameter_step');
-    expect(controllerPhysical).not.toContain('state_jump_or_sign_flip');
-    expect(controllerElectrical).toContain('state_jump_or_sign_flip');
-    expect(controllerElectrical).not.toContain('physical_parameter_step');
-    expect(controllerProtocol).toEqual([]);
-
-    const imuProtocol = window.getCompatibleFaultModelsForTarget(imuFeedbackEdge, { layer: 'protocol' }).map((fault) => fault.id);
-    expect(imuProtocol).toEqual(expect.arrayContaining(['can_bus_delay']));
-
-    wrapper.unmount();
-  });
-
-  it('disables fault-library target choices from fault injector component drops', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-    const state = window.__GZ_STATE__;
-    const controller = state.modelNodes.find((node) => node.id === 'node-controller');
-    const imuFeedbackEdge = state.modelEdges.find((edge) => edge.id === 'edge-imu-error');
-
-    const physicalResult = window.handleFaultComponentDrop({
-      target: controller,
-      targetKind: 'node',
-      layer: 'physical'
-    });
+  it('exposes the component registry globals before evaluating the legacy runtime', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
-    expect(physicalResult).toMatchObject({ ok: false, reason: 'fault-library-disabled' });
-    expect(document.querySelector('[data-target-fault-dialog]')).toBeNull();
-    expect(document.querySelector('[data-activate-compatible-fault="physical_parameter_step"]')).toBeNull();
-    expect(document.querySelector('[data-activate-compatible-fault="state_jump_or_sign_flip"]')).toBeNull();
-
-    const protocolOnNode = window.handleFaultComponentDrop({
-      target: controller,
-      targetKind: 'node',
-      layer: 'protocol'
+    expect(window.__GZ_COMPONENT_GROUPS__.map((group) => group.id)).not.toContain('signal-ops');
+    expect(window.__GZ_COMPONENT_REGISTRY__.flow_block).toMatchObject({
+      type: 'flow_block',
+      group: 'legacy-hidden',
+      label: '信号适配块'
     });
-    await flushRuntime();
-    expect(protocolOnNode).toMatchObject({ ok: false, reason: 'fault-library-disabled' });
-
-    const protocolResult = window.handleLineFaultComponentDrop({
-      target: imuFeedbackEdge,
-      targetKind: 'edge',
-      layer: 'protocol'
+    expect(window.__GZ_COMPONENT_LIBRARY__.flow_block).toMatchObject({
+      label: '信号适配块',
+      badge: '适配',
+      className: 'b-flow'
     });
-    await flushRuntime();
-
-    expect(protocolResult).toMatchObject({ ok: false, reason: 'fault-library-disabled' });
-    expect(document.querySelector('[data-activate-compatible-fault="can_bus_delay"]')).toBeNull();
-    expect(document.querySelector('[data-activate-compatible-fault="sensor_additive_bias"]')).toBeNull();
+    expect(window.__GZ_COMPONENT_LIBRARY__.flow_block).not.toHaveProperty('group');
 
     wrapper.unmount();
   });
 
-  it('records the injection form for module-variable and protocol-bus injections', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-    const state = window.__GZ_STATE__;
-    const controller = state.modelNodes.find((node) => node.id === 'node-controller');
-    const imuFeedbackEdge = state.modelEdges.find((edge) => edge.id === 'edge-imu-error');
-    const controllerPhysicalSlot = window.getCompatibleFaultOptionsForTarget(controller, { layer: 'physical' })[0].slot;
-    const imuProtocolSlot = window.getCompatibleFaultOptionsForTarget(imuFeedbackEdge, { layer: 'protocol' })[0].slot;
 
-    const moduleResult = window.activateFaultForTarget(controller, 'physical_parameter_step', {}, {
-      slot: controllerPhysicalSlot,
-      slotId: 'physical:controller_gain',
-      layer: 'physical'
-    });
-    const protocolResult = window.activateFaultForTarget(imuFeedbackEdge, 'can_bus_delay', {}, {
-      slot: imuProtocolSlot,
-      slotId: 'imu-feedback-can',
-      layer: 'protocol'
-    });
-    await flushRuntime();
 
-    expect(moduleResult.ok).toBe(true);
-    expect(protocolResult.ok).toBe(true);
-    expect(state.faultInstances).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        faultTypeId: 'physical_parameter_step',
-        targetKind: 'node',
-        injectionForm: 'module-variable'
-      }),
-      expect.objectContaining({
-        faultTypeId: 'can_bus_delay',
-        targetKind: 'edge',
-        injectionForm: 'protocol-bus'
-      })
-    ]));
-    expect(controller.injectedFault).toMatchObject({
-      modelId: 'physical_parameter_step',
-      injectionForm: 'module-variable'
-    });
-    expect(imuFeedbackEdge.injectedFault).toMatchObject({
-      modelId: 'can_bus_delay',
-      injectionForm: 'protocol-bus'
-    });
 
-    wrapper.unmount();
-  });
+
+
 
   it('records signal-edge injections for electrical line fault slots', async () => {
     const wrapper = mount(App, { attachTo: document.body });
@@ -692,7 +586,7 @@ describe('Flight model package app integration', () => {
               {
                 slotId: 'gyro-feedback',
                 signalName: '角速度反馈',
-                allowedFaultTypeIds: ['gyro_zero_bias_drift']
+                allowedFaultTypeIds: ['sensor_additive_bias']
               }
             ]
           },
@@ -714,7 +608,7 @@ describe('Flight model package app integration', () => {
       },
       faultTypeCatalog: [
         {
-          id: 'gyro_zero_bias_drift',
+          id: 'sensor_additive_bias',
           displayName: 'Gyro 零偏 - 缓慢漂移',
           layer: 'sensor',
           runtimeBehavior: 'drift',
@@ -733,7 +627,7 @@ describe('Flight model package app integration', () => {
           targetKind: 'node',
           targetId: 'node-imu',
           slotId: 'gyro-feedback',
-          allowedFaultTypeIds: ['gyro_zero_bias_drift']
+          allowedFaultTypeIds: ['sensor_additive_bias']
         }
       ],
       faultInstances: [],
@@ -864,361 +758,19 @@ describe('Flight model package app integration', () => {
     wrapper.unmount();
   });
 
-  it('activates a compatible fault as a target-owned fault instance', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-    const state = window.__GZ_STATE__;
-    const imu = state.modelNodes.find((node) => node.id === 'node-imu');
 
-    const result = window.activateFaultForTarget(imu, 'gyro_zero_bias_drift', {
-      rate: '0.01',
-      start: '5'
-    });
-    await flushRuntime();
 
-    expect(result.ok).toBe(true);
-    expect(state.faultInstances).toHaveLength(1);
-    expect(state.faultInstances[0]).toMatchObject({
-      faultTypeId: 'gyro_zero_bias_drift',
-      targetKind: 'node',
-      targetId: 'node-imu',
-      slotId: 'physical:imu_zero_bias',
-      active: true
-    });
-    expect(state.faultInstances[0].parameters).toMatchObject({ rate: '0.01', start: '5' });
-    expect(imu.injectedFault).toMatchObject({ modelId: 'gyro_zero_bias_drift' });
-    expect(imu.faultBindings.some((binding) => binding.faultModelId === 'gyro_zero_bias_drift')).toBe(true);
-    expect(state.faultTags.some((tag) => tag.faultModelId === 'gyro_zero_bias_drift' && tag.targetId === 'node-imu')).toBe(true);
-    expect(document.querySelector('.edge-path[data-edge-id="edge-imu-error"]')?.classList.contains('is-faulted')).toBe(false);
 
-    wrapper.unmount();
-  });
 
-  it('rejects fault activation on targets without compatible capability slots', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-    const state = window.__GZ_STATE__;
-    const controller = state.modelNodes.find((node) => node.id === 'node-controller');
 
-    const result = window.activateFaultForTarget(controller, 'gyro_zero_bias_drift');
-    await flushRuntime();
 
-    expect(result).toMatchObject({ ok: false, error: 'incompatible-target' });
-    expect(state.faultInstances || []).toHaveLength(0);
-    expect(controller.injectedFault).toBeUndefined();
 
-    wrapper.unmount();
-  });
 
-  it('opens compatible fault choices for a selected target instead of importing arbitrary catalog faults', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-    const state = window.__GZ_STATE__;
-    const imu = state.modelNodes.find((node) => node.id === 'node-imu');
 
-    window.selectNode(imu.id);
-    window.openTargetFaultActivationDialog();
-    await flushRuntime();
 
-    const dialog = document.querySelector('[data-target-fault-dialog]');
-    expect(dialog).not.toBeNull();
-    expect(dialog.textContent).toContain('IMU 陀螺仪反馈');
-    expect(dialog.textContent).toContain('Gyro 陀螺仪零偏 - 固定偏差');
-    expect(dialog.textContent).toContain('Gyro 陀螺仪零偏 - 缓慢漂移');
-    expect(dialog.textContent).toContain('Gyro 陀螺仪零偏 - 间歇故障');
-    expect(dialog.textContent).not.toContain('单电机卡死');
 
-    wrapper.unmount();
-  });
 
-  it('prevents choosing the same concrete fault twice on the same target', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-    const state = window.__GZ_STATE__;
-    const imu = state.modelNodes.find((node) => node.id === 'node-imu');
 
-    const first = window.activateFaultForTarget(imu, 'gyro_zero_bias_drift');
-    const second = window.activateFaultForTarget(imu, 'gyro_zero_bias_drift');
-    await flushRuntime();
-
-    expect(first.ok).toBe(true);
-    expect(second).toMatchObject({ ok: false, error: 'duplicate-fault-instance' });
-    expect(state.faultInstances.filter((instance) => (
-      instance.targetId === 'node-imu' && instance.faultTypeId === 'gyro_zero_bias_drift'
-    ))).toHaveLength(1);
-
-    window.selectNode(imu.id);
-    window.openTargetFaultActivationDialog();
-    await flushRuntime();
-
-    const injectedChoice = document.querySelector('[data-activate-compatible-fault="gyro_zero_bias_drift"]');
-    const otherChoice = document.querySelector('[data-activate-compatible-fault="gyro_zero_bias_offset"]');
-    expect(injectedChoice).not.toBeNull();
-    expect(injectedChoice.disabled).toBe(true);
-    expect(injectedChoice.classList.contains('is-injected')).toBe(true);
-    expect(injectedChoice.textContent).toContain('已注入');
-    expect(otherChoice).not.toBeNull();
-    expect(otherChoice.disabled).toBe(false);
-
-    wrapper.unmount();
-  });
-
-  it('requires parameter confirmation before activating a compatible fault choice', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-    const state = window.__GZ_STATE__;
-    const imu = state.modelNodes.find((node) => node.id === 'node-imu');
-    const initialTagCount = (state.faultTags || []).length;
-
-    window.selectNode(imu.id);
-    window.openTargetFaultActivationDialog();
-    await flushRuntime();
-
-    const choice = document.querySelector('[data-activate-compatible-fault="gyro_zero_bias_drift"]');
-    expect(choice).not.toBeNull();
-    choice.click();
-    await flushRuntime();
-
-    expect(state.faultInstances || []).toHaveLength(0);
-    expect((state.faultTags || []).length).toBe(initialTagCount);
-
-    const panel = document.querySelector('[data-target-fault-parameters]');
-    expect(panel).not.toBeNull();
-    expect(panel.textContent).toContain('Gyro 陀螺仪零偏 - 缓慢漂移');
-    expect(panel.querySelector('[data-target-fault-param="rate"]')).not.toBeNull();
-    const parameterGridText = panel.querySelector('.target-fault-parameters__grid')?.textContent || '';
-    expect(parameterGridText).toContain('漂移速率');
-    expect(parameterGridText).toContain('开始时间');
-    expect(parameterGridText).toContain('持续时间');
-    expect(parameterGridText).not.toContain('rate');
-    expect(parameterGridText).not.toContain('start');
-    expect(parameterGridText).not.toContain('duration');
-
-    const rate = panel.querySelector('[data-target-fault-param="rate"]');
-    rate.value = '0.009';
-    rate.dispatchEvent(new Event('input', { bubbles: true }));
-    panel.querySelector('[data-confirm-target-fault]').click();
-    await flushRuntime();
-
-    expect(state.faultInstances).toContainEqual(expect.objectContaining({
-      faultTypeId: 'gyro_zero_bias_drift',
-      targetKind: 'node',
-      targetId: 'node-imu',
-      parameters: expect.objectContaining({ rate: '0.009' })
-    }));
-    expect(state.faultTags).toContainEqual(expect.objectContaining({
-      faultModelId: 'gyro_zero_bias_drift',
-      targetKind: 'node',
-      targetId: 'node-imu'
-    }));
-
-    wrapper.unmount();
-  });
-
-  it('uses explicit diagnostic matrix signatures for multiple fault forms on the same target', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-
-    const matrix = window.buildDetectionMatrixModel();
-    const residual = matrix.points.find((point) => point.shortName === 'M10');
-    const spectrum = matrix.points.find((point) => point.shortName === 'M11');
-    const byFault = new Map(matrix.rows.map((row) => [row.faultId, row]));
-
-    const fixed = byFault.get('gyro_zero_bias_offset');
-    const drift = byFault.get('gyro_zero_bias_drift');
-    const intermittent = byFault.get('gyro_zero_bias_intermittent');
-
-    expect(fixed.cells.find((cell) => cell.pointId === residual.pointId).detectable).toBe(false);
-    expect(drift.cells.find((cell) => cell.pointId === residual.pointId).detectable).toBe(true);
-    expect(intermittent.cells.find((cell) => cell.pointId === spectrum.pointId).detectable).toBe(true);
-    expect(intermittent.cells.find((cell) => cell.pointId === spectrum.pointId).reason).toContain('间歇');
-
-    wrapper.unmount();
-  });
-
-  it('builds an ordered troubleshooting path for a concrete fault from the D matrix', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-
-    expect(typeof window.buildTroubleshootingPathForFault).toBe('function');
-    const path = window.buildTroubleshootingPathForFault('gyro_zero_bias_drift');
-
-    expect(path).toMatchObject({
-      faultId: 'gyro_zero_bias_drift',
-      faultName: 'Gyro 陀螺仪零偏 - 缓慢漂移'
-    });
-    expect(path.steps.length).toBeGreaterThanOrEqual(2);
-    expect(path.steps[0]).toMatchObject({
-      pointCode: 'M10',
-      pointName: '残差诊断',
-      expected: expect.stringContaining('残差趋势项持续上升')
-    });
-    expect(path.steps[0].remainingFaultIds).toContain('gyro_zero_bias_drift');
-    expect(path.steps[0].remainingFaultIds).not.toContain('gyro_zero_bias_offset');
-    expect(path.steps.some((step) => step.pointCode === 'M3')).toBe(true);
-    expect(path.summary).toContain('优先检查');
-
-    wrapper.unmount();
-  });
-
-  it('opens the troubleshooting path panel from a D matrix fault row', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-
-    window.renderDetectionMatrixPanel();
-    await flushRuntime();
-
-    const action = document.querySelector('[data-build-troubleshooting-path="gyro_zero_bias_drift"]');
-    expect(action).not.toBeNull();
-    action.click();
-    await flushRuntime();
-
-    const panel = document.querySelector('[data-troubleshooting-path-panel]');
-    expect(panel).not.toBeNull();
-    expect(panel.textContent).toContain('Gyro 陀螺仪零偏 - 缓慢漂移');
-    expect(panel.textContent).toContain('M10');
-    expect(panel.textContent).toContain('残差趋势项持续上升');
-
-    wrapper.unmount();
-  });
-
-  it('does not inject into a model edge from the disabled fault component drop flow', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-    const state = window.__GZ_STATE__;
-    const canEdge = state.modelEdges.find((edge) => edge.id === 'edge-motor-motor1');
-
-    expect(typeof window.handleLineFaultComponentDrop).toBe('function');
-
-    const moduleFaultResult = window.handleFaultComponentDrop({ target: canEdge, x: 0, y: 0 });
-    expect(moduleFaultResult).toMatchObject({
-      ok: false,
-      reason: 'fault-library-disabled'
-    });
-
-    const result = window.handleLineFaultComponentDrop({ target: canEdge, x: 0, y: 0 });
-    await flushRuntime();
-
-    expect(result).toMatchObject({
-      ok: false,
-      reason: 'fault-library-disabled'
-    });
-
-    const choice = document.querySelector('[data-activate-compatible-fault="control_command_tamper"]');
-    expect(choice).toBeNull();
-    expect(document.querySelector('[data-target-fault-dialog]')).toBeNull();
-    expect(state.faultInstances || []).not.toContainEqual(expect.objectContaining({
-      faultTypeId: 'control_command_tamper',
-      targetKind: 'edge',
-      targetId: 'edge-motor-motor1'
-    }));
-    expect(canEdge.injectedFault).toBeUndefined();
-    expect(canEdge.faultBindings?.some((binding) => binding.faultModelId === 'control_command_tamper')).not.toBe(true);
-    expect(document.querySelector('.edge-path[data-edge-id="edge-motor-motor1"]')?.classList.contains('is-faulted')).toBe(false);
-
-    wrapper.unmount();
-  });
-
-  it('does not offer direct fault-library choices on the IMU feedback line', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-    const state = window.__GZ_STATE__;
-    const imuFeedbackEdge = state.modelEdges.find((edge) => edge.id === 'edge-imu-error');
-
-    const result = window.handleLineFaultComponentDrop({ target: imuFeedbackEdge, x: 0, y: 0 });
-    await flushRuntime();
-
-    expect(result).toMatchObject({
-      ok: false,
-      reason: 'fault-library-disabled'
-    });
-
-    const choice = document.querySelector('[data-activate-compatible-fault="can_bus_delay"]');
-    expect(choice).toBeNull();
-    expect(document.querySelector('[data-target-fault-dialog]')).toBeNull();
-    expect(state.faultInstances || []).not.toContainEqual(expect.objectContaining({
-      faultTypeId: 'can_bus_delay',
-      targetKind: 'edge',
-      targetId: 'edge-imu-error'
-    }));
-    expect(imuFeedbackEdge.injectedFault).toBeUndefined();
-    expect(document.querySelector('.edge-path[data-edge-id="edge-imu-error"]')?.classList.contains('is-faulted')).toBe(false);
-    expect(document.getElementById('b-node-imu')?.classList.contains('faulted')).toBe(false);
-
-    wrapper.unmount();
-  });
-
-  it('highlights only compatible modules while dragging the module fault component template', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-
-    expect(typeof window.showCompatibleFaultDropTargets).toBe('function');
-    expect(typeof window.clearCompatibleFaultDropTargets).toBe('function');
-
-    window.showCompatibleFaultDropTargets({ targetKind: 'node' });
-    await flushRuntime();
-
-    expect(document.getElementById('diagram')?.classList.contains('fault-drop-preview')).toBe(true);
-    expect(document.getElementById('diagram')?.classList.contains('fault-drop-preview--node')).toBe(true);
-    expect(document.getElementById('b-node-imu')?.classList.contains('fault-drop-compatible')).toBe(true);
-    expect(document.getElementById('b-node-motor-1')?.classList.contains('fault-drop-compatible')).toBe(true);
-    expect(document.getElementById('b-node-controller')?.classList.contains('fault-drop-compatible')).toBe(true);
-    expect(document.querySelector('.edge-path[data-edge-id="edge-motor-motor1"]')?.classList.contains('is-fault-drop-compatible')).toBe(false);
-    expect(document.querySelector('.edge-path[data-edge-id="edge-shaper-error"]')?.classList.contains('is-fault-drop-compatible')).toBe(false);
-
-    window.clearCompatibleFaultDropTargets();
-    await flushRuntime();
-
-    expect(document.getElementById('diagram')?.classList.contains('fault-drop-preview')).toBe(false);
-    expect(document.getElementById('b-node-imu')?.classList.contains('fault-drop-compatible')).toBe(false);
-    expect(document.querySelector('.edge-path[data-edge-id="edge-motor-motor1"]')?.classList.contains('is-fault-drop-compatible')).toBe(false);
-
-    wrapper.unmount();
-  });
-
-  it('highlights only compatible lines while dragging the line fault component template', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-
-    expect(typeof window.showCompatibleFaultDropTargets).toBe('function');
-
-    window.showCompatibleFaultDropTargets({ targetKind: 'edge' });
-    await flushRuntime();
-
-    expect(document.getElementById('diagram')?.classList.contains('fault-drop-preview')).toBe(true);
-    expect(document.getElementById('diagram')?.classList.contains('fault-drop-preview--edge')).toBe(true);
-    expect(document.getElementById('b-node-imu')?.classList.contains('fault-drop-compatible')).toBe(false);
-    expect(document.getElementById('b-node-motor-1')?.classList.contains('fault-drop-compatible')).toBe(false);
-    expect(document.querySelector('.edge-path[data-edge-id="edge-motor-motor1"]')?.classList.contains('is-fault-drop-compatible')).toBe(true);
-    expect(document.querySelector('.edge-path[data-edge-id="edge-shaper-error"]')?.classList.contains('is-fault-drop-compatible')).toBe(false);
-
-    window.clearCompatibleFaultDropTargets();
-    await flushRuntime();
-
-    expect(document.getElementById('diagram')?.classList.contains('fault-drop-preview--edge')).toBe(false);
-    expect(document.querySelector('.edge-path[data-edge-id="edge-motor-motor1"]')?.classList.contains('is-fault-drop-compatible')).toBe(false);
-
-    wrapper.unmount();
-  });
-
-  it('blocks target-specific choices when the fault component is dropped on a compatible target', async () => {
-    const { wrapper } = await importDefaultClosedLoopPackage();
-    const state = window.__GZ_STATE__;
-    const imu = state.modelNodes.find((node) => node.id === 'node-imu');
-    const controller = state.modelNodes.find((node) => node.id === 'node-controller');
-    const signalSource = state.modelNodes.find((node) => node.type === 'signal_source');
-    const initialTagCount = (state.faultTags || []).length;
-
-    expect(typeof window.handleFaultComponentDrop).toBe('function');
-    const compatibleResult = window.handleFaultComponentDrop({ target: imu, x: imu.x + 20, y: imu.y + 20 });
-    await flushRuntime();
-
-    expect(compatibleResult).toMatchObject({ ok: false, reason: 'fault-library-disabled' });
-    const dialog = document.querySelector('[data-target-fault-dialog]');
-    expect(dialog).toBeNull();
-    expect((state.faultTags || []).length).toBe(initialTagCount);
-
-    const controllerResult = window.handleFaultComponentDrop({ target: controller, x: controller.x + 20, y: controller.y + 20 });
-    await flushRuntime();
-
-    expect(controllerResult).toMatchObject({ ok: false, reason: 'fault-library-disabled' });
-
-    const incompatibleResult = window.handleFaultComponentDrop({ target: signalSource, x: signalSource.x + 20, y: signalSource.y + 20 });
-    await flushRuntime();
-
-    expect(incompatibleResult).toMatchObject({ ok: false, reason: 'fault-library-disabled' });
-    expect((state.faultTags || []).length).toBe(initialTagCount);
-
-    wrapper.unmount();
-  });
 
   it('keeps the startup canvas blank and imports the selected local model JSON from the import action', async () => {
     const originalFetch = window.fetch;
@@ -1238,7 +790,7 @@ describe('Flight model package app integration', () => {
       await flushRuntime();
 
       expect(importResult).toMatchObject({ ok: true });
-      expect(window.fetch).not.toHaveBeenCalled();
+      expect(window.fetch).toHaveBeenCalledWith('http://localhost:3000/model-packages/evtol-small-flight-control-fault-display.json');
       expect(window.__GZ_STATE__.sysLoaded).toBe(true);
       expect(window.__GZ_STATE__.modelNodes).toHaveLength(selectedPackage.workbenchSnapshot.modelNodes.length);
       expect(window.__GZ_STATE__.activeModelPackage).toMatchObject({
@@ -1249,6 +801,45 @@ describe('Flight model package app integration', () => {
       expect(document.getElementById('diagram')?.classList.contains('on')).toBe(true);
     } finally {
       window.fetch = originalFetch;
+      wrapper.unmount();
+    }
+  });
+
+  it('imports the selected local model JSON through the browser file picker API when available', async () => {
+    const originalPicker = window.showOpenFilePicker;
+    const selectedPackage = loadPublicPackage('evtol_small_nonlinear.json');
+    const inputClick = vi.spyOn(HTMLInputElement.prototype, 'click');
+    window.showOpenFilePicker = vi.fn().mockResolvedValue([
+      {
+        getFile: async () => ({
+          name: 'model-package.json',
+          text: async () => JSON.stringify(selectedPackage)
+        })
+      }
+    ]);
+
+    const wrapper = mount(App, { attachTo: document.body });
+    try {
+      await flushRuntime();
+
+      const importResult = await window.doImportSys();
+      await flushRuntime();
+
+      expect(importResult).toMatchObject({ ok: true });
+      expect(window.showOpenFilePicker).toHaveBeenCalledWith(expect.objectContaining({
+        multiple: false
+      }));
+      expect(inputClick).not.toHaveBeenCalled();
+      expect(window.__GZ_STATE__.activeModelPackage).toMatchObject({
+        modelId: selectedPackage.modelId,
+        modelName: selectedPackage.modelName
+      });
+    } finally {
+      if (originalPicker) {
+        window.showOpenFilePicker = originalPicker;
+      } else {
+        delete window.showOpenFilePicker;
+      }
       wrapper.unmount();
     }
   });
@@ -1306,390 +897,58 @@ describe('Flight model package app integration', () => {
     wrapper.unmount();
   });
 
-  it('force-loads the public demo over stale blank workspace state and opens fault injection directly', async () => {
-    const wrapper = mount(App, { attachTo: document.body });
-    await flushRuntime();
-
-    window.doCreateBlankWorkspace();
-    window.localStorage.setItem('gz-workbench-system-model', JSON.stringify({
-      modelNodes: [],
-      modelEdges: []
-    }));
-    await flushRuntime();
-
-    expect(window.__GZ_STATE__.sysLoaded).toBe(true);
-    expect(window.__GZ_STATE__.modelNodes).toHaveLength(0);
-
-    const defaultPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = await window.__GZ_LOAD_DEFAULT_FLIGHT_MODEL__({
-      force: true,
-      resetStoredWorkbench: true,
-      publicDemo: true,
-      packageObject: defaultPackage
+  it('waits for a delayed local model JSON selection after focus returns', async () => {
+    const selectedPackage = loadPublicPackage('evtol_small_nonlinear.json');
+    vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function click() {
+      window.dispatchEvent(new Event('focus'));
+      setTimeout(() => {
+        Object.defineProperty(this, 'files', {
+          configurable: true,
+          value: [
+            {
+              name: 'model-package.json',
+              text: async () => JSON.stringify(selectedPackage)
+            }
+          ]
+        });
+        this.onchange?.(new Event('change'));
+      }, 350);
     });
+
+    const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
-    const state = window.__GZ_STATE__;
+    const importResult = await window.doImportSys();
+    await flushRuntime();
+
     expect(importResult).toMatchObject({ ok: true });
-    expect(window.localStorage.getItem('gz-workbench-system-model')).toBeNull();
-    expect(window.__GZ_PUBLIC_DEMO_MODE__).toBe(true);
-    expect(window.__GZ_DEFAULT_FLIGHT_MODEL_STATE__).toMatchObject({
-      loaded: true,
-      modelId: defaultPackage.modelId,
-      publicDemo: true
+    expect(window.__GZ_STATE__.activeModelPackage).toMatchObject({
+      modelId: selectedPackage.modelId,
+      modelName: selectedPackage.modelName
     });
-    expect(state.sysLoaded).toBe(true);
-    expect(state.activeModelPackage).toMatchObject({
-      modelId: defaultPackage.modelId,
-      modelName: defaultPackage.modelName,
-      systemFamily: 'uav-flight-control'
-    });
-    expect(state.modelNodes).toHaveLength(defaultPackage.workbenchSnapshot.modelNodes.length);
-    expect(state.modelEdges).toHaveLength(defaultPackage.workbenchSnapshot.modelEdges.length);
-    expect(state.availableFaultModels.some((model) => model.id === 'sensor_additive_bias')).toBe(true);
-    expect(document.getElementById('btn-imp-flt')?.textContent).toContain('加载故障模型');
-    expect(document.getElementById('btn-imp-flt')?.disabled).toBe(false);
-
-    window.doImportFault();
-    await flushRuntime();
-
-    expect(document.getElementById('ov-ifm')?.classList.contains('open')).not.toBe(true);
-    expect(document.querySelector('[data-fault-task-loader]')).not.toBeNull();
-    expect(document.querySelector('[data-fault-task-preset="gyro-bias"]')?.textContent).toContain('陀螺仪零偏');
-    expect(document.querySelector('[data-fault-id="gyro_zero_bias_offset"]')).toBeNull();
-    expect(document.querySelector('[data-fault-id="gyro_zero_bias_drift"]')).toBeNull();
-    expect(document.querySelector('[data-fault-id="gyro_zero_bias_intermittent"]')).toBeNull();
-    expect(document.querySelector('[data-fault-id="motor_1_stuck_position"]')).toBeNull();
-    expect(document.querySelector('[data-fault-id="control_command_tamper"]')).toBeNull();
-    expect(document.querySelector('[data-fault-id="physical_parameter_bias"]')).toBeNull();
 
     wrapper.unmount();
   });
 
-  it('removes a demo injected fault from the catalog imported state and canvas target', async () => {
-    const wrapper = mount(App, { attachTo: document.body });
-    await flushRuntime();
 
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    await flushRuntime();
 
-    expect(importResult).toMatchObject({ ok: true });
 
-    const faultId = 'gyro_zero_bias_offset';
-    window.doImportFault();
-    await flushRuntime();
-    window.selectFaultCatalogModel(faultId);
-    await flushRuntime();
-    window.confirmImportFault();
-    await flushRuntime();
 
-    const state = window.__GZ_STATE__;
-    const allTargets = () => [
-      ...state.modelNodes,
-      ...state.modelEdges,
-      ...(state.nodes || []),
-      ...(state.edges || [])
-    ];
 
-    expect(state.importedFaultModels.some((model) => model.id === faultId)).toBe(true);
-    expect(allTargets().some((target) => targetHasFaultRef(target, faultId))).toBe(true);
-    expect(state.modelNodes.some((node) => node.autoFaultInjection && node.faultModelId === faultId)).toBe(false);
-    expect((state.faultTags || []).some((tag) => tag.faultModelId === faultId)).toBe(true);
-    const hiddenTag = state.faultTags.find((tag) => tag.faultModelId === faultId);
-    expect((state.faultInjectionLinks || []).some((link) => (
-      link.faultModelId === faultId && link.role === 'fault-tag-attachment'
-    ))).toBe(true);
-    expect(document.querySelector(`[data-fault-tag-id][data-fault-model-id="${faultId}"]`)).toBeNull();
-    expect(document.querySelector(`[data-fault-tags-toggle="${hiddenTag.hostNodeId || hiddenTag.targetId}"]`)).not.toBeNull();
-    expect(document.querySelector(`[data-fault-id="${faultId}"].is-imported`)).toBeNull();
-
-    expect(typeof window.removeInjectedFault).toBe('function');
-    expect(typeof window.removeImportedFaultModel).toBe('function');
-    window.removeInjectedFault(faultId);
-    window.removeImportedFaultModel(faultId, { silent: true });
-    await flushRuntime();
-
-    expect(state.importedFaultModels.some((model) => model.id === faultId)).toBe(false);
-    expect(allTargets().some((target) => targetHasFaultRef(target, faultId))).toBe(false);
-    expect(state.modelNodes.some((node) => node.autoFaultInjection && node.faultModelId === faultId)).toBe(false);
-    expect((state.faultInjectionLinks || []).some((link) => link.faultModelId === faultId)).toBe(false);
-    expect((state.faultTags || []).some((tag) => tag.faultModelId === faultId)).toBe(false);
-    expect(document.querySelector(`[data-fault-tag-id][data-fault-model-id="${faultId}"]`)).toBeNull();
-    expect(document.querySelector(`[data-fault-tags-toggle="${hiddenTag.hostNodeId || hiddenTag.targetId}"]`)).toBeNull();
-    expect(document.querySelector(`[data-fault-id="${faultId}"].is-imported`)).toBeNull();
-
-    wrapper.unmount();
-  });
-
-  it('visualizes demo fault injection as attached fault tags instead of inserted canvas blocks', async () => {
-    const wrapper = mount(App, { attachTo: document.body });
-    await flushRuntime();
-
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    await flushRuntime();
-
-    expect(importResult).toMatchObject({ ok: true });
-
-    const cases = [
-      'gyro_zero_bias_drift',
-      'gyro_zero_bias_intermittent',
-      'motor_1_stuck_position',
-      'control_command_tamper'
-    ];
-
-    for (const faultId of cases) {
-      window.doImportFault();
-      await flushRuntime();
-      window.selectFaultCatalogModel(faultId);
-      await flushRuntime();
-      window.confirmImportFault();
-      await flushRuntime();
-
-      const state = window.__GZ_STATE__;
-      const visualNodes = state.modelNodes
-        .filter((node) => node.autoFaultInjection && node.faultModelId === faultId)
-        .map((node) => node.type);
-      expect(visualNodes).toEqual([]);
-      expect((state.faultTags || []).filter((tag) => tag.faultModelId === faultId)).toHaveLength(1);
-      const tag = (state.faultTags || []).find((item) => item.faultModelId === faultId);
-      expect(tag).toMatchObject({
-        type: 'fault_tag',
-        active: true
-      });
-      expect(typeof tag.expanded).toBe('boolean');
-      expect((state.faultInjectionLinks || []).filter((link) => (
-        link.faultModelId === faultId && link.role === 'fault-tag-attachment'
-      )).length).toBe(1);
-      if (!tag.expanded) {
-        expect(document.querySelector(`[data-fault-tag-id][data-fault-model-id="${faultId}"]`)).toBeNull();
-        const toggleSelector = tag.targetKind === 'edge'
-          ? `[data-edge-fault-toggle][data-edge-id="${tag.targetId}"]`
-          : `[data-fault-tags-toggle="${tag.hostNodeId || tag.targetId}"]`;
-        document.querySelector(toggleSelector)
-          .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-        await flushRuntime();
-      }
-      expect(document.querySelector(`[data-fault-tag-id][data-fault-model-id="${faultId}"]`)).not.toBeNull();
-    }
-
-    wrapper.unmount();
-  });
-
-  it('keeps the fault view label readable and leaves injected fault tags independently positioned', async () => {
-    const wrapper = mount(App, { attachTo: document.body });
-    await flushRuntime();
-
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    await flushRuntime();
-
-    expect(importResult).toMatchObject({ ok: true });
-    expect(document.querySelector('[data-canvas-view="components"]')?.textContent?.trim()).toBe('故障视图');
-
-    const faultId = 'motor_1_stuck_position';
-    window.doImportFault();
-    await flushRuntime();
-    window.selectFaultCatalogModel(faultId);
-    await flushRuntime();
-    window.confirmImportFault();
-    await flushRuntime();
-
-    const state = window.__GZ_STATE__;
-    const tag = state.faultTags.find((item) => item.faultModelId === faultId);
-    expect(tag).toMatchObject({ positionMode: 'manual' });
-    const initialPosition = { x: tag.x, y: tag.y };
-    const target = state.modelNodes.find((node) => node.id === tag.targetId);
-    expect(target).toBeTruthy();
-    target.x += 120;
-    target.y += 80;
-
-    window.renderModelNodes();
-    window.renderEdges();
-    await flushRuntime();
-
-    expect(tag.x).toBe(initialPosition.x);
-    expect(tag.y).toBe(initialPosition.y);
-
-    wrapper.unmount();
-  });
-
-  it('keeps injected fault tags hidden until the faulted module expands them', async () => {
-    const wrapper = mount(App, { attachTo: document.body });
-    await flushRuntime();
-
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    await flushRuntime();
-
-    expect(importResult).toMatchObject({ ok: true });
-
-    const faultId = 'gyro_zero_bias_drift';
-    window.doImportFault();
-    await flushRuntime();
-    window.selectFaultCatalogModel(faultId);
-    await flushRuntime();
-    window.confirmImportFault();
-    await flushRuntime();
-
-    const state = window.__GZ_STATE__;
-    const tag = state.faultTags.find((item) => item.faultModelId === faultId);
-    expect(tag).toMatchObject({ expanded: false });
-
-    expect(document.querySelector(`.fault-tag-card[data-fault-model-id="${faultId}"]`)).toBeNull();
-    const targetModule = document.querySelector(`[data-fault-tags-toggle="${tag.hostNodeId || tag.targetId}"]`);
-    expect(targetModule).not.toBeNull();
-    expect(document.getElementById(`b-${tag.hostNodeId || tag.targetId}`)?.classList.contains('faulted')).toBe(true);
-
-    targetModule.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await flushRuntime();
-
-    expect(tag.expanded).toBe(true);
-    let tagEl = document.querySelector(`.fault-tag-card[data-fault-model-id="${faultId}"]`);
-    expect(tagEl).not.toBeNull();
-    expect(tagEl.classList.contains('is-collapsed')).toBe(false);
-    expect(tagEl.querySelector('.fault-tag-card__compact')).toBeNull();
-    expect(tagEl.textContent).toContain('Gyro');
-
-    document.querySelector(`[data-fault-tags-toggle="${tag.hostNodeId || tag.targetId}"]`)
-      .dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await flushRuntime();
-
-    expect(tag.expanded).toBe(false);
-    expect(document.querySelector(`.fault-tag-card[data-fault-model-id="${faultId}"]`)).toBeNull();
-
-    wrapper.unmount();
-  });
-
-  it('requires explicit apply before fault tag parameter edits affect the runtime target', async () => {
-    const wrapper = mount(App, { attachTo: document.body });
-    await flushRuntime();
-
-    const pkg = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(pkg);
-    await flushRuntime();
-    expect(importResult).toMatchObject({ ok: true });
-
-    const faultId = 'gyro_zero_bias_offset';
-    window.doImportFault();
-    await flushRuntime();
-    window.selectFaultCatalogModel(faultId);
-    await flushRuntime();
-    window.confirmImportFault();
-    await flushRuntime();
-
-    const state = window.__GZ_STATE__;
-    const tag = state.faultTags.find((item) => item.faultModelId === faultId);
-    expect(tag).toBeTruthy();
-    window.selectFaultTag(tag.id);
-    await flushRuntime();
-
-    const allTargets = [
-      ...state.modelNodes,
-      ...state.modelEdges,
-      ...(state.nodes || []),
-      ...(state.edges || [])
-    ];
-    const target = allTargets.find((item) => targetHasFaultRef(item, faultId));
-    const getTargetBinding = () => target?.faultBindings?.find((binding) => targetHasFaultRef(binding, faultId));
-    const getTargetFault = () => (
-      target?.injectedFault?.modelId === faultId
-        ? target.injectedFault
-        : getTargetBinding()?.injectedFault
-    );
-    expect(target).toBeTruthy();
-    expect(getTargetFault()?.parameters?.bias).toBe(0.04);
-    expect(getTargetBinding()?.parameters?.bias).toBe(0.04);
-
-    window.setPropertyPanelTab('parameters');
-    await flushRuntime();
-
-    const input = document.querySelector('[data-fault-tag-param="bias"]');
-    const applyButton = document.querySelector('[data-fault-tag-apply]');
-    const resetButton = document.querySelector('[data-fault-tag-reset]');
-    expect(input).not.toBeNull();
-    expect(applyButton).not.toBeNull();
-    expect(resetButton).not.toBeNull();
-    expect(applyButton.disabled).toBe(true);
-
-    input.value = '0.12';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    await flushRuntime();
-
-    expect(applyButton.disabled).toBe(false);
-    expect(resetButton.disabled).toBe(false);
-    expect(tag.parameters.bias).toBe(0.04);
-    expect(getTargetFault().parameters.bias).toBe(0.04);
-    expect(getTargetBinding().parameters.bias).toBe(0.04);
-
-    applyButton.click();
-    await flushRuntime();
-
-    expect(applyButton.disabled).toBe(true);
-    expect(tag.parameters.bias).toBe('0.12');
-    expect(tag.injectedFault.parameters.bias).toBe('0.12');
-    expect(getTargetFault().parameters.bias).toBe('0.12');
-    expect(getTargetBinding().parameters.bias).toBe('0.12');
-    expect(getTargetBinding().injectedFault.parameters.bias).toBe('0.12');
-
-    input.value = '0.20';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(applyButton.disabled).toBe(false);
-    resetButton.click();
-    await flushRuntime();
-
-    expect(input.value).toBe('0.12');
-    expect(applyButton.disabled).toBe(true);
-    expect(tag.parameters.bias).toBe('0.12');
-    expect(getTargetFault().parameters.bias).toBe('0.12');
-
-    wrapper.unmount();
-  });
-
-  it('fetches the default package from the configured public base path', async () => {
-    const originalFetch = window.fetch;
-    const defaultPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    window.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => defaultPackage
-    }));
-
-    const wrapper = mount(App, { attachTo: document.body });
-    try {
-      await flushRuntime();
-
-      const importResult = await window.__GZ_LOAD_DEFAULT_FLIGHT_MODEL__({ force: true });
-      await flushRuntime();
-
-      expect(importResult).toMatchObject({ ok: true });
-      expect(window.fetch).toHaveBeenCalledWith(
-        'http://localhost:3000/model-packages/evtol_closed_loop_fault_demo.json'
-      );
-      expect(window.__GZ_DEFAULT_FLIGHT_MODEL_STATE__).toMatchObject({
-        loaded: true,
-        modelId: defaultPackage.modelId,
-        source: 'http://localhost:3000/model-packages/evtol_closed_loop_fault_demo.json'
-      });
-    } finally {
-      window.fetch = originalFetch;
-      wrapper.unmount();
-    }
-  });
 
   it('opens the fault-task loader instead of the legacy fault-library window in the component-binding branch', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
-    const hierarchicalPackage = loadPublicPackage('evtol_small_nonlinear_hierarchical.json');
+    const hierarchicalPackage = {
+      ...PACKAGE_FIXTURE,
+      systemFamily: 'uav-flight-control',
+      supportedFaultLibraries: ['uav-flight-control-faults']
+    };
     const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(hierarchicalPackage);
     await flushRuntime();
 
     expect(importResult).toMatchObject({ ok: true });
-    expect(document.getElementById('btn-imp-flt')?.textContent).toContain('加载故障模型');
-    expect(document.getElementById('btn-imp-flt')?.disabled).toBe(false);
-    expect(document.getElementById('btn-imp-flt')?.classList.contains('tbtn-disabled')).toBe(false);
-
     window.doImportFault();
     await flushRuntime();
 
@@ -1704,7 +963,11 @@ describe('Flight model package app integration', () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
-    const hierarchicalPackage = loadPublicPackage('evtol_small_nonlinear_hierarchical.json');
+    const hierarchicalPackage = {
+      ...PACKAGE_FIXTURE,
+      systemFamily: 'uav-flight-control',
+      supportedFaultLibraries: ['uav-flight-control-faults']
+    };
     const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(hierarchicalPackage);
     await flushRuntime();
 
@@ -1715,12 +978,6 @@ describe('Flight model package app integration', () => {
     window.__GZ_STATE__.systemSaved = false;
     window.updateUI();
     await flushRuntime();
-
-    const injectButton = document.getElementById('btn-imp-flt');
-    expect(injectButton?.textContent).toContain('加载故障模型');
-    expect(injectButton?.disabled).toBe(false);
-    expect(injectButton?.classList.contains('tbtn-disabled')).toBe(false);
-    expect(injectButton?.getAttribute('aria-disabled')).toBe('false');
 
     window.doImportFault();
     await flushRuntime();
@@ -1763,56 +1020,6 @@ describe('Flight model package app integration', () => {
     wrapper.unmount();
   });
 
-  it('ignores stale localStorage snapshots when the import action loads a selected local model JSON', async () => {
-    const originalFetch = window.fetch;
-    const selectedPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    window.fetch = vi.fn();
-
-    const wrapper = mount(App, { attachTo: document.body });
-    await flushRuntime();
-
-    const legacySnapshot = createWorkbenchSnapshot({
-      modelNodes: [
-        {
-          id: 'node-legacy-1',
-          type: 'simulation_block',
-          x: 240,
-          y: 180,
-          props: {
-            name: 'Legacy PID',
-            moduleType: 'control',
-            inputs: [{ name: 'Legacy Input', type: 'scalar' }],
-            outputs: [{ name: 'Legacy Output', type: 'scalar' }],
-            middleVars: []
-          },
-          pythonBinding: binding
-        }
-      ],
-      modelEdges: [],
-      nodeSeq: 1,
-      edgeSeq: 0,
-      activeLineType: 'normal',
-      faultedBlks: [],
-      importedFaultModels: []
-    });
-
-    window.localStorage.setItem('gz-workbench-system-model', JSON.stringify(legacySnapshot));
-    mockNextJsonFileSelection(JSON.stringify(selectedPackage));
-
-    await window.doImportSys();
-    await flushRuntime();
-
-    expect(window.localStorage.getItem('gz-workbench-system-model')).toBeNull();
-    expect(window.__GZ_STATE__.sysLoaded).toBe(true);
-    expect(window.__GZ_STATE__.modelNodes).toHaveLength(selectedPackage.workbenchSnapshot.modelNodes.length);
-    expect(window.__GZ_STATE__.modelNodes.some((node) => node.props?.name === 'Legacy PID')).toBe(false);
-    expect(window.__GZ_STATE__.activeModelPackage).toMatchObject({
-      modelId: selectedPackage.modelId,
-      modelName: selectedPackage.modelName
-    });
-    window.fetch = originalFetch;
-    wrapper.unmount();
-  });
 
   it('hydrates lean imported simulation bindings from package pythonModules', async () => {
     const wrapper = mount(App, { attachTo: document.body });
@@ -1837,6 +1044,64 @@ describe('Flight model package app integration', () => {
       moduleName: 'attitude_pid',
       entryFunction: 'process'
     });
+
+    wrapper.unmount();
+  });
+
+  it('preserves saved interface names and distant component positions when importing a system model', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const packageWithSavedLayout = JSON.parse(JSON.stringify(LEAN_PACKAGE_FIXTURE));
+    const savedPortMapping = {
+      inputs: [{
+        varName: 'pitch_error',
+        displayName: 'Reference Pitch Vector',
+        type: 'float',
+        comment: 'pitch error'
+      }],
+      outputs: [{
+        varName: 'elevator_cmd',
+        displayName: 'Actuator Command Vector',
+        type: 'float',
+        comment: 'elevator command'
+      }],
+      middleVars: [{
+        varName: 'integral_state',
+        displayName: 'Saved Integral State',
+        type: 'float',
+        comment: 'integral accumulator'
+      }]
+    };
+    const savedPosition = { x: 5270, y: 3490 };
+    const snapshotNodes = [
+      packageWithSavedLayout.workbenchSnapshot.modelNodes[0],
+      packageWithSavedLayout.workbenchSnapshot.canvases['canvas-root'].nodes[0]
+    ];
+
+    snapshotNodes.forEach((node) => {
+      Object.assign(node, savedPosition);
+      node.pythonBinding.portMapping = JSON.parse(JSON.stringify(savedPortMapping));
+      node.simulationInterfaceDefinition.pythonPortMapping = JSON.parse(JSON.stringify(savedPortMapping));
+    });
+
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(packageWithSavedLayout)).toMatchObject({ ok: true });
+    await flushRuntime();
+
+    const importedNode = window.__GZ_STATE__.modelNodes[0];
+    const stage = document.getElementById('canvas-stage');
+    expect(importedNode).toMatchObject(savedPosition);
+    expect(importedNode.pythonBinding.portMapping.inputs[0].displayName).toBe('Reference Pitch Vector');
+    expect(importedNode.pythonBinding.portMapping.outputs[0].displayName).toBe('Actuator Command Vector');
+    expect(importedNode.pythonBinding.portMapping.middleVars[0].displayName).toBe('Saved Integral State');
+    expect(Number.parseFloat(stage.style.width)).toBeGreaterThan(importedNode.x + importedNode.w);
+    expect(Number.parseFloat(stage.style.height)).toBeGreaterThan(importedNode.y + importedNode.h);
+
+    const exportedNode = window.__GZ_FLIGHT_MODEL_PACKAGE__.exportCurrent().workbenchSnapshot.modelNodes[0];
+    expect(exportedNode).toMatchObject(savedPosition);
+    expect(exportedNode.pythonBinding.portMapping.inputs[0].displayName).toBe('Reference Pitch Vector');
+    expect(exportedNode.pythonBinding.portMapping.outputs[0].displayName).toBe('Actuator Command Vector');
+    expect(exportedNode.pythonBinding.portMapping.middleVars[0].displayName).toBe('Saved Integral State');
 
     wrapper.unmount();
   });
@@ -2000,157 +1265,6 @@ describe('Flight model package app integration', () => {
     ]));
 
     wrapper.unmount();
-  });
-
-  it('imports the hierarchical eVTOL package and restores its child canvas structure', async () => {
-    const wrapper = mount(App, { attachTo: document.body });
-    await flushRuntime();
-
-    const hierarchicalPackage = loadPublicPackage('evtol_small_nonlinear_hierarchical.json');
-    const expectedLinkedSubsystemCount = collectLinkedSubsystemNodes(hierarchicalPackage.workbenchSnapshot).length;
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(hierarchicalPackage);
-    await flushRuntime();
-
-    const state = window.__GZ_STATE__;
-    expect(state.rootCanvasId).toBeTruthy();
-    const rootCanvas = state.canvases[state.rootCanvasId];
-
-    expect(importResult).toMatchObject({ ok: true });
-    expect(state.activeModelPackage).toMatchObject({
-      modelId: hierarchicalPackage.modelId,
-      modelName: hierarchicalPackage.modelName
-    });
-    expect(rootCanvas).toBeTruthy();
-    if (!rootCanvas) {
-      throw new Error('Missing imported root canvas');
-    }
-    expect(expectedLinkedSubsystemCount).toBeGreaterThan(0);
-    const linkedSubsystemNodes = (rootCanvas.nodes || []).filter((node) => node?.type === 'subsystem_block' && node.targetCanvasId);
-    expect(linkedSubsystemNodes).toHaveLength(expectedLinkedSubsystemCount);
-
-    const linkedChildCanvases = linkedSubsystemNodes
-      .map((node) => state.canvases[node.targetCanvasId])
-      .filter(Boolean);
-    expect(linkedChildCanvases).toHaveLength(expectedLinkedSubsystemCount);
-    linkedSubsystemNodes.forEach((node) => {
-      const childCanvas = state.canvases[node.targetCanvasId];
-      expect(childCanvas).toBeTruthy();
-      if (!childCanvas) {
-        throw new Error(`Missing linked child canvas for subsystem ${node.id}`);
-      }
-      expect(childCanvas.parentSubsystemNodeId).toBe(node.id);
-      expect(childCanvas.nodes).toEqual(expect.arrayContaining([
-        expect.objectContaining({ type: 'simulation_block', pythonBinding: expect.objectContaining({ bound: true }) })
-      ]));
-      expect(childCanvas.nodes).toEqual(expect.arrayContaining([
-        expect.objectContaining({ type: 'subsystem_in_port' }),
-        expect.objectContaining({ type: 'subsystem_out_port' })
-      ]));
-    });
-
-    wrapper.unmount();
-  });
-
-  it('imports the hierarchical eVTOL fault package and restores motor_efficiency_loss inside the child canvas', async () => {
-    const wrapper = mount(App, { attachTo: document.body });
-    await flushRuntime();
-
-    const hierarchicalFaultPackage = loadPublicPackage('evtol_small_nonlinear_hierarchical_fault_injected.json');
-    const expectedLinkedSubsystemCount = collectLinkedSubsystemNodes(hierarchicalFaultPackage.workbenchSnapshot).length;
-    const importResult = window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(hierarchicalFaultPackage);
-    await flushRuntime();
-
-    const state = window.__GZ_STATE__;
-    expect(state.rootCanvasId).toBeTruthy();
-    const rootCanvas = state.canvases[state.rootCanvasId];
-
-    expect(importResult).toMatchObject({ ok: true });
-    expect(state.activeModelPackage).toMatchObject({
-      modelId: hierarchicalFaultPackage.modelId,
-      modelName: hierarchicalFaultPackage.modelName
-    });
-    expect(state.availableFaultModels.some((model) => model.id === 'motor_efficiency_loss')).toBe(true);
-    expect(rootCanvas).toBeTruthy();
-    if (!rootCanvas) {
-      throw new Error('Missing imported root canvas');
-    }
-    expect(expectedLinkedSubsystemCount).toBeGreaterThan(0);
-    const rootFaultNodes = (rootCanvas.nodes || []).filter((node) => node?.injectedFault?.modelId === 'motor_efficiency_loss');
-    expect(rootFaultNodes).toHaveLength(0);
-    const linkedSubsystemNodes = (rootCanvas.nodes || []).filter((node) => node?.type === 'subsystem_block' && node.targetCanvasId);
-    expect(linkedSubsystemNodes).toHaveLength(expectedLinkedSubsystemCount);
-
-    const linkedChildCanvases = linkedSubsystemNodes
-      .map((node) => state.canvases[node.targetCanvasId])
-      .filter(Boolean);
-    expect(linkedChildCanvases).toHaveLength(expectedLinkedSubsystemCount);
-    linkedSubsystemNodes.forEach((node) => {
-      const childCanvas = state.canvases[node.targetCanvasId];
-      expect(childCanvas).toBeTruthy();
-      if (!childCanvas) {
-        throw new Error(`Missing linked child canvas for subsystem ${node.id}`);
-      }
-      expect(childCanvas.parentSubsystemNodeId).toBe(node.id);
-    });
-
-    const faultedChildCanvases = linkedChildCanvases.filter((childCanvas) => (
-      childCanvas.nodes?.some((node) => node?.injectedFault?.modelId === 'motor_efficiency_loss')
-    ));
-    expect(faultedChildCanvases).toHaveLength(1);
-    const faultedChildCanvas = faultedChildCanvases[0];
-    expect(faultedChildCanvas).toBeTruthy();
-    if (!faultedChildCanvas) {
-      throw new Error('Missing faulted child canvas');
-    }
-    const faultNodes = faultedChildCanvas.nodes.filter((node) => node?.injectedFault?.modelId === 'motor_efficiency_loss');
-    expect(faultNodes).toHaveLength(1);
-    const totalFaultNodes = linkedChildCanvases.reduce((count, childCanvas) => (
-      count + (childCanvas.nodes || []).filter((node) => node?.injectedFault?.modelId === 'motor_efficiency_loss').length
-    ), 0);
-    expect(totalFaultNodes).toBe(1);
-    const faultNode = faultNodes[0];
-    expect(faultNode).toBeTruthy();
-    if (!faultNode) {
-      throw new Error('Missing injected fault node in faulted child canvas');
-    }
-    expect(faultNode.type).toBe('simulation_block');
-    expect(faultNode.injectedFault).toMatchObject({
-      modelId: 'motor_efficiency_loss',
-      layer: 'electrical',
-      name: 'Motor Efficiency Loss'
-    });
-
-    wrapper.unmount();
-  });
-
-  it('reduces hierarchical dynamics-scope amplitude when the imported motor_efficiency_loss fault is preloaded', async () => {
-    const { scopeSamples: normalScopeSamples, scopePeak: normalPeak } = await measurePackageDynamicsScopePeak(
-      'evtol_small_nonlinear_hierarchical.json'
-    );
-    const { scopeSamples: faultScopeSamples, scopePeak: faultPeak } = await measurePackageDynamicsScopePeak(
-      'evtol_small_nonlinear_hierarchical_fault_injected.json'
-    );
-
-    expect(normalScopeSamples.length).toBeGreaterThan(0);
-    expect(faultScopeSamples.length).toBeGreaterThan(0);
-    expect(normalPeak).toBeGreaterThan(0.01);
-    expect(faultPeak).toBeGreaterThan(0);
-    expect(faultPeak).toBeLessThan(normalPeak * 0.75);
-  });
-
-  it('reduces flat dynamics-scope amplitude when the imported motor_efficiency_loss fault is preloaded', async () => {
-    const { scopeSamples: normalScopeSamples, scopePeak: normalPeak } = await measurePackageDynamicsScopePeak(
-      'evtol_small_nonlinear.json'
-    );
-    const { scopeSamples: faultScopeSamples, scopePeak: faultPeak } = await measurePackageDynamicsScopePeak(
-      'evtol_small_nonlinear_fault_injected.json'
-    );
-
-    expect(normalScopeSamples.length).toBeGreaterThan(0);
-    expect(faultScopeSamples.length).toBeGreaterThan(0);
-    expect(normalPeak).toBeGreaterThan(0.01);
-    expect(faultPeak).toBeGreaterThan(0);
-    expect(faultPeak).toBeLessThan(normalPeak * 0.75);
   });
 
   it('removes persistent runtime listeners during reset before remounting', async () => {

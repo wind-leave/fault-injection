@@ -21,6 +21,8 @@ import {
   getComponentFaultVariables,
   normalizeModelNode
 } from '../src/services/modelStore.js';
+import { COMPONENT_REGISTRY } from '../src/services/componentRegistry.js';
+import { buildBackendExecutablePackage } from '../src/services/backendExecutablePackageService.js';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -70,16 +72,47 @@ function loadPublicPackage(fileName) {
   return JSON.parse(readFileSync(targetPath, 'utf8'));
 }
 
-function collectLinkedSubsystemNodes(snapshot) {
-  const rootCanvas = snapshot?.canvases?.[snapshot?.rootCanvasId];
-  if (!rootCanvas) {
-    return [];
-  }
-
-  return (rootCanvas.nodes || []).filter((node) => node?.type === 'subsystem_block' && node.targetCanvasId);
-}
-
 describe('flightModelPackageService', () => {
+  it('preserves an existing simulation interface when importing the same node id', () => {
+    const existingSnapshot = {
+      ...VALID_PACKAGE.workbenchSnapshot,
+      modelNodes: [{
+        id: 'node-controller',
+        type: 'simulation_block',
+        props: {
+          name: 'original-controller',
+          inputs: [{ name: 'error', type: 'scalar' }],
+          outputs: [{ name: 'command', type: 'scalar' }],
+          middleVars: []
+        }
+      }]
+    };
+    const importedPackage = {
+      ...VALID_PACKAGE,
+      workbenchSnapshot: {
+        ...VALID_PACKAGE.workbenchSnapshot,
+        modelNodes: [{
+          id: 'node-controller',
+          type: 'simulation_block',
+          props: {
+            name: 'imported-controller',
+            inputs: [{ name: 'changed-input', type: 'matrix' }],
+            outputs: [],
+            middleVars: []
+          }
+        }]
+      }
+    };
+
+    const result = applyFlightModelPackage(importedPackage, { existingSnapshot });
+
+    expect(result.ok).toBe(true);
+    expect(result.snapshot.modelNodes[0].props).toMatchObject({
+      name: 'original-controller',
+      inputs: [{ name: 'error', type: 'scalar' }]
+    });
+  });
+
   it('validates a well-formed flight model package and rejects malformed packages', () => {
     const valid = validateFlightModelPackage(VALID_PACKAGE);
     const invalid = validateFlightModelPackage({
@@ -143,6 +176,70 @@ describe('flightModelPackageService', () => {
     );
   });
 
+  it('exports generated fault models with their snapshot references and imports legacy generated faults', () => {
+    const generatedFaultId = 'layered-node-25-node-control-allocation-physical-allocation_gain';
+    const generatedFault = {
+      instanceId: generatedFaultId,
+      modelId: generatedFaultId,
+      faultTypeId: generatedFaultId,
+      name: 'Control allocation gain injection',
+      layer: 'physical',
+      runtimeBehavior: 'bias',
+      parameters: { bias: 0.1, start: 0 }
+    };
+    const legacyPackage = {
+      ...VALID_PACKAGE,
+      faultLibrary: [],
+      workbenchSnapshot: {
+        ...VALID_PACKAGE.workbenchSnapshot,
+        modelNodes: [
+          {
+            id: 'node-control-allocation',
+            type: 'simulation_block',
+            injectedFault: generatedFault,
+            faultBindings: [{
+              faultModelId: generatedFaultId,
+              injectedFault: generatedFault,
+              active: true
+            }]
+          }
+        ],
+        faultInstances: [{
+          instanceId: generatedFaultId,
+          faultTypeId: generatedFaultId,
+          targetKind: 'node',
+          targetId: 'node-control-allocation',
+          layer: 'physical',
+          parameters: { bias: 0.1, start: 0 }
+        }]
+      }
+    };
+
+    const importedLegacyPackage = applyFlightModelPackage(legacyPackage);
+    expect(importedLegacyPackage.ok).toBe(true);
+    expect(importedLegacyPackage.faultLibrary).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: generatedFaultId,
+        layer: 'physical',
+        runtimeBehavior: 'bias'
+      })
+    ]));
+
+    const exportedPackage = buildFlightModelPackage({
+      meta: {
+        modelId: 'generated-fault-export',
+        modelName: 'Generated Fault Export'
+      },
+      snapshot: legacyPackage.workbenchSnapshot,
+      faultLibrary: []
+    });
+
+    expect(validateFlightModelPackage(exportedPackage)).toEqual({ ok: true, errors: [] });
+    expect(exportedPackage.faultLibrary).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: generatedFaultId })
+    ]));
+  });
+
   it('rejects whitespace-only module fields and missing entry functions', () => {
     const result = validateFlightModelPackage({
       ...VALID_PACKAGE,
@@ -173,12 +270,11 @@ describe('flightModelPackageService', () => {
     expect(result.ok).toBe(false);
     expect(result.errors).toContain('pythonModules[0].moduleId is required.');
     expect(result.errors).toContain('pythonModules[0].fileName is required.');
-    expect(result.errors).toContain('pythonModules[0].source is required.');
     expect(result.errors).toContain('pythonModules[0].entryFunction is required.');
     expect(result.errors).toContain('pythonModules[1].entryFunction is required.');
   });
 
-  it('preserves the default execution endpoint when restoring a partial binding config', () => {
+  it('removes deprecated execution endpoint settings when restoring a binding', () => {
     const restored = restoreWorkbenchSnapshot({
       modelNodes: [
         {
@@ -195,10 +291,7 @@ describe('flightModelPackageService', () => {
       modelEdges: []
     });
 
-    expect(restored.modelNodes[0].pythonBinding.executionConfig).toMatchObject({
-      endpoint: 'http://127.0.0.1:8765/api/python-flow/execute',
-      timeoutMs: 5000
-    });
+    expect(restored.modelNodes[0].pythonBinding).not.toHaveProperty('executionConfig');
   });
 
   it('restores and creates snapshots defensively when node and edge collections are invalid', () => {
@@ -291,7 +384,7 @@ describe('flightModelPackageService', () => {
     expect(applied.snapshot.faultInstances).toEqual(faultInstances);
   });
 
-  it('builds a flight model package with embedded python modules from bound simulation blocks', () => {
+  it('does not save custom python modules in a flight model package', () => {
     const packageData = buildFlightModelPackage({
       meta: {
         modelId: 'attitude-controller',
@@ -342,16 +435,12 @@ describe('flightModelPackageService', () => {
 
     expect(packageData.schemaVersion).toBe(1);
     expect(packageData.packageType).toBe('flight-control-model');
-    expect(packageData.pythonModules).toHaveLength(1);
-    expect(packageData.pythonModules[0]).toMatchObject({
-      moduleId: 'attitude_pid',
-      fileName: 'attitude_pid.py',
-      entryFunction: 'process'
-    });
+    expect(packageData.pythonModules).toEqual([]);
+    expect(packageData.workbenchSnapshot.modelNodes[0].pythonBinding).toBeNull();
     expect(packageData.workbenchSnapshot.modelNodes).toHaveLength(1);
   });
 
-  it('exports a single pythonModules entry when multiple simulation blocks bind to the same module', () => {
+  it('does not export custom python module references when multiple blocks bind to them', () => {
     const binding = createSimulationBlockPythonBinding({
       fileName: 'attitude_pid.py',
       moduleName: 'attitude_pid',
@@ -404,15 +493,8 @@ describe('flightModelPackageService', () => {
       faultLibrary: []
     });
 
-    expect(packageData.pythonModules).toHaveLength(1);
-    expect(packageData.pythonModules[0]).toMatchObject({
-      moduleId: 'attitude_pid',
-      fileName: 'attitude_pid.py',
-      entryFunction: 'process',
-      category: 'controllers',
-      sourcePackageId: 'evtol-small-nonlinear',
-      sourcePackageName: 'eVTOL Small Nonlinear Flight Control'
-    });
+    expect(packageData.pythonModules).toEqual([]);
+    expect(packageData.workbenchSnapshot.modelNodes.map((node) => node.pythonBinding)).toEqual([null, null]);
   });
 
   it('deep clones exported workbenchSnapshot.modelEdges so edits do not mutate the input snapshot', () => {
@@ -584,18 +666,8 @@ describe('flightModelPackageService', () => {
     });
 
     expect(binding.moduleId).toBe('attitude_pid');
-    expect(packageData.pythonModules).toHaveLength(1);
-    expect(packageData.pythonModules[0]).toMatchObject({
-      moduleId: 'attitude_pid',
-      fileName: 'attitude_pid.py',
-      entryFunction: 'process'
-    });
-    expect(packageData.workbenchSnapshot.modelNodes[0].pythonBinding).toMatchObject({
-      bound: true,
-      moduleId: 'attitude_pid',
-      fileName: 'attitude_pid.py',
-      entryFunction: 'process'
-    });
+    expect(packageData.pythonModules).toEqual([]);
+    expect(packageData.workbenchSnapshot.modelNodes[0].pythonBinding).toBeNull();
   });
 
   it('preserves package-aware python binding metadata through the factory and package export', () => {
@@ -661,18 +733,57 @@ describe('flightModelPackageService', () => {
       sourcePackageName: 'eVTOL Small Nonlinear Flight Control',
       executionMode: 'mock'
     });
+    expect(packageData.workbenchSnapshot.modelNodes[0].pythonBinding).toBeNull();
+    expect(packageData.pythonModules).toEqual([]);
+  });
+
+  it('keeps built-in vector simulation bindings executable after save and re-import', () => {
+    const template = COMPONENT_REGISTRY.scalar_to_vector4;
+    const simulationNode = {
+      id: 'scalar-to-vector-node',
+      type: 'simulation_block',
+      templateId: template.templateId,
+      props: JSON.parse(JSON.stringify(template.defaults)),
+      inputs: JSON.parse(JSON.stringify(template.ports.inputs)),
+      outputs: JSON.parse(JSON.stringify(template.ports.outputs)),
+      pythonBinding: JSON.parse(JSON.stringify(template.pythonBinding))
+    };
+    const packageData = buildFlightModelPackage({
+      meta: { modelId: 'vector-save-import', modelName: 'Vector Save Import' },
+      snapshot: { modelNodes: [simulationNode], modelEdges: [] }
+    });
+    const applied = applyFlightModelPackage(packageData);
+    const executable = buildBackendExecutablePackage(applied.snapshot);
+
+    expect(packageData.pythonModules).toEqual([]);
     expect(packageData.workbenchSnapshot.modelNodes[0].pythonBinding).toMatchObject({
       bound: true,
-      moduleId: 'attitude_pid',
-      moduleCategory: 'controllers',
-      sourcePackageId: 'evtol-small-nonlinear',
-      sourcePackageName: 'eVTOL Small Nonlinear Flight Control'
+      sourceKind: 'builtin',
+      moduleId: 'scalar_to_vector4'
     });
-    expect(packageData.pythonModules[0]).toMatchObject({
-      moduleId: 'attitude_pid',
-      category: 'controllers',
-      sourcePackageId: 'evtol-small-nonlinear',
-      sourcePackageName: 'eVTOL Small Nonlinear Flight Control'
+    expect(applied.ok).toBe(true);
+    expect(executable.nodes[0]).toMatchObject({
+      pythonBinding: { moduleId: 'scalar_to_vector4', entryFunction: 'process' },
+      outputs: [{ dataType: 'vector', vectorLength: 4 }]
+    });
+
+    const legacyPackage = {
+      ...packageData,
+      workbenchSnapshot: {
+        ...packageData.workbenchSnapshot,
+        modelNodes: packageData.workbenchSnapshot.modelNodes.map((node) => ({
+          ...node,
+          pythonBinding: null
+        }))
+      }
+    };
+    const legacyApplied = applyFlightModelPackage(legacyPackage);
+    const legacyExecutable = buildBackendExecutablePackage(legacyApplied.snapshot);
+
+    expect(legacyApplied.ok).toBe(true);
+    expect(legacyExecutable.nodes[0].pythonBinding).toEqual({
+      moduleId: 'scalar_to_vector4',
+      entryFunction: 'process'
     });
   });
 
@@ -724,8 +835,8 @@ describe('flightModelPackageService', () => {
       faultLibrary: []
     });
 
-    expect(packageData.pythonModules).toHaveLength(1);
-    expect(packageData.pythonModules[0].moduleId).toBe('attitude_pid');
+    expect(packageData.pythonModules).toEqual([]);
+    expect(packageData.workbenchSnapshot.modelNodes[0].pythonBinding).toBeNull();
     expect(packageData.workbenchSnapshot.modelNodes[1].pythonBinding).toBeNull();
   });
 
@@ -745,132 +856,6 @@ describe('flightModelPackageService', () => {
     ]);
     expect(evtolReferencePackage.faultLibrary.length).toBeGreaterThanOrEqual(5);
     expect(evtolReferencePackage.workbenchSnapshot.modelNodes.length).toBeGreaterThanOrEqual(8);
-  });
-
-  it('loads the hierarchical eVTOL fixture file with nested child canvases', () => {
-    const hierarchicalPackage = loadPublicPackage('evtol_small_nonlinear_hierarchical.json');
-    const hierarchicalValidation = validateFlightModelPackage(hierarchicalPackage);
-    const hierarchicalApplied = applyFlightModelPackage(hierarchicalPackage);
-    const expectedLinkedSubsystemCount = collectLinkedSubsystemNodes(hierarchicalPackage.workbenchSnapshot).length;
-
-    expect(hierarchicalValidation).toEqual({ ok: true, errors: [] });
-    expect(expectedLinkedSubsystemCount).toBeGreaterThan(0);
-    expect(hierarchicalApplied.ok).toBe(true);
-    if (!hierarchicalApplied.ok) {
-      throw new Error(`Failed to apply hierarchical package: ${(hierarchicalApplied.errors || []).join('; ')}`);
-    }
-    const rootCanvasId = hierarchicalApplied.snapshot.rootCanvasId;
-    const rootCanvas = hierarchicalApplied.snapshot.canvases[rootCanvasId];
-    expect(rootCanvasId).toBeTruthy();
-    expect(rootCanvas).toBeTruthy();
-    if (!rootCanvas) {
-      throw new Error('Missing imported root canvas');
-    }
-    const linkedSubsystemNodes = (rootCanvas.nodes || []).filter((node) => node?.type === 'subsystem_block' && node.targetCanvasId);
-    expect(linkedSubsystemNodes).toHaveLength(expectedLinkedSubsystemCount);
-
-    const linkedChildCanvases = linkedSubsystemNodes
-      .map((node) => hierarchicalApplied.snapshot.canvases[node.targetCanvasId])
-      .filter(Boolean);
-    expect(linkedChildCanvases).toHaveLength(expectedLinkedSubsystemCount);
-    linkedSubsystemNodes.forEach((node) => {
-      const childCanvas = hierarchicalApplied.snapshot.canvases[node.targetCanvasId];
-      expect(childCanvas).toBeTruthy();
-      if (!childCanvas) {
-        throw new Error(`Missing linked child canvas for subsystem ${node.id}`);
-      }
-      expect(childCanvas.parentSubsystemNodeId).toBe(node.id);
-      expect(childCanvas.nodes).toEqual(expect.arrayContaining([
-        expect.objectContaining({ type: 'simulation_block', pythonBinding: expect.objectContaining({ bound: true }) })
-      ]));
-      expect(childCanvas.nodes).toEqual(expect.arrayContaining([
-        expect.objectContaining({ type: 'subsystem_in_port' }),
-        expect.objectContaining({ type: 'subsystem_out_port' })
-      ]));
-    });
-  });
-
-  it('loads the hierarchical eVTOL fault fixture file with child-local motor fault state', () => {
-    const hierarchicalFaultPackage = loadPublicPackage('evtol_small_nonlinear_hierarchical_fault_injected.json');
-    const hierarchicalFaultValidation = validateFlightModelPackage(hierarchicalFaultPackage);
-    const hierarchicalFaultApplied = applyFlightModelPackage(hierarchicalFaultPackage);
-    const expectedLinkedSubsystemCount = collectLinkedSubsystemNodes(hierarchicalFaultPackage.workbenchSnapshot).length;
-
-    expect(hierarchicalFaultValidation).toEqual({ ok: true, errors: [] });
-    expect(expectedLinkedSubsystemCount).toBeGreaterThan(0);
-    expect(hierarchicalFaultApplied.ok).toBe(true);
-    if (!hierarchicalFaultApplied.ok) {
-      throw new Error(`Failed to apply hierarchical fault package: ${(hierarchicalFaultApplied.errors || []).join('; ')}`);
-    }
-    const rootCanvasId = hierarchicalFaultApplied.snapshot.rootCanvasId;
-    const rootCanvas = hierarchicalFaultApplied.snapshot.canvases[rootCanvasId];
-    expect(rootCanvasId).toBeTruthy();
-    expect(rootCanvas).toBeTruthy();
-    if (!rootCanvas) {
-      throw new Error('Missing imported fault root canvas');
-    }
-    const rootFaultNodes = (rootCanvas.nodes || []).filter((node) => node?.injectedFault?.modelId === 'motor_efficiency_loss');
-    expect(rootFaultNodes).toHaveLength(0);
-    const linkedSubsystemNodes = (rootCanvas.nodes || []).filter((node) => node?.type === 'subsystem_block' && node.targetCanvasId);
-    expect(linkedSubsystemNodes).toHaveLength(expectedLinkedSubsystemCount);
-
-    const linkedChildCanvases = linkedSubsystemNodes
-      .map((node) => hierarchicalFaultApplied.snapshot.canvases[node.targetCanvasId])
-      .filter(Boolean);
-    expect(linkedChildCanvases).toHaveLength(expectedLinkedSubsystemCount);
-    linkedSubsystemNodes.forEach((node) => {
-      const childCanvas = hierarchicalFaultApplied.snapshot.canvases[node.targetCanvasId];
-      expect(childCanvas).toBeTruthy();
-      if (!childCanvas) {
-        throw new Error(`Missing linked child canvas for subsystem ${node.id}`);
-      }
-      expect(childCanvas.parentSubsystemNodeId).toBe(node.id);
-    });
-
-    const faultedChildCanvases = linkedChildCanvases.filter((childCanvas) => (
-      childCanvas.nodes?.some((node) => node?.injectedFault?.modelId === 'motor_efficiency_loss')
-    ));
-    expect(faultedChildCanvases).toHaveLength(1);
-    const faultedChildCanvas = faultedChildCanvases[0];
-    expect(faultedChildCanvas).toBeTruthy();
-    if (!faultedChildCanvas) {
-      throw new Error('Missing faulted child canvas');
-    }
-    const faultNodes = faultedChildCanvas.nodes.filter((node) => node?.injectedFault?.modelId === 'motor_efficiency_loss');
-    expect(faultNodes).toHaveLength(1);
-    const totalFaultNodes = linkedChildCanvases.reduce((count, childCanvas) => (
-      count + (childCanvas.nodes || []).filter((node) => node?.injectedFault?.modelId === 'motor_efficiency_loss').length
-    ), 0);
-    expect(totalFaultNodes).toBe(1);
-    const faultNode = faultNodes[0];
-    expect(faultNode).toBeTruthy();
-    if (!faultNode) {
-      throw new Error('Missing injected fault node in faulted child canvas');
-    }
-    expect(faultNode.type).toBe('simulation_block');
-    expect(faultNode.injectedFault).toMatchObject({
-      modelId: 'motor_efficiency_loss',
-      layer: 'electrical',
-      name: 'Motor Efficiency Loss'
-    });
-  });
-
-  it('loads the flat fault-injected eVTOL fixture file with the canonical motor_efficiency_loss fault id', () => {
-    const flatFaultPackage = loadPublicPackage('evtol_small_nonlinear_fault_injected.json');
-    const flatFaultValidation = validateFlightModelPackage(flatFaultPackage);
-    const flatFaultApplied = applyFlightModelPackage(flatFaultPackage);
-    const faultNodes = flatFaultPackage.workbenchSnapshot.modelNodes.filter((node) => node?.injectedFault?.modelId);
-    const matchingFaultModels = flatFaultPackage.faultLibrary.filter((faultModel) => faultModel?.id === 'motor_efficiency_loss');
-
-    expect(flatFaultValidation).toEqual({ ok: true, errors: [] });
-    expect(flatFaultApplied.ok).toBe(true);
-    expect(faultNodes).toHaveLength(1);
-    expect(matchingFaultModels).toHaveLength(1);
-    expect(faultNodes[0].injectedFault).toMatchObject({
-      modelId: 'motor_efficiency_loss',
-      layer: 'electrical',
-      name: 'Motor Efficiency Loss'
-    });
   });
 
   it('keeps the reference package compatible with the current local runtime', () => {
@@ -949,136 +934,9 @@ describe('flightModelPackageService', () => {
     });
   });
 
-  it('loads the closed-loop fault demo with CAN metadata and UAV fault-library scope', () => {
-    const closedLoopPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const validation = validateFlightModelPackage(closedLoopPackage);
-    const applied = applyFlightModelPackage(closedLoopPackage);
-    const edges = closedLoopPackage.workbenchSnapshot.modelEdges;
-    const canEdge = edges.find((edge) => edge.id === 'edge-imu-error');
-    const scopeEdges = edges.filter((edge) => edge.targetNodeId === 'node-scope');
 
-    expect(validation).toEqual({ ok: true, errors: [] });
-    expect(applied.ok).toBe(true);
-    expect(closedLoopPackage).toMatchObject({
-      systemFamily: 'uav-flight-control',
-      supportedFaultLibraries: ['uav-flight-control-faults'],
-      modelId: 'evtol-closed-loop-fault-demo'
-    });
-    expect(closedLoopPackage.workbenchSnapshot.modelNodes.length).toBeGreaterThanOrEqual(8);
-    expect(scopeEdges.length).toBeGreaterThanOrEqual(2);
-    expect(canEdge).toMatchObject({
-      signalId: 'imu.pitch_rate',
-      channelId: 'CAN-FC-IMU',
-      messageId: '0x184',
-      payloadKind: 'float32',
-      signalUnit: 'rad/s',
-      faultPropagationPolicy: 'propagates'
-    });
-    expect(canEdge.signalChannels).toEqual([
-      expect.objectContaining({
-        signalId: 'imu.pitch_rate',
-        channelId: 'CAN-FC-IMU',
-        messageId: '0x184'
-      })
-    ]);
-  });
 
-  it('declares injectable slots directly on every closed-loop demo edge', () => {
-    const closedLoopPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const edges = closedLoopPackage.workbenchSnapshot.modelEdges;
-    const normalEdge = edges.find((edge) => edge.id === 'edge-command-shaper');
-    const canEdge = edges.find((edge) => edge.id === 'edge-imu-error');
 
-    expect(edges.length).toBeGreaterThan(0);
-    edges.forEach((edge) => {
-      expect(edge.faultSlots, edge.id).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          slotId: expect.any(String),
-          layer: 'electrical',
-          targetField: 'signal.value',
-          allowedModels: expect.arrayContaining(['bias', 'noise', 'freeze', 'intermittent'])
-        })
-      ]));
-    });
-
-    expect(normalEdge.faultSlots.map((slot) => slot.layer)).toEqual(['electrical']);
-    expect(canEdge.faultSlots).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        slotId: 'protocol:can_message',
-        layer: 'protocol',
-        targetField: 'can.payload',
-        allowedModels: expect.arrayContaining(['delay', 'dropout', 'tamper', 'stale'])
-      })
-    ]));
-  });
-
-  it('keeps core component parameter fault slots in the closed-loop demo package', () => {
-    const closedLoopPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const nodes = closedLoopPackage.workbenchSnapshot.modelNodes;
-    const imu = nodes.find((node) => node.id === 'node-imu');
-    const motor = nodes.find((node) => node.id === 'node-motor-1');
-    const allocator = nodes.find((node) => node.id === 'node-allocator');
-
-    expect(imu.faultSlots).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        slotId: 'physical:imu_zero_bias',
-        layer: 'physical',
-        targetField: 'params.gyro.bias',
-        allowedModels: expect.arrayContaining(['bias', 'drift', 'random'])
-      })
-    ]));
-    expect(motor.faultSlots).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        slotId: 'physical:motor_thrust_coefficient',
-        layer: 'physical',
-        targetField: 'params.thrustCoefficient',
-        allowedModels: expect.arrayContaining(['bias', 'drift', 'degradation'])
-      })
-    ]));
-    expect(allocator.faultSlots).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        slotId: 'physical:allocation_matrix',
-        layer: 'physical',
-        targetField: 'params.allocationMatrix',
-        allowedModels: expect.arrayContaining(['step'])
-      })
-    ]));
-  });
-
-  it('declares component-owned injectable variables in the closed-loop demo package', () => {
-    const closedLoopPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const nodes = closedLoopPackage.workbenchSnapshot.modelNodes
-      .filter((node) => node.type === 'simulation_block');
-
-    expect(nodes.length).toBeGreaterThan(0);
-    nodes.forEach((node) => {
-      expect(node.props?.faultInjection, node.id).toEqual(expect.objectContaining({
-        physical: expect.any(Array),
-        electrical: expect.any(Array),
-        protocol: expect.any(Array)
-      }));
-
-      const declared = new Set(
-        Object.entries(node.props.faultInjection)
-          .flatMap(([layer, keys]) => keys.map((key) => `${layer}:${String(key).replace(/\s+/g, '_')}`))
-      );
-      expect(node.faultSlots.map((slot) => slot.slotId), node.id).toEqual(
-        expect.arrayContaining([...declared])
-      );
-      node.faultSlots.forEach((slot) => {
-        expect(declared.has(slot.slotId), `${node.id}:${slot.slotId}`).toBe(true);
-      });
-    });
-
-    const imu = nodes.find((node) => node.id === 'node-imu');
-    const motorMixer = nodes.find((node) => node.id === 'node-motor');
-    expect(imu.props.faultInjection).toEqual(expect.objectContaining({
-      physical: expect.arrayContaining(['imu_zero_bias', 'imu_scale_factor', 'imu_noise_std']),
-      electrical: expect.arrayContaining(['机体角速度', '测量角速度', '陀螺仪零偏状态']),
-      protocol: expect.arrayContaining(['imu_feedback_payload'])
-    }));
-    expect(motorMixer.props.faultInjection.protocol).toEqual(expect.arrayContaining(['motor_command_payload']));
-  });
 
   it('derives component-owned fault slots from module interface declarations', () => {
     const node = normalizeModelNode({
@@ -1214,6 +1072,49 @@ describe('flightModelPackageService', () => {
     ]);
   });
 
+  it('keeps vector parameter length on declared fault slots', () => {
+    const node = normalizeModelNode({
+      id: 'node-controller',
+      type: 'simulation_block',
+      props: {
+        parameters: [
+          { key: 'gains', name: 'Controller gains', default: '[1.0, 0.5, 0.2]' }
+        ],
+        faultInjection: { physical: ['gains'], electrical: [], protocol: [] }
+      }
+    });
+
+    expect(node.faultSlots).toContainEqual(expect.objectContaining({
+      slotId: 'physical:gains',
+      targetField: 'params.gains',
+      dataType: 'vector',
+      vectorLength: 3
+    }));
+  });
+
+  it('preserves executable physical parameter targets for default fault slots', () => {
+    const node = normalizeModelNode({
+      id: 'node-allocation',
+      type: 'simulation_block',
+      props: {
+        modelParameters: [
+          {
+            key: 'allocation_gain',
+            name: 'Allocation gain',
+            targetField: 'params.allocationGain'
+          }
+        ]
+      }
+    });
+
+    expect(node.faultSlots).toContainEqual(expect.objectContaining({
+      slotId: 'physical:parameter:allocation_gain',
+      layer: 'physical',
+      targetField: 'params.allocationGain',
+      parameterKey: 'allocation_gain'
+    }));
+  });
+
   it('does not infer undeclared component variables once a layer declaration exists', () => {
     const node = normalizeModelNode({
       id: 'node-controller',
@@ -1327,6 +1228,7 @@ describe('flightModelPackageService', () => {
     ]);
     expect(byId.bias.formula).toBe('p_fault = p + bias');
     expect(byId.drift.formula).toBe('p_fault = p + rate * max(t - start, 0)');
+    expect(byId.freeze.defaultParameters).toEqual({ start: 0 });
     expect(byId.random.defaultParameters).toMatchObject({ seed: 1, std: 0.08 });
   });
 
@@ -1364,214 +1266,41 @@ describe('flightModelPackageService', () => {
     expect(canEdge.faultSlots.map((slot) => slot.layer)).toEqual(['electrical', 'protocol']);
   });
 
-  it('defines component-owned fault capabilities for the closed-loop demo', () => {
-    const closedLoopPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const nodes = new Set(closedLoopPackage.workbenchSnapshot.modelNodes.map((node) => node.id));
-    const edges = new Set(closedLoopPackage.workbenchSnapshot.modelEdges.map((edge) => edge.id));
-    const faultIds = new Set(closedLoopPackage.faultTypeCatalog.map((fault) => fault.id));
 
-    expect(closedLoopPackage.schemaVersion).toBe('2.0');
-    expect(closedLoopPackage.faultInstances).toEqual([]);
-    expect(closedLoopPackage.faultTypeCatalog).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'gyro_zero_bias_offset', displayName: 'Gyro 陀螺仪零偏 - 固定偏差' }),
-      expect.objectContaining({ id: 'gyro_zero_bias_drift', displayName: 'Gyro 陀螺仪零偏 - 缓慢漂移' }),
-      expect.objectContaining({ id: 'gyro_zero_bias_intermittent', displayName: 'Gyro 陀螺仪零偏 - 间歇故障' }),
-      expect.objectContaining({ id: 'motor_1_stuck_position', displayName: '单电机卡死 - 1号电机卡位' }),
-      expect.objectContaining({ id: 'control_command_tamper', displayName: '控制指令篡改 - 1号电机 CAN 指令' })
-    ]));
 
-    closedLoopPackage.faultCapabilityMap.forEach((entry) => {
-      expect(['node', 'edge']).toContain(entry.targetKind);
-      expect(entry.targetKind === 'node' ? nodes.has(entry.targetId) : edges.has(entry.targetId)).toBe(true);
-      expect(entry.targetName).toBeTruthy();
-      expect(entry.faultSlots.length).toBeGreaterThan(0);
-      entry.faultSlots.forEach((slot) => {
-        expect(slot.slotId).toBeTruthy();
-        expect(slot.slotName).toBeTruthy();
-        expect(slot.allowedFaultIds.length).toBeGreaterThan(0);
-        slot.allowedFaultIds.forEach((faultId) => expect(faultIds.has(faultId)).toBe(true));
-      });
-    });
 
-    const imu = closedLoopPackage.faultCapabilityMap.find((entry) => entry.targetId === 'node-imu');
-    expect(imu.faultSlots[0].allowedFaultIds).toEqual([
-      'gyro_zero_bias_offset',
-      'gyro_zero_bias_drift',
-      'gyro_zero_bias_intermittent'
-    ]);
 
-    const motor = closedLoopPackage.faultCapabilityMap.find((entry) => entry.targetId === 'node-motor-1');
-    expect(motor.faultSlots[0].allowedFaultIds).toEqual(['motor_1_stuck_position']);
-
-    const can = closedLoopPackage.faultCapabilityMap.find((entry) => entry.targetId === 'edge-motor-motor1');
-    expect(can.faultSlots[0].allowedFaultIds).toEqual(['control_command_tamper']);
-  });
-
-  it('publishes the full global fault catalog through the closed-loop demo package', () => {
-    const closedLoopPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const globalFaultIds = globalFaultCatalog.faultTypes.map((fault) => fault.id);
-    const packageFaultIds = closedLoopPackage.faultTypeCatalog.map((fault) => fault.id);
-    const text = closedLoopPackage.faultTypeCatalog
-      .map((fault) => `${fault.id} ${fault.name ?? ''} ${fault.displayName ?? ''} ${fault.modelClass ?? ''}`)
-      .join('\n');
-
-    expect(packageFaultIds).toEqual(expect.arrayContaining(globalFaultIds));
-    expect(closedLoopPackage.faultLibrary.map((fault) => fault.id)).toEqual(expect.arrayContaining(globalFaultIds));
-    expect(closedLoopPackage.faultTypeCatalog.length).toBeGreaterThanOrEqual(20);
-
-    ['偏差', '卡位', '渐变', '突变'].forEach((label) => {
-      expect(text, label).toContain(label);
-    });
-    ['状态突变', '信号阻塞', '间歇'].forEach((label) => {
-      expect(text, label).toContain(label);
-    });
-    ['高斯', '白噪声', '有色噪声'].forEach((label) => {
-      expect(text, label).toContain(label);
-    });
-  });
-
-  it('embeds backend python modules in the closed-loop demo package', () => {
-    const closedLoopPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const validation = validateFlightModelPackage(closedLoopPackage);
-    const applied = applyFlightModelPackage(closedLoopPackage);
-
-    expect(validation).toEqual({ ok: true, errors: [] });
-    expect(closedLoopPackage.pythonModules.length).toBeGreaterThanOrEqual(1);
-    closedLoopPackage.pythonModules.forEach((module) => {
-      expect(module).toMatchObject({
-        moduleId: expect.any(String),
-        fileName: expect.stringMatching(/\.py$/),
-        entryFunction: 'process',
-        source: expect.stringContaining('def process')
-      });
-      expect(module.parsedInterface).toMatchObject({
-        entryFunction: 'process',
-        inputs: expect.any(Array),
-        outputs: expect.any(Array)
-      });
-    });
-
-    const backendBlocks = applied.snapshot.modelNodes.filter((node) => (
-      node.type === 'simulation_block'
-      && node.pythonBinding?.bound
-      && node.pythonBinding.executionMode === 'backend'
-      && node.pythonBinding.rawSource
-    ));
-    expect(backendBlocks.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('defines the closed-loop demo diagnostic contract with Chinese labels and red-box faults', () => {
-    const closedLoopPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const diagnosticModel = closedLoopPackage.diagnosticModel;
-    const nodes = closedLoopPackage.workbenchSnapshot.modelNodes;
-    const faults = closedLoopPackage.faultLibrary;
-    const points = diagnosticModel?.testPoints ?? [];
-    const cases = diagnosticModel?.faultCases ?? [];
-    const caseIds = cases.map((faultCase) => faultCase.id);
-
-    expect(closedLoopPackage.modelName).toContain('飞控');
-    expect(nodes.map((node) => node.props?.name)).toEqual(expect.arrayContaining([
-      '姿态指令',
-      '姿态控制器',
-      '控制分配',
-      '1号电机与旋翼',
-      'IMU 陀螺仪反馈',
-      '故障前后对比示波器'
-    ]));
-    const compareScope = nodes.find((node) => node.id === 'node-scope');
-    expect(compareScope).toMatchObject({
-      type: 'instrument_scope',
-      x: expect.any(Number),
-      y: expect.any(Number),
-      props: expect.objectContaining({
-        name: '故障前后对比示波器',
-        displayRole: 'fault-comparison'
-      })
-    });
-    expect(compareScope.x).toBeGreaterThanOrEqual(650);
-    expect(compareScope.x).toBeLessThanOrEqual(920);
-    expect(compareScope.y).toBeGreaterThanOrEqual(300);
-    expect(compareScope.y).toBeLessThanOrEqual(420);
-    expect(closedLoopPackage.workbenchSnapshot.modelEdges).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'edge-command-scope', targetNodeId: 'node-scope', targetPortIndex: 0 }),
-      expect.objectContaining({ id: 'edge-imu-scope', targetNodeId: 'node-scope', targetPortIndex: 1 })
-    ]));
-    expect(diagnosticModel).toMatchObject({
-      modelId: 'evtol-closed-loop-fault-demo',
-      locale: 'zh-CN'
-    });
-    expect(points).toHaveLength(12);
-    expect(points.map((point) => point.shortName)).toEqual([
-      'M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10', 'M11', 'M12'
-    ]);
-    expect(caseIds).toEqual(expect.arrayContaining([
-      'gyro_zero_bias_offset',
-      'gyro_zero_bias_drift',
-      'gyro_zero_bias_intermittent',
-      'motor_1_stuck_position',
-      'control_command_tamper'
-    ]));
-    const visualImplementations = Object.fromEntries(faults.map((fault) => [
-      fault.id,
-      {
-        recommendedModule: fault.platformImplementation?.recommendedModule,
-        strategy: fault.visualInjection?.strategy,
-        tagType: fault.visualInjection?.tagType
+  it('normalizes legacy signal sources to analog domain during package import', () => {
+    const pkg = {
+      schemaVersion: 1,
+      packageType: 'flight-control-model',
+      modelId: 'legacy-signal-source',
+      modelName: 'Legacy Signal Source',
+      pythonModules: [],
+      faultLibrary: [],
+      workbenchSnapshot: {
+        modelNodes: [
+          {
+            id: 'node-source',
+            type: 'signal_source',
+            props: { name: 'Legacy Source', waveType: '常值', amplitude: '1', frequency: '0', outputFormat: '标量' }
+          }
+        ],
+        modelEdges: []
       }
-    ]));
-    expect(visualImplementations).toMatchObject({
-      gyro_zero_bias_offset: { recommendedModule: 'fault_tag', strategy: 'fault_tag', tagType: 'fault_tag' },
-      gyro_zero_bias_drift: { recommendedModule: 'fault_tag', strategy: 'fault_tag', tagType: 'fault_tag' },
-      gyro_zero_bias_intermittent: { recommendedModule: 'fault_tag', strategy: 'fault_tag', tagType: 'fault_tag' },
-      motor_1_stuck_position: { recommendedModule: 'fault_tag', strategy: 'fault_tag', tagType: 'fault_tag' },
-      control_command_tamper: { recommendedModule: 'fault_tag', strategy: 'fault_tag', tagType: 'fault_tag' }
-    });
-    caseIds.forEach((faultId) => {
-      const fault = faults.find((item) => item.id === faultId);
-      expect(fault.platformImplementation.moduleLabel).toBe('故障组件');
-      expect(fault.platformImplementation.moduleLabel).not.toContain('?');
-    });
-    const redBoxVisualImplementations = Object.fromEntries(
-      Object.entries(visualImplementations).filter(([faultId]) => caseIds.includes(faultId))
-    );
-    expect(JSON.stringify(redBoxVisualImplementations)).not.toMatch(/fault_bias|fault_noise|middle_var_assign|gain_block|sum_block|fault_intermittent|fault_tamper|fault_stuck/);
-    cases.forEach((faultCase) => {
-      expect(faults.some((fault) => fault.id === faultCase.id)).toBe(true);
-      expect(points.some((point) => point.detects.includes(faultCase.id))).toBe(true);
-      expect(faultCase.name).toMatch(/[一-龥]/);
-      expect(faultCase.catalogTypeId).toBeTruthy();
-    });
+    };
 
-    const motorCommandPoint = points.find((point) => point.shortName === 'M6');
-    const motorResponsePoint = points.find((point) => point.shortName === 'M7');
-    expect(motorCommandPoint?.detects).toContain('control_command_tamper');
-    expect(motorCommandPoint?.detects).not.toContain('motor_1_stuck_position');
-    expect(motorResponsePoint?.detects).toContain('motor_1_stuck_position');
+    const result = applyFlightModelPackage(pkg);
+
+    expect(result.ok).toBe(true);
+    expect(result.snapshot.modelNodes[0].props).toMatchObject({
+      name: 'Legacy Source',
+      signalDomain: 'analog',
+      waveType: '常值',
+      amplitude: '1',
+      frequency: '0',
+      outputFormat: '标量'
+    });
   });
 
-  it('maps every closed-loop demo fault-library entry to a compatible runtime target', () => {
-    const closedLoopPackage = loadPublicPackage('evtol_closed_loop_fault_demo.json');
-    const nodes = closedLoopPackage.workbenchSnapshot.modelNodes;
-    const edges = closedLoopPackage.workbenchSnapshot.modelEdges;
-    const targetsByFaultId = Object.fromEntries(
-      closedLoopPackage.faultLibrary.map((faultModel) => [
-        faultModel.id,
-        findCompatibleFaultTarget(faultModel, { nodes, edges })
-      ])
-    );
-
-    expect(targetsByFaultId).toMatchObject({
-      gyro_zero_bias_offset: { kind: 'node', id: 'node-imu' },
-      gyro_zero_bias_drift: { kind: 'node', id: 'node-imu' },
-      gyro_zero_bias_intermittent: { kind: 'node', id: 'node-imu' },
-      motor_1_stuck_position: { kind: 'node', id: 'node-motor-1' },
-      control_command_tamper: { kind: 'edge', id: 'edge-shaper-error' },
-      motor_efficiency_loss: { kind: 'node', id: 'node-motor' },
-      airframe_inertia_shift: { kind: 'node', id: 'node-dynamics' },
-      can_bus_delay: { kind: 'edge', id: 'edge-imu-error' }
-    });
-    Object.entries(targetsByFaultId).forEach(([faultId, target]) => {
-      expect(target, faultId).toBeTruthy();
-    });
-  });
 });

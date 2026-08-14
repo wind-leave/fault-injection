@@ -1,9 +1,9 @@
 import { mount } from '@vue/test-utils';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import PythonBindingDialog from '../src/components/dialogs/PythonBindingDialog.vue';
 import { createSimulationBlockPythonBinding } from '../src/composables/useWorkbenchState.js';
 import { getPythonBindingPortCounts } from '../src/services/canvasGraph.js';
-import { executePythonBinding, executePythonBindingSync } from '../src/services/pythonExecutionAdapter.js';
+import { executePythonBindingSync } from '../src/services/pythonExecutionAdapter.js';
 
 const parsedInterface = {
   fileName: 'pid_controller.py',
@@ -71,8 +71,8 @@ describe('Python binding UI and state helpers', () => {
     expect(counts).toEqual({ inputs: 2, outputs: 2, middleVars: 1 });
   });
 
-  it('returns deterministic values in mock execution mode', async () => {
-    const result = await executePythonBinding({
+  it('uses a transparent fallback in mock execution mode', () => {
+    const result = executePythonBindingSync({
       adapterMode: 'mock',
       payload: {
         nodeId: 'node-1',
@@ -82,58 +82,11 @@ describe('Python binding UI and state helpers', () => {
       }
     });
 
-    expect(result.outputs.output_0).toBeTypeOf('number');
-    expect(result.outputs.output_1).toBeTypeOf('number');
-    expect(result.middleVars.integral).toBeTypeOf('number');
+    expect(result.outputs).toEqual({ output_0: 0.5, output_1: 0.5 });
+    expect(result.middleVars).toEqual({ integral: 0 });
   });
 
-  it('hands off backend execution payloads over HTTP', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        outputs: { output_0: 0.61 },
-        middleVars: { half_error: 0.25 }
-      })
-    });
-
-    const source = [
-      'def process(error, dt=0.1):',
-      '    half_error = error * 0.5',
-      "    return (error + dt, {'half_error': half_error})"
-    ].join('\n');
-
-    const result = await executePythonBinding({
-      adapterMode: 'backend',
-      endpoint: 'http://127.0.0.1:8765/api/python-flow/execute',
-      payload: {
-        moduleName: 'attitude_pid',
-        fileName: 'attitude_pid.py',
-        entryFunction: 'process',
-        source,
-        inputs: { error: 0.5, dt: 0.1 },
-        outputNames: ['output_0'],
-        middleVarNames: ['half_error']
-      },
-      fetchImpl
-    });
-
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(fetchImpl).toHaveBeenCalledWith(
-      'http://127.0.0.1:8765/api/python-flow/execute',
-      expect.objectContaining({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      })
-    );
-
-    const serializedBody = JSON.parse(fetchImpl.mock.calls[0][1].body);
-    expect(serializedBody.moduleName).toBe('attitude_pid');
-    expect(serializedBody.source).toBe(source);
-    expect(result.outputs.output_0).toBe(0.61);
-    expect(result.middleVars.half_error).toBe(0.25);
-  });
-
-  it('runs simple bound Python source locally when no backend sync adapter is present', () => {
+  it('runs simple bound Python source in mock execution mode', () => {
     const source = [
       'def process(pitch_command=0.0):',
       '    value = float(pitch_command)',
@@ -143,7 +96,7 @@ describe('Python binding UI and state helpers', () => {
     ].join('\n');
 
     const result = executePythonBindingSync({
-      adapterMode: 'backend',
+      adapterMode: 'mock',
       payload: {
         moduleName: 'command_shaper',
         fileName: 'command_shaper.py',

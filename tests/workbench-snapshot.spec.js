@@ -5,6 +5,31 @@ import {
 } from '../src/services/workbenchSnapshotService.js';
 
 describe('workbenchSnapshotService', () => {
+  it('restores the persisted immutable simulation interface definition', () => {
+    const restored = restoreWorkbenchSnapshot({
+      modelNodes: [{
+        id: 'node-1',
+        type: 'simulation_block',
+        props: { name: 'changed', inputs: [], outputs: [], middleVars: [] },
+        simulationInterfaceDefinition: {
+          name: 'controller',
+          ports: {
+            inputs: [{ name: 'error', type: 'scalar' }],
+            outputs: [{ name: 'command', type: 'scalar' }],
+            middleVars: []
+          },
+          pythonPortMapping: { inputs: [], outputs: [], middleVars: [] }
+        }
+      }],
+      modelEdges: []
+    });
+
+    expect(restored.modelNodes[0].props).toMatchObject({
+      name: 'controller',
+      inputs: [{ name: 'error', type: 'scalar' }]
+    });
+  });
+
   it('serializes python bindings and port metadata into a restorable snapshot', () => {
     const snapshot = createWorkbenchSnapshot({
       modelNodes: [
@@ -23,8 +48,7 @@ describe('workbenchSnapshotService', () => {
             description: 'PID controller',
             entryFunction: 'process',
             rawSource: 'def process(error): return error',
-            executionMode: 'backend',
-            executionConfig: { endpoint: '/api/python-flow/execute', timeoutMs: 5000 },
+            executionMode: 'mock',
             parsedInterface: {
               fileName: 'pid_controller.py',
               inputs: [{ name: 'error', type: 'float', default: null, comment: '' }],
@@ -141,5 +165,37 @@ describe('workbenchSnapshotService', () => {
       offsetX: 88,
       offsetY: 46
     });
+  });
+
+  it('preserves diagnostic test point state through snapshot round-trip', () => {
+    const snapshot = createWorkbenchSnapshot({
+      modelNodes: [],
+      modelEdges: [],
+      diagnosticTestPoints: [
+        { pointId: 'tp-fixed', edgeId: 'edge-a', name: 'Fixed point' }
+      ],
+      testPoints: [
+        { pointId: 'tp-package', edgeId: 'edge-b', name: 'Package point' }
+      ],
+      manualDiagnosticTestPoints: [
+        { pointId: 'tp-manual', edgeId: 'edge-c', name: 'Manual point' }
+      ],
+      installedDiagnosticTestPointIds: ['tp-fixed', 'tp-manual'],
+      diagnosticTestPointManualCleared: true
+    });
+
+    const restored = restoreWorkbenchSnapshot(snapshot);
+
+    expect(snapshot.diagnosticTestPoints).toEqual([
+      { pointId: 'tp-fixed', edgeId: 'edge-a', name: 'Fixed point' }
+    ]);
+    expect(snapshot.manualDiagnosticTestPoints).toEqual([
+      { pointId: 'tp-manual', edgeId: 'edge-c', name: 'Manual point' }
+    ]);
+    expect(snapshot.installedDiagnosticTestPointIds).toEqual(['tp-fixed', 'tp-manual']);
+    expect(restored.testPoints).toEqual([
+      { pointId: 'tp-package', edgeId: 'edge-b', name: 'Package point' }
+    ]);
+    expect(restored.diagnosticTestPointManualCleared).toBe(true);
   });
 });

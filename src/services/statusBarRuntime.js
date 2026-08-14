@@ -18,6 +18,7 @@ const EMPTY_LABELS = {
   results: '暂无仿真结果',
   performance: '暂无性能趋势'
 };
+const MAX_ENTRIES_PER_VIEW = 60;
 
 let boundRoot = null;
 let boundHandler = null;
@@ -33,7 +34,7 @@ function getRows(root = getRoot()) {
 }
 
 function getTable(root = getRoot()) {
-  return root?.querySelector('.sbar-log-table') || null;
+  return root?.querySelector('[data-status-log-scroll]') || root?.querySelector('.sbar-log-table') || null;
 }
 
 function getEmpty(root = getRoot()) {
@@ -318,6 +319,88 @@ function formatStatusTime(date = new Date()) {
   });
 }
 
+function initializeTemplateTimes(root = getRoot()) {
+  const timestamp = Date.now();
+  const times = Array.from(root?.querySelectorAll('[data-status-live-time], [data-status-created-time]') || []);
+  times.forEach((time, index) => {
+    const rowTimestamp = timestamp - index;
+    time.textContent = formatStatusTime(new Date(rowTimestamp));
+    const row = time.closest('[data-log-entry]');
+    if (row) {
+      row.dataset.statusTimestamp = String(rowTimestamp);
+    }
+  });
+}
+
+function insertStatusRowByTime(table, row, timestamp) {
+  const nextRow = Array.from(table.querySelectorAll('[data-log-entry]')).find((existingRow) => {
+    const existingTimestamp = Number(existingRow.dataset.statusTimestamp || 0);
+    return existingTimestamp <= timestamp;
+  });
+  if (nextRow) {
+    table.insertBefore(row, nextRow);
+    return;
+  }
+  const empty = table.querySelector('[data-status-empty]');
+  table.insertBefore(row, empty || null);
+}
+
+export function beginLiveStatus(options = {}) {
+  const root = getRoot();
+  const table = getTable(root);
+  if (!root || !table) {
+    return { ok: false, reason: 'missing-statusbar' };
+  }
+  const previousRow = root.querySelector('[data-status-live-row]');
+  if (previousRow) {
+    previousRow.removeAttribute('data-status-live-row');
+    previousRow.removeAttribute('data-status-key');
+    previousRow.querySelector('[data-status-live-time]')?.removeAttribute('data-status-live-time');
+    previousRow.querySelector('#stxt')?.removeAttribute('id');
+  }
+
+  const result = pushStatusEntry({
+    level: options.level || 'info',
+    source: options.source || '系统',
+    message: options.message || '仿真准备运行',
+    time: options.time,
+    timestamp: options.timestamp,
+    view: 'log'
+  });
+  if (!result.ok) {
+    return result;
+  }
+  const row = result.row;
+  row.setAttribute('data-status-live-row', '');
+  row.dataset.statusKey = String(options.key || 'simulation-starting');
+  const cells = row.children;
+  cells[0]?.setAttribute('data-status-live-time', '');
+  if (cells[3]) {
+    cells[3].id = 'stxt';
+  }
+  return { ...result, previousRow };
+}
+
+export function updateLiveStatus(message, options = {}) {
+  const root = getRoot();
+  const row = root?.querySelector('[data-status-live-row]');
+  const messageElement = row?.querySelector('#stxt');
+  if (!row || !messageElement) {
+    return { ok: false, reason: 'missing-live-status-row' };
+  }
+  messageElement.textContent = String(message ?? '');
+  const timeElement = row.querySelector('[data-status-live-time]');
+  const statusKey = String(options.key || '');
+  const statusChanged = !statusKey || row.dataset.statusKey !== statusKey;
+  if (timeElement && options.updateTime === true && statusChanged) {
+    timeElement.textContent = options.time || formatStatusTime();
+  }
+  if (statusKey) {
+    row.dataset.statusKey = statusKey;
+  }
+  return { ok: true, row };
+}
+
 export function pushStatusEntry(entry = {}) {
   const root = getRoot();
   const table = getTable(root);
@@ -332,8 +415,10 @@ export function pushStatusEntry(entry = {}) {
   row.dataset.level = level;
   row.dataset.view = view;
 
+  const timestamp = Number.isFinite(Number(entry.timestamp)) ? Number(entry.timestamp) : Date.now();
+  row.dataset.statusTimestamp = String(timestamp);
   const time = document.createElement('span');
-  time.textContent = entry.time || formatStatusTime();
+  time.textContent = entry.time || formatStatusTime(new Date(timestamp));
   const badgeCell = document.createElement('span');
   badgeCell.className = `sbar-badge ${LEVEL_BADGE_CLASS[level] || LEVEL_BADGE_CLASS.info}`;
   badgeCell.textContent = LEVEL_LABELS[level] || LEVEL_LABELS.info;
@@ -343,16 +428,18 @@ export function pushStatusEntry(entry = {}) {
   message.textContent = entry.message || '状态更新';
 
   row.append(time, badgeCell, source, message);
-  const empty = getEmpty(root);
-  table.insertBefore(row, empty || null);
+  insertStatusRowByTime(table, row, timestamp);
 
-  const rows = getRows(root);
-  for (const staleRow of rows.slice(60)) {
+  const rows = getRows(root).filter((entryRow) => (
+    !entryRow.hasAttribute('data-status-live-row') && (entryRow.dataset.view || 'log') === view
+  ));
+  for (const staleRow of rows.slice(MAX_ENTRIES_PER_VIEW)) {
     staleRow.remove();
   }
 
   root.dataset.logCleared = 'false';
   refreshRows(root);
+  table.scrollTop = 0;
   return { ok: true, row };
 }
 
@@ -364,14 +451,29 @@ function formatSimulationNumber(value, fractionDigits = 2) {
   return Number(number.toFixed(fractionDigits)).toString();
 }
 
+function normalizeSimulationTimeUnit(value) {
+  const unit = String(value || 's').trim().toLowerCase();
+  if (unit === 'us' || unit === 'µs' || unit === 'μs') {
+    return 'µs';
+  }
+  return ['s', 'ms', 'ns', 'ps'].includes(unit) ? unit : 's';
+}
+
+function formatSimulationTime(value, unit, fractionDigits) {
+  const scales = { s: 1, ms: 1e-3, 'µs': 1e-6, ns: 1e-9, ps: 1e-12 };
+  return formatSimulationNumber(Number(value) / scales[unit], fractionDigits);
+}
+
 function normalizeSimulationSummary(summary = {}) {
-  const duration = formatSimulationNumber(summary.duration, 2);
-  const elapsedSeconds = formatSimulationNumber(summary.elapsedSeconds ?? summary.time ?? 0, 2);
-  const stepSize = formatSimulationNumber(summary.stepSize, 4);
+  const timeUnit = normalizeSimulationTimeUnit(summary.timeUnit ?? summary.durationUnit);
+  const duration = formatSimulationTime(summary.duration, timeUnit, 2);
+  const elapsedSeconds = formatSimulationTime(summary.elapsedSeconds ?? summary.time ?? 0, timeUnit, 2);
+  const stepSize = formatSimulationTime(summary.stepSize, timeUnit, 4);
   return {
     datasetName: String(summary.datasetName || summary.name || 'test'),
     duration,
     elapsedSeconds,
+    timeUnit,
     faults: toMetricNumber(summary.faults, 0),
     sampleRate: String(summary.sampleRate || '-'),
     status: String(summary.status || 'updated'),
@@ -386,13 +488,13 @@ export function publishSimulationSummary(summary = {}) {
     level: normalized.status === 'completed' ? 'ok' : 'info',
     source: '仿真结果',
     view: 'results',
-    message: `${normalized.datasetName} · ${normalized.status} · ${normalized.stepIndex} steps · ${normalized.duration}s · faults ${normalized.faults}`
+    message: `${normalized.datasetName} · ${normalized.status} · ${normalized.stepIndex} steps · ${normalized.duration}${normalized.timeUnit} · faults ${normalized.faults}`
   });
   const performance = pushStatusEntry({
     level: 'info',
     source: '性能趋势',
     view: 'performance',
-    message: `${normalized.datasetName} · ${normalized.sampleRate} · elapsed ${normalized.elapsedSeconds}s · step ${normalized.stepSize}s · ${normalized.stepIndex} samples`
+    message: `${normalized.datasetName} · ${normalized.sampleRate} · elapsed ${normalized.elapsedSeconds}${normalized.timeUnit} · step ${normalized.stepSize}${normalized.timeUnit} · ${normalized.stepIndex} samples`
   });
   return {
     ok: result.ok && performance.ok,
@@ -434,10 +536,12 @@ export function bindStatusBarInteractions() {
   root.dataset.filterLevel = root.dataset.filterLevel || 'all';
   root.dataset.logCleared = root.dataset.logCleared || 'false';
   bindMetricFormattingObserver(root);
+  initializeTemplateTimes(root);
   refreshRows(root);
   window.__GZ_STATUS_BAR__ = {
     applyLevelFilter,
     bind: bindStatusBarInteractions,
+    beginLiveStatus,
     clear: clearStatusLog,
     cycleLevelFilter,
     exportLog: exportStatusLog,
@@ -446,6 +550,7 @@ export function bindStatusBarInteractions() {
     publishSimulationSummary,
     refresh: refreshRows,
     selectView: selectStatusView,
+    updateLiveStatus,
     unbind: unbindStatusBarInteractions
   };
 }

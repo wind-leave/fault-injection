@@ -192,7 +192,7 @@ POST /api/practice/session/{practiceSessionId}/submit
 | `initialSimulationResult` | 当前含故障模型的静态初始仿真结果 |
 | `initialSimulationResult.physicalMeasurements` | 初始物理测点的完整逐时间步数据；测点含 `pointCode`、`pointId`、`pointName`、`channel`、`sourceDeviceId`、`sourcePort` 和 `samples` |
 | `initialSimulationResult.virtualMeasurements` | 初始虚拟测点的完整逐时间步数据；字段与物理测点相同 |
-| `*.samples[]` | 单个仿真时间步的公开数据，仅含 `time` 和故障模型的 `actual` 值；不含参考值、阈值或状态判定 |
+| `*.samples[]` | 单个仿真时间步的公开数据，仅含 `time` 和故障模型的 `actual` 值；标量接口的 `actual` 为 number，多路接口为按接口通道顺序排列的完整 number[]（嵌套接口可为嵌套数组）；无效通道值保留位置并写为 null；不含参考值、阈值或状态判定 |
 
 ### 3.4 `privateData`
 
@@ -210,20 +210,20 @@ POST /api/practice/session/{practiceSessionId}/submit
     "faultInstances": [],
     "measurementPoints": []
   },
-  "rerunConfig": {
-    "startTime": 0,
-    "duration": 10,
-    "stepSize": 0.1,
-    "randomSeed": null,
-    "initialConditions": {},
-    "inputScenario": {},
-    "resetPolicy": "full-reset"
-  },
   "targetFaultId": "fault-001",
   "dMatrix": {
     "points": [],
     "rows": []
   },
+  "displayConsoleControls": [
+    {
+      "displayConsoleId": "display-console-1",
+      "displayConsoleName": "显控台 1",
+      "targetComponentId": "rf-source-1",
+      "componentType": "rf_four_output_source",
+      "parameterKeys": ["center_frequency_hz", "pulse_width_seconds"]
+    }
+  ],
   "initialRecommendedPath": {
     "steps": [
       {
@@ -248,9 +248,9 @@ POST /api/practice/session/{practiceSessionId}/submit
 | `executableModel.edges` | 模型连接和线缆 |
 | `executableModel.faultInstances` | 初始故障实例 |
 | `executableModel.measurementPoints` | 后端仿真曲线测量通道定义 |
-| `rerunConfig` | 更换组件或线缆后的重跑配置；当前固定从 `0` 全量重跑 |
 | `targetFaultId` | 本次实践的真实目标故障，实践过程中属于后端私有答案；没有选择实践故障时为 `null` |
 | `dMatrix` | 故障—测点检测矩阵 |
+| `displayConsoleControls` | 显控台到受控组件及允许修改参数的后端白名单 |
 | `initialRecommendedPath` | 导出前由后端方案接口生成并标准化的初始最优排故路径；没有选择实践故障时为 `null` |
 
 私有数据与创建请求的映射：
@@ -262,8 +262,7 @@ POST /api/practice/session/{practiceSessionId}/submit
 | `privateData.targetFaultId` | `targetFaultId` |
 | `privateData.initialRecommendedPath` | `initialRecommendedPath` |
 | `privateData.initialPointStates` | `initialPointStates` |
-
-`rerunConfig` 随任务包导出，用于记录重跑策略；当前创建实践任务请求不需要映射该字段。
+| `privateData.displayConsoleControls` | `displayConsoleControls` |
 
 三维端仅在 `targetFaultId` 为非空字符串时创建实践任务；未选择实践故障的导出包仍可用于展示仿真结果，但不能直接创建后端实践会话。
 
@@ -297,6 +296,7 @@ POST /api/practice/session
     "rows": []
   },
   "targetFaultId": "fault-001",
+  "displayConsoleControls": [],
   "initialRecommendedPath": {
     "steps": [],
     "keySteps": [],
@@ -312,6 +312,7 @@ POST /api/practice/session
 | `targetFaultId` | string | 是 | `privateData.targetFaultId` |
 | `initialRecommendedPath` | object | 否 | `privateData.initialRecommendedPath`；缺省时后端根据 D 矩阵生成 |
 | `initialPointStates` | array | 是 | `privateData.initialPointStates`；后端直接读取各测点的 `observed` 作为初始诊断状态 |
+| `displayConsoleControls` | array | 有显控台控制时必填 | `privateData.displayConsoleControls`；用于约束实践动作可修改的组件及参数 |
 | `scoringRules` | object | 否 | 可选评分参数，例如 `fullEfficiencySeconds` |
 | `lifecycle` | object | 否 | 最大生命周期和空闲超时配置；缺省时分别为 3600 秒和 900 秒 |
 | `resourceLimits` | object | 否 | 最大动作数量等资源限制 |
@@ -355,9 +356,9 @@ POST /api/practice/session/{practiceSessionId}/action
 | --- | --- | --- | --- |
 | `protocolVersion` | string | 否 | 当前为 `1.0` |
 | `operationId` | string | 建议必填 | 三维端生成的动作唯一 ID |
-| `actionType` | string | 是 | `measurePoint`、`replaceWire` 或 `replaceComponent` |
+| `actionType` | string | 是 | `measurePoint`、`replaceWire`、`replaceComponent` 或 `adjustDisplayConsoleParameter` |
 | `target` | object | 是 | 学员操作目标 |
-| `target.type` | string | 是 | 分别为 `testPoint`、`wire` 或 `component` |
+| `target.type` | string | 是 | 分别为 `testPoint`、`wire`、`component` 或 `displayConsole` |
 | `target.id` | string | 是 | 后端模型中的测点、线缆或组件 ID |
 | `pointCode` | string | 测量必填 | D 矩阵中的虚拟测点编码 |
 | `faultId` | string | 否 | 旧客户端兼容字段；更换动作不依赖该字段 |
@@ -365,7 +366,37 @@ POST /api/practice/session/{practiceSessionId}/action
 | `clientTime` | string | 否 | ISO 8601 客户端动作时间 |
 | `rawAction` | object | 否 | 三维端原始交互信息 |
 
-### 5.3 测量虚拟测点
+### 5.3 修改显控台受控组件参数并重跑
+
+请求中的参数值使用后端基础单位，与 `executableModel.nodes[].parameters` 保持一致。
+
+```json
+{
+  "protocolVersion": "1.0",
+  "operationId": "op-console-parameter-001",
+  "actionType": "adjustDisplayConsoleParameter",
+  "target": {
+    "type": "displayConsole",
+    "id": "display-console-1"
+  },
+  "componentId": "rf-source-1",
+  "parameters": {
+    "center_frequency_hz": 250000000,
+    "pulse_width_seconds": 0.000002
+  },
+  "clientTime": "2026-07-16T10:00:00+08:00"
+}
+```
+
+后端校验 `target.id`、`componentId` 和参数键是否存在于创建实践会话时提交的 `displayConsoleControls` 白名单。校验通过后更新会话内可执行模型参数，清空时间、模块状态及运行时状态，从 `t=0` 完整重跑，并返回：
+
+- `normalizedAction`：标准化后的动作；
+- `appliedParameters`：每个参数的旧值、新值、显控台 ID 和受控组件 ID；
+- `simulationResult`：重跑后的完整公开测点结果，结构与更换动作响应相同。
+
+也可使用单参数形式：`"parameter": "center_frequency_hz", "value": 250000000`。
+
+### 5.4 测量虚拟测点
 
 物理测点由导出包中的 `initialSimulationResult.physicalMeasurements` 提供。`measurePoint` 仅用于 D 矩阵中 `pointType=virtual` 的虚拟测点。
 
@@ -404,7 +435,7 @@ POST /api/practice/session/{practiceSessionId}/action
 
   测量动作读取当前最新仿真结果，不修改模型，也不会触发从零重跑；响应仅确认已接受的动作，不返回完整 `simulationResult`、测点观测详情或 `troubleshootingState`。
 
-### 5.4 更换线缆
+### 5.5 更换线缆
 
 请求：
 
@@ -424,7 +455,7 @@ POST /api/practice/session/{practiceSessionId}/action
 }
 ```
 
-### 5.5 更换组件
+### 5.6 更换组件
 
 请求：
 
@@ -444,7 +475,7 @@ POST /api/practice/session/{practiceSessionId}/action
 }
 ```
 
-### 5.6 更换动作处理规则
+### 5.7 更换动作处理规则
 
 - `target.id` 必须对应当前最新模型中存在的线缆或组件。
 - 更换动作不要求目标存在故障，也不要求提交 `faultId`。
@@ -453,7 +484,7 @@ POST /api/practice/session/{practiceSessionId}/action
 - 更换线缆会恢复该连接的连通状态。
 - 每次更换后，后端保留最新模型修改，清空时间、模块状态和仿真运行时状态，从时间 `0` 跑完 `simulationConfig` 指定的完整仿真时长。
 
-### 5.7 更换动作成功响应
+### 5.8 更换动作成功响应
 
 ```json
 {
@@ -732,7 +763,8 @@ POST /api/practice/session/{practiceSessionId}/submit
 | --- | --- |
 | `INVALID_SCHEMA` | 创建请求或提交请求字段结构错误 |
 | `INVALID_ACTION_SCHEMA` | 动作缺少目标、测点编码或目标类型错误 |
-| `UNSUPPORTED_ACTION_TYPE` | 动作不是 `measurePoint`、`replaceWire` 或 `replaceComponent` |
+| `UNSUPPORTED_ACTION_TYPE` | 动作不是 `measurePoint`、`replaceWire`、`replaceComponent` 或 `adjustDisplayConsoleParameter` |
+| `PARAMETER_NOT_ALLOWED` | 指定参数不在该显控台的控制白名单中 |
 | `TARGET_NOT_FOUND` | 组件、线缆或故障目标不存在 |
 | `SESSION_NOT_FOUND` | 实践任务不存在、已提交或后端已重启 |
 | `SESSION_EXPIRED` | 实践任务超过生命周期或空闲超时 |

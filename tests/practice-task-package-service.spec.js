@@ -72,7 +72,15 @@ describe('practiceTaskPackageService', () => {
       schemaVersion: 1,
       kind: '3d-practice-task-package',
       exportedAt: '2026-07-16T08:00:00.000Z',
-      taskId: 'practice-1'
+      taskId: 'practice-1',
+      meta: {
+        duration: 10,
+        stepSize: 0.1
+      }
+    });
+    expect(result.publicData.initialSimulationResult.simulationConfig).toEqual({
+      duration: 10,
+      stepSize: 0.1
     });
     expect(result.publicData).not.toHaveProperty('modelTopology');
     expect(result.publicData.renderData).toEqual({
@@ -88,21 +96,36 @@ describe('practiceTaskPackageService', () => {
     expect(JSON.stringify(result.publicData)).not.toContain('referenceScopeSamples');
 
     expect(result.privateData.executableModel).toEqual(executableModel);
-    expect(result.privateData.rerunConfig).toEqual({
-      startTime: 0,
-      duration: 10,
-      stepSize: 0.1,
-      randomSeed: null,
-      initialConditions: {},
-      inputScenario: {},
-      resetPolicy: 'full-reset'
-    });
+    expect(result.privateData).not.toHaveProperty('rerunConfig');
     expect(result.privateData.targetFaultId).toBe('fault-1');
     expect(result.privateData.initialRecommendedPath).toEqual(initialRecommendedPath);
     expect(result.privateData).not.toHaveProperty('keyNodes');
     expect(result.privateData).not.toHaveProperty('actionRules');
     expect(result.privateData).not.toHaveProperty('scoringRules');
     expect(result.privateData).not.toHaveProperty('referenceCurves');
+  });
+
+  it('persists simulation duration and step size from the executable model when metadata omits them', () => {
+    const result = buildPracticeTaskPackage({
+      meta: { datasetName: 'run-with-model-config' },
+      executableModel: {
+        simulationConfig: { duration: 2.5, stepSize: 0.005 },
+        nodes: [],
+        edges: [],
+        faultInstances: [],
+        measurementPoints: []
+      }
+    });
+
+    expect(result.meta).toMatchObject({
+      duration: 2.5,
+      stepSize: 0.005
+    });
+    expect(result.publicData.initialSimulationResult.simulationConfig).toEqual({
+      duration: 2.5,
+      stepSize: 0.005
+    });
+    expect(result.privateData).not.toHaveProperty('rerunConfig');
   });
 
   it('keeps only non-instrument devices and connections in public render data', () => {
@@ -200,6 +223,95 @@ describe('practiceTaskPackageService', () => {
       expect(point).not.toHaveProperty('observed');
       point.samples.forEach((sample) => expect(sample).not.toHaveProperty('reference'));
     });
+  });
+
+  it('exports display-console parameter control permissions for the practice backend', () => {
+    const result = buildPracticeTaskPackage({
+      renderData: {
+        devices: [{
+          id: 'console-1',
+          displayName: '显控台 1',
+          type: 'display_console',
+          controlState: {
+            targetComponentId: 'source-1',
+            componentType: 'rf_four_output_source',
+            parameters: [
+              { key: 'center_frequency_hz', value: 100000000 },
+              { key: 'pulse_width_seconds', value: 0.000001 }
+            ]
+          }
+        }],
+        connections: []
+      }
+    });
+
+    expect(result.privateData.displayConsoleControls).toEqual([{
+      displayConsoleId: 'console-1',
+      displayConsoleName: '显控台 1',
+      targetComponentId: 'source-1',
+      componentType: 'rf_four_output_source',
+      parameterKeys: ['center_frequency_hz', 'pulse_width_seconds']
+    }]);
+  });
+
+  it('preserves every channel of a multi-channel interface in each saved sample', () => {
+    const result = buildPracticeTaskPackage({
+      dMatrix: {
+        points: [{
+          pointId: 'tp-vector',
+          shortName: 'P-VECTOR',
+          name: 'Three-phase output',
+          pointType: 'physical',
+          edgeId: 'vector-wire'
+        }]
+      },
+      executableModel: {
+        simulationConfig: { duration: 0.1, stepSize: 0.1 },
+        nodes: [],
+        edges: [{
+          id: 'vector-wire',
+          sourceNodeId: 'source-1',
+          sourcePortIndex: 0,
+          sourcePortMeta: { varName: 'phase_output' }
+        }],
+        faultInstances: [],
+        measurementPoints: []
+      },
+      componentOutputs: {
+        time: [0, 0.1],
+        steps: [
+          {
+            time: 0,
+            actual: { 'source-1': { phase_output: [220, 221, 222] } },
+            reference: { 'source-1': { phase_output: [220, 220, 220] } }
+          },
+          {
+            time: 0.1,
+            actual: { 'source-1': { phase_output: [223, null, 225] } },
+            reference: { 'source-1': { phase_output: [220, 220, 220] } }
+          }
+        ]
+      },
+      renderData: {
+        devices: [{ id: 'source-1', type: 'simulation_block' }],
+        connections: [{
+          id: 'vector-wire',
+          sourceDeviceId: 'source-1',
+          targetDeviceId: 'source-1',
+          sourcePort: 'phase-output'
+        }]
+      }
+    });
+
+    expect(result.publicData.initialSimulationResult.physicalMeasurements).toMatchObject([{
+      pointId: 'tp-vector',
+      sourceDeviceId: 'source-1',
+      sourcePort: 'phase-output',
+      samples: [
+        { time: 0, actual: [220, 221, 222] },
+        { time: 0.1, actual: [223, null, 225] }
+      ]
+    }]);
   });
 
   it('normalizes a backend troubleshooting plan for the practice task', () => {

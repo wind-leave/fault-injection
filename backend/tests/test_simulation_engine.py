@@ -13,7 +13,7 @@ class SimulationEngineTests(unittest.TestCase):
         for actual_value, expected_value in zip(actual, expected):
             self.assertAlmostEqual(actual_value, expected_value, places=10)
 
-    def test_simulation_component_output_is_not_gated_by_power_connection(self):
+    def test_simulation_component_requires_matching_power_connection(self):
         package = {
             "schemaVersion": 1,
             "packageId": "power-gating",
@@ -35,7 +35,7 @@ class SimulationEngineTests(unittest.TestCase):
         }
         registry = ModuleRegistry.from_builtin_manifest()
         unpowered = run_simulation(compile_graph(package, registry))
-        self.assertEqual(unpowered["componentOutputs"]["steps"][0]["actual"]["component"]["output"], 5.0)
+        self.assertEqual(unpowered["componentOutputs"]["steps"][0]["actual"]["component"]["output"], 0.0)
 
         package["edges"].append(
             {"id": "supply-edge", "sourceNodeId": "supply", "sourcePortIndex": 0, "targetNodeId": "component", "targetPortIndex": 1}
@@ -45,12 +45,12 @@ class SimulationEngineTests(unittest.TestCase):
 
         package["nodes"][1]["parameters"]["value"] = 200
         mismatched = run_simulation(compile_graph(package, registry))
-        self.assertEqual(mismatched["componentOutputs"]["steps"][0]["actual"]["component"]["output"], 5.0)
+        self.assertEqual(mismatched["componentOutputs"]["steps"][0]["actual"]["component"]["output"], 0.0)
 
         package["nodes"][1]["parameters"]["value"] = 220
         package["nodes"][1]["outputs"][0]["unit"] = "VAC"
         wrong_supply_type = run_simulation(compile_graph(package, registry))
-        self.assertEqual(wrong_supply_type["componentOutputs"]["steps"][0]["actual"]["component"]["output"], 5.0)
+        self.assertEqual(wrong_supply_type["componentOutputs"]["steps"][0]["actual"]["component"]["output"], 0.0)
 
     def test_dc_matching_and_boost_output_can_power_a_simulation_component_at_its_rated_voltage(self):
         package = {
@@ -100,6 +100,34 @@ class SimulationEngineTests(unittest.TestCase):
             self.assertEqual(step["actual"]["dc-matcher"]["dc_output"], 220.0)
             self.assertEqual(step["actual"]["dc-boost"]["dc_output"], 418.0)
             self.assertEqual(step["actual"]["component"]["output"], 5.0)
+
+    def test_unpowered_vector_component_returns_a_shape_correct_zero_output(self):
+        package = {
+            "schemaVersion": 1,
+            "packageId": "unpowered-vector-component",
+            "simulationConfig": {"duration": 0.1, "stepSize": 0.1},
+            "nodes": [
+                {"id": "signal", "type": "signal_source", "parameters": {"value": 2}, "outputs": [{"name": "out"}]},
+                {
+                    "id": "vectorizer", "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "scalar_to_vector4", "entryFunction": "process"},
+                    "inputs": [{"name": "scalar_input"}],
+                    "outputs": [{"name": "vector_output", "dataType": "vector", "vectorLength": 4}],
+                    "powerInputs": [{"name": "supply", "voltage": "28V", "supplyType": "DC"}],
+                },
+            ],
+            "edges": [
+                {"id": "signal-vectorizer", "sourceNodeId": "signal", "sourcePortIndex": 0, "targetNodeId": "vectorizer", "targetPortIndex": 0},
+            ],
+            "faultInstances": [], "measurementPoints": [],
+        }
+
+        result = run_simulation(compile_graph(package, ModuleRegistry.from_builtin_manifest()))
+
+        self.assertEqual(
+            result["componentOutputs"]["steps"][0]["actual"]["vectorizer"]["vector_output"],
+            [0.0, 0.0, 0.0, 0.0],
+        )
 
     def test_routes_a_fixed_length_vector_through_component_input_and_output_ports(self):
         package = {

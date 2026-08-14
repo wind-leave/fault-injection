@@ -116,12 +116,16 @@ class PracticeSession:
         lifecycle=None,
         action_rules=None,
         resource_limits=None,
+        display_console_controls=None,
         default_max_actions=200,
     ):
         self.practice_session_id = practice_session_id
         self.simulation_session_id = simulation_session_id
         self.simulation_session = simulation_session
-        self.action_runtime = PracticeActionRuntime(simulation_session)
+        self.action_runtime = PracticeActionRuntime(
+            simulation_session,
+            display_console_controls=display_console_controls,
+        )
         self.rule_engine = PracticeActionRuleEngine(simulation_session, rules=action_rules)
         self.troubleshooting = TroubleshootingSession(d_matrix, target_fault_id)
         # Keep the original matrix for final-fault validation and retain a
@@ -959,6 +963,11 @@ class PracticeSession:
             "simulationSessionId": self.simulation_session_id,
             "normalizedAction": normalized_action,
             "simulationResult": self._build_measurement_result(simulation_result),
+            **(
+                {"appliedParameters": _clone(action_application.get("changes") or [])}
+                if action_record.get("actionType") == "adjustDisplayConsoleParameter"
+                else {}
+            ),
         }
 
     def _record_measure_point_action(self, action_record, normalized_action, steps, reference_before):

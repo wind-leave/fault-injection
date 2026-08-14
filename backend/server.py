@@ -255,6 +255,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
             lifecycle=payload.get("lifecycle"),
             action_rules=payload.get("actionRules"),
             resource_limits=payload.get("resourceLimits"),
+            display_console_controls=payload.get("displayConsoleControls"),
             default_max_actions=self.default_max_practice_actions,
         )
         with self.sessions_lock:

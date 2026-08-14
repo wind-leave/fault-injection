@@ -27,6 +27,34 @@ class PracticeActionRuntimeTests(unittest.TestCase):
         self.assertEqual(result["changes"][0]["type"], "parameter_updated")
         self.assertFloatSeriesEqual(step["curves"]["channels"]["scope-1.ch1.actual"], [2.0, 2.0])
 
+    def test_display_console_parameter_action_enforces_control_permissions(self):
+        session = self._session()
+        runtime = PracticeActionRuntime(session, display_console_controls=[{
+            "displayConsoleId": "console-1",
+            "targetComponentId": "source-1",
+            "parameterKeys": ["value"],
+        }])
+
+        result = runtime.apply({
+            "actionType": "adjustDisplayConsoleParameter",
+            "targetId": "console-1",
+            "componentId": "source-1",
+            "parameters": {"value": 2.5},
+        })
+        rerun = session.run_from_zero()
+
+        self.assertEqual(result["changes"][0]["type"], "display_console_parameter_updated")
+        self.assertFloatSeriesEqual(rerun["curves"]["channels"]["scope-1.ch1.actual"], [2.5, 2.5, 2.5])
+
+        with self.assertRaises(Exception) as context:
+            runtime.apply({
+                "actionType": "adjustDisplayConsoleParameter",
+                "targetId": "console-1",
+                "parameters": {"value": 9.0, "frequency": 100.0},
+            })
+        self.assertEqual(context.exception.error_code, "PARAMETER_NOT_ALLOWED")
+        self.assertEqual(session.graph.nodes["source-1"].parameters["value"], 2.5)
+
     def test_repair_component_disables_matching_runtime_faults(self):
         package = valid_package()
         package["faultInstances"] = [{

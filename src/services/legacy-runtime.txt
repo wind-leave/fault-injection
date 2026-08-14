@@ -66,9 +66,10 @@ const SCOPE_WINDOW_SIZE_OPTIONS=[
   {value:8,label:'8s'},
   {value:'all',label:'全部'}
 ];
-const NODE_DRAG={active:false,engaged:false,pointerId:null,nodeId:'',startX:0,startY:0,originX:0,originY:0,clickSuppressUntil:0};
+const NODE_DRAG={active:false,engaged:false,pointerId:null,nodeId:'',startX:0,startY:0,originX:0,originY:0,clickSuppressUntil:0,selectOnPointerUp:false};
 const CANVAS_PAN={active:false,engaged:false,clearSelectionOnPointerUp:false,pointerId:null,startX:0,startY:0,originX:0,originY:0};
 const NODE_DOUBLE_CLICK={nodeId:'',timestamp:0};
+const NODE_DOUBLE_CLICK_INTERVAL=600;
 const SCOPE_WINDOW_DRAG={active:false,engaged:false,pointerId:null,scopeId:'',startX:0,startY:0,originX:0,originY:0};
 
 const PORT_FORMATS=['标量','向量','矩阵','布尔','事件'];
@@ -588,7 +589,9 @@ function updateUI(){
   setTopButtonReady(savRes,Boolean(S.simDone));
 
   let statusText='就绪 · 等待导入系统模型';
+  let statusKey='workflow-idle';
   if(S.sysLoaded && S.step===1){
+    statusKey='workflow-modeling';
     if(!S.modelNodes.length){
       statusText='系统建模中 · 请拖拽组件到画布';
     }else if(canInitializeSimulation()){
@@ -597,24 +600,35 @@ function updateUI(){
       statusText='系统建模中 · 单击模块后可在右侧保存设置';
     }
   }else if(S.step===2){
+    statusKey='workflow-fault-injection';
     statusText=hasSimulationFaults()
       ?'系统模型已保存 · 当前包含故障注入，可继续仿真分析'
       :'系统模型已保存 · 故障注入为可选，可直接初始化仿真';
   }else if(S.step===3){
+    statusKey='workflow-simulation';
     statusText=hasSimulationFaults()
       ?'故障配置完成 · 仿真分析'
       :'仿真分析阶段 · 当前为无故障基线仿真';
   }
   if(typeof SIM!=='undefined'){
     if(SIM.running&&!SIM.paused){
+      statusKey='simulation-running';
       statusText=`仿真运行中 · t = ${formatSimulationTimeForLog(SIM.time)} / ${formatSimulationTimeForLog(SIM.duration)}`;
     }else if(SIM.paused){
+      statusKey='simulation-paused';
       statusText=`仿真已暂停 · t = ${formatSimulationTimeForLog(SIM.time)} / ${formatSimulationTimeForLog(SIM.duration)}`;
     }else if(SIM.hasSamples&&S.step===3){
+      statusKey='simulation-result';
       statusText=`仿真结果就绪 · ${SIM.datasetName} · 已采样 ${SIM.stepIndex} 步`;
     }
   }
-  document.getElementById('stxt').textContent=statusText;
+  const statusRuntime=window.__GZ_STATUS_BAR__;
+  if(statusRuntime?.updateLiveStatus){
+    statusRuntime.updateLiveStatus(statusText,{key:statusKey,updateTime:statusKey!=='simulation-running'});
+  }else{
+    const statusTextElement=document.getElementById('stxt');
+    if(statusTextElement){statusTextElement.textContent=statusText;}
+  }
   const sd=document.getElementById('sdot');
   sd.className='sdot'+['','sdot-b','sdot-r','sdot-g'][S.step];
   document.getElementById('sblk').textContent=`组件: ${S.modelNodes.length} · 连线: ${S.modelEdges.length}`;
@@ -691,6 +705,45 @@ function getActiveCanvasRecord(){
     return api.getActiveCanvasRecord(S);
   }
   return getCanvasRecord(S.activeCanvasId);
+}
+
+function findCanvasIdForElementId(elementId){
+  if(!elementId){return '';}
+  ensureWorkbenchCanvasState();
+  for(const [canvasId,canvas] of Object.entries(S.canvases||{})){
+    if((canvas?.nodes||[]).some(node=>node?.id===elementId)||(canvas?.edges||[]).some(edge=>edge?.id===elementId)){
+      return canvasId;
+    }
+  }
+  return '';
+}
+
+function resolveCanvasIdForVisualRecord(record){
+  if(!record){return '';}
+  if(record.canvasId&&S.canvases?.[record.canvasId]){return record.canvasId;}
+  const referenceIds=[record.targetEdgeId,record.targetNodeId,record.targetId,record.hostNodeId,record.sourceNodeId]
+    .filter(Boolean);
+  for(const referenceId of referenceIds){
+    const canvasId=findCanvasIdForElementId(referenceId);
+    if(canvasId){return canvasId;}
+  }
+  return '';
+}
+
+function visualRecordBelongsToActiveCanvas(record){
+  const canvasId=resolveCanvasIdForVisualRecord(record);
+  return canvasId?canvasId===S.activeCanvasId:S.activeCanvasId===S.rootCanvasId;
+}
+
+function isHiddenSubsystemBoundaryNode(node){
+  return S.activeCanvasId!==S.rootCanvasId&&isSubsystemBoundaryNodeType(node?.type);
+}
+
+function isHiddenSubsystemBoundaryEdge(edge){
+  if(S.activeCanvasId===S.rootCanvasId||!edge){return false;}
+  const nodes=getActiveCanvasRecord()?.nodes||[];
+  const boundaryIds=new Set(nodes.filter(node=>isSubsystemBoundaryNodeType(node?.type)).map(node=>node.id));
+  return boundaryIds.has(edge.sourceNodeId)||boundaryIds.has(edge.targetNodeId);
 }
 
 function syncActiveCanvasViewportFromState(){
@@ -1073,10 +1126,28 @@ function getSimulationNodeSize(props){
   };
 }
 
+function getSubsystemNodeSize(props){
+  const interfaceDef=ensureSubsystemInterface(props);
+  const verticalPortCount=Math.max(interfaceDef.inputs.length,interfaceDef.outputs.length,1);
+  const meta=COMPONENT_LIBRARY.subsystem_block;
+  const minWidth=meta?.width||180;
+  const minHeight=meta?.height||92;
+  const portPitch=24;
+  const bodyPadding=44;
+  return {
+    width:minWidth,
+    height:Math.max(minHeight,bodyPadding+verticalPortCount*portPitch)
+  };
+}
+
 function applyNodeGeometry(node){
   if(!node){return;}
   if(node.type==='flow_block'&&isPythonBoundFlowBlock(node)){
     const size=getPythonBindingNodeSize(node);
+    node.w=size.width;
+    node.h=size.height;
+  }else if(node.type==='subsystem_block'){
+    const size=getSubsystemNodeSize(node.props||{});
     node.w=size.width;
     node.h=size.height;
   }else if(node.type==='simulation_block'){
@@ -1214,6 +1285,7 @@ function normalizeSubsystemInterfaceList(items,prefix,minCount=0){
   const base=Array.isArray(items)?items:[];
   const normalized=base
     .map((item,index)=>({
+      ...(item&&typeof item==='object'?item:{}),
       id:String(item?.id||`${prefix.toLowerCase()}-${index+1}`).trim()||`${prefix.toLowerCase()}-${index+1}`,
       name:String(item?.name||`${prefix} ${index+1}`).trim()||`${prefix} ${index+1}`,
       type:PORT_FORMATS.includes(item?.type)?item.type:'标量',
@@ -1333,10 +1405,201 @@ function createSubsystemBoundaryNode(subsystemNode,role,item,index,existingNode=
       interfacePortId:item.id,
       interfaceRole:role,
       portType:item.type,
-      order:item.order
+      order:item.order,
+      componentNodeId:item.componentNodeId||'',
+      componentPortIndex:Number.isFinite(Number(item.componentPortIndex))?Number(item.componentPortIndex):0,
+      componentName:item.componentName||'',
+      componentPortName:item.componentPortName||''
     },
     pythonBinding:null
   };
+}
+
+function getSubsystemParentNodeForCanvas(canvas){
+  const parentNodeId=canvas?.parentSubsystemNodeId||'';
+  if(!parentNodeId){return null;}
+  for(const candidate of Object.values(S.canvases||{})){
+    const node=(candidate?.nodes||[]).find(item=>item.id===parentNodeId&&item.type==='subsystem_block');
+    if(node){return node;}
+  }
+  return null;
+}
+
+function getSubsystemPortIdentity(nodeId,portIndex){
+  return `${nodeId}:${Math.max(0,Number(portIndex)||0)}`;
+}
+
+function getExistingSubsystemInterfaceIdentityMap(node,canvas,role,items){
+  const boundaryType=role==='input'?'subsystem_in_port':'subsystem_out_port';
+  const boundaryByPortId=new Map(
+    (canvas.nodes||[])
+      .filter(item=>item.type===boundaryType)
+      .map(item=>[item.props?.interfacePortId,item])
+  );
+  const result=new Map();
+  (items||[]).forEach(item=>{
+    let componentNodeId=item.componentNodeId||'';
+    let componentPortIndex=Math.max(0,Number(item.componentPortIndex)||0);
+    if(!componentNodeId){
+      const boundaryNode=boundaryByPortId.get(item.id);
+      const mapping=(canvas.edges||[]).find(edge=>role==='input'
+        ?edge.sourceNodeId===boundaryNode?.id
+        :edge.targetNodeId===boundaryNode?.id
+      );
+      if(mapping){
+        componentNodeId=role==='input'?mapping.targetNodeId:mapping.sourceNodeId;
+        componentPortIndex=role==='input'?(mapping.targetPortIndex||0):(mapping.sourcePortIndex||0);
+      }
+    }
+    if(componentNodeId){
+      result.set(getSubsystemPortIdentity(componentNodeId,componentPortIndex),item);
+    }
+  });
+  return result;
+}
+
+function getSubsystemDerivedPortType(port){
+  const raw=port?.meta?.type||port?.type||port?.dataType||'标量';
+  const aliases={scalar:'标量',vector:'向量',matrix:'矩阵',boolean:'布尔',event:'事件'};
+  const normalized=aliases[String(raw).toLowerCase()]||raw;
+  return PORT_FORMATS.includes(normalized)?normalized:'标量';
+}
+
+function getSubsystemDerivedPortLabel(port,direction,index){
+  return String(port?.meta?.displayName||port?.displayName||port?.label||port?.name||port?.key||`${direction==='input'?'输入':'输出'} ${index+1}`).trim();
+}
+
+function makeSubsystemAutoInterfaceId(role,nodeId,port,index){
+  const portKey=String(port?.key||index).replace(/[^a-zA-Z0-9_-]+/g,'-').replace(/^-+|-+$/g,'')||String(index);
+  return `auto-${role}-${nodeId}-${portKey}`;
+}
+
+function remapSubsystemParentEdges(node,previousInterface,nextInterface){
+  const parentCanvasId=findCanvasIdForElementId(node.id);
+  const parentCanvas=parentCanvasId?S.canvases?.[parentCanvasId]:null;
+  if(!parentCanvas){return;}
+  const nextInputIndex=new Map(nextInterface.inputs.map((item,index)=>[item.id,index]));
+  const nextOutputIndex=new Map(nextInterface.outputs.map((item,index)=>[item.id,index]));
+  parentCanvas.edges=(parentCanvas.edges||[]).flatMap(edge=>{
+    if(edge.targetNodeId===node.id){
+      const previous=previousInterface.inputs[edge.targetPortIndex||0];
+      const nextIndex=previous?nextInputIndex.get(previous.id):undefined;
+      return Number.isInteger(nextIndex)?[{...edge,targetPortIndex:nextIndex}]:[];
+    }
+    if(edge.sourceNodeId===node.id){
+      const previous=previousInterface.outputs[edge.sourcePortIndex||0];
+      const nextIndex=previous?nextOutputIndex.get(previous.id):undefined;
+      return Number.isInteger(nextIndex)?[{...edge,sourcePortIndex:nextIndex}]:[];
+    }
+    return [edge];
+  });
+}
+
+function syncAutomaticSubsystemBoundaryMappings(node,canvas){
+  if(node?.props?.interfaceMode!=='auto'){return;}
+  const intf=ensureSubsystemInterface(node);
+  const boundaryNodes=(canvas.nodes||[]).filter(item=>isSubsystemBoundaryNodeType(item.type));
+  const boundaryIds=new Set(boundaryNodes.map(item=>item.id));
+  const structuralEdges=(canvas.edges||[]).filter(edge=>!boundaryIds.has(edge.sourceNodeId)&&!boundaryIds.has(edge.targetNodeId));
+  const boundaryByPortId=new Map(boundaryNodes.map(item=>[item.props?.interfacePortId,item]));
+  const mappingEdges=[];
+  intf.inputs.forEach(item=>{
+    const boundary=boundaryByPortId.get(item.id);
+    if(!boundary||!item.componentNodeId){return;}
+    mappingEdges.push({
+      id:`edge-${node.id}-auto-input-${item.id}`,
+      lineType:'normal',
+      sourceNodeId:boundary.id,
+      targetNodeId:item.componentNodeId,
+      sourcePortIndex:0,
+      targetPortIndex:item.componentPortIndex||0,
+      subsystemBoundaryMapping:true,
+      interfacePortId:item.id
+    });
+  });
+  intf.outputs.forEach(item=>{
+    const boundary=boundaryByPortId.get(item.id);
+    if(!boundary||!item.componentNodeId){return;}
+    mappingEdges.push({
+      id:`edge-${node.id}-auto-output-${item.id}`,
+      lineType:'normal',
+      sourceNodeId:item.componentNodeId,
+      targetNodeId:boundary.id,
+      sourcePortIndex:item.componentPortIndex||0,
+      targetPortIndex:0,
+      subsystemBoundaryMapping:true,
+      interfacePortId:item.id
+    });
+  });
+  canvas.edges=[...structuralEdges,...mappingEdges];
+}
+
+function deriveSubsystemInterfaceFromInternalCanvas(node){
+  if(!node||node.type!=='subsystem_block'){return false;}
+  const canvas=ensureSubsystemCanvasNode(node);
+  const internalNodes=(canvas.nodes||[])
+    .filter(item=>!isSubsystemBoundaryNodeType(item.type))
+    .sort((a,b)=>(a.y||0)-(b.y||0)||(a.x||0)-(b.x||0)||a.id.localeCompare(b.id));
+  if(!internalNodes.length&&node.props?.interfaceMode!=='auto'){
+    return false;
+  }
+  const previousInterface=cloneDefaults(ensureSubsystemInterface(node));
+  const previousInputsByIdentity=getExistingSubsystemInterfaceIdentityMap(node,canvas,'input',previousInterface.inputs);
+  const previousOutputsByIdentity=getExistingSubsystemInterfaceIdentityMap(node,canvas,'output',previousInterface.outputs);
+  const internalNodeIds=new Set(internalNodes.map(item=>item.id));
+  const structuralEdges=(canvas.edges||[]).filter(edge=>internalNodeIds.has(edge.sourceNodeId)&&internalNodeIds.has(edge.targetNodeId));
+  const inputs=[];
+  const outputs=[];
+
+  internalNodes.forEach(component=>{
+    const ports=getNodePorts(component);
+    const componentName=String(component.props?.name||COMPONENT_LIBRARY[component.type]?.label||component.id).trim();
+    (ports.inputs||[]).forEach((port,index)=>{
+      const connected=structuralEdges.some(edge=>edge.targetNodeId===component.id&&(edge.targetPortIndex||0)===index);
+      if(connected){return;}
+      const identity=getSubsystemPortIdentity(component.id,index);
+      const previous=previousInputsByIdentity.get(identity);
+      const componentPortName=getSubsystemDerivedPortLabel(port,'input',index);
+      inputs.push({
+        ...(previous||{}),
+        id:previous?.id||makeSubsystemAutoInterfaceId('input',component.id,port,index),
+        name:`${componentName} · ${componentPortName}`,
+        type:getSubsystemDerivedPortType(port),
+        order:inputs.length,
+        autoDerived:true,
+        componentNodeId:component.id,
+        componentPortIndex:index,
+        componentName,
+        componentPortName
+      });
+    });
+    (ports.outputs||[]).forEach((port,index)=>{
+      const connected=structuralEdges.some(edge=>edge.sourceNodeId===component.id&&(edge.sourcePortIndex||0)===index);
+      if(connected){return;}
+      const identity=getSubsystemPortIdentity(component.id,index);
+      const previous=previousOutputsByIdentity.get(identity);
+      const componentPortName=getSubsystemDerivedPortLabel(port,'output',index);
+      outputs.push({
+        ...(previous||{}),
+        id:previous?.id||makeSubsystemAutoInterfaceId('output',component.id,port,index),
+        name:`${componentName} · ${componentPortName}`,
+        type:getSubsystemDerivedPortType(port),
+        order:outputs.length,
+        autoDerived:true,
+        componentNodeId:component.id,
+        componentPortIndex:index,
+        componentName,
+        componentPortName
+      });
+    });
+  });
+
+  const nextInterface={inputs,outputs};
+  remapSubsystemParentEdges(node,previousInterface,nextInterface);
+  node.props.interfaceMode='auto';
+  node.props.interface=nextInterface;
+  syncSubsystemBoundaryNodes(node);
+  return JSON.stringify(previousInterface)!==JSON.stringify(nextInterface);
 }
 
 function syncSubsystemBoundaryNodes(node){
@@ -1365,12 +1628,20 @@ function syncSubsystemBoundaryNodes(node){
   if(removedBoundaryIds.length){
     canvas.edges=(canvas.edges||[]).filter(edge=>!removedBoundaryIds.includes(edge.sourceNodeId)&&!removedBoundaryIds.includes(edge.targetNodeId));
   }
+  syncAutomaticSubsystemBoundaryMappings(node,canvas);
   return canvas;
 }
 
 function syncSubsystemInterfaceCounts(){
   const node=getNode(S.selBlk);
   if(!node||node.type!=='subsystem_block'){return;}
+  if((ensureSubsystemCanvasNode(node)?.nodes||[]).some(item=>!isSubsystemBoundaryNodeType(item.type))||node.props?.interfaceMode==='auto'){
+    deriveSubsystemInterfaceFromInternalCanvas(node);
+    applyNodeGeometry(node);
+    renderModelNodes();
+    renderPropertyPanel(node);
+    return;
+  }
   const nextProps=cloneDefaults(node.props);
   const subsystemSchema=window.__GZ_SUBSYSTEM_PROPERTY_PANEL_SCHEMA__;
   const schemaResult=subsystemSchema?.readSubsystemBlockValuesFromPanel?.({...node,props:nextProps},document,{
@@ -1410,6 +1681,17 @@ function isPhysicalFaultNodeType(type){
 
 function isElectricalInjectableType(type){
   return type==='flow_block'||type==='simulation_block';
+}
+
+function isSubsystemFaultTarget(target){
+  return target?.type==='subsystem_block';
+}
+
+function rejectSubsystemFaultTarget(showMessage=true){
+  if(showMessage&&typeof toast==='function'){
+    toast('子系统块不能直接绑定故障，请进入子系统画布后选择内部组件或连线','w');
+  }
+  return {ok:false,error:'subsystem-target',reason:'subsystem-target'};
 }
 
 function isProtocolInjectableEdge(edge){
@@ -2501,11 +2783,11 @@ function beginNodeDrag(event,nodeId){
   CANVAS_PAN.clearSelectionOnPointerUp=false;
   CANVAS_PAN.pointerId=null;
   getCanvasViewport()?.classList.remove('panning');
-  selectNode(nodeId);
   NODE_DRAG.active=true;
   NODE_DRAG.engaged=false;
   NODE_DRAG.pointerId=event.pointerId;
   NODE_DRAG.nodeId=nodeId;
+  NODE_DRAG.selectOnPointerUp=S.selBlk!==nodeId;
   NODE_DRAG.startX=event.clientX;
   NODE_DRAG.startY=event.clientY;
   NODE_DRAG.originX=node.x;
@@ -2595,6 +2877,7 @@ function handlePortClick(event,nodeId,direction,index){
   }
 
   const occupiedTarget=S.modelEdges.some(edge=>
+    !edge.subsystemBoundaryMapping &&
     edge.targetNodeId===nodeId &&
     (edge.targetPortIndex||0)===index
   );
@@ -2627,6 +2910,11 @@ function handlePortClick(event,nodeId,direction,index){
     targetPortMeta:targetMeta
   };
   S.modelEdges.push(newEdge);
+  const parentSubsystemNode=getSubsystemParentNodeForCanvas(getActiveCanvasRecord());
+  if(parentSubsystemNode){
+    deriveSubsystemInterfaceFromInternalCanvas(parentSubsystemNode);
+    renderModelNodes();
+  }
   syncAllPythonInputConnectionState();
   markTopologyDirty(getMutationScopeForEdge(newEdge));
   S.selEdge=newEdge.id;
@@ -2641,7 +2929,8 @@ function renderModelNodes(){
   const layer=document.getElementById('node-layer');
   if(!layer){return;}
   layer.innerHTML='';
-  S.modelNodes.forEach(node=>{
+  const visibleNodes=S.modelNodes.filter(node=>!isHiddenSubsystemBoundaryNode(node));
+  visibleNodes.forEach(node=>{
     applyNodeGeometry(node);
     const meta=COMPONENT_LIBRARY[node.type];
     const displayMeta=getNodeDisplayMeta(node);
@@ -2783,7 +3072,7 @@ function renderModelNodes(){
 
     layer.appendChild(el);
   });
-  document.getElementById('diagram-placeholder').style.display=S.modelNodes.length?'none':'flex';
+  document.getElementById('diagram-placeholder').style.display=visibleNodes.length?'none':'flex';
   renderEdges();
 }
 
@@ -3174,6 +3463,7 @@ function bindCanvasInteractions(){
       const draggedNode=getNode(NODE_DRAG.nodeId);
       const draggedEl=document.getElementById(`b-${NODE_DRAG.nodeId}`);
       const wasDragging=NODE_DRAG.engaged;
+      const selectDraggedNode=NODE_DRAG.selectOnPointerUp;
       if(draggedEl){
         draggedEl.classList.remove('is-dragging');
       }
@@ -3181,8 +3471,12 @@ function bindCanvasInteractions(){
       NODE_DRAG.engaged=false;
       NODE_DRAG.pointerId=null;
       NODE_DRAG.nodeId='';
+      NODE_DRAG.selectOnPointerUp=false;
       NODE_DRAG.clickSuppressUntil=wasDragging?Date.now()+220:0;
-      if(draggedNode&&wasDragging){renderEdges();}
+      if(draggedNode&&wasDragging){
+        if(selectDraggedNode){selectNode(draggedNode.id);}
+        renderEdges();
+      }
     }
 
     if(CANVAS_PAN.active&&CANVAS_PAN.pointerId===event.pointerId){
@@ -3579,7 +3873,7 @@ function doImportSys(){
 
 function doSaveSys(){
   if(!S.sysLoaded){toast('请先导入系统模型','w');return;}
-  if(S.modelNodes.length===0){toast('请至少添加一个组件后再保存','w');return;}
+  if(getLoadedSystemNodeCount()===0){toast('请至少添加一个组件后再保存','w');return;}
   try{
     const snapshot=createSystemModelSnapshot();
     window.localStorage?.setItem(WORKBENCH_STORAGE_KEY,JSON.stringify(snapshot));
@@ -4402,7 +4696,7 @@ function getDisplayConsoleInputReadings(node){
 }
 
 function expandCanvasStageForActiveCanvasNodes(){
-  (S.modelNodes||[]).forEach(node=>{
+  (S.modelNodes||[]).filter(node=>!isHiddenSubsystemBoundaryNode(node)).forEach(node=>{
     const meta=COMPONENT_LIBRARY[node?.type]||{};
     const x=Number(node?.x);
     const y=Number(node?.y);
@@ -7413,7 +7707,7 @@ doImportSys = async function(){
 
 doSaveSys = function(){
   if(!S.sysLoaded){toast('请先导入系统模型','w');return;}
-  if(S.modelNodes.length===0){toast('请至少添加一个组件后再导出','w');return;}
+  if(getLoadedSystemNodeCount()===0){toast('请至少添加一个组件后再导出','w');return;}
   syncTaskNameFromInput();
   const packageApi=window.__GZ_FLIGHT_MODEL_PACKAGE__;
   if(typeof packageApi?.exportCurrent!=='function'){
@@ -7432,7 +7726,7 @@ doSaveSys = function(){
       return;
     }
     S.systemSaved=true;
-    S.step=S.modelNodes.length?2:1;
+    S.step=getLoadedSystemNodeCount()>0?2:1;
     toast('飞控模型包已导出','s');
     updateUI();
   }catch(error){
@@ -7551,6 +7845,90 @@ function buildRenderDataChannelsForNode(node,actualScopeSamples,actualInstrument
   return {};
 }
 
+function cloneDisplayConsoleSeriesValue(value){
+  if(Array.isArray(value)) return value.map(cloneDisplayConsoleSeriesValue);
+  if(value===null) return null;
+  const numeric=Number(value);
+  return Number.isFinite(numeric)?numeric:null;
+}
+
+function getDisplayConsoleOutputAliases(source,portIndex){
+  const port=getNodePorts(source)?.outputs?.[portIndex]||{};
+  const configured=source?.props?.outputs?.[portIndex]||source?.outputs?.[portIndex]||{};
+  return Array.from(new Set([
+    port?.meta?.varName,port?.varName,port?.name,port?.key,port?.id,
+    configured?.varName,configured?.name,configured?.key,configured?.id,
+    portIndex===0?'output':`output-${portIndex+1}`,
+    `output-${portIndex}`,
+    portIndex===0?'out':'',
+    portIndex===0?'value':''
+  ].filter(Boolean)));
+}
+
+function getDisplayConsoleStepValue(stepOutputs,source,portIndex){
+  const outputs=stepOutputs?.[source?.id];
+  if(Array.isArray(outputs)||Number.isFinite(Number(outputs))){
+    return portIndex===0?cloneDisplayConsoleSeriesValue(outputs):null;
+  }
+  if(!outputs||typeof outputs!=='object') return null;
+  for(const key of getDisplayConsoleOutputAliases(source,portIndex)){
+    if(Object.prototype.hasOwnProperty.call(outputs,key)){
+      return cloneDisplayConsoleSeriesValue(outputs[key]);
+    }
+  }
+  return cloneDisplayConsoleSeriesValue(Object.values(outputs)[portIndex]);
+}
+
+function buildDisplayConsoleRenderChannels(node,componentOutputs){
+  const inputs=getDisplayConsoleInputDefinitions(node).slice(0,4);
+  const incoming=(S.modelEdges||[]).filter(edge=>edge.targetNodeId===node.id);
+  const steps=Array.isArray(componentOutputs?.steps)?componentOutputs.steps:[];
+  const traceTimes=Array.isArray(componentOutputs?.time)?componentOutputs.time:[];
+  return Object.fromEntries(inputs.map((input,index)=>{
+    const channelId=input.key||`input${index+1}`;
+    const edge=incoming.find(item=>(item.targetPortIndex||0)===index);
+    const source=edge?getNode(edge.sourceNodeId):null;
+    const series=!edge||!source?[]:steps.map((step,stepIndex)=>({
+      t:Number.isFinite(Number(step?.time))?Number(step.time):(Number.isFinite(Number(traceTimes[stepIndex]))?Number(traceTimes[stepIndex]):stepIndex*(SIM.stepSize||0)),
+      value:getDisplayConsoleStepValue(step?.actual,source,Math.max(0,Number(edge.sourcePortIndex)||0))
+    }));
+    return [channelId,{
+      label:input.label||`输入 ${index+1}`,
+      unit:input.unit||'',
+      dataType:input.type||'float',
+      displayScale:Number.isFinite(Number(input.displayScale))?Number(input.displayScale):1,
+      inputIndex:index,
+      connected:Boolean(edge),
+      sourceDeviceId:edge?.sourceNodeId||null,
+      sourcePort:edge&&source?getRenderDataPortId(source,'source',edge.sourcePortIndex||0):null,
+      series
+    }];
+  }));
+}
+
+function buildDisplayConsoleControlState(node){
+  const targets=getDisplayConsoleControlTargets(node);
+  const selectedId=String(node?.props?.controlTargetId||'');
+  const selected=targets.find(item=>item.node.id===selectedId)||targets[0];
+  if(!selected){
+    return {targetComponentId:null,targetComponentName:'',componentType:'',parameters:[]};
+  }
+  const parameters=getDisplayConsoleControlledParameters(selected.node,selected.control).map(parameter=>({
+    key:parameter.key,
+    name:parameter.name,
+    value:cloneDefaults(parameter.value),
+    unit:parameter.baseUnit||'',
+    displayValue:cloneDefaults(formatDisplayConsoleControlledParameter(parameter)),
+    displayUnit:parameter.unit||parameter.baseUnit||''
+  }));
+  return {
+    targetComponentId:selected.node.id,
+    targetComponentName:selected.node.props?.name||selected.control?.label||selected.node.id,
+    componentType:selected.componentType,
+    parameters
+  };
+}
+
 function getRenderDataPortId(node,direction,index){
   const ports=getNodePorts(node)?.[direction==='source'?'outputs':'inputs']||[];
   const port=ports[index||0];
@@ -7562,20 +7940,35 @@ function getRenderDataPortId(node,direction,index){
     ||`${direction==='source'?'output':'input'}${(index||0)+1}`;
 }
 
-function buildSimulationRenderDataSnapshot(actualScopeSamples,actualInstrumentSamples){
-  const deviceNodes=(S.modelNodes||[]).filter(isRenderDataDeviceNode);
+function buildSimulationRenderDataSnapshot(actualScopeSamples,actualInstrumentSamples,componentOutputs,executableModel=null){
+  const allRuntimeNodes=Object.values(S.canvases||{}).flatMap(canvas=>canvas?.nodes||[]);
+  const allRuntimeEdges=Object.values(S.canvases||{}).flatMap(canvas=>canvas?.edges||[]);
+  const runtimeNodesById=new Map(allRuntimeNodes.map(node=>[node.id,node]));
+  const executableDevices=(executableModel?.nodes||[])
+    .map(node=>runtimeNodesById.get(node.id)||node)
+    .filter(isRenderDataDeviceNode);
+  const auxiliaryDevices=allRuntimeNodes.filter(node=>node.type==='display_console');
+  const deviceNodes=executableModel
+    ?Array.from(new Map([...executableDevices,...auxiliaryDevices].map(node=>[node.id,node])).values())
+    :(S.modelNodes||[]).filter(isRenderDataDeviceNode);
   const deviceIds=new Set(deviceNodes.map(node=>node.id));
   const devices=deviceNodes.map(node=>({
     id:node.id,
     displayName:node.props?.name||node.name||node.id,
     type:node.type,
-    channels:buildRenderDataChannelsForNode(node,actualScopeSamples,actualInstrumentSamples)
+    channels:node.type==='display_console'
+      ?buildDisplayConsoleRenderChannels(node,componentOutputs)
+      :buildRenderDataChannelsForNode(node,actualScopeSamples,actualInstrumentSamples),
+    ...(node.type==='display_console'?{controlState:buildDisplayConsoleControlState(node)}:{})
   }));
-  const connections=(S.modelEdges||[])
+  const connectionCandidates=executableModel
+    ?[...(executableModel.edges||[]),...allRuntimeEdges]
+    :(S.modelEdges||[]);
+  const connections=Array.from(new Map(connectionCandidates.map(edge=>[edge.id,edge])).values())
     .filter(edge=>deviceIds.has(edge.sourceNodeId)&&deviceIds.has(edge.targetNodeId))
     .map(edge=>{
-      const source=getNode(edge.sourceNodeId);
-      const target=getNode(edge.targetNodeId);
+      const source=runtimeNodesById.get(edge.sourceNodeId)||getNode(edge.sourceNodeId);
+      const target=runtimeNodesById.get(edge.targetNodeId)||getNode(edge.targetNodeId);
       return {
         id:edge.id,
         sourceDeviceId:edge.sourceNodeId,
@@ -7642,16 +8035,6 @@ async function buildSimulationResultSnapshot(){
     modelId:S.activeModelPackage?.modelId||null,
     modelName:S.activeModelPackage?.modelName||null
   };
-  const renderData=buildSimulationRenderDataSnapshot(actualScopeSamples,actualInstrumentSamples);
-  const summary={
-    nodeCount:(S.modelNodes||[]).length,
-    edgeCount:(S.modelEdges||[]).length,
-    faultCount:countConfiguredFaults(),
-    actualScopeSampleCount:countResultSamples(actualScopeSamples),
-    referenceScopeSampleCount:countResultSamples(referenceScopeSamples),
-    actualInstrumentSampleCount:countResultSamples(actualInstrumentSamples),
-    referenceInstrumentSampleCount:countResultSamples(referenceInstrumentSamples)
-  };
   const executableBuilder=window.__GZ_BACKEND_SIMULATION__?.buildExecutablePackage;
   const packageBuilder=window.__GZ_PRACTICE_TASK_PACKAGE__?.buildPracticeTaskPackage;
   if(typeof executableBuilder!=='function'||typeof packageBuilder!=='function'){
@@ -7660,11 +8043,21 @@ async function buildSimulationResultSnapshot(){
   const executableModel=executableBuilder({
     packageId:S.activeModelPackage?.modelId||`practice-${exportSequence}`,
     simulationConfig:{duration:SIM.duration,stepSize:SIM.stepSize},
-    modelNodes:S.modelNodes||[],
-    modelEdges:S.modelEdges||[],
+    rootCanvasId:S.rootCanvasId,
+    canvases:S.canvases,
     faultInstances:S.faultInstances||[],
     measurementPoints:S.measurementPoints||[]
   });
+  const renderData=buildSimulationRenderDataSnapshot(actualScopeSamples,actualInstrumentSamples,componentOutputs,executableModel);
+  const summary={
+    nodeCount:executableModel.nodes.length,
+    edgeCount:executableModel.edges.length,
+    faultCount:executableModel.faultInstances.length,
+    actualScopeSampleCount:countResultSamples(actualScopeSamples),
+    referenceScopeSampleCount:countResultSamples(referenceScopeSamples),
+    actualInstrumentSampleCount:countResultSamples(actualInstrumentSamples),
+    referenceInstrumentSampleCount:countResultSamples(referenceInstrumentSamples)
+  };
 
   return packageBuilder({
     exportedAt,
@@ -7817,7 +8210,7 @@ doImportSys = async function(){
 
 doSaveSys = function(){
   if(!S.sysLoaded){toast('请先导入系统模型','w');return;}
-  if(S.modelNodes.length===0){toast('请至少添加一个组件后再导出','w');return;}
+  if(getLoadedSystemNodeCount()===0){toast('请至少添加一个组件后再导出','w');return;}
   syncTaskNameFromInput();
   const packageApi=window.__GZ_FLIGHT_MODEL_PACKAGE__;
   if(typeof packageApi?.exportCurrent!=='function'){
@@ -7836,7 +8229,7 @@ doSaveSys = function(){
       return;
     }
     S.systemSaved=true;
-    S.step=S.modelNodes.length?2:1;
+    S.step=getLoadedSystemNodeCount()>0?2:1;
     toast('飞控模型包已导出','s');
     updateUI();
   }catch(error){
@@ -8111,6 +8504,13 @@ simInit = function(silent=false){
 };
 
 simRun = function(){
+  if(!SIM.running){
+    window.__GZ_STATUS_BAR__?.beginLiveStatus?.({
+      key:'simulation-starting',
+      message:'仿真准备运行',
+      source:'系统'
+    });
+  }
   __statusSummarySimRun();
   if(SIM.running&&!SIM.paused){
     window.__GZ_STATUS_BAR__?.pushEntry?.({
@@ -8582,7 +8982,8 @@ renderModelNodes = function(){
   const layer=document.getElementById('node-layer');
   if(!layer){return;}
   layer.innerHTML='';
-  S.modelNodes.forEach(node=>{
+  const visibleNodes=S.modelNodes.filter(node=>!isHiddenSubsystemBoundaryNode(node));
+  visibleNodes.forEach(node=>{
     applyNodeGeometry(node);
     const meta=COMPONENT_LIBRARY[node.type];
     const displayMeta=getNodeDisplayMeta(node);
@@ -8617,11 +9018,17 @@ renderModelNodes = function(){
     el.addEventListener('click',event=>{
       if(event.target.closest('.node-port')){return;}
       if(Date.now()<NODE_DRAG.clickSuppressUntil){return;}
-      selectNode(node.id);
       const now=Date.now();
-      const isDouble=NODE_DOUBLE_CLICK.nodeId===node.id&&(now-NODE_DOUBLE_CLICK.timestamp)<320;
+      const isDouble=event.detail>=2||(NODE_DOUBLE_CLICK.nodeId===node.id&&(now-NODE_DOUBLE_CLICK.timestamp)<NODE_DOUBLE_CLICK_INTERVAL);
       NODE_DOUBLE_CLICK.nodeId=node.id;
       NODE_DOUBLE_CLICK.timestamp=now;
+      if(isDouble&&node.type==='subsystem_block'){
+        NODE_DOUBLE_CLICK.nodeId='';
+        NODE_DOUBLE_CLICK.timestamp=0;
+        openSubsystemCanvas(node.id);
+        return;
+      }
+      selectNode(node.id);
       if(!isDouble){return;}
       if(node.type==='instrument_scope'){
         openScope(node.id);
@@ -9849,9 +10256,7 @@ function refreshOpenScopeWindows(){
     if(SIM.running&&!SIM.paused){
       const scopeEl=document.querySelector(`.scope-window[data-scope-id="${scopeWindow.scopeId}"]`);
       if(scopeEl){
-        if(!isScopeWindowDragActive(scopeWindow.scopeId)){
-          drawScopeWindow(scopeWindow.scopeId);
-        }
+        refreshScopeWindow(scopeWindow.scopeId);
       }else{
         needsRender=true;
       }
@@ -10462,6 +10867,7 @@ function renderTask3SubsystemPropertyPanel(node){
       ${buildSubsystemBlockFields(node)}
       <div class="props-actions">
         <button class="props-secondary" onclick="openSubsystemCanvas('${node.id}')">进入子系统</button>
+        <button class="props-secondary" data-unwrap-subsystem="${node.id}" onclick="unwrapSelectedSubsystem('${node.id}')">解除子系统</button>
         <button class="props-save" onclick="saveSelectedNode()">保存设置</button>
         <button class="props-danger" onclick="deleteSelectedNode()">删除模块</button>
       </div>
@@ -10518,7 +10924,11 @@ const __task3SaveSelectedNode = saveSelectedNode;
 saveSelectedNode = function(){
   const node=getNode(S.selBlk);
   if(node?.type==='subsystem_block'){
-    if(!applySubsystemSchemaPropertyValues(node)){
+    if(node.props?.interfaceMode==='auto'){
+      node.props.name=document.getElementById('prop-name')?.value.trim()||node.props.name;
+      node.props.description=document.getElementById('prop-description')?.value.trim()||'';
+      deriveSubsystemInterfaceFromInternalCanvas(node);
+    }else if(!applySubsystemSchemaPropertyValues(node)){
     node.props.name=document.getElementById('prop-name')?.value.trim()||node.props.name;
     node.props.description=document.getElementById('prop-description')?.value.trim()||'';
     ensureSubsystemInterface(node);
@@ -10548,8 +10958,14 @@ saveSelectedNode = function(){
 
 const __task3RenderModelNodes = renderModelNodes;
 renderModelNodes = function(){
+  const activeCanvas=getActiveCanvasRecord();
+  const parentSubsystemNode=getSubsystemParentNodeForCanvas(activeCanvas);
+  if(parentSubsystemNode){
+    deriveSubsystemInterfaceFromInternalCanvas(parentSubsystemNode);
+  }
   S.modelNodes.forEach(node=>{
     if(node.type==='subsystem_block'){
+      deriveSubsystemInterfaceFromInternalCanvas(node);
       ensureSubsystemInterface(node);
       syncSubsystemBoundaryNodes(node);
     }
@@ -10976,6 +11392,8 @@ function wrapSelectionIntoSubsystem(){
   });
 
   canvas.edges=nextRootEdges;
+  subsystemNode.props.interfaceMode='auto';
+  deriveSubsystemInterfaceFromInternalCanvas(subsystemNode);
   clearPendingConnection();
   markTopologyDirty('system');
   syncAllPythonInputConnectionState();
@@ -10984,6 +11402,176 @@ function wrapSelectionIntoSubsystem(){
   updateUI();
   toast(`已将 ${selectedNodes.length} 个模块封装为子系统`,'s');
   return subsystemNode;
+}
+
+function getSubsystemBoundaryNodeByInterfaceId(canvas,role,interfacePortId){
+  const type=role==='input'?'subsystem_in_port':'subsystem_out_port';
+  return (canvas?.nodes||[]).find(node=>node.type===type&&node.props?.interfacePortId===interfacePortId)||null;
+}
+
+function getUnwrappedNodeTranslation(nodes,subsystemNode){
+  if(!nodes.length){return {x:0,y:0};}
+  const bounds=computeTask5SelectionBounds(nodes);
+  return {
+    x:Math.round(subsystemNode.x+(subsystemNode.w||180)/2-(bounds.left+bounds.width/2)),
+    y:Math.round(subsystemNode.y+(subsystemNode.h||92)/2-(bounds.top+bounds.height/2))
+  };
+}
+
+function createUnwrappedEdge(baseEdge,sourceNodeId,targetNodeId,sourcePortIndex,targetPortIndex,sourceMeta,targetMeta){
+  const edge={
+    ...cloneDefaults(baseEdge||{}),
+    id:`edge-${++S.edgeSeq}`,
+    sourceNodeId,
+    targetNodeId,
+    sourcePortIndex:Math.max(0,Number(sourcePortIndex)||0),
+    targetPortIndex:Math.max(0,Number(targetPortIndex)||0)
+  };
+  delete edge.subsystemBoundaryMapping;
+  delete edge.interfacePortId;
+  if(sourceMeta){
+    edge.sourcePort=cloneDefaults(sourceMeta);
+    edge.sourcePortMeta=cloneDefaults(sourceMeta);
+  }
+  if(targetMeta){
+    edge.targetPort=cloneDefaults(targetMeta);
+    edge.targetPortMeta=cloneDefaults(targetMeta);
+  }
+  return edge;
+}
+
+function migrateUnwrappedCanvasVisualRecords(childCanvasId,parentCanvasId,movedNodeIds,movedEdgeIds){
+  const collections=[
+    S.faultTags,S.faultInjectionLinks,S.manualDiagnosticTestPoints,
+    S.diagnosticTestPoints,S.testPoints,S.canvasAnnotations
+  ].filter(Array.isArray);
+  collections.forEach(records=>records.forEach(record=>{
+    const references=[record.targetId,record.targetNodeId,record.hostNodeId,record.sourceNodeId,record.targetEdgeId];
+    if(record.canvasId===childCanvasId||references.some(id=>movedNodeIds.has(id)||movedEdgeIds.has(id))){
+      record.canvasId=parentCanvasId;
+    }
+  }));
+}
+
+function unwrapSelectedSubsystem(nodeId=S.selBlk){
+  const parentCanvas=getActiveCanvasRecord();
+  const subsystemNode=(parentCanvas?.nodes||[]).find(node=>node.id===nodeId&&node.type==='subsystem_block');
+  if(!parentCanvas||!subsystemNode){
+    toast('请先在父画布选择要解除的子系统块','w');
+    return null;
+  }
+  const childCanvas=S.canvases?.[subsystemNode.targetCanvasId];
+  if(!childCanvas){
+    toast('当前子系统没有可恢复的子画布','w');
+    return null;
+  }
+
+  deriveSubsystemInterfaceFromInternalCanvas(subsystemNode);
+  const intf=ensureSubsystemInterface(subsystemNode);
+  const boundaryNodes=(childCanvas.nodes||[]).filter(node=>isSubsystemBoundaryNodeType(node.type));
+  const boundaryIds=new Set(boundaryNodes.map(node=>node.id));
+  const restoredNodes=(childCanvas.nodes||[]).filter(node=>!boundaryIds.has(node.id));
+  const restoredNodeIds=new Set(restoredNodes.map(node=>node.id));
+  const translation=getUnwrappedNodeTranslation(restoredNodes,subsystemNode);
+  restoredNodes.forEach(node=>{
+    applyNodeGeometry(node);
+    node.x=clamp((node.x||0)+translation.x,CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-node.w-CANVAS_STAGE.nodePadding);
+    node.y=clamp((node.y||0)+translation.y,CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-node.h-CANVAS_STAGE.nodePadding);
+  });
+
+  const parentEdges=(parentCanvas.edges||[]).map(edge=>cloneDefaults(edge));
+  const incomingParentEdges=parentEdges.filter(edge=>edge.targetNodeId===subsystemNode.id);
+  const outgoingParentEdges=parentEdges.filter(edge=>edge.sourceNodeId===subsystemNode.id);
+  const untouchedParentEdges=parentEdges.filter(edge=>edge.sourceNodeId!==subsystemNode.id&&edge.targetNodeId!==subsystemNode.id);
+  const childEdges=(childCanvas.edges||[]).map(edge=>cloneDefaults(edge));
+  const structuralChildEdges=childEdges.filter(edge=>restoredNodeIds.has(edge.sourceNodeId)&&restoredNodeIds.has(edge.targetNodeId));
+  const nextEdges=[...untouchedParentEdges,...structuralChildEdges];
+  const edgeSignatures=new Set(nextEdges.map(edge=>`${edge.sourceNodeId}:${edge.sourcePortIndex||0}>${edge.targetNodeId}:${edge.targetPortIndex||0}`));
+  const pushUniqueEdge=edge=>{
+    const signature=`${edge.sourceNodeId}:${edge.sourcePortIndex||0}>${edge.targetNodeId}:${edge.targetPortIndex||0}`;
+    if(edgeSignatures.has(signature)){return;}
+    edgeSignatures.add(signature);
+    nextEdges.push(edge);
+  };
+
+  const parentInputsByBoundaryId=new Map();
+  incomingParentEdges.forEach(parentEdge=>{
+    const item=intf.inputs[parentEdge.targetPortIndex||0];
+    const boundary=getSubsystemBoundaryNodeByInterfaceId(childCanvas,'input',item?.id);
+    if(!boundary){return;}
+    const list=parentInputsByBoundaryId.get(boundary.id)||[];
+    list.push(parentEdge);
+    parentInputsByBoundaryId.set(boundary.id,list);
+    childEdges
+      .filter(edge=>edge.sourceNodeId===boundary.id&&restoredNodeIds.has(edge.targetNodeId))
+      .forEach(mapping=>{
+        const sourceNode=(parentCanvas.nodes||[]).find(node=>node.id===parentEdge.sourceNodeId);
+        const targetNode=restoredNodes.find(node=>node.id===mapping.targetNodeId);
+        pushUniqueEdge(createUnwrappedEdge(
+          parentEdge,
+          parentEdge.sourceNodeId,
+          mapping.targetNodeId,
+          parentEdge.sourcePortIndex||0,
+          mapping.targetPortIndex||0,
+          cloneIfPresentTask5(parentEdge.sourcePortMeta)||cloneIfPresentTask5(parentEdge.sourcePort)||getTask5PortMeta(sourceNode,'output',parentEdge.sourcePortIndex||0),
+          cloneIfPresentTask5(mapping.targetPortMeta)||cloneIfPresentTask5(mapping.targetPort)||getTask5PortMeta(targetNode,'input',mapping.targetPortIndex||0)
+        ));
+      });
+  });
+
+  outgoingParentEdges.forEach(parentEdge=>{
+    const item=intf.outputs[parentEdge.sourcePortIndex||0];
+    const boundary=getSubsystemBoundaryNodeByInterfaceId(childCanvas,'output',item?.id);
+    if(!boundary){return;}
+    childEdges.filter(edge=>edge.targetNodeId===boundary.id).forEach(mapping=>{
+      const targetNode=(parentCanvas.nodes||[]).find(node=>node.id===parentEdge.targetNodeId);
+      if(restoredNodeIds.has(mapping.sourceNodeId)){
+        const sourceNode=restoredNodes.find(node=>node.id===mapping.sourceNodeId);
+        pushUniqueEdge(createUnwrappedEdge(
+          parentEdge,
+          mapping.sourceNodeId,
+          parentEdge.targetNodeId,
+          mapping.sourcePortIndex||0,
+          parentEdge.targetPortIndex||0,
+          cloneIfPresentTask5(mapping.sourcePortMeta)||cloneIfPresentTask5(mapping.sourcePort)||getTask5PortMeta(sourceNode,'output',mapping.sourcePortIndex||0),
+          cloneIfPresentTask5(parentEdge.targetPortMeta)||cloneIfPresentTask5(parentEdge.targetPort)||getTask5PortMeta(targetNode,'input',parentEdge.targetPortIndex||0)
+        ));
+        return;
+      }
+      const upstreamParentEdges=parentInputsByBoundaryId.get(mapping.sourceNodeId)||[];
+      upstreamParentEdges.forEach(upstream=>{
+        const sourceNode=(parentCanvas.nodes||[]).find(node=>node.id===upstream.sourceNodeId);
+        pushUniqueEdge(createUnwrappedEdge(
+          upstream,
+          upstream.sourceNodeId,
+          parentEdge.targetNodeId,
+          upstream.sourcePortIndex||0,
+          parentEdge.targetPortIndex||0,
+          cloneIfPresentTask5(upstream.sourcePortMeta)||cloneIfPresentTask5(upstream.sourcePort)||getTask5PortMeta(sourceNode,'output',upstream.sourcePortIndex||0),
+          cloneIfPresentTask5(parentEdge.targetPortMeta)||cloneIfPresentTask5(parentEdge.targetPort)||getTask5PortMeta(targetNode,'input',parentEdge.targetPortIndex||0)
+        ));
+      });
+    });
+  });
+
+  parentCanvas.nodes=[...(parentCanvas.nodes||[]).filter(node=>node.id!==subsystemNode.id),...restoredNodes];
+  parentCanvas.edges=nextEdges;
+  const movedEdgeIds=new Set(structuralChildEdges.map(edge=>edge.id));
+  migrateUnwrappedCanvasVisualRecords(childCanvas.id,parentCanvas.id,new Set(restoredNodes.map(node=>node.id)),movedEdgeIds);
+  delete S.canvases[childCanvas.id];
+  S.canvasTrail=(S.canvasTrail||[]).filter(canvasId=>canvasId!==childCanvas.id);
+  clearTask5NodeSelectionState();
+  S.selBlk=null;
+  S.selEdge=null;
+  clearPendingConnection();
+  markTopologyDirty('system');
+  syncAllPythonInputConnectionState();
+  renderModelNodes();
+  renderPropertyPanel(null);
+  syncConfigTargets();
+  updateUI();
+  toast(`已解除子系统，恢复 ${restoredNodes.length} 个内部组件`,'s');
+  return {subsystemNode,restoredNodes,restoredEdges:nextEdges};
 }
 
 const __task5FinalSelectNode = selectNode;
@@ -11097,6 +11685,7 @@ Object.assign(window,{
   deleteCurrentSelection,
   deleteSelectedNodeGroup,
   wrapSelectionIntoSubsystem,
+  unwrapSelectedSubsystem,
   renderModelNodes,
   updateUI
 });
@@ -11897,7 +12486,7 @@ Object.assign(window,{
     normalizeElectricalEdgeLineTypes();
     edgeGroup.innerHTML='';
 
-    S.modelEdges.forEach(edge=>{
+    S.modelEdges.filter(edge=>!isHiddenSubsystemBoundaryEdge(edge)).forEach(edge=>{
       const sourceNode=getNode(edge.sourceNodeId);
       const targetNode=getNode(edge.targetNodeId);
       if(!sourceNode||!targetNode){return;}
@@ -13628,6 +14217,7 @@ Object.assign(window,{
     if(kind==='scope'){return ['overview','parameters','outputs'];}
     if(kind==='measurement-instrument'){return ['overview','parameters','outputs'];}
     if(kind==='empty'){return ['overview'];}
+    if(target?.type==='subsystem_block'){return ['overview'];}
     if(target?.type==='display_console'){return ['overview','parameters'];}
     if(target?.type==='signal_source'){return ['overview','parameters','faults'];}
     if(target?.type==='simulation_block'){return ['overview','parameters','faults'];}
@@ -13943,8 +14533,6 @@ Object.assign(window,{
         ${renderTargetHeader(node)}
         ${renderLegacyOverviewCompat(node)}`;
     }
-    const meta=COMPONENT_LIBRARY[node.type]||{};
-    const ports=getNodePorts(node);
     const pythonBound=isPythonBoundFlowBlock(node);
     const simulationPackageRows=node.type==='simulation_block'&&pythonBound
       ?buildSimulationBlockPackageRows(node)
@@ -13956,7 +14544,7 @@ Object.assign(window,{
           <button type="button" class="props-secondary" data-open-display-console="${jsString(node.id)}">进入显控台</button>
         </div>
       </div>`:'';
-    const canvasPositionRows=(node.type==='signal_source'||node.type==='simulation_block')?'':`
+    const canvasPositionRows=(node.type==='signal_source'||node.type==='simulation_block'||node.type==='subsystem_block')?'':`
       <div class="pgroup">
         <div class="pglbl">画布位置</div>
         ${renderRows([
@@ -13969,16 +14557,6 @@ Object.assign(window,{
       ${renderTargetHeader(node)}
       ${simulationPackageRows}
       ${signalDefinitionRows}
-      <div class="pgroup">
-        <div class="pglbl">模块状态</div>
-        ${renderRows([
-          ['节点类别',meta.label||node.type],
-          ['输入端口',ports.inputs.length],
-          ['输出端口',ports.outputs.length],
-          ['Python 绑定',pythonBound?getPythonBindingSummary(node):'未绑定'],
-          ['故障实例',activeFaultBindingsForPanel(node).length||'0']
-        ])}
-      </div>
       ${canvasPositionRows}
       ${displayConsoleAction}
       ${renderLegacyOverviewCompat(node)}`;
@@ -14542,6 +15120,11 @@ Object.assign(window,{
       const key=slotVariableKey(slot,index);
       if(key&&keepKey(key)&&!declaration[layer].includes(key)) declaration[layer].push(key);
     });
+    list(variables)
+      .filter(variable=>variable?.role==='parameter')
+      .forEach(variable=>{
+        if(variable.key&&!declaration.physical.includes(variable.key)) declaration.physical.push(variable.key);
+      });
     return declaration;
   }
 
@@ -14582,7 +15165,12 @@ Object.assign(window,{
         roleLabels:FAULT_SLOT_ROLE_LABELS
       });
     }
-    const selectedCount=FAULT_SLOT_CONFIG_LAYERS.reduce((count,layer)=>count+list(declaration[layer]).length,0);
+    const variableKeys=new Set(variables.map(variable=>variable.key));
+    const configuredVariableKeys=new Set(
+      FAULT_SLOT_CONFIG_LAYERS.flatMap(layer=>list(declaration[layer]))
+        .filter(key=>variableKeys.has(key))
+    );
+    const selectedCount=configuredVariableKeys.size;
     const rows=variables.map(variable=>{
       const layerChecks=FAULT_SLOT_CONFIG_LAYERS.map(layer=>{
         const checked=declaration[layer].includes(variable.key)?'checked':'';
@@ -14608,7 +15196,7 @@ Object.assign(window,{
             <div class="pglbl">可注入变量声明</div>
             <p>选择组件变量可被哪些故障层级关联。</p>
           </div>
-          <span class="props-section-count">${text(selectedCount)} / ${text(variables.length*FAULT_SLOT_CONFIG_LAYERS.length)}</span>
+          <span class="props-section-count" data-fault-slot-count>${text(selectedCount)} / ${text(variables.length)}</span>
         </div>
         <div class="props-fault-slot-table">
           <div class="props-fault-slot-head">
@@ -15622,12 +16210,29 @@ Object.assign(window,{
 
   function bindFaultSlotEditorActions(host){
     const saveButton=host?.querySelector?.('[data-save-fault-slots]');
-    if(!saveButton||saveButton.dataset.saveFaultSlotsBound){return;}
-    saveButton.addEventListener('click',event=>{
-      event.preventDefault();
-      savePropertyPanelFaultSlots();
-    });
-    saveButton.dataset.saveFaultSlotsBound='true';
+    if(saveButton&&!saveButton.dataset.saveFaultSlotsBound){
+      saveButton.addEventListener('click',event=>{
+        event.preventDefault();
+        savePropertyPanelFaultSlots();
+      });
+      saveButton.dataset.saveFaultSlotsBound='true';
+    }
+    const editor=host?.querySelector?.('[data-fault-slot-editor]');
+    if(editor&&!editor.dataset.faultSlotCountBound){
+      const syncCount=()=>{
+        const variableKeys=new Set([...editor.querySelectorAll('[data-fault-slot-variable]')]
+          .map(row=>row.getAttribute('data-fault-slot-variable'))
+          .filter(Boolean));
+        const configuredKeys=new Set([...editor.querySelectorAll('[data-fault-slot-layer][data-fault-slot-var]:checked')]
+          .map(input=>input.getAttribute('data-fault-slot-var'))
+          .filter(key=>variableKeys.has(key)));
+        const count=editor.querySelector('[data-fault-slot-count]');
+        if(count) count.textContent=`${configuredKeys.size} / ${variableKeys.size}`;
+      };
+      editor.addEventListener('change',syncCount);
+      editor.dataset.faultSlotCountBound='true';
+      syncCount();
+    }
     const injectButton=host?.querySelector?.('[data-open-property-fault-dialog]');
     if(injectButton&&!injectButton.dataset.openPropertyFaultDialogBound){
       injectButton.addEventListener('click',event=>{
@@ -21396,6 +22001,10 @@ function decorateDataflowEdges(){
 
   function injectFaultIntoNode(target,model,parameterOverrides={}){
     if(!target||!model){return false;}
+    if(isSubsystemFaultTarget(target)){
+      rejectSubsystemFaultTarget();
+      return false;
+    }
     const payload=getRuntimePayload(model,parameterOverrides);
     target.injectedFault=payload;
     appendRuntimeFaultBinding(target,model,payload,'node');
@@ -21598,7 +22207,7 @@ function decorateDataflowEdges(){
     if(!edgeGroup){return;}
     const existing=document.getElementById('fault-injection-link-group');
     if(existing){existing.remove();}
-    const links=ensureFaultInjectionLinks();
+    const links=ensureFaultInjectionLinks().filter(visualRecordBelongsToActiveCanvas);
     if(!links.length){return;}
     const group=document.createElementNS('http://www.w3.org/2000/svg','g');
     group.id='fault-injection-link-group';
@@ -21789,7 +22398,7 @@ function decorateDataflowEdges(){
 
   function syncFaultTagPositions(){
     const offsets=new Map();
-    ensureFaultTags().forEach(tag=>{
+    ensureFaultTags().filter(visualRecordBelongsToActiveCanvas).forEach(tag=>{
       tag.positionMode=tag.positionMode||'manual';
       applyFaultTagBoxSize(tag);
       if(tag.positionMode==='manual'){
@@ -21810,6 +22419,10 @@ function decorateDataflowEdges(){
 
   createVisualFaultInjection=function(model,target,payload){
     if(!model||!target){return null;}
+    if(isSubsystemFaultTarget(target)){
+      rejectSubsystemFaultTarget();
+      return null;
+    }
     removeVisualFaultInjectionArtifacts(model.id,{skipRender:true});
     const targetKind=target?.sourceNodeId&&target?.targetNodeId?'edge':'node';
     const targetId=target?.id||model?.visualInjection?.targetId||'';
@@ -22558,7 +23171,7 @@ function decorateDataflowEdges(){
     if(!layer){return;}
     syncFaultTagPositions();
     layer.querySelectorAll('.fault-tag-card').forEach(el=>el.remove());
-    ensureFaultTags().forEach(tag=>{
+    ensureFaultTags().filter(visualRecordBelongsToActiveCanvas).forEach(tag=>{
       applyFaultTagBoxSize(tag);
       if(!tag.expanded){return;}
       const el=document.createElement('div');
@@ -23750,6 +24363,10 @@ function decorateDataflowEdges(){
     const pe=document.getElementById('pe');
     const panel=document.querySelector('.rpanel');
     const kind=classifyPropertyPanelKind(target,options);
+    const isModuleTarget=Boolean(target&&kind!=='edge'&&kind!=='fault-tag');
+    if(isModuleTarget&&pd){
+      pd.querySelectorAll('.props-danger[onclick*="deleteSelectedNode"]').forEach(button=>button.remove());
+    }
     const header=getPanelHeader(kind);
     const titleEl=document.querySelector('.ph-title');
     const subEl=document.querySelector('.ph-sub');
@@ -23773,6 +24390,13 @@ function decorateDataflowEdges(){
     content.className='props-panel-shell__content';
     while(pd.firstChild){
       content.appendChild(pd.firstChild);
+    }
+    const activeTab=options.tab||S.propertyPanelTab||'overview';
+    if(isModuleTarget&&activeTab==='overview'){
+      const deleteActions=document.createElement('div');
+      deleteActions.className='props-actions property-panel-overview-delete';
+      deleteActions.innerHTML='<button type="button" class="props-danger" onclick="deleteSelectedNode()">删除模块</button>';
+      content.appendChild(deleteActions);
     }
     shell.appendChild(content);
     pd.appendChild(shell);
@@ -23819,6 +24443,7 @@ function decorateDataflowEdges(){
 
   function getFaultCapabilityForTarget(target){
     if(!target?.id) return null;
+    if(isSubsystemFaultTarget(target)) return null;
     const kind=inferFaultTargetKind(target);
     return getActiveFaultCapabilityMap().find(entry=>(
       entry?.targetId===target.id&&(entry.targetKind||kind)===kind
@@ -23974,6 +24599,7 @@ function decorateDataflowEdges(){
   }
 
   function getCompatibleFaultOptionsForTarget(target,filters={}){
+    if(isSubsystemFaultTarget(target)) return [];
     const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
     if(runtimeService?.getCompatibleFaultOptionsForTarget){
       return runtimeService.getCompatibleFaultOptionsForTarget(target,{
@@ -24104,6 +24730,9 @@ function decorateDataflowEdges(){
   }
 
   function createFaultInstanceForTarget(target,faultTypeId,parameterOverrides={},options={}){
+    if(isSubsystemFaultTarget(target)){
+      return rejectSubsystemFaultTarget(false);
+    }
     const model=getCapabilityFaultModel(faultTypeId);
     const optionFilters=normalizeFaultOptionFilters(options);
     const slot=options.slot||getCompatibleSlotForFault(target,faultTypeId,options.slotId||'',optionFilters);
@@ -24443,6 +25072,7 @@ function decorateDataflowEdges(){
 
   function mirrorFaultInstanceToRuntimeTarget(instance,model,target){
     if(!instance||!model||!target) return null;
+    if(isSubsystemFaultTarget(target)) return null;
     const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
     const payload=createCapabilityRuntimePayload(model,instance.parameters||{});
     payload.modelId=instance.faultTypeId;
@@ -24508,6 +25138,9 @@ function decorateDataflowEdges(){
   }
 
   function activateFaultForTarget(target,faultTypeId,parameterOverrides={},options={}){
+    if(isSubsystemFaultTarget(target)){
+      return rejectSubsystemFaultTarget();
+    }
     const created=createFaultInstanceForTarget(target,faultTypeId,parameterOverrides,options);
     if(!created.ok) return created;
     mirrorFaultInstanceToRuntimeTarget(created.instance,created.model,target);
@@ -24717,6 +25350,10 @@ function decorateDataflowEdges(){
       toast('请先选择可添加故障的组件或连线','w');
       return false;
     }
+    if(isSubsystemFaultTarget(target)){
+      rejectSubsystemFaultTarget();
+      return false;
+    }
     renderTargetFaultActivationDialog(target,filters);
     return true;
   }
@@ -24894,6 +25531,7 @@ function decorateDataflowEdges(){
 
   function targetAcceptsFaultComponent(target,expectedKind='any',filters={}){
     if(!target?.id||typeof window.getCompatibleFaultModelsForTarget!=='function') return false;
+    if(isSubsystemFaultTarget(target)) return false;
     const normalized=normalizeFaultDropTargetKind(expectedKind);
     if(normalized!=='any'&&targetKind(target)!==normalized) return false;
     return window.getCompatibleFaultModelsForTarget(target,filters).length>0;
@@ -28255,6 +28893,7 @@ function decorateDataflowEdges(){
 
   function getLayeredFaultSlotsForTarget(target){
     if(!target?.id) return [];
+    if(isSubsystemFaultTarget(target)) return [];
     const declared=getDeclaredFaultSlots(target);
     if(getTargetKind(target)==='edge'){
       const protocolSlots=getEdgeProtocolSlots(target);
@@ -28284,6 +28923,7 @@ function decorateDataflowEdges(){
   function canBindLayeredFaultInjectorToTarget(injector,target){
     const layer=resolveInjectorLayer(injector);
     if(!layer||!target?.id) return false;
+    if(isSubsystemFaultTarget(target)) return false;
     if(!canLayeredInjectorUseTargetKind(injector,target)) return false;
     return getLayeredFaultSlotsForTarget(target).some(slot=>slot.layer===layer);
   }
@@ -28527,6 +29167,9 @@ function decorateDataflowEdges(){
     const target=getTargetByRef(options);
     if(!target){
       return {ok:false,reason:'target-not-found'};
+    }
+    if(isSubsystemFaultTarget(target)){
+      return rejectSubsystemFaultTarget();
     }
     if(!canLayeredInjectorUseTargetKind(injector,target)){
       return {ok:false,reason:'incompatible-target-kind',layer,targetId:target.id,targetKind:getTargetKind(target)};
@@ -30129,8 +30772,8 @@ function decorateDataflowEdges(){
       actual:collectRuntimeOutputs(SIM.actual),
       reference:collectRuntimeOutputs(SIM.reference)
     };
-    pushLimitedSample(trace.time,time);
-    pushLimitedSample(trace.steps,step);
+    trace.time.push(time);
+    trace.steps.push(step);
     if(document.getElementById('cw')?.dataset.view==='components'){
       window.renderSimulationViewPanel?.();
     }
@@ -31304,4 +31947,139 @@ function decorateDataflowEdges(){
     }
     return resolved;
   };
+})();
+
+// --- Enforce simulation-component supply requirements in the local runtime ---
+;(function installSimulationPowerExecutionGate(){
+  if(typeof window==='undefined'){return;}
+
+  const previousBuildSimulationResult=buildSimulationResult;
+  const previousExecuteBoundFlowBlock=executeBoundFlowBlock;
+
+  function list(value){return Array.isArray(value)?value:[];}
+
+  function moduleId(node){
+    return String(node?.templateId||node?.pythonBinding?.moduleId||'').trim();
+  }
+
+  function numericVoltage(value){
+    if(typeof value==='boolean'||value===null||value===undefined){return null;}
+    if(typeof value==='number'){return Number.isFinite(value)?value:null;}
+    const match=String(value).trim().match(/[-+]?(?:\d+(?:\.\d*)?|\.\d+)/);
+    if(!match){return null;}
+    const parsed=Number(match[0]);
+    return Number.isFinite(parsed)?parsed:null;
+  }
+
+  function supplyType(port,node=null){
+    const candidates=[
+      port?.supplyType,
+      port?.meta?.supplyType,
+      port?.unit,
+      port?.meta?.unit
+    ].map(value=>String(value||'').toUpperCase());
+    if(candidates.some(value=>value==='AC'||value.includes('VAC'))){return 'AC';}
+    if(candidates.some(value=>value==='DC'||value.includes('VDC'))){return 'DC';}
+    const id=moduleId(node);
+    if(id==='electrical_ac_power_source'){return 'AC';}
+    if(id==='electrical_ac_dc_matching'||id==='electrical_dc_boost'){return 'DC';}
+    return '';
+  }
+
+  function parameterValue(node,key){
+    const props=node?.props||{};
+    const configured=props.parameterValues&&typeof props.parameterValues==='object'
+      ?props.parameterValues[key]
+      :undefined;
+    if(configured!==undefined){return configured;}
+    if(props[key]!==undefined){return props[key];}
+    const definition=list(props.parameters).find(item=>String(item?.key||item?.varName||item?.name||'')===key);
+    return definition?.value??definition?.default;
+  }
+
+  function sourceRatedVoltage(node,visited=new Set()){
+    if(!node||visited.has(node.id)){return null;}
+    const nextVisited=new Set(visited);
+    nextVisited.add(node.id);
+
+    for(const key of ['voltage_rms','output_voltage','voltage','value']){
+      const value=numericVoltage(parameterValue(node,key));
+      if(value!==null){return value;}
+    }
+
+    const id=moduleId(node);
+    if(id!=='electrical_ac_dc_matching'&&id!=='electrical_dc_boost'){return null;}
+    const signalInputCount=list(node.props?.inputs).length;
+    const incoming=getIncomingEdgesForNode(node.id)
+      .filter(edge=>Number(edge.targetPortIndex||0)<signalInputCount);
+    let upstreamVoltage=null;
+    for(const edge of incoming){
+      upstreamVoltage=sourceRatedVoltage(getNode(edge.sourceNodeId),nextVisited);
+      if(upstreamVoltage!==null){break;}
+    }
+    if(upstreamVoltage===null){return null;}
+    if(id==='electrical_ac_dc_matching'){
+      const gain=Math.max(0,Number(parameterValue(node,'conversion_gain')??1)||0);
+      return upstreamVoltage*gain;
+    }
+    const ratio=Math.max(0,Number(parameterValue(node,'boost_ratio')??1)||0);
+    const efficiency=Math.max(0,Number(parameterValue(node,'efficiency')??1)||0);
+    return upstreamVoltage*ratio*efficiency;
+  }
+
+  function isSimulationComponentPowered(node){
+    if(node?.type!=='simulation_block'){return true;}
+    const requiredPorts=list(node.props?.powerInputs);
+    if(!requiredPorts.length){return true;}
+    const signalInputCount=list(node.props?.inputs).length;
+    const incoming=getIncomingEdgesForNode(node.id);
+    return requiredPorts.every((requiredPort,index)=>{
+      const edge=incoming.find(item=>Number(item.targetPortIndex||0)===signalInputCount+index);
+      if(!edge){return false;}
+      const sourceNode=getNode(edge.sourceNodeId);
+      if(!sourceNode){return false;}
+      const sourcePort=list(getNodePorts(sourceNode).outputs)[Number(edge.sourcePortIndex||0)];
+      const requiredType=supplyType(requiredPort)||'DC';
+      if(supplyType(sourcePort,sourceNode)!==requiredType){return false;}
+      const actualVoltage=sourceRatedVoltage(sourceNode);
+      const requiredVoltage=numericVoltage(requiredPort?.voltage);
+      if(actualVoltage===null||requiredVoltage===null){return false;}
+      return Math.abs(actualVoltage-requiredVoltage)<=Math.max(0.01,Math.abs(requiredVoltage)*0.01);
+    });
+  }
+
+  function zeroPortValue(port){
+    const vectorLength=Number.parseInt(port?.vectorLength,10);
+    const isVector=port?.dataType==='vector'||port?.type==='vector';
+    return isVector&&Number.isInteger(vectorLength)&&vectorLength>0
+      ?Array.from({length:vectorLength},()=>0)
+      :0;
+  }
+
+  function unpoweredResult(node){
+    return {
+      outputs:list(node?.props?.outputs).map(zeroPortValue),
+      middleValues:list(node?.props?.middleVars).map(zeroPortValue)
+    };
+  }
+
+  function signalInputsOnly(node,inputValues){
+    return list(inputValues).slice(0,list(node?.props?.inputs).length);
+  }
+
+  buildSimulationResult=function(node,nodeState,inputValues,modeKey,time,dt){
+    if(node?.type==='simulation_block'&&!isSimulationComponentPowered(node)){
+      return unpoweredResult(node);
+    }
+    return previousBuildSimulationResult(node,nodeState,signalInputsOnly(node,inputValues),modeKey,time,dt);
+  };
+
+  executeBoundFlowBlock=function(node,nodeState,inputValues,modeKey,time,dt){
+    if(node?.type==='simulation_block'&&!isSimulationComponentPowered(node)){
+      return unpoweredResult(node);
+    }
+    return previousExecuteBoundFlowBlock(node,nodeState,signalInputsOnly(node,inputValues),modeKey,time,dt);
+  };
+
+  window.__GZ_IS_SIMULATION_COMPONENT_POWERED__=isSimulationComponentPowered;
 })();

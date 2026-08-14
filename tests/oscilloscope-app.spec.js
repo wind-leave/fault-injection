@@ -598,6 +598,49 @@ describe('Oscilloscope app integration', () => {
     wrapper.unmount();
   });
 
+  it('updates both channel readouts while the simulation is running', async () => {
+    const wrapper = await mountWorkbench();
+
+    const scope = window.createNode('instrument_scope', 560, 260);
+    await flushRuntime();
+    window.openScope(scope.id);
+    await flushRuntime();
+
+    const readMetric = (channel, field) => document
+      .querySelector(`[data-scope-id="${scope.id}"] [data-scope-channel="${channel}"] [data-field="${field}"]`)
+      ?.textContent
+      ?.trim();
+
+    expect(readMetric('ch1', 'current')).toBe('--');
+    expect(readMetric('ch2', 'current')).toBe('--');
+
+    window.__GZ_SIM__.running = true;
+    window.__GZ_SIM__.actual.scopeSamples[scope.id] = {
+      ch1: [
+        { t: 0, actual: -2 },
+        { t: 0.1, actual: 3.5 }
+      ],
+      ch2: [
+        { t: 0, actual: 4 },
+        { t: 0.1, actual: 9 }
+      ]
+    };
+
+    window.refreshOpenScopeWindows();
+    await flushRuntime();
+
+    expect(readMetric('ch1', 'current')).toBe('3.50');
+    expect(readMetric('ch1', 'min')).toBe('-2.00');
+    expect(readMetric('ch1', 'max')).toBe('3.50');
+    expect(readMetric('ch1', 'pp')).toBe('5.50');
+    expect(readMetric('ch2', 'current')).toBe('9.00');
+    expect(readMetric('ch2', 'min')).toBe('4.00');
+    expect(readMetric('ch2', 'max')).toBe('9.00');
+    expect(readMetric('ch2', 'pp')).toBe('5.00');
+
+    wrapper.unmount();
+  });
+
   it('samples a digital signal source as a stable level instead of an analog sine wave', async () => {
     const wrapper = await mountWorkbench();
 

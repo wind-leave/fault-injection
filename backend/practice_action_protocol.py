@@ -2,6 +2,7 @@ from backend.schemas import SimulationBackendError
 
 
 SUPPORTED_ACTION_TARGETS = {
+    "adjustDisplayConsoleParameter": "displayConsole",
     "replaceComponent": "component",
     "replaceWire": "wire",
     "measurePoint": "testPoint",
@@ -64,6 +65,23 @@ def normalize_practice_action(action):
     }
     if action_type == "measurePoint":
         normalized["pointCode"] = _require_text(action, "pointCode")
+    elif action_type == "adjustDisplayConsoleParameter":
+        parameters = action.get("parameters") if isinstance(action.get("parameters"), dict) else {}
+        parameter = _text(action.get("parameter") or action.get("parameterName"))
+        if parameter:
+            if "value" not in action:
+                raise SimulationBackendError("INVALID_ACTION_SCHEMA", "value", "value is required")
+            parameters = {**parameters, parameter: action.get("value")}
+        if not parameters:
+            raise SimulationBackendError(
+                "INVALID_ACTION_SCHEMA",
+                "parameters",
+                "parameters or parameter/value is required",
+            )
+        normalized["parameters"] = dict(parameters)
+        component_id = _text(action.get("componentId") or action.get("targetComponentId"))
+        if component_id:
+            normalized["componentId"] = component_id
     else:
         fault_id = _text(action.get("faultId"))
         if fault_id:

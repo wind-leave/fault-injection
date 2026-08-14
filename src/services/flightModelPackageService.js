@@ -627,6 +627,14 @@ export function buildFlightModelPackage({ meta = {}, snapshot = {}, faultLibrary
     faultCapabilityMap: meta.faultCapabilityMap
   });
   const exportedSnapshot = mapSnapshotNodes(normalizedSnapshot, exportSimulationNode);
+  const rootCanvas = exportedSnapshot.canvases?.[exportedSnapshot.rootCanvasId];
+  const hierarchicalSnapshot = rootCanvas
+    ? {
+        ...exportedSnapshot,
+        modelNodes: clone(rootCanvas.nodes ?? []),
+        modelEdges: clone(rootCanvas.edges ?? [])
+      }
+    : exportedSnapshot;
   const pythonModulesById = collectPythonModulesFromSnapshot(normalizedSnapshot);
 
   return embedReferencedFaultModels({
@@ -644,7 +652,7 @@ export function buildFlightModelPackage({ meta = {}, snapshot = {}, faultLibrary
     pythonModules: Array.from(pythonModulesById.values()),
     faultLibrary: clone(faultLibrary ?? []),
     faultInstances: clone(Array.isArray(normalizedSnapshot.faultInstances) ? normalizedSnapshot.faultInstances : []),
-    workbenchSnapshot: exportedSnapshot
+    workbenchSnapshot: hierarchicalSnapshot
   });
 }
 

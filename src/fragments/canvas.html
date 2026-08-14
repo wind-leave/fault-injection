@@ -77,6 +77,9 @@
       <button type="button" class="canvas-tool" title="全屏" data-canvas-command="fullscreen">⛶</button>
     </div>
   </div>
+  <button type="button" class="canvas-top-toggle" data-testid="canvas-top-toggle" aria-label="切换顶部工具栏" title="切换顶部工具栏" onclick="window.dispatchEvent(new CustomEvent('gz:toggle-canvas-top-chrome'))">
+    <span class="canvas-top-toggle__icon" aria-hidden="true">⌃</span>
+  </button>
 
     <div class="canvas-breadcrumbs" id="canvas-breadcrumbs" data-testid="canvas-breadcrumbs"></div>
     <div class="simulation-panel" id="simulation-panel" aria-live="polite">
@@ -108,22 +111,25 @@
       </div>
     </div>
     <div class="canvas-floating">
-      <div class="canvas-group-actions">
-        <button type="button" class="canvas-line-view__button" id="canvas-line-view-toggle" onclick="cycleCanvasLineView()">全部</button>
-        <button type="button" class="canvas-wrap__button" id="canvas-wrap-selection" onclick="wrapSelectionIntoSubsystem()" disabled>封装为子系统</button>
-        <button type="button" class="canvas-arrange__button" onclick="autoArrangeCanvas()">一键整理</button>
-      </div>
-      <div class="canvas-mode">
-        <span class="canvas-mode__label">当前连接</span>
-        <span class="canvas-mode__chip" id="line-mode-chip">普通连接线</span>
-      </div>
-      <div class="canvas-zoom">
-        <button type="button" class="canvas-zoom__button" onclick="handleCanvasZoomOut()">-</button>
-        <div class="canvas-zoom__track">
-          <span class="canvas-zoom__fill" id="canvas-zoom-fill" style="width:100%"></span>
+      <button type="button" class="canvas-floating-toggle" data-testid="canvas-floating-toggle" aria-label="显示画布浮动工具" title="显示画布浮动工具" onclick="window.dispatchEvent(new CustomEvent('gz:toggle-canvas-floating-controls'))">⋮</button>
+      <div class="canvas-floating-content">
+        <div class="canvas-group-actions">
+          <button type="button" class="canvas-line-view__button" id="canvas-line-view-toggle" onclick="cycleCanvasLineView()">全部</button>
+          <button type="button" class="canvas-wrap__button" id="canvas-wrap-selection" onclick="wrapSelectionIntoSubsystem()" disabled>封装为子系统</button>
+          <button type="button" class="canvas-arrange__button" onclick="autoArrangeCanvas()">一键整理</button>
         </div>
-        <button type="button" class="canvas-zoom__button" onclick="handleCanvasZoomIn()">+</button>
-        <button type="button" class="canvas-zoom__reset" id="canvas-zoom-reset" onclick="handleCanvasZoomReset()">100%</button>
+        <div class="canvas-mode">
+          <span class="canvas-mode__label">当前连接</span>
+          <span class="canvas-mode__chip" id="line-mode-chip">普通连接线</span>
+        </div>
+        <div class="canvas-zoom">
+          <button type="button" class="canvas-zoom__button" onclick="handleCanvasZoomOut()">-</button>
+          <div class="canvas-zoom__track">
+            <span class="canvas-zoom__fill" id="canvas-zoom-fill" style="width:100%"></span>
+          </div>
+          <button type="button" class="canvas-zoom__button" onclick="handleCanvasZoomIn()">+</button>
+          <button type="button" class="canvas-zoom__reset" id="canvas-zoom-reset" onclick="handleCanvasZoomReset()">100%</button>
+        </div>
       </div>
     </div>
     <div class="canvas-viewport" id="canvas-viewport">

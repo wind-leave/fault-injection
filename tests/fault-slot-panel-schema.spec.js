@@ -39,10 +39,10 @@ describe('fault slot panel schema service', () => {
     expect(html).toContain('data-fault-slot-layer="protocol" data-fault-slot-var="input_1" checked');
     expect(html).toContain('Gain &lt;K&gt;');
     expect(html).toContain('Parameter');
-    expect(html).toContain('2 / 3');
+    expect(html).toContain('2 / 2');
   });
 
-  it('filters visible fault layers by variable role and counts only visible choices', () => {
+  it('filters visible fault layers by variable role and counts configured variables', () => {
     const html = renderFaultSlotEditorFromSchema({
       variables: [
         { key: 'gain', name: 'Gain', role: 'parameter' },
@@ -74,7 +74,7 @@ describe('fault slot panel schema service', () => {
     expect(html).toContain('data-fault-slot-layer="electrical" data-fault-slot-var="torque" checked');
     expect(html).toContain('data-fault-slot-layer="protocol" data-fault-slot-var="torque" checked');
     expect(html).toContain('data-fault-slot-layer="physical" data-fault-slot-var="integral" checked');
-    expect(html).toContain('6 / 8');
+    expect(html).toContain('4 / 4');
   });
 
   it('renders an empty state when no fault variables are available', () => {

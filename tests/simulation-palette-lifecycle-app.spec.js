@@ -121,6 +121,49 @@ describe('simulation palette lifecycle', () => {
     wrapper.unmount();
   });
 
+  it('gates local simulation output by supply connection, type, and voltage', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+
+    const electrical = window.createNode('electrical_ac_power_source', 280, 260);
+    const simulation = window.createNode('simulation_block', 560, 260);
+    const powerInputIndex = window.getNodePorts(simulation).inputs.findIndex((port) => port.kind === 'powerInput');
+
+    expect(window.__GZ_IS_SIMULATION_COMPONENT_POWERED__(simulation)).toBe(false);
+    expect(window.buildSimulationResult(simulation, {}, [5], 'actual', 0, 0.1).outputs).toEqual([0]);
+
+    const vectorSimulation = window.createNode('scalar_to_vector4', 760, 420);
+    expect(window.executeBoundFlowBlock(vectorSimulation, {}, [5], 'actual', 0, 0.1).outputs).toEqual([
+      [0, 0, 0, 0]
+    ]);
+
+    window.__GZ_STATE__.modelEdges.push({
+      id: 'wrong-power',
+      lineType: 'normal',
+      sourceNodeId: electrical.id,
+      targetNodeId: simulation.id,
+      sourcePortIndex: 0,
+      targetPortIndex: powerInputIndex
+    });
+
+    expect(window.__GZ_IS_SIMULATION_COMPONENT_POWERED__(simulation)).toBe(false);
+    expect(window.buildSimulationResult(simulation, {}, [5, 220], 'actual', 0, 0.1).outputs).toEqual([0]);
+
+    simulation.props.powerInputs[0] = {
+      ...simulation.props.powerInputs[0],
+      voltage: '220V',
+      supplyType: 'AC'
+    };
+
+    expect(window.__GZ_IS_SIMULATION_COMPONENT_POWERED__(simulation)).toBe(true);
+    const powered = window.buildSimulationResult(simulation, {}, [5, 220], 'actual', 0, 0.1);
+    expect(powered.outputs[0]).toBeGreaterThan(0);
+    expect(powered.outputs[0]).toBeLessThan(1);
+
+    wrapper.unmount();
+  });
+
   it('cycles the canvas line view between all, signal, and electrical topology', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();

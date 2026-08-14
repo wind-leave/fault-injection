@@ -79,11 +79,10 @@ export function renderFaultSlotEditorFromSchema(options = {}) {
     variable,
     allowedLayers: getAllowedLayersForVariable(variable, layers, roleLayerRules)
   }));
-  const selectedCount = variableLayerEntries.reduce((count, entry) => {
+  const configuredVariableCount = variableLayerEntries.reduce((count, entry) => {
     const key = String(entry.variable?.key || '');
-    return count + entry.allowedLayers.filter((layer) => declaration[layer].includes(key)).length;
+    return count + (entry.allowedLayers.some((layer) => declaration[layer].includes(key)) ? 1 : 0);
   }, 0);
-  const visibleChoiceCount = variableLayerEntries.reduce((count, entry) => count + entry.allowedLayers.length, 0);
 
   const rows = variableLayerEntries.map(({ variable, allowedLayers }) => {
     const key = String(variable?.key || '');
@@ -113,7 +112,7 @@ export function renderFaultSlotEditorFromSchema(options = {}) {
             <div class="pglbl">${escapeHtml(copy.title)}</div>
             <p>${escapeHtml(copy.description)}</p>
           </div>
-          <span class="props-section-count">${escapeHtml(selectedCount)} / ${escapeHtml(visibleChoiceCount)}</span>
+          <span class="props-section-count" data-fault-slot-count>${escapeHtml(configuredVariableCount)} / ${escapeHtml(variables.length)}</span>
         </div>
         <div class="props-fault-slot-table">
           <div class="props-fault-slot-head">

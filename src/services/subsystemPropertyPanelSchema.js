@@ -48,6 +48,7 @@ function clampInterfaceCount(value, limits = [0, 6]) {
 
 function normalizeSubsystemInterfaceList(items, prefix, minCount = 0) {
   const normalized = list(items).map((item, index) => ({
+    ...(item && typeof item === 'object' ? item : {}),
     id: textValue(item?.id, `${prefix}-${index + 1}`),
     name: textValue(item?.name, `${prefix} ${index + 1}`),
     type: textValue(item?.type, '标量'),
@@ -68,6 +69,26 @@ function normalizeSubsystemInterfaceList(items, prefix, minCount = 0) {
     ...item,
     order: index
   }));
+}
+
+function renderAutomaticSubsystemInterfaceRows(items, role, helpers = {}) {
+  const escape = helpers.escapeHtml || escapeHtml;
+  const prefix = getRolePrefix(role);
+  return list(items).map((item, index) => `
+      <div class="sim-intf-row subsystem-intf-row" data-subsystem-role="${role}" data-index="${index}" data-port-id="${escape(item.id)}" data-source-component-id="${escape(item.componentNodeId || '')}">
+        <div class="props-field">
+          <label>${prefix} ${index + 1}</label>
+          <input value="${escape(item.name)}" readonly>
+        </div>
+        <div class="props-field">
+          <label>来源组件</label>
+          <input value="${escape(item.componentName || item.componentNodeId || '--')}" readonly>
+        </div>
+        <div class="props-field">
+          <label>来源端口</label>
+          <input value="${escape(item.componentPortName || '--')}" readonly>
+        </div>
+      </div>`).join('');
 }
 
 function ensureSubsystemInterface(nodeOrProps) {
@@ -118,6 +139,34 @@ export function renderSubsystemBlockFieldsFromSchema(node, helpers = {}) {
   const intf = ensureSubsystemInterface(node);
   const limits = helpers.interfaceLimits || DEFAULT_INTERFACE_LIMITS;
   const canvasId = helpers.canvasId || node?.targetCanvasId || '--';
+  const automatic = props.interfaceMode === 'auto';
+
+  if (automatic) {
+    return `
+      <div class="pgroup">
+        <div class="pglbl">子系统设置</div>
+        <div class="props-field"><label>模块名称</label><input id="prop-name" value="${escape(props.name || '')}"></div>
+        <div class="props-field"><label>模块说明</label><textarea id="prop-description" rows="3" placeholder="可填写子系统职责、输入输出说明">${escape(props.description || '')}</textarea></div>
+        <div class="prow"><span class="pk">子画布 ID</span><span class="pv">${escape(canvasId || '--')}</span></div>
+      </div>
+      <div class="sim-intf-toolbar">
+        <div class="sim-intf-note">输入输出接口根据子系统内部所有未连接端口自动生成；内部连线变化后会自动刷新。</div>
+      </div>
+      <div class="sim-intf-group">
+        <div class="sim-intf-head">
+          <div class="sim-intf-title">自动输入接口</div>
+          <div class="sim-intf-meta">${intf.inputs.length} 个未连接输入端口</div>
+        </div>
+        <div class="sim-intf-list">${intf.inputs.length ? renderAutomaticSubsystemInterfaceRows(intf.inputs, 'input', helpers) : '<div class="sim-intf-note">内部组件没有未连接的输入端口。</div>'}</div>
+      </div>
+      <div class="sim-intf-group">
+        <div class="sim-intf-head">
+          <div class="sim-intf-title">自动输出接口</div>
+          <div class="sim-intf-meta">${intf.outputs.length} 个未连接输出端口</div>
+        </div>
+        <div class="sim-intf-list">${intf.outputs.length ? renderAutomaticSubsystemInterfaceRows(intf.outputs, 'output', helpers) : '<div class="sim-intf-note">内部组件没有未连接的输出端口。</div>'}</div>
+      </div>`;
+  }
 
   return `
       <div class="pgroup">

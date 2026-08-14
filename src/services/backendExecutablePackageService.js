@@ -583,15 +583,210 @@ function buildMeasurementPoints(state, nodes, edges) {
   return [...pointsById.values()];
 }
 
+function endpointKey(direction, nodeId, portIndex = 0) {
+  return `${direction}:${String(nodeId)}:${Math.max(0, Math.trunc(Number(portIndex) || 0))}`;
+}
+
+function parseEndpointKey(key) {
+  const [direction, ...parts] = String(key).split(':');
+  const portIndex = Number(parts.pop());
+  return {
+    direction,
+    nodeId: parts.join(':'),
+    portIndex: Math.max(0, Math.trunc(Number(portIndex) || 0))
+  };
+}
+
+function subsystemInterface(node, role) {
+  const items = node?.props?.interface?.[role];
+  return Array.isArray(items) ? items : [];
+}
+
+function boundaryNodeForInterface(canvas, role, item, index) {
+  const type = role === 'inputs' ? 'subsystem_in_port' : 'subsystem_out_port';
+  return (canvas?.nodes ?? []).find((node) => (
+    node?.type === type
+    && (
+      String(node?.props?.interfacePortId ?? '') === String(item?.id ?? '')
+      || Number(node?.props?.order) === Number(item?.order ?? index)
+    )
+  ));
+}
+
+function reachableCanvasRecords(state = {}) {
+  const canvases = state.canvases && typeof state.canvases === 'object' ? state.canvases : null;
+  if (!canvases) {
+    return [{
+      id: state.rootCanvasId || 'canvas-root',
+      nodes: state.modelNodes ?? state.nodes ?? [],
+      edges: state.modelEdges ?? state.edges ?? []
+    }];
+  }
+  const rootCanvasId = canvases[state.rootCanvasId]
+    ? state.rootCanvasId
+    : canvases['canvas-root']
+      ? 'canvas-root'
+      : Object.keys(canvases)[0];
+  if (!rootCanvasId) return [];
+
+  const records = [];
+  const visited = new Set();
+  const visit = (canvasId) => {
+    if (!canvasId || visited.has(canvasId) || !canvases[canvasId]) return;
+    visited.add(canvasId);
+    const canvas = canvases[canvasId];
+    records.push(canvas);
+    (canvas.nodes ?? [])
+      .filter((node) => node?.type === 'subsystem_block')
+      .forEach((node) => visit(node.targetCanvasId));
+  };
+  visit(rootCanvasId);
+  return records;
+}
+
+function flattenedEdgeId(pathEdges, usedIds) {
+  const preferred = pathEdges.find((edge) => !edge?.subsystemBoundaryMapping)?.id
+    || pathEdges[0]?.id
+    || 'flattened-edge';
+  let id = String(preferred);
+  let suffix = 2;
+  while (usedIds.has(id)) {
+    id = `${preferred}::flat-${suffix}`;
+    suffix += 1;
+  }
+  usedIds.add(id);
+  return id;
+}
+
+function flattenedLineType(pathEdges) {
+  if (pathEdges.some((edge) => edge?.lineType === 'power')) return 'power';
+  if (pathEdges.some((edge) => edge?.lineType === 'can')) return 'can';
+  return 'normal';
+}
+
+function flattenSubsystemGraph(state = {}) {
+  const canvases = reachableCanvasRecords(state);
+  const allNodes = canvases.flatMap((canvas) => Array.isArray(canvas?.nodes) ? canvas.nodes : []);
+  const allEdges = canvases.flatMap((canvas) => Array.isArray(canvas?.edges) ? canvas.edges : []);
+  const nodeById = new Map(allNodes.filter((node) => node?.id).map((node) => [String(node.id), node]));
+  const executableNodes = allNodes.filter((node) => node?.id && SUPPORTED_NODE_TYPES.has(node.type));
+  const executableNodeIds = new Set(executableNodes.map((node) => String(node.id)));
+  const adjacency = new Map();
+  const addTransition = (from, to, pathEdges = []) => {
+    if (!from || !to) return;
+    const transitions = adjacency.get(from) ?? [];
+    transitions.push({ to, pathEdges });
+    adjacency.set(from, transitions);
+  };
+
+  allEdges.forEach((edge) => {
+    if (!nodeById.has(String(edge?.sourceNodeId)) || !nodeById.has(String(edge?.targetNodeId))) return;
+    addTransition(
+      endpointKey('out', edge.sourceNodeId, edge.sourcePortIndex),
+      endpointKey('in', edge.targetNodeId, edge.targetPortIndex),
+      [edge]
+    );
+  });
+
+  canvases.forEach((canvas) => {
+    (canvas?.nodes ?? []).filter((node) => node?.type === 'subsystem_block').forEach((subsystemNode) => {
+      const childCanvas = state.canvases?.[subsystemNode.targetCanvasId];
+      if (!childCanvas) return;
+      subsystemInterface(subsystemNode, 'inputs').forEach((item, index) => {
+        const boundary = boundaryNodeForInterface(childCanvas, 'inputs', item, index);
+        if (boundary) {
+          addTransition(endpointKey('in', subsystemNode.id, index), endpointKey('out', boundary.id, 0));
+        } else if (item?.componentNodeId) {
+          addTransition(
+            endpointKey('in', subsystemNode.id, index),
+            endpointKey('in', item.componentNodeId, item.componentPortIndex)
+          );
+        }
+      });
+      subsystemInterface(subsystemNode, 'outputs').forEach((item, index) => {
+        const boundary = boundaryNodeForInterface(childCanvas, 'outputs', item, index);
+        if (boundary) {
+          addTransition(endpointKey('in', boundary.id, 0), endpointKey('out', subsystemNode.id, index));
+        } else if (item?.componentNodeId) {
+          addTransition(
+            endpointKey('out', item.componentNodeId, item.componentPortIndex),
+            endpointKey('out', subsystemNode.id, index)
+          );
+        }
+      });
+    });
+  });
+
+  const flattenedEdges = [];
+  const usedIds = new Set();
+  const edgeIdMap = new Map();
+  const connectionSignatures = new Set();
+  const walk = (source, currentKey, pathEdges, visited) => {
+    if (visited.has(currentKey)) return;
+    const nextVisited = new Set(visited);
+    nextVisited.add(currentKey);
+    const endpoint = parseEndpointKey(currentKey);
+    if (endpoint.direction === 'in' && executableNodeIds.has(endpoint.nodeId)) {
+      const signature = `${source.nodeId}:${source.portIndex}>${endpoint.nodeId}:${endpoint.portIndex}`;
+      if (connectionSignatures.has(signature)) return;
+      connectionSignatures.add(signature);
+      const id = flattenedEdgeId(pathEdges, usedIds);
+      const flattened = {
+        id,
+        sourceNodeId: source.nodeId,
+        sourcePortIndex: source.portIndex,
+        targetNodeId: endpoint.nodeId,
+        targetPortIndex: endpoint.portIndex,
+        lineType: flattenedLineType(pathEdges)
+      };
+      flattenedEdges.push(flattened);
+      pathEdges.forEach((edge) => {
+        if (edge?.id) edgeIdMap.set(String(edge.id), id);
+      });
+      return;
+    }
+    (adjacency.get(currentKey) ?? []).forEach((transition) => {
+      walk(source, transition.to, [...pathEdges, ...transition.pathEdges], nextVisited);
+    });
+  };
+
+  executableNodes.forEach((node) => {
+    const nodeId = String(node.id);
+    [...adjacency.keys()]
+      .filter((key) => {
+        const endpoint = parseEndpointKey(key);
+        return endpoint.direction === 'out' && endpoint.nodeId === nodeId;
+      })
+      .forEach((key) => {
+        const endpoint = parseEndpointKey(key);
+        walk({ nodeId, portIndex: endpoint.portIndex }, key, [], new Set());
+      });
+  });
+
+  return { nodes: executableNodes, edges: flattenedEdges, edgeIdMap };
+}
+
+function executableFaultInstances(state, nodeIds, edgeIds, edgeIdMap) {
+  return (Array.isArray(state.faultInstances) ? state.faultInstances : [])
+    .filter(isActiveFaultInstance)
+    .map((fault) => {
+      const targetId = String(firstPresent(fault.targetId, fault.targetNodeId, fault.targetEdgeId));
+      const remappedTargetId = edgeIdMap.get(targetId) ?? targetId;
+      return { ...fault, targetId: remappedTargetId };
+    })
+    .filter((fault) => nodeIds.has(String(fault.targetId)) || edgeIds.has(String(fault.targetId)))
+    .map(normalizeFaultInstance);
+}
+
 export function buildBackendExecutablePackage(state = {}) {
   const simulationConfig = state.simulationConfig ?? {};
-  const nodes = (state.modelNodes ?? state.nodes ?? [])
-    .filter((node) => node?.id && SUPPORTED_NODE_TYPES.has(node.type))
-    .map(normalizeNode);
+  const flattened = flattenSubsystemGraph(state);
+  const nodes = flattened.nodes.map(normalizeNode);
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const edges = (state.modelEdges ?? state.edges ?? [])
+  const edges = flattened.edges
     .filter((edge) => nodeIds.has(String(edge?.sourceNodeId)) && nodeIds.has(String(edge?.targetNodeId)))
     .map(normalizeEdge);
+  const edgeIds = new Set(edges.map((edge) => edge.id));
   alignScopeInputsWithConnectedSignals(nodes, edges);
   return {
     schemaVersion: 1,
@@ -602,9 +797,7 @@ export function buildBackendExecutablePackage(state = {}) {
     },
     nodes,
     edges,
-    faultInstances: Array.isArray(state.faultInstances)
-      ? state.faultInstances.filter(isActiveFaultInstance).map(normalizeFaultInstance)
-      : [],
+    faultInstances: executableFaultInstances(state, nodeIds, edgeIds, flattened.edgeIdMap),
     measurementPoints: buildMeasurementPoints(state, nodes, edges)
   };
 }

@@ -481,6 +481,46 @@ function resetBackendRuntimeSamples(sim) {
   sim.hasSamples = false;
 }
 
+function beginBackendRunGeneration(sim) {
+  if (!sim) {
+    return 0;
+  }
+  sim.backendRunGeneration = Number(sim.backendRunGeneration || 0) + 1;
+  sim.backendStepPending = false;
+  return sim.backendRunGeneration;
+}
+
+async function waitForBackendSessionCleanup(sim) {
+  const cleanup = sim?.backendSessionCleanup;
+  if (!cleanup || typeof cleanup.then !== 'function') {
+    return;
+  }
+  try {
+    await cleanup;
+  } catch {
+    // Cleanup failures are already reported when the cleanup is queued.
+  }
+}
+
+function queueBackendSessionCleanup(sim, api, sessionId, options = {}) {
+  if (!sim || !sessionId || !api?.deleteSession) {
+    return Promise.resolve();
+  }
+  const previousCleanup = Promise.resolve(sim.backendSessionCleanup).catch(() => undefined);
+  const cleanup = previousCleanup
+    .then(() => api.deleteSession(sessionId))
+    .catch((error) => {
+      options.onError?.(error);
+    });
+  sim.backendSessionCleanup = cleanup;
+  cleanup.finally(() => {
+    if (sim.backendSessionCleanup === cleanup) {
+      sim.backendSessionCleanup = null;
+    }
+  });
+  return cleanup;
+}
+
 export function appendBackendSimulationChunk(target, chunk, { sampleLimit = DEFAULT_SAMPLE_LIMIT } = {}) {
   const sim = getSimulationState(target);
   if (!sim || chunk?.status === 'error') {
@@ -514,11 +554,11 @@ export function appendBackendSimulationChunk(target, chunk, { sampleLimit = DEFA
         : Number.isFinite(Number(times[index]))
           ? Number(times[index])
           : Number(sim.time || 0);
-    pushLimitedSample(componentOutputTrace.time, time, sampleLimit);
-    pushLimitedSample(componentOutputTrace.steps, {
+    componentOutputTrace.time.push(time);
+    componentOutputTrace.steps.push({
       ...cloneComponentOutputStep(step),
       time
-    }, sampleLimit);
+    });
   });
 
   syncBackendRuntimeState(target, componentSteps);
@@ -572,14 +612,8 @@ async function discardBackendSession(sim, api, options = {}) {
     sim.backendRunId = '';
     sim.staleBackendSessionId = '';
   }
-  if (!sessionId || !api?.deleteSession) {
-    return;
-  }
-  try {
-    await api.deleteSession(sessionId);
-  } catch (error) {
-    options.onError?.(error);
-  }
+  await waitForBackendSessionCleanup(sim);
+  await queueBackendSessionCleanup(sim, api, sessionId, options);
 }
 
 async function ensureBackendSession(target, legacy, options = {}) {
@@ -590,12 +624,15 @@ async function ensureBackendSession(target, legacy, options = {}) {
     return null;
   }
 
+  await waitForBackendSessionCleanup(sim);
+
   if (!sim.inited) {
     // A topology or parameter edit marks the legacy simulation as uninitialized.
     // Its backend session is otherwise still alive and would keep the old
     // executable package (for example, the previous downconverter LO value).
     await discardBackendSession(sim, api, options);
-    legacy.simInit?.(options.silentInit ?? true);
+    target.simInit?.(options.silentInit ?? true);
+    await waitForBackendSessionCleanup(sim);
   }
   if (!sim.inited) {
     return null;
@@ -604,9 +641,14 @@ async function ensureBackendSession(target, legacy, options = {}) {
     return sim.backendSessionId;
   }
 
+  const generation = Number(sim.backendRunGeneration || 0);
   const executablePackage = api.buildExecutablePackage(state);
   resetBackendRuntimeSamples(sim);
   const created = await api.createSession(executablePackage);
+  if (generation !== Number(sim.backendRunGeneration || 0)) {
+    queueBackendSessionCleanup(sim, api, created?.sessionId, options);
+    return null;
+  }
   sim.backendSessionId = created.sessionId;
   sim.backendRunId = created.runId || '';
   return sim.backendSessionId;
@@ -628,13 +670,24 @@ async function runBackendStep(target, legacy, steps = 1, options = {}) {
     return { completed: true };
   }
 
-  const sessionId = await ensureBackendSession(target, legacy);
+  const requestedGeneration = Number(sim.backendRunGeneration || 0);
+  const sessionId = await ensureBackendSession(target, legacy, options);
   if (!sessionId) {
+    if (requestedGeneration !== Number(sim.backendRunGeneration || 0)) {
+      return { completed: false, stale: true };
+    }
     return callLegacy(options, () => legacy.simStep?.());
   }
 
+  const generation = Number(sim.backendRunGeneration || 0);
   const api = getBackendApi(target);
   const chunk = await api.stepSession(sessionId, { steps });
+  if (
+    generation !== Number(sim.backendRunGeneration || 0)
+    || sim.backendSessionId !== sessionId
+  ) {
+    return { completed: false, stale: true, chunk };
+  }
   appendBackendSimulationChunk(target, chunk);
   refreshRuntimeViews(target, chunk?.metrics?.done ? 'completed' : 'stepped');
   return { completed: Boolean(chunk?.metrics?.done), chunk };
@@ -658,16 +711,18 @@ export function installBackendStepSimulationRuntime(target = globalThis, options
     const sim = getSimulationState(target);
     const api = getBackendApi(target);
     const staleSessionId = sim?.backendSessionId || sim?.staleBackendSessionId;
-    const result = legacy.simInit?.(silent);
+    clearBackendTimer(target, sim);
+    beginBackendRunGeneration(sim);
     if (sim) {
       sim.backendSessionId = '';
       sim.backendRunId = '';
       sim.staleBackendSessionId = '';
+    }
+    const result = legacy.simInit?.(silent);
+    if (sim) {
       sim.componentOutputs = { time: [], steps: [] };
     }
-    if (staleSessionId && api?.deleteSession) {
-      Promise.resolve(api.deleteSession(staleSessionId)).catch((error) => options.onError?.(error));
-    }
+    queueBackendSessionCleanup(sim, api, staleSessionId, options);
     return result;
   };
 
@@ -693,23 +748,36 @@ export function installBackendStepSimulationRuntime(target = globalThis, options
     if (!isBackendRuntimeAvailable(target) || !sim) {
       return callLegacy(options, () => legacy.simRun?.());
     }
+    if (!sim.running) {
+      target.__GZ_STATUS_BAR__?.beginLiveStatus?.({
+        key: 'simulation-starting',
+        message: '仿真准备运行',
+        source: '系统'
+      });
+    }
     if (!sim.inited) {
       await discardBackendSession(sim, getBackendApi(target), options);
-      legacy.simInit?.();
+      target.simInit?.();
       if (!sim.inited) {
         return undefined;
       }
     }
     if (sim.time >= sim.duration) {
       await discardBackendSession(sim, getBackendApi(target), options);
-      legacy.simInit?.(true);
+      target.simInit?.(true);
     }
 
+    const runGeneration = Number(sim.backendRunGeneration || 0);
     sim.running = true;
     sim.paused = false;
     clearBackendTimer(target, sim);
     sim.timer = target.setInterval?.(async () => {
-      if (!sim.running || sim.paused || sim.backendStepPending) {
+      if (
+        runGeneration !== Number(sim.backendRunGeneration || 0)
+        || !sim.running
+        || sim.paused
+        || sim.backendStepPending
+      ) {
         return;
       }
       sim.backendStepPending = true;
@@ -723,7 +791,9 @@ export function installBackendStepSimulationRuntime(target = globalThis, options
         clearBackendTimer(target, sim);
         callLegacy(options, () => legacy.simRun?.());
       } finally {
-        sim.backendStepPending = false;
+        if (runGeneration === Number(sim.backendRunGeneration || 0)) {
+          sim.backendStepPending = false;
+        }
       }
     }, Math.max(Math.round(Number(sim.stepSize || 0.1) * 1000), 80));
     refreshRuntimeViews(target, 'running');
@@ -757,23 +827,16 @@ export function installBackendStepSimulationRuntime(target = globalThis, options
     const sessionId = sim?.backendSessionId;
     if (sim) {
       clearBackendTimer(target, sim);
+      beginBackendRunGeneration(sim);
+      sim.backendSessionId = '';
+      sim.backendRunId = '';
       sim.running = false;
       sim.paused = false;
       getWorkbenchState(target).simDone = Boolean(sim.hasSamples);
     }
-    if (sessionId && api?.deleteSession) {
-      try {
-        await api.deleteSession(sessionId);
-      } catch (error) {
-        options.onError?.(error);
-      }
-    }
-    if (sim) {
-      sim.backendSessionId = '';
-      sim.backendRunId = '';
-    }
     callLegacy(options, () => legacy.simStop?.(mode));
     refreshRuntimeViews(target, mode === 'completed' ? 'completed' : 'stopped');
+    await queueBackendSessionCleanup(sim, api, sessionId, options);
     return undefined;
   };
 

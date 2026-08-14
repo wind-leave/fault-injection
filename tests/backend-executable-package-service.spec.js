@@ -57,6 +57,144 @@ describe('backendExecutablePackageService', () => {
     expect(JSON.stringify(pkg)).not.toContain('"x"');
   });
 
+  it('flattens a subsystem into its internal backend components and reconnects parent edges', () => {
+    const state = {
+      rootCanvasId: 'canvas-root',
+      simulationConfig: { duration: 1, stepSize: 0.1 },
+      canvases: {
+        'canvas-root': {
+          id: 'canvas-root',
+          nodes: [
+            { id: 'source', type: 'signal_source', props: { value: 2 }, outputs: [{ name: 'out' }] },
+            {
+              id: 'subsystem',
+              type: 'subsystem_block',
+              targetCanvasId: 'canvas-subsystem',
+              props: {
+                interface: {
+                  inputs: [{ id: 'input-1', order: 0 }],
+                  outputs: [{ id: 'output-1', order: 0 }]
+                }
+              }
+            },
+            { id: 'scope', type: 'instrument_scope', props: {}, inputs: [{ name: 'CH1' }] }
+          ],
+          edges: [
+            { id: 'root-source-subsystem', sourceNodeId: 'source', sourcePortIndex: 0, targetNodeId: 'subsystem', targetPortIndex: 0 },
+            { id: 'root-subsystem-scope', sourceNodeId: 'subsystem', sourcePortIndex: 0, targetNodeId: 'scope', targetPortIndex: 0 }
+          ]
+        },
+        'canvas-subsystem': {
+          id: 'canvas-subsystem',
+          parentSubsystemNodeId: 'subsystem',
+          nodes: [
+            { id: 'boundary-input', type: 'subsystem_in_port', props: { interfacePortId: 'input-1', order: 0 } },
+            {
+              id: 'internal-controller',
+              type: 'simulation_block',
+              props: { inputs: [{ name: 'input' }], outputs: [{ name: 'output' }] },
+              pythonBinding: { moduleId: 'attitude_controller', entryFunction: 'process' }
+            },
+            { id: 'boundary-output', type: 'subsystem_out_port', props: { interfacePortId: 'output-1', order: 0 } }
+          ],
+          edges: [
+            { id: 'map-input', sourceNodeId: 'boundary-input', sourcePortIndex: 0, targetNodeId: 'internal-controller', targetPortIndex: 0, subsystemBoundaryMapping: true },
+            { id: 'map-output', sourceNodeId: 'internal-controller', sourcePortIndex: 0, targetNodeId: 'boundary-output', targetPortIndex: 0, subsystemBoundaryMapping: true }
+          ]
+        }
+      },
+      faultInstances: [{
+        instanceId: 'internal-bias',
+        faultTypeId: 'bias',
+        targetId: 'internal-controller',
+        parameters: { bias: 0.2 }
+      }]
+    };
+
+    const pkg = buildBackendExecutablePackage(state);
+
+    expect(pkg.nodes.map((node) => node.id)).toEqual(['source', 'scope', 'internal-controller']);
+    expect(pkg.nodes.some((node) => node.type === 'subsystem_block')).toBe(false);
+    expect(pkg.nodes.some((node) => node.type === 'subsystem_in_port' || node.type === 'subsystem_out_port')).toBe(false);
+    expect(pkg.edges).toEqual([
+      expect.objectContaining({ sourceNodeId: 'source', sourcePortIndex: 0, targetNodeId: 'internal-controller', targetPortIndex: 0 }),
+      expect.objectContaining({ sourceNodeId: 'internal-controller', sourcePortIndex: 0, targetNodeId: 'scope', targetPortIndex: 0 })
+    ]);
+    expect(pkg.faultInstances).toEqual([
+      expect.objectContaining({ faultId: 'internal-bias', targetId: 'internal-controller', faultType: 'sensor_bias' })
+    ]);
+  });
+
+  it('recursively flattens nested subsystems before sending the graph to the backend', () => {
+    const subsystem = (id, targetCanvasId, inputId, outputId) => ({
+      id,
+      type: 'subsystem_block',
+      targetCanvasId,
+      props: {
+        interface: {
+          inputs: [{ id: inputId, order: 0 }],
+          outputs: [{ id: outputId, order: 0 }]
+        }
+      }
+    });
+    const state = {
+      rootCanvasId: 'canvas-root',
+      canvases: {
+        'canvas-root': {
+          id: 'canvas-root',
+          nodes: [
+            { id: 'source', type: 'signal_source', props: { value: 1 }, outputs: [{ name: 'out' }] },
+            subsystem('outer', 'canvas-outer', 'outer-in', 'outer-out'),
+            { id: 'scope', type: 'instrument_scope', props: {}, inputs: [{ name: 'CH1' }] }
+          ],
+          edges: [
+            { id: 'source-outer', sourceNodeId: 'source', targetNodeId: 'outer', sourcePortIndex: 0, targetPortIndex: 0 },
+            { id: 'outer-scope', sourceNodeId: 'outer', targetNodeId: 'scope', sourcePortIndex: 0, targetPortIndex: 0 }
+          ]
+        },
+        'canvas-outer': {
+          id: 'canvas-outer',
+          parentSubsystemNodeId: 'outer',
+          nodes: [
+            { id: 'outer-input', type: 'subsystem_in_port', props: { interfacePortId: 'outer-in', order: 0 } },
+            subsystem('inner', 'canvas-inner', 'inner-in', 'inner-out'),
+            { id: 'outer-output', type: 'subsystem_out_port', props: { interfacePortId: 'outer-out', order: 0 } }
+          ],
+          edges: [
+            { id: 'outer-input-inner', sourceNodeId: 'outer-input', targetNodeId: 'inner', sourcePortIndex: 0, targetPortIndex: 0 },
+            { id: 'inner-outer-output', sourceNodeId: 'inner', targetNodeId: 'outer-output', sourcePortIndex: 0, targetPortIndex: 0 }
+          ]
+        },
+        'canvas-inner': {
+          id: 'canvas-inner',
+          parentSubsystemNodeId: 'inner',
+          nodes: [
+            { id: 'inner-input', type: 'subsystem_in_port', props: { interfacePortId: 'inner-in', order: 0 } },
+            {
+              id: 'deep-component',
+              type: 'simulation_block',
+              props: { inputs: [{ name: 'input' }], outputs: [{ name: 'output' }] },
+              pythonBinding: { moduleId: 'passthrough' }
+            },
+            { id: 'inner-output', type: 'subsystem_out_port', props: { interfacePortId: 'inner-out', order: 0 } }
+          ],
+          edges: [
+            { id: 'inner-input-deep', sourceNodeId: 'inner-input', targetNodeId: 'deep-component', sourcePortIndex: 0, targetPortIndex: 0 },
+            { id: 'deep-inner-output', sourceNodeId: 'deep-component', targetNodeId: 'inner-output', sourcePortIndex: 0, targetPortIndex: 0 }
+          ]
+        }
+      }
+    };
+
+    const pkg = buildBackendExecutablePackage(state);
+
+    expect(pkg.nodes.map((node) => node.id)).toEqual(['source', 'scope', 'deep-component']);
+    expect(pkg.edges).toEqual([
+      expect.objectContaining({ sourceNodeId: 'source', targetNodeId: 'deep-component' }),
+      expect.objectContaining({ sourceNodeId: 'deep-component', targetNodeId: 'scope' })
+    ]);
+  });
+
   it('uses default simulation config when state omits it', () => {
     const pkg = buildBackendExecutablePackage({ modelNodes: [], modelEdges: [] });
 
@@ -122,7 +260,7 @@ describe('backendExecutablePackageService', () => {
     });
 
     expect(pkg.nodes[1]).toEqual(expect.objectContaining({
-      powerInputs: [{ id: 'supply', name: '电源输入', voltage: '28V' }],
+      powerInputs: [{ id: 'supply', name: '电源输入', voltage: '28V', supplyType: 'DC' }],
       powerOutputs: [{ id: 'ground', name: '电源地', voltage: '0V' }]
     }));
     expect(pkg.edges[0].lineType).toBe('power');
@@ -148,7 +286,7 @@ describe('backendExecutablePackageService', () => {
     });
 
     expect(pkg.nodes[1]).toEqual(expect.objectContaining({
-      powerInputs: [{ id: 'supply', name: '电源输入', voltage: '28V' }],
+      powerInputs: [{ id: 'supply', name: '电源输入', voltage: '28V', supplyType: 'DC' }],
       powerOutputs: []
     }));
     expect(pkg.edges[0].lineType).toBe('normal');

@@ -360,23 +360,27 @@ def _is_powered(graph, node):
     if not node.requires_power:
         return True
     supply_start = len(node.input_ports)
-    for edge in graph.edges:
-        if edge.target_node_id != node.id or not (supply_start <= edge.target_port_index < supply_start + len(node.power_input_ports)):
-            continue
-        source_node = graph.nodes[edge.source_node_id]
-        if edge.source_port_index >= len(source_node.output_ports):
-            continue
-        source_port = source_node.output_ports[edge.source_port_index]
-        required_port = node.power_input_ports[edge.target_port_index - supply_start]
-        if _source_supply_type(source_node, source_port) != _power_type(required_port):
-            continue
-        source_voltage = _source_power_voltage(graph, source_node)
-        required_voltage = _power_voltage(required_port.get("voltage"))
-        if source_voltage is None or required_voltage is None:
-            continue
-        if abs(source_voltage - required_voltage) <= max(0.01, abs(required_voltage) * 0.01):
-            return True
-    return False
+    for power_index, required_port in enumerate(node.power_input_ports):
+        matched = False
+        for edge in graph.edges:
+            if edge.target_node_id != node.id or edge.target_port_index != supply_start + power_index:
+                continue
+            source_node = graph.nodes[edge.source_node_id]
+            if edge.source_port_index >= len(source_node.output_ports):
+                continue
+            source_port = source_node.output_ports[edge.source_port_index]
+            if _source_supply_type(source_node, source_port) != _power_type(required_port):
+                continue
+            source_voltage = _source_power_voltage(graph, source_node)
+            required_voltage = _power_voltage(required_port.get("voltage"))
+            if source_voltage is None or required_voltage is None:
+                continue
+            if abs(source_voltage - required_voltage) <= max(0.01, abs(required_voltage) * 0.01):
+                matched = True
+                break
+        if not matched:
+            return False
+    return True
 
 
 def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_states, dt, visiting, previous_values, next_values, component_outputs):
@@ -399,8 +403,9 @@ def _evaluate_node(graph, node_id, mode, time, cache, fault_runtime, module_stat
     if node.type == "signal_source":
         value = _source_value(node, time)
         outputs = {output_names[0]: _ensure_port_value(node, "output", 0, value)}
+    elif node.type == "simulation_block" and not _is_powered(graph, node):
+        outputs = _default_outputs(node)
     elif node.type == "simulation_block":
-        # 供电匹配校验暂不参与仿真执行；电源接口仍保留在模型中供建模和展示使用。
         module_inputs = {}
         for index, input_name in enumerate(node.module.inputs):
             input_value = inputs[index] if index < len(inputs) else 0.0

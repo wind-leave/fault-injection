@@ -44,11 +44,17 @@ function createRuntimeTarget() {
     },
     simInit: vi.fn(() => {
       sim.inited = true;
+      sim.running = false;
+      sim.paused = false;
+      sim.hasSamples = false;
+      sim.time = 0;
+      sim.stepIndex = 0;
       sim.duration = 0.3;
       sim.stepSize = 0.1;
       sim.actual = { scopeSamples: {} };
       sim.reference = { scopeSamples: {} };
       sim.componentOutputs = { time: [], steps: [] };
+      state.simDone = false;
     }),
     simStep: vi.fn(),
     simRun: vi.fn(),
@@ -243,7 +249,7 @@ describe('backend step simulation runtime', () => {
     expect(target.__GZ_SIM__.reference.nodeStates['multi-component'].lastOutputs).toEqual([10, 20]);
   });
 
-  it('overwrites the oldest component output sample after the rolling capacity is reached', () => {
+  it('keeps the complete component output trace beyond the rolling display capacity', () => {
     const target = createRuntimeTarget();
     const steps = [0, 0.1, 0.2].map((time, index) => ({
       time,
@@ -257,8 +263,8 @@ describe('backend step simulation runtime', () => {
       metrics: { sampleCount: steps.length, stepIndex: steps.length, time: 0.3, done: false }
     }, { sampleLimit: 2 });
 
-    expect(target.__GZ_SIM__.componentOutputs.time).toEqual([0.1, 0.2]);
-    expect(target.__GZ_SIM__.componentOutputs.steps.map((step) => step.actual['sim-1'].output)).toEqual([1, 2]);
+    expect(target.__GZ_SIM__.componentOutputs.time).toEqual([0, 0.1, 0.2]);
+    expect(target.__GZ_SIM__.componentOutputs.steps.map((step) => step.actual['sim-1'].output)).toEqual([0, 1, 2]);
   });
 
   it('records backend component outputs for a connected spectrum analyzer', () => {
@@ -624,5 +630,126 @@ describe('backend step simulation runtime', () => {
 
     expect(target.__GZ_BACKEND_SIMULATION__.deleteSession).toHaveBeenCalledWith('session-1');
     expect(target.__GZ_SIM__.backendSessionId).toBe('');
+  });
+
+  it('keeps the second simulation session when the first session finishes deleting late', async () => {
+    const target = createRuntimeTarget();
+    let sessionSequence = 0;
+    let finishFirstDelete;
+    const firstDelete = new Promise((resolve) => {
+      finishFirstDelete = resolve;
+    });
+    target.__GZ_BACKEND_SIMULATION__.createSession.mockImplementation(async () => {
+      sessionSequence += 1;
+      return { status: 'success', sessionId: `session-${sessionSequence}` };
+    });
+    target.__GZ_BACKEND_SIMULATION__.deleteSession.mockImplementation((sessionId) => (
+      sessionId === 'session-1' ? firstDelete : Promise.resolve({ status: 'success' })
+    ));
+
+    installBackendStepSimulationRuntime(target);
+    await target.simStep();
+    expect(target.__GZ_SIM__.backendSessionId).toBe('session-1');
+
+    const firstStop = target.simStop('completed');
+    expect(target.__GZ_SIM__.backendSessionId).toBe('');
+    target.simInit(true);
+    const secondStep = target.simStep();
+    await Promise.resolve();
+    expect(target.__GZ_BACKEND_SIMULATION__.createSession).toHaveBeenCalledTimes(1);
+
+    finishFirstDelete({ status: 'success' });
+    await firstStop;
+    await secondStep;
+
+    expect(target.__GZ_BACKEND_SIMULATION__.createSession).toHaveBeenCalledTimes(2);
+    expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenLastCalledWith('session-2', { steps: 1 });
+    expect(target.__GZ_SIM__.backendSessionId).toBe('session-2');
+    expect(target.__GZ_SIM__.componentOutputs.time).toEqual([]);
+  });
+
+  it('runs a completed simulation a second time with a fresh backend session', async () => {
+    const target = createRuntimeTarget();
+    const timerCallbacks = [];
+    let sessionSequence = 0;
+    target.setInterval.mockImplementation((callback) => {
+      timerCallbacks.push(callback);
+      return timerCallbacks.length;
+    });
+    target.__GZ_BACKEND_SIMULATION__.createSession.mockImplementation(async () => {
+      sessionSequence += 1;
+      return { status: 'success', sessionId: `session-${sessionSequence}` };
+    });
+    target.__GZ_BACKEND_SIMULATION__.stepSession.mockImplementation(async (sessionId) => ({
+      status: 'success',
+      sessionId,
+      curves: { time: [0], channels: { 'scope-1.ch1.actual': [sessionSequence] } },
+      componentOutputs: { time: [0], steps: [] },
+      metrics: { sampleCount: 1, stepIndex: 3, time: 0.3, done: true }
+    }));
+
+    installBackendStepSimulationRuntime(target);
+    await target.simRun();
+    await timerCallbacks[0]();
+    expect(target.__GZ_BACKEND_SIMULATION__.deleteSession).toHaveBeenCalledWith('session-1');
+
+    await target.simRun();
+    await timerCallbacks[1]();
+
+    expect(target.__GZ_BACKEND_SIMULATION__.createSession).toHaveBeenCalledTimes(2);
+    expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenLastCalledWith('session-2', { steps: 1 });
+    expect(target.__GZ_BACKEND_SIMULATION__.deleteSession).toHaveBeenLastCalledWith('session-2');
+  });
+
+  it('ignores a late step response from the previous simulation run', async () => {
+    const target = createRuntimeTarget();
+    let finishFirstStep;
+    const firstStep = new Promise((resolve) => {
+      finishFirstStep = resolve;
+    });
+    target.__GZ_BACKEND_SIMULATION__.stepSession.mockImplementationOnce(() => firstStep);
+
+    installBackendStepSimulationRuntime(target);
+    const pendingStep = target.simStep();
+    await vi.waitFor(() => {
+      expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenCalledTimes(1);
+    });
+    target.simInit(true);
+
+    finishFirstStep({
+      status: 'success',
+      curves: { time: [0], channels: { 'scope-1.ch1.actual': [99] } },
+      componentOutputs: { time: [0], steps: [] },
+      metrics: { sampleCount: 1, stepIndex: 1, time: 0.1, done: false }
+    });
+    await pendingStep;
+
+    expect(target.__GZ_SIM__.actual.scopeSamples).toEqual({});
+    expect(target.__GZ_SIM__.time).toBe(0);
+    expect(target.__GZ_SIM__.stepIndex).toBe(0);
+  });
+
+  it('discards a backend session that finishes creating after reinitialization', async () => {
+    const target = createRuntimeTarget();
+    let finishCreate;
+    target.__GZ_BACKEND_SIMULATION__.createSession.mockImplementationOnce(() => new Promise((resolve) => {
+      finishCreate = resolve;
+    }));
+
+    installBackendStepSimulationRuntime(target);
+    const pendingStep = target.simStep();
+    await vi.waitFor(() => {
+      expect(target.__GZ_BACKEND_SIMULATION__.createSession).toHaveBeenCalledTimes(1);
+    });
+    target.simInit(true);
+    finishCreate({ status: 'success', sessionId: 'stale-session' });
+    await pendingStep;
+    await vi.waitFor(() => {
+      expect(target.__GZ_BACKEND_SIMULATION__.deleteSession).toHaveBeenCalledWith('stale-session');
+    });
+
+    expect(target.__GZ_BACKEND_SIMULATION__.stepSession).not.toHaveBeenCalled();
+    expect(target.__GZ_SIM__.backendSessionId).toBe('');
+    expect(target.__GZ_SIM__.time).toBe(0);
   });
 });

@@ -391,15 +391,6 @@ function renderBoundSimulationFields(node, binding, helpers = {}) {
       ${renderSimulationParameterFields(node, helpers)}`;
 }
 
-function renderReadOnlySimulationInterface(html) {
-  return html
-    .replace(/(<input id="prop-name"[^>]*)(>)/g, '$1 disabled$2')
-    .replace(/(<input id="sim-(?:input|output|middle)-count"[^>]*)(>)/g, '$1 disabled$2')
-    .replace(/(<(?:input|select) data-sim-field="(?:name|type)"[^>]*)(>)/g, '$1 disabled$2')
-    .replace(/(<input data-python-port-display-name[^>]*)(>)/g, '$1 disabled$2')
-    .replace(/<button class="props-secondary" type="button" onclick="syncSimulationInterfaceCounts\(\)">[\s\S]*?<\/button>/, '');
-}
-
 function readPowerInputs(props, documentLike) {
   const current = list(props.powerInputs).length
     ? list(props.powerInputs)
@@ -418,9 +409,9 @@ function readPowerInputs(props, documentLike) {
 export function renderSimulationBlockFieldsFromSchema(node, helpers = {}) {
   const binding = helpers.binding || null;
   if (binding?.bound) {
-    return renderReadOnlySimulationInterface(renderBoundSimulationFields(node, binding, helpers));
+    return renderBoundSimulationFields(node, binding, helpers);
   }
-  return renderReadOnlySimulationInterface(renderUnboundSimulationFields(node, helpers));
+  return renderUnboundSimulationFields(node, helpers);
 }
 
 export function readSimulationBlockValuesFromPanel(node, documentLike, helpers = {}) {
@@ -431,42 +422,24 @@ export function readSimulationBlockValuesFromPanel(node, documentLike, helpers =
     : {};
 
   if (binding?.bound) {
-    return {
-      values: {
-        parameterValues: readSimulationParameterValues(node, documentLike),
-        parameterUnits: readSimulationParameterUnits(node, documentLike),
-        ...supplyValues
-      },
-      shouldPruneInvalidEdges: false
-    };
-  }
-
-  return {
-    values: {
-      moduleType: documentLike?.getElementById?.('prop-moduleType')?.value || props.moduleType,
-      ffunctionNote: textValue(documentLike?.getElementById?.('prop-ffunctionNote')?.value, props.ffunctionNote || ''),
-      parameterValues: readSimulationParameterValues(node, documentLike),
-      parameterUnits: readSimulationParameterUnits(node, documentLike),
-      ...supplyValues
-    },
-    shouldPruneInvalidEdges: false
-  };
-
-  const name = textValue(documentLike?.getElementById?.('prop-name')?.value, props.name || '');
-
-  if (binding?.bound) {
     const portDisplayNames = ['inputs', 'outputs', 'middleVars'].reduce((result, kind) => {
       result[kind] = [...(documentLike?.querySelectorAll?.(`[data-python-port-display-name][data-python-port-kind="${kind}"]`) || [])]
         .map((element, index) => textValue(element.value, list(binding?.portMapping?.[kind])[index]?.displayName || ''));
       return result;
     }, {});
     return {
-      values: { name },
+      values: {
+        name: textValue(documentLike?.getElementById?.('prop-name')?.value, props.name || ''),
+        parameterValues: readSimulationParameterValues(node, documentLike),
+        parameterUnits: readSimulationParameterUnits(node, documentLike),
+        ...supplyValues
+      },
       portDisplayNames,
       shouldPruneInvalidEdges: false
     };
   }
 
+  const name = textValue(documentLike?.getElementById?.('prop-name')?.value, props.name || '');
   const limits = helpers.interfaceLimits || DEFAULT_INTERFACE_LIMITS;
   const inputCount = clampInterfaceCount(documentLike?.getElementById?.('sim-input-count')?.value, limits.inputs);
   const outputCount = clampInterfaceCount(documentLike?.getElementById?.('sim-output-count')?.value, limits.outputs);
@@ -497,7 +470,10 @@ export function readSimulationBlockValuesFromPanel(node, documentLike, helpers =
         middleFallbackType,
         middleCount
       ),
-      ffunctionNote: textValue(documentLike?.getElementById?.('prop-ffunctionNote')?.value, props.ffunctionNote || '')
+      ffunctionNote: textValue(documentLike?.getElementById?.('prop-ffunctionNote')?.value, props.ffunctionNote || ''),
+      parameterValues: readSimulationParameterValues(node, documentLike),
+      parameterUnits: readSimulationParameterUnits(node, documentLike),
+      ...supplyValues
     },
     shouldPruneInvalidEdges: true
   };

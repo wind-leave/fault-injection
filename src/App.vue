@@ -22,6 +22,11 @@ import './services/simulationRuntime.js';
 
 const workbench = useWorkbenchState();
 const rootEl = ref(null);
+const isLeftPanelCollapsed = ref(false);
+const isRightPanelCollapsed = ref(false);
+const isCanvasTopChromeCollapsed = ref(false);
+const isStatusBarCollapsed = ref(false);
+const isCanvasFloatingControlsOpen = ref(false);
 
 const LAYOUT_STORAGE_KEY = 'gz.layoutSizes.v3';
 const DEFAULT_LAYOUT_SIZES = Object.freeze({
@@ -161,8 +166,30 @@ function resetLayoutSize(target) {
   });
 }
 
+function toggleLeftPanel() {
+  isLeftPanelCollapsed.value = !isLeftPanelCollapsed.value;
+}
+
+function toggleRightPanel() {
+  isRightPanelCollapsed.value = !isRightPanelCollapsed.value;
+}
+
+function toggleCanvasTopChrome() {
+  isCanvasTopChromeCollapsed.value = !isCanvasTopChromeCollapsed.value;
+}
+
+function toggleStatusBar() {
+  isStatusBarCollapsed.value = !isStatusBarCollapsed.value;
+}
+
+function toggleCanvasFloatingControls() {
+  isCanvasFloatingControlsOpen.value = !isCanvasFloatingControlsOpen.value;
+}
+
 onMounted(async () => {
   applyLayoutSizes(readStoredLayoutSizes(), { persist: false });
+  window.addEventListener('gz:toggle-canvas-top-chrome', toggleCanvasTopChrome);
+  window.addEventListener('gz:toggle-canvas-floating-controls', toggleCanvasFloatingControls);
   await nextTick();
   mountLegacyRuntime();
   bindStatusBarInteractions();
@@ -171,15 +198,29 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopLayoutResize();
+  window.removeEventListener('gz:toggle-canvas-top-chrome', toggleCanvasTopChrome);
+  window.removeEventListener('gz:toggle-canvas-floating-controls', toggleCanvasFloatingControls);
   unbindStatusBarInteractions();
 });
 </script>
 
 <template>
-  <div ref="rootEl" class="gz-app" data-testid="workbench-root" :data-runtime-ready="workbench.runtimeReady ? 'true' : 'false'">
+  <div
+    ref="rootEl"
+    class="gz-app"
+    :class="{
+      'is-left-panel-collapsed': isLeftPanelCollapsed,
+      'is-right-panel-collapsed': isRightPanelCollapsed,
+      'is-canvas-top-chrome-collapsed': isCanvasTopChromeCollapsed,
+      'is-status-bar-collapsed': isStatusBarCollapsed,
+      'is-canvas-floating-controls-open': isCanvasFloatingControlsOpen
+    }"
+    data-testid="workbench-root"
+    :data-runtime-ready="workbench.runtimeReady ? 'true' : 'false'"
+  >
     <WorkbenchHeader />
     <main class="workbench-main">
-      <LeftPalette />
+      <LeftPalette :collapsed="isLeftPanelCollapsed" @toggle-collapse="toggleLeftPanel" />
       <button
         type="button"
         class="layout-resizer layout-resizer--vertical layout-resizer--left"
@@ -199,7 +240,7 @@ onBeforeUnmount(() => {
         @pointerdown="startLayoutResize('right', $event)"
         @dblclick="resetLayoutSize('right')"
       ></button>
-      <RightInspector />
+      <RightInspector :collapsed="isRightPanelCollapsed" @toggle-collapse="toggleRightPanel" />
       <button
         type="button"
         class="layout-resizer layout-resizer--horizontal layout-resizer--bottom"
@@ -209,7 +250,7 @@ onBeforeUnmount(() => {
         @pointerdown="startLayoutResize('bottom', $event)"
         @dblclick="resetLayoutSize('status')"
       ></button>
-      <WorkbenchStatusBar />
+      <WorkbenchStatusBar :collapsed="isStatusBarCollapsed" @toggle-collapse="toggleStatusBar" />
     </main>
     <FaultLibraryDialog />
     <TemplateDialog />

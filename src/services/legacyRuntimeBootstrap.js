@@ -194,7 +194,16 @@ function createExportMeta(state = {}) {
 }
 
 function createExportSnapshot(state = {}) {
-  return createWorkbenchSnapshot(state);
+  const snapshot = createWorkbenchSnapshot(state);
+  const rootCanvas = snapshot.canvases?.[snapshot.rootCanvasId];
+  if (!rootCanvas) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    modelNodes: rootCanvas.nodes,
+    modelEdges: rootCanvas.edges
+  };
 }
 
 export function mountLegacyRuntime() {

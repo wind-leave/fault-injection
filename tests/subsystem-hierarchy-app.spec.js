@@ -84,19 +84,17 @@ describe('subsystem hierarchy app integration', () => {
     const subsystemNode = document.querySelector('.blk.b-subsystem');
     expect(subsystemNode).not.toBeNull();
 
-    const pointerDown = new MouseEvent('pointerdown', {
-      bubbles: true,
-      cancelable: true,
-      clientX: 220,
-      clientY: 180,
-      button: 0
-    });
-    Object.defineProperty(pointerDown, 'pointerId', { value: 11 });
-    expect(subsystemNode.dispatchEvent(pointerDown)).toBe(true);
-    expect(pointerDown.defaultPrevented).toBe(false);
-
+    dispatchPointer(subsystemNode, 'pointerdown', { pointerId: 11, clientX: 220, clientY: 180 });
+    expect(document.querySelector('.blk.b-subsystem')).toBe(subsystemNode);
+    dispatchPointer(subsystemNode, 'pointerup', { pointerId: 11, clientX: 220, clientY: 180 });
     dispatchClick(subsystemNode);
-    dispatchClick(subsystemNode);
+    await flushRuntime();
+    const refreshedSubsystemNode = document.querySelector('.blk.b-subsystem');
+    expect(refreshedSubsystemNode).not.toBeNull();
+    dispatchPointer(refreshedSubsystemNode, 'pointerdown', { pointerId: 12, clientX: 220, clientY: 180 });
+    expect(document.querySelector('.blk.b-subsystem')).toBe(refreshedSubsystemNode);
+    dispatchPointer(refreshedSubsystemNode, 'pointerup', { pointerId: 12, clientX: 220, clientY: 180 });
+    dispatchClick(refreshedSubsystemNode);
     await flushRuntime();
 
     const state = window.__GZ_STATE__;
@@ -108,7 +106,8 @@ describe('subsystem hierarchy app integration', () => {
     window.createNode('signal_source', 300, 260);
     await flushRuntime();
 
-    expect(state.canvases[childCanvasId].nodes).toHaveLength(1);
+    expect(state.canvases[childCanvasId].nodes.filter((node) => node.type === 'signal_source')).toHaveLength(1);
+    expect(state.canvases[childCanvasId].nodes.filter((node) => node.type === 'subsystem_out_port')).toHaveLength(1);
     expect(state.canvases['canvas-root'].nodes).toHaveLength(1);
 
     document.querySelector('[data-breadcrumb-root]')?.dispatchEvent(
@@ -180,6 +179,95 @@ describe('subsystem hierarchy app integration', () => {
     expect(subsystemNode.props.targetPort).toBeUndefined();
   });
 
+  it('keeps a subsystem property panel focused on its overview and hides unrelated sections', async () => {
+    mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.createNode('subsystem_block', 420, 320);
+    await flushRuntime();
+
+    const labels = Array.from(document.querySelectorAll('.props-tab:not([hidden])'))
+      .map((item) => item.textContent.trim());
+    expect(labels).toEqual(['属性']);
+    expect(document.querySelector('.rpanel')?.dataset.propsTabCount).toBe('1');
+    expect(document.getElementById('pd')?.textContent).not.toContain('画布位置');
+  });
+
+  it('rejects fault binding on a subsystem shell and requires binding inside its canvas', async () => {
+    mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.createNode('subsystem_block', 420, 320);
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    const subsystemNode = state.canvases['canvas-root'].nodes.find((node) => node.type === 'subsystem_block');
+    subsystemNode.faultSlots = [{
+      slotId: 'physical:subsystem',
+      layer: 'physical',
+      allowedFaultTypeIds: ['subsystem_fault_forbidden']
+    }];
+    state.activeModelPackage = {
+      faultTypeCatalog: [{
+        id: 'subsystem_fault_forbidden',
+        name: '子系统故障',
+        layer: 'physical',
+        defaultParameters: { bias: 1 }
+      }],
+      faultCapabilityMap: [{
+        targetKind: 'node',
+        targetId: subsystemNode.id,
+        faultSlots: subsystemNode.faultSlots
+      }]
+    };
+
+    expect(window.getFaultCapabilityForTarget(subsystemNode)).toBeNull();
+    expect(window.getCompatibleFaultModelsForTarget(subsystemNode)).toEqual([]);
+    expect(window.activateFaultForTarget(subsystemNode, 'subsystem_fault_forbidden')).toMatchObject({
+      ok: false,
+      reason: 'subsystem-target'
+    });
+    expect(window.canBindLayeredFaultInjectorToTarget('physical_fault_injector', subsystemNode)).toBe(false);
+    expect(state.faultInstances ?? []).toHaveLength(0);
+    expect(state.faultTags ?? []).toHaveLength(0);
+
+    window.selectNode(subsystemNode.id);
+    await flushRuntime();
+    expect(window.openTargetFaultActivationDialog()).toBe(false);
+    expect(document.querySelector('[data-target-fault-dialog]')).toBeNull();
+
+    window.openSubsystemCanvas(subsystemNode.id);
+    window.createNode('signal_source', 320, 240);
+    await flushRuntime();
+
+    const internalNode = state.modelNodes.find((node) => node.type === 'signal_source');
+    internalNode.faultSlots = [{
+      slotId: 'physical:internal-source',
+      layer: 'physical',
+      allowedFaultTypeIds: ['internal_source_fault']
+    }];
+    state.activeModelPackage = {
+      faultTypeCatalog: [{
+        id: 'internal_source_fault',
+        name: '内部信号源故障',
+        layer: 'physical',
+        defaultParameters: { bias: 0.1 }
+      }],
+      faultCapabilityMap: [{
+        targetKind: 'node',
+        targetId: internalNode.id,
+        faultSlots: internalNode.faultSlots
+      }]
+    };
+
+    expect(window.getCompatibleFaultModelsForTarget(internalNode).map((model) => model.id)).toContain('internal_source_fault');
+    expect(window.activateFaultForTarget(internalNode, 'internal_source_fault')).toMatchObject({ ok: true });
+    expect(state.faultInstances).toContainEqual(expect.objectContaining({
+      targetId: internalNode.id,
+      faultTypeId: 'internal_source_fault'
+    }));
+  });
+
   it('exports and re-imports hierarchy snapshots into a fresh runtime without flattening child canvases', async () => {
     const firstWrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -204,8 +292,12 @@ describe('subsystem hierarchy app integration', () => {
     expect(exported.workbenchSnapshot.rootCanvasId).toBe('canvas-root');
     expect(exported.workbenchSnapshot.activeCanvasId).toBe(childCanvasId);
     expect(exported.workbenchSnapshot.canvasTrail).toEqual(['canvas-root', childCanvasId]);
+    expect(exported.workbenchSnapshot.modelNodes).toEqual([
+      expect.objectContaining({ id: rootSubsystemId, type: 'subsystem_block', targetCanvasId: childCanvasId })
+    ]);
     expect(exported.workbenchSnapshot.canvases['canvas-root'].nodes).toHaveLength(1);
-    expect(exported.workbenchSnapshot.canvases[childCanvasId].nodes).toHaveLength(1);
+    expect(exported.workbenchSnapshot.canvases[childCanvasId].nodes.filter((node) => node.type === 'signal_source')).toHaveLength(1);
+    expect(exported.workbenchSnapshot.canvases[childCanvasId].nodes.filter((node) => node.type === 'subsystem_out_port')).toHaveLength(1);
 
     firstWrapper.unmount();
     document.body.innerHTML = '';
@@ -223,7 +315,13 @@ describe('subsystem hierarchy app integration', () => {
     expect(importedState.activeCanvasId).toBe(childCanvasId);
     expect(importedState.canvasTrail).toEqual(['canvas-root', childCanvasId]);
     expect(importedState.canvases['canvas-root'].nodes).toHaveLength(1);
-    expect(importedState.canvases[childCanvasId].nodes).toHaveLength(1);
+    expect(importedState.canvases['canvas-root'].nodes[0]).toMatchObject({
+      id: rootSubsystemId,
+      type: 'subsystem_block',
+      targetCanvasId: childCanvasId
+    });
+    expect(importedState.canvases[childCanvasId].nodes.filter((node) => node.type === 'signal_source')).toHaveLength(1);
+    expect(importedState.canvases[childCanvasId].nodes.filter((node) => node.type === 'subsystem_out_port')).toHaveLength(1);
     expect(importedState.canvasScale).toBe(1.75);
     expect(importedState.canvasOffsetX).toBe(86);
     expect(importedState.canvasOffsetY).toBe(52);
@@ -381,8 +479,131 @@ describe('subsystem hierarchy app integration', () => {
     window.openSubsystemCanvas(subsystemNode.id);
     await flushRuntime();
 
-    expect(document.querySelectorAll('.blk.b-subsystem-port-in')).toHaveLength(2);
-    expect(document.querySelectorAll('.blk.b-subsystem-port-out')).toHaveLength(1);
+    expect(document.querySelectorAll('.blk.b-subsystem-port-in')).toHaveLength(0);
+    expect(document.querySelectorAll('.blk.b-subsystem-port-out')).toHaveLength(0);
+  });
+
+  it('automatically resizes a subsystem block when its interface counts change', async () => {
+    mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.createNode('subsystem_block', 420, 320);
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    const subsystemNode = state.canvases['canvas-root'].nodes[0];
+    expect(subsystemNode.w).toBe(180);
+    expect(subsystemNode.h).toBe(92);
+
+    window.selectNode(subsystemNode.id);
+    await flushRuntime();
+    document.getElementById('subsystem-input-count').value = '6';
+    document.getElementById('subsystem-output-count').value = '4';
+    window.syncSubsystemInterfaceCounts();
+    await flushRuntime();
+    window.saveSelectedNode();
+    await flushRuntime();
+
+    expect(subsystemNode.w).toBe(180);
+    expect(subsystemNode.h).toBe(188);
+    let subsystemShell = document.getElementById(`b-${subsystemNode.id}`);
+    expect(subsystemShell?.style.height).toBe('188px');
+    const inputPorts = [...subsystemShell.querySelectorAll('.node-port--input')];
+    expect(inputPorts).toHaveLength(6);
+    const inputPortTops = inputPorts.map((port) => Number.parseFloat(port.style.top));
+    const inputPortGaps = inputPortTops.slice(1).map((top, index) => top - inputPortTops[index]);
+    expect(Math.min(...inputPortGaps)).toBeGreaterThan(20);
+
+    window.selectNode(subsystemNode.id);
+    await flushRuntime();
+    document.getElementById('subsystem-input-count').value = '1';
+    document.getElementById('subsystem-output-count').value = '1';
+    window.syncSubsystemInterfaceCounts();
+    await flushRuntime();
+    window.saveSelectedNode();
+    await flushRuntime();
+
+    expect(subsystemNode.w).toBe(180);
+    expect(subsystemNode.h).toBe(92);
+    subsystemShell = document.getElementById(`b-${subsystemNode.id}`);
+    expect(subsystemShell?.style.height).toBe('92px');
+  });
+
+  it('derives subsystem interfaces from every unconnected internal component port with source details', async () => {
+    mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.createNode('subsystem_block', 420, 320);
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    const subsystemNode = state.canvases['canvas-root'].nodes[0];
+    window.openSubsystemCanvas(subsystemNode.id);
+    await flushRuntime();
+
+    window.createNode('flow_block', 360, 220);
+    window.createNode('instrument_scope', 700, 220);
+    await flushRuntime();
+
+    const childCanvas = state.canvases[subsystemNode.targetCanvasId];
+    const flowNode = childCanvas.nodes.find((node) => node.type === 'flow_block');
+    const scopeNode = childCanvas.nodes.find((node) => node.type === 'instrument_scope');
+    flowNode.props.name = '姿态处理';
+    flowNode.props.inputName = '姿态误差';
+    flowNode.props.outputName = '修正量';
+    scopeNode.props.name = '监视器';
+    window.renderModelNodes();
+    await flushRuntime();
+
+    expect(subsystemNode.props.interfaceMode).toBe('auto');
+    expect(subsystemNode.props.interface.inputs).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: '姿态处理 · 姿态误差',
+        componentNodeId: flowNode.id,
+        componentPortIndex: 0,
+        componentName: '姿态处理',
+        componentPortName: '姿态误差'
+      }),
+      expect.objectContaining({ componentNodeId: scopeNode.id, componentName: '监视器' })
+    ]));
+    expect(subsystemNode.props.interface.outputs).toEqual([
+      expect.objectContaining({
+        name: '姿态处理 · 修正量',
+        componentNodeId: flowNode.id,
+        componentPortIndex: 0,
+        componentName: '姿态处理',
+        componentPortName: '修正量'
+      })
+    ]);
+
+    const inputBoundaryNodes = childCanvas.nodes.filter((node) => node.type === 'subsystem_in_port');
+    const outputBoundaryNodes = childCanvas.nodes.filter((node) => node.type === 'subsystem_out_port');
+    expect(inputBoundaryNodes).toHaveLength(3);
+    expect(outputBoundaryNodes).toHaveLength(1);
+    expect(childCanvas.edges.filter((edge) => edge.subsystemBoundaryMapping)).toHaveLength(4);
+
+    connectCanvasNodes(childCanvas, 'edge-internal-flow-scope', flowNode.id, scopeNode.id, 0, 0);
+    window.renderModelNodes();
+    await flushRuntime();
+
+    expect(subsystemNode.props.interface.inputs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: '姿态处理 · 姿态误差', componentNodeId: flowNode.id }),
+      expect.objectContaining({ componentNodeId: scopeNode.id, componentPortIndex: 1 })
+    ]));
+    expect(subsystemNode.props.interface.inputs).toHaveLength(2);
+    expect(subsystemNode.props.interface.outputs).toHaveLength(0);
+    expect(childCanvas.edges.some((edge) => edge.id === 'edge-internal-flow-scope')).toBe(true);
+    expect(childCanvas.edges.filter((edge) => edge.subsystemBoundaryMapping)).toHaveLength(2);
+
+    window.goToRootCanvas();
+    await flushRuntime();
+    window.selectNode(subsystemNode.id);
+    await flushRuntime();
+
+    expect(document.getElementById('subsystem-input-count')).toBeNull();
+    const automaticValues = [...document.querySelectorAll('.subsystem-intf-row input')].map((input) => input.value);
+    expect(automaticValues).toContain('姿态处理');
+    expect(automaticValues).toContain('姿态误差');
   });
 
   it('prunes stale parent edges when a subsystem interface shrinks', async () => {
@@ -675,6 +896,23 @@ describe('subsystem hierarchy app integration', () => {
     connectCanvasNodes(rootCanvas, 'edge-wrap-source-flow', sourceNode.id, flowNode.id, 0, 0);
     connectCanvasNodes(rootCanvas, 'edge-wrap-flow-sim', flowNode.id, simulationNode.id, 0, 0);
     connectCanvasNodes(rootCanvas, 'edge-wrap-sim-scope', simulationNode.id, scopeNode.id, 0, 0);
+    state.faultTags.push({
+      id: 'root-only-fault-tag',
+      faultModelId: 'root-only-fault',
+      name: '顶层故障标签',
+      targetKind: 'node',
+      targetId: sourceNode.id,
+      hostNodeId: sourceNode.id,
+      expanded: true,
+      x: 120,
+      y: 120
+    });
+    state.faultInjectionLinks.push({
+      id: 'root-only-fault-link',
+      faultModelId: 'root-only-fault',
+      sourceTagId: 'root-only-fault-tag',
+      targetNodeId: sourceNode.id
+    });
 
     window.renderModelNodes();
     await flushRuntime();
@@ -692,6 +930,9 @@ describe('subsystem hierarchy app integration', () => {
     const subsystemNode = wrappedRootCanvas.nodes.find((node) => node.type === 'subsystem_block');
 
     expect(subsystemNode).toBeTruthy();
+    expect(subsystemNode.w).toBe(180);
+    expect(subsystemNode.props.interface.inputs.length).toBeGreaterThanOrEqual(1);
+    expect(subsystemNode.props.interface.outputs).toHaveLength(1);
     expect(wrappedRootCanvas.nodes.map((node) => node.type)).toEqual(
       expect.arrayContaining(['signal_source', 'instrument_scope', 'subsystem_block'])
     );
@@ -705,13 +946,130 @@ describe('subsystem hierarchy app integration', () => {
     expect(childCanvas.nodes.map((node) => node.type)).toEqual(
       expect.arrayContaining(['flow_block', 'simulation_block', 'subsystem_in_port', 'subsystem_out_port'])
     );
-    expect(childCanvas.nodes.filter((node) => node.type === 'subsystem_in_port')).toHaveLength(1);
+    expect(childCanvas.nodes.filter((node) => node.type === 'subsystem_in_port').length).toBeGreaterThanOrEqual(1);
     expect(childCanvas.nodes.filter((node) => node.type === 'subsystem_out_port')).toHaveLength(1);
     expect(childCanvas.edges.some((edge) => edge.sourceNodeId === flowNode.id && edge.targetNodeId === simulationNode.id)).toBe(true);
 
-    const childInput = childCanvas.nodes.find((node) => node.type === 'subsystem_in_port');
-    const childOutput = childCanvas.nodes.find((node) => node.type === 'subsystem_out_port');
+    const childInput = childCanvas.nodes.find((node) => node.type === 'subsystem_in_port' && node.props.componentNodeId === flowNode.id);
+    const childOutput = childCanvas.nodes.find((node) => node.type === 'subsystem_out_port' && node.props.componentNodeId === simulationNode.id);
     expect(childCanvas.edges.some((edge) => edge.sourceNodeId === childInput.id && edge.targetNodeId === flowNode.id)).toBe(true);
     expect(childCanvas.edges.some((edge) => edge.sourceNodeId === simulationNode.id && edge.targetNodeId === childOutput.id)).toBe(true);
+
+    const backendPackage = window.__GZ_BACKEND_SIMULATION__.buildExecutablePackage(state);
+    expect(backendPackage.nodes.map((node) => node.id)).toEqual(expect.arrayContaining([
+      sourceNode.id,
+      flowNode.id,
+      simulationNode.id,
+      scopeNode.id
+    ]));
+    expect(backendPackage.nodes.some((node) => node.id === subsystemNode.id || node.type === 'subsystem_block')).toBe(false);
+    expect(backendPackage.nodes.some((node) => node.type === 'subsystem_in_port' || node.type === 'subsystem_out_port')).toBe(false);
+    expect(backendPackage.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceNodeId: sourceNode.id, targetNodeId: flowNode.id }),
+      expect.objectContaining({ sourceNodeId: flowNode.id, targetNodeId: simulationNode.id }),
+      expect.objectContaining({ sourceNodeId: simulationNode.id, targetNodeId: scopeNode.id })
+    ]));
+
+    const resultPackage = await window.buildSimulationResultSnapshot();
+    const savedExecutable = resultPackage.privateData.executableModel;
+    expect(savedExecutable.nodes.map((node) => node.id)).toEqual(expect.arrayContaining([
+      sourceNode.id,
+      flowNode.id,
+      simulationNode.id,
+      scopeNode.id
+    ]));
+    expect(savedExecutable.nodes.some((node) => node.id === subsystemNode.id || node.type.startsWith('subsystem_'))).toBe(false);
+    expect(savedExecutable.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceNodeId: sourceNode.id, targetNodeId: flowNode.id }),
+      expect.objectContaining({ sourceNodeId: flowNode.id, targetNodeId: simulationNode.id }),
+      expect.objectContaining({ sourceNodeId: simulationNode.id, targetNodeId: scopeNode.id })
+    ]));
+    expect(resultPackage.publicData.renderData.devices.some((device) => device.id === subsystemNode.id || device.type.startsWith('subsystem_'))).toBe(false);
+    expect(resultPackage.publicData.initialSimulationResult.summary).toMatchObject({
+      nodeCount: savedExecutable.nodes.length,
+      edgeCount: savedExecutable.edges.length
+    });
+
+    window.openSubsystemCanvas(subsystemNode.id);
+    await flushRuntime();
+
+    const visibleNodeIds = Array.from(document.querySelectorAll('#node-layer > .blk[id^="b-"]'))
+      .map((element) => element.id.replace(/^b-/, ''));
+    const visibleEdgeIds = Array.from(document.querySelectorAll('#edge-group .edge-path[data-edge-id]'))
+      .map((element) => element.dataset.edgeId);
+
+    const boundaryNodeIds = new Set(
+      childCanvas.nodes
+        .filter((node) => node.type === 'subsystem_in_port' || node.type === 'subsystem_out_port')
+        .map((node) => node.id)
+    );
+    const expectedVisibleNodeIds = childCanvas.nodes
+      .filter((node) => !boundaryNodeIds.has(node.id))
+      .map((node) => node.id);
+    const expectedVisibleEdgeIds = childCanvas.edges
+      .filter((edge) => !boundaryNodeIds.has(edge.sourceNodeId) && !boundaryNodeIds.has(edge.targetNodeId))
+      .map((edge) => edge.id);
+
+    expect(visibleNodeIds.sort()).toEqual(expectedVisibleNodeIds.sort());
+    expect(visibleNodeIds).not.toContain(sourceNode.id);
+    expect(visibleNodeIds).not.toContain(scopeNode.id);
+    expect(visibleNodeIds).not.toContain(subsystemNode.id);
+    expect(visibleEdgeIds.sort()).toEqual(expectedVisibleEdgeIds.sort());
+    expect(visibleEdgeIds).not.toContain('edge-wrap-source-flow');
+    expect(visibleEdgeIds).not.toContain('edge-wrap-sim-scope');
+    expect(document.querySelector('[data-fault-tag-id="root-only-fault-tag"]')).toBeNull();
+    expect(document.querySelector('[data-fault-injection-link="root-only-fault-link"]')).toBeNull();
+  });
+
+  it('unwraps a subsystem back into its parent canvas and restores external connections', async () => {
+    mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.createNode('signal_source', 160, 220);
+    window.createNode('flow_block', 360, 220);
+    window.createNode('simulation_block', 600, 220);
+    window.createNode('instrument_scope', 860, 220);
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    const rootCanvas = state.canvases['canvas-root'];
+    const sourceNode = rootCanvas.nodes.find((node) => node.type === 'signal_source');
+    const flowNode = rootCanvas.nodes.find((node) => node.type === 'flow_block');
+    const simulationNode = rootCanvas.nodes.find((node) => node.type === 'simulation_block');
+    const scopeNode = rootCanvas.nodes.find((node) => node.type === 'instrument_scope');
+
+    connectCanvasNodes(rootCanvas, 'edge-unwrap-source-flow', sourceNode.id, flowNode.id, 0, 0);
+    connectCanvasNodes(rootCanvas, 'edge-unwrap-flow-sim', flowNode.id, simulationNode.id, 0, 0);
+    connectCanvasNodes(rootCanvas, 'edge-unwrap-sim-scope', simulationNode.id, scopeNode.id, 0, 0);
+    window.renderModelNodes();
+    await flushRuntime();
+
+    dispatchClick(document.getElementById(`b-${flowNode.id}`));
+    dispatchClick(document.getElementById(`b-${simulationNode.id}`), { ctrlKey: true });
+    await flushRuntime();
+    window.wrapSelectionIntoSubsystem();
+    await flushRuntime();
+
+    const subsystemNode = rootCanvas.nodes.find((node) => node.type === 'subsystem_block');
+    const childCanvasId = subsystemNode.targetCanvasId;
+    expect(document.querySelector(`[data-unwrap-subsystem="${subsystemNode.id}"]`)).not.toBeNull();
+    expect(typeof window.unwrapSelectedSubsystem).toBe('function');
+
+    const result = window.unwrapSelectedSubsystem(subsystemNode.id);
+    await flushRuntime();
+
+    expect(result?.restoredNodes).toHaveLength(2);
+    expect(state.canvases[childCanvasId]).toBeUndefined();
+    expect(rootCanvas.nodes).toHaveLength(4);
+    expect(rootCanvas.nodes.some((node) => node.type === 'subsystem_block')).toBe(false);
+    expect(rootCanvas.nodes).toEqual(expect.arrayContaining([sourceNode, flowNode, simulationNode, scopeNode]));
+    expect(rootCanvas.edges).toHaveLength(3);
+    expect(rootCanvas.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceNodeId: sourceNode.id, targetNodeId: flowNode.id, sourcePortIndex: 0, targetPortIndex: 0 }),
+      expect.objectContaining({ sourceNodeId: flowNode.id, targetNodeId: simulationNode.id, sourcePortIndex: 0, targetPortIndex: 0 }),
+      expect.objectContaining({ sourceNodeId: simulationNode.id, targetNodeId: scopeNode.id, sourcePortIndex: 0, targetPortIndex: 0 })
+    ]));
+    expect(state.activeCanvasId).toBe('canvas-root');
+    expect(state.selBlk).toBeNull();
   });
 });

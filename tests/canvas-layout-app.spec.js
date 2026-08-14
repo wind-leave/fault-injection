@@ -459,6 +459,131 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('collapses and restores the component library without leaving an empty layout column', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const toggle = wrapper.get('[data-testid="left-palette-toggle"]');
+    expect(toggle.attributes('aria-expanded')).toBe('true');
+
+    await toggle.trigger('click');
+    expect(wrapper.get('[data-testid="workbench-root"]').classes()).toContain('is-left-panel-collapsed');
+    expect(wrapper.get('[data-testid="left-palette"]').classes()).toContain('is-collapsed');
+    expect(toggle.attributes('aria-expanded')).toBe('false');
+
+    await toggle.trigger('click');
+    expect(wrapper.get('[data-testid="workbench-root"]').classes()).not.toContain('is-left-panel-collapsed');
+    expect(toggle.attributes('aria-expanded')).toBe('true');
+
+    const ibmCss = readIbmWorkbenchCss();
+    expect(ibmCss).toContain('.gz-app.is-left-panel-collapsed .workbench-main');
+    expect(ibmCss).toContain('grid-template-columns:minmax(0,1fr) var(--layout-resizer-size) var(--workbench-right-w)');
+    expect(ibmCss).toContain('top:280px;');
+    expect(ibmCss).toContain('opacity:.42;');
+    expect(ibmCss).toContain('width:18px;');
+    expect(ibmCss).toContain('height:48px;');
+    expect(ibmCss).toContain('.workbench-main .lpanel .lscroll');
+    expect(toggle.text()).not.toContain('收起');
+
+    wrapper.unmount();
+  });
+
+  it('collapses and restores the right inspector while preserving its edge toggle', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const toggle = wrapper.get('[data-testid="right-inspector-toggle"]');
+    expect(toggle.attributes('aria-expanded')).toBe('true');
+
+    await toggle.trigger('click');
+    expect(wrapper.get('[data-testid="workbench-root"]').classes()).toContain('is-right-panel-collapsed');
+    expect(wrapper.get('[data-testid="right-inspector"]').classes()).toContain('is-collapsed');
+    expect(toggle.attributes('aria-expanded')).toBe('false');
+
+    await toggle.trigger('click');
+    expect(wrapper.get('[data-testid="workbench-root"]').classes()).not.toContain('is-right-panel-collapsed');
+    expect(toggle.attributes('aria-expanded')).toBe('true');
+
+    const ibmCss = readIbmWorkbenchCss();
+    expect(ibmCss).toContain('.gz-app.is-right-panel-collapsed .workbench-main');
+    expect(ibmCss).toContain('grid-template-columns:var(--workbench-left-w) var(--layout-resizer-size) minmax(0,1fr)');
+    expect(ibmCss).toContain('.right-panel-toggle');
+
+    wrapper.unmount();
+  });
+
+  it('collapses and restores the canvas chrome and status bar', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const topToggle = wrapper.get('[data-testid="canvas-top-toggle"]');
+    window.dispatchEvent(new CustomEvent('gz:toggle-canvas-top-chrome'));
+    await nextTick();
+    expect(wrapper.get('[data-testid="workbench-root"]').classes()).toContain('is-canvas-top-chrome-collapsed');
+    await topToggle.trigger('click');
+    expect(wrapper.get('[data-testid="workbench-root"]').classes()).not.toContain('is-canvas-top-chrome-collapsed');
+
+    const statusToggle = wrapper.get('[data-testid="status-bar-toggle"]');
+    await statusToggle.trigger('click');
+    expect(wrapper.get('[data-testid="workbench-root"]').classes()).toContain('is-status-bar-collapsed');
+    expect(statusToggle.attributes('aria-expanded')).toBe('false');
+    await statusToggle.trigger('click');
+    expect(wrapper.get('[data-testid="workbench-root"]').classes()).not.toContain('is-status-bar-collapsed');
+
+    const ibmCss = readIbmWorkbenchCss();
+    expect(ibmCss).toContain('.canvas-top-toggle');
+    expect(ibmCss).toContain('.status-bar-toggle');
+    expect(ibmCss).toContain('border-bottom:6px solid currentColor;');
+    expect(ibmCss).toContain('top:126px;');
+    expect(ibmCss).toContain('top:-34px;');
+    expect(ibmCss).toContain('grid-template-rows:minmax(0,1fr)');
+
+    wrapper.unmount();
+  });
+
+  it('reveals canvas floating tools only after their round toggle is activated', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const toggle = wrapper.get('[data-testid="canvas-floating-toggle"]');
+    expect(wrapper.get('[data-testid="workbench-root"]').classes()).not.toContain('is-canvas-floating-controls-open');
+
+    await toggle.trigger('click');
+    expect(wrapper.get('[data-testid="workbench-root"]').classes()).toContain('is-canvas-floating-controls-open');
+
+    await toggle.trigger('click');
+    expect(wrapper.get('[data-testid="workbench-root"]').classes()).not.toContain('is-canvas-floating-controls-open');
+
+    const ibmCss = readIbmWorkbenchCss();
+    expect(ibmCss).toContain('.canvas-floating-toggle');
+    expect(ibmCss).toContain('border-radius:50%;');
+    expect(ibmCss).toContain('.canvas-floating-content');
+
+    wrapper.unmount();
+  });
+
+  it('keeps the status log entries in a dedicated scroll region', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const scrollRegion = wrapper.get('[data-status-log-scroll]');
+    expect(scrollRegion.attributes('role')).toBe('region');
+    expect(scrollRegion.attributes('tabindex')).toBe('0');
+    expect(scrollRegion.find('[data-log-entry]').exists()).toBe(true);
+
+    window.__GZ_STATUS_BAR__.pushEntry({ source: '画布工具', message: '最新日志' });
+    expect(scrollRegion.find('[data-log-entry]').text()).toContain('最新日志');
+
+    const ibmCss = readIbmWorkbenchCss();
+    expect(ibmCss).toContain('.sbar-log-scroll');
+    expect(ibmCss).toContain('overscroll-behavior:contain;');
+    expect(ibmCss).toContain('scrollbar-gutter:stable;');
+    expect(ibmCss).toContain('.sbar-card{\n  height:auto;');
+    expect(ibmCss).toContain('max-height:none;');
+
+    wrapper.unmount();
+  });
+
   it('docks simulation controls above the canvas and removes obsolete header project details', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -867,6 +992,87 @@ describe('canvas layout cleanup', () => {
     expect(performanceRow?.classList.contains('is-hidden')).toBe(false);
     expect(performanceRow?.textContent).toContain('100 Hz');
     expect(performanceRow?.textContent).toContain('4.2');
+
+    wrapper.unmount();
+  });
+
+  it('keeps the live status row after more than 29 simulation summary updates', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    for (let stepIndex = 1; stepIndex <= 65; stepIndex += 1) {
+      window.__GZ_STATUS_BAR__.publishSimulationSummary({
+        datasetName: 'long-run',
+        duration: 10,
+        elapsedSeconds: stepIndex * 0.1,
+        status: 'stepped',
+        stepIndex
+      });
+    }
+
+    expect(document.querySelector('[data-status-live-row]')).not.toBeNull();
+    expect(document.getElementById('stxt')).not.toBeNull();
+    expect(document.querySelectorAll('[data-log-entry][data-view="results"]')).toHaveLength(60);
+    expect(document.querySelectorAll('[data-log-entry][data-view="performance"]')).toHaveLength(60);
+    expect(() => window.updateUI()).not.toThrow();
+
+    wrapper.unmount();
+  });
+
+  it('updates the live status row with the operation time instead of a fixed template time', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const result = window.__GZ_STATUS_BAR__.updateLiveStatus('仿真运行中', {
+      key: 'simulation-running',
+      time: '12:39:55',
+      updateTime: true
+    });
+    window.__GZ_STATUS_BAR__.updateLiveStatus('仿真运行中 · t = 2.9s / 10s', {
+      key: 'simulation-running',
+      time: '12:40:24'
+    });
+
+    expect(result.ok).toBe(true);
+    expect(document.querySelector('[data-status-live-time]')?.textContent).toBe('12:39:55');
+    expect(document.getElementById('stxt')?.textContent).toBe('仿真运行中 · t = 2.9s / 10s');
+    expect(document.body.textContent).not.toContain('10:24:31');
+
+    wrapper.unmount();
+  });
+
+  it('creates a new time-sorted live log row for every simulation run', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.__GZ_STATUS_BAR__.beginLiveStatus({
+      key: 'simulation-starting',
+      message: '第一次仿真',
+      source: '仿真控制',
+      time: '12:39:55',
+      timestamp: 1000
+    });
+    window.__GZ_STATUS_BAR__.updateLiveStatus('第一次仿真 · t = 10s / 10s', {
+      key: 'simulation-running'
+    });
+    window.__GZ_STATUS_BAR__.beginLiveStatus({
+      key: 'simulation-starting',
+      message: '第二次仿真',
+      source: '仿真控制',
+      time: '12:45:02',
+      timestamp: 2000
+    });
+
+    const runRows = Array.from(document.querySelectorAll('[data-log-entry]')).filter((row) => (
+      row.textContent.includes('第一次仿真') || row.textContent.includes('第二次仿真')
+    ));
+    expect(runRows).toHaveLength(2);
+    expect(runRows[0].textContent).toContain('第二次仿真');
+    expect(runRows[0].textContent).toContain('12:45:02');
+    expect(runRows[1].textContent).toContain('第一次仿真');
+    expect(runRows[1].textContent).toContain('12:39:55');
+    expect(document.querySelectorAll('[data-status-live-row]')).toHaveLength(1);
+    expect(document.querySelectorAll('#stxt')).toHaveLength(1);
 
     wrapper.unmount();
   });

@@ -23,8 +23,30 @@ def _target_id(action):
 
 
 class PracticeActionRuntime:
-    def __init__(self, simulation_session):
+    def __init__(self, simulation_session, display_console_controls=None):
         self.simulation_session = simulation_session
+        self.display_console_controls = self._normalize_display_console_controls(display_console_controls)
+
+    def _normalize_display_console_controls(self, controls):
+        normalized = {}
+        for control in controls if isinstance(controls, list) else []:
+            if not isinstance(control, dict):
+                continue
+            console_id = _text(control.get("displayConsoleId") or control.get("consoleId"))
+            component_id = _text(control.get("targetComponentId") or control.get("componentId"))
+            parameter_keys = {
+                _text(key)
+                for key in (control.get("parameterKeys") if isinstance(control.get("parameterKeys"), list) else [])
+                if _text(key)
+            }
+            if console_id and component_id and parameter_keys:
+                normalized[console_id] = {
+                    "displayConsoleId": console_id,
+                    "targetComponentId": component_id,
+                    "componentType": _text(control.get("componentType")),
+                    "parameterKeys": parameter_keys,
+                }
+        return normalized
 
     def skipped(self, action, warning="action skipped by business rules"):
         return {
@@ -39,7 +61,9 @@ class PracticeActionRuntime:
             raise SimulationBackendError("INVALID_SCHEMA", "action", "action must be an object")
 
         action_type = _normalized_action_type(action)
-        if action_type in {"replacecomponent", "repaircomponent"}:
+        if action_type == "adjustdisplayconsoleparameter":
+            changes = self._adjust_display_console_parameters(action)
+        elif action_type in {"replacecomponent", "repaircomponent"}:
             changes = self._replace_component(action)
         elif action_type == "replacewire":
             changes = self._replace_wire(action)
@@ -96,6 +120,54 @@ class PracticeActionRuntime:
                 "targetId": fault.get("targetId") or "",
                 "previousEnabled": True,
                 "newEnabled": False,
+            })
+        return changes
+
+    def _adjust_display_console_parameters(self, action):
+        console_id = self._require_target(action, "target.id")
+        control = self.display_console_controls.get(console_id)
+        if control is None:
+            raise SimulationBackendError(
+                "TARGET_NOT_FOUND",
+                "target.id",
+                f"display console control not found: {console_id}",
+            )
+        component_id = _text(action.get("componentId") or action.get("targetComponentId"))
+        expected_component_id = control["targetComponentId"]
+        if component_id and component_id != expected_component_id:
+            raise SimulationBackendError(
+                "INVALID_ACTION_SCHEMA",
+                "componentId",
+                f"componentId must be {expected_component_id} for display console {console_id}",
+            )
+        node = self._require_node(expected_component_id, "componentId")
+        updates = action.get("parameters") if isinstance(action.get("parameters"), dict) else {}
+        if not updates:
+            raise SimulationBackendError("INVALID_ACTION_SCHEMA", "parameters", "parameters is required")
+
+        validated_updates = []
+        for name, raw_value in updates.items():
+            parameter_name = _text(name)
+            if parameter_name not in control["parameterKeys"]:
+                raise SimulationBackendError(
+                    "PARAMETER_NOT_ALLOWED",
+                    f"parameters.{parameter_name}",
+                    f"parameter is not controlled by display console {console_id}: {parameter_name}",
+                )
+            new_value = ensure_number(raw_value, f"parameters.{parameter_name}")
+            validated_updates.append((parameter_name, new_value))
+
+        changes = []
+        for parameter_name, new_value in validated_updates:
+            old_value = node.parameters.get(parameter_name)
+            node.parameters[parameter_name] = new_value
+            changes.append({
+                "type": "display_console_parameter_updated",
+                "displayConsoleId": console_id,
+                "nodeId": expected_component_id,
+                "parameter": parameter_name,
+                "previousValue": old_value,
+                "newValue": new_value,
             })
         return changes
 

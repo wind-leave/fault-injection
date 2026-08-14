@@ -333,6 +333,50 @@ class SimulationBackendServerTests(unittest.TestCase):
             self.assertNotIn(field, submitted)
         self.assertNotIn("record", submitted)
 
+    def test_adjusts_display_console_parameter_and_returns_full_rerun_result(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+                "displayConsoleControls": [{
+                    "displayConsoleId": "console-1",
+                    "targetComponentId": "source-1",
+                    "componentType": "signal_source",
+                    "parameterKeys": ["value"],
+                }],
+            },
+        )
+        self.assertEqual(status, 200)
+
+        status, updated = self._post(
+            f"/api/practice/session/{created['practiceSessionId']}/action",
+            {
+                "operationId": "op-console-value",
+                "actionType": "adjustDisplayConsoleParameter",
+                "target": {"type": "displayConsole", "id": "console-1"},
+                "componentId": "source-1",
+                "parameters": {"value": 2.5},
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(updated["normalizedAction"]["parameters"], {"value": 2.5})
+        self.assertEqual(updated["appliedParameters"], [{
+            "type": "display_console_parameter_updated",
+            "displayConsoleId": "console-1",
+            "nodeId": "source-1",
+            "parameter": "value",
+            "previousValue": 1.0,
+            "newValue": 2.5,
+        }])
+        self.assertEqual(updated["simulationResult"]["status"], "completed")
+        self.assertEqual(
+            [sample["actual"] for sample in updated["simulationResult"]["physicalMeasurements"][0]["samples"]],
+            [2.5, 2.5, 2.5],
+        )
+
     def test_submit_returns_internal_action_path_for_measurement_and_wire_repair(self):
         package = valid_package()
         package["simulationConfig"]["duration"] = 0.5

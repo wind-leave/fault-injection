@@ -121,6 +121,19 @@ class PracticeActionProtocolTests(unittest.TestCase):
         self.assertEqual(context.exception.error_code, "UNSUPPORTED_ACTION_TYPE")
         self.assertEqual(context.exception.field, "actionType")
 
+    def test_normalizes_display_console_parameter_action(self):
+        normalized = normalize_practice_action({
+            "operationId": "op-console-1",
+            "actionType": "adjustDisplayConsoleParameter",
+            "target": {"type": "displayConsole", "id": "console-1"},
+            "componentId": "source-1",
+            "parameters": {"value": 2.5},
+        })
+
+        self.assertEqual(normalized["targetId"], "console-1")
+        self.assertEqual(normalized["componentId"], "source-1")
+        self.assertEqual(normalized["parameters"], {"value": 2.5})
+
 
 if __name__ == "__main__":
     unittest.main()

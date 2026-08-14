@@ -32,6 +32,9 @@ describe('practice task package export integration contract', () => {
     expect(implementation).toContain('await ensureSelectedPracticeFaultPlans()');
     expect(implementation).toContain('practiceFaults');
     expect(implementation).toContain('dMatrix');
+    expect(implementation).toContain('duration:SIM.duration');
+    expect(implementation).toContain('stepSize:SIM.stepSize');
+    expect(implementation).toContain('simulationConfig:{duration:SIM.duration,stepSize:SIM.stepSize}');
     expect(implementation).not.toContain("kind:'simulation-result'");
   });
 

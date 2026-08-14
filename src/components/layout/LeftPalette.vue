@@ -2,6 +2,15 @@
 import { computed, onBeforeUnmount, onMounted, reactive } from 'vue';
 import { getPaletteGroups, getSimulationMenuSections } from '../../services/componentRegistry.js';
 
+defineProps({
+  collapsed: {
+    type: Boolean,
+    default: false
+  }
+});
+
+const emit = defineEmits(['toggle-collapse']);
+
 const paletteGroups = getPaletteGroups();
 const groupOpen = reactive(Object.fromEntries(
   paletteGroups.map((group) => [group.id, group.defaultOpen !== false])
@@ -149,8 +158,21 @@ function handleLineToolClick(component) {
 </script>
 
 <template>
-  <aside class="lpanel" data-testid="left-palette">
-    <div class="lscroll">
+  <aside class="lpanel" :class="{ 'is-collapsed': collapsed }" data-testid="left-palette">
+    <div class="left-panel-control">
+      <button
+        type="button"
+        class="left-panel-toggle"
+        data-testid="left-palette-toggle"
+        :aria-expanded="!collapsed"
+        :aria-label="collapsed ? '展开组件库' : '收起组件库'"
+        :title="collapsed ? '展开组件库' : '收起组件库'"
+        @click="emit('toggle-collapse')"
+      >
+        <span class="left-panel-toggle__icon" aria-hidden="true">{{ collapsed ? '›' : '‹' }}</span>
+      </button>
+    </div>
+    <div v-show="!collapsed" class="lscroll">
       <template v-for="group in paletteGroups" :key="group.id">
         <div
           class="lgroup-head"

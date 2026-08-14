@@ -24,14 +24,47 @@ function buildPublicRenderData(renderData) {
   return { ...source, devices, connections };
 }
 
+function buildDisplayConsoleControls(renderData) {
+  const devices = Array.isArray(renderData?.devices) ? renderData.devices : [];
+  return devices
+    .filter((device) => device?.type === 'display_console' && device?.controlState?.targetComponentId)
+    .map((device) => ({
+      displayConsoleId: String(device.id ?? ''),
+      displayConsoleName: String(device.displayName ?? device.id ?? ''),
+      targetComponentId: String(device.controlState.targetComponentId),
+      componentType: String(device.controlState.componentType ?? ''),
+      parameterKeys: (Array.isArray(device.controlState.parameters) ? device.controlState.parameters : [])
+        .map((parameter) => String(parameter?.key ?? '').trim())
+        .filter(Boolean)
+    }))
+    .filter((control) => control.displayConsoleId && control.parameterKeys.length);
+}
+
 function pointType(point) {
   const value = String(point?.pointType ?? point?.type ?? '').toLowerCase();
   return value === 'virtual' ? 'virtual' : 'physical';
 }
 
 function finiteNumber(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function simulationOutputValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => simulationOutputValue(item));
+  }
+  return finiteNumber(value);
+}
+
+function hasSimulationOutputValue(value) {
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  return value !== null;
 }
 
 function sourceForPoint(point, edges, connections) {
@@ -81,12 +114,14 @@ function readOutputValue(outputs, nodeId, keys) {
     return null;
   }
   for (const key of keys) {
-    const value = finiteNumber(nodeOutputs[key]);
-    if (value !== null) {
+    const value = simulationOutputValue(nodeOutputs[key]);
+    if (hasSimulationOutputValue(value)) {
       return value;
     }
   }
-  return Object.values(nodeOutputs).map(finiteNumber).find((value) => value !== null) ?? null;
+  return Object.values(nodeOutputs)
+    .map(simulationOutputValue)
+    .find(hasSimulationOutputValue) ?? null;
 }
 
 function pointSamples(point, edge, nodeId, componentOutputs) {
@@ -205,6 +240,15 @@ export function buildPracticeTaskPackage(input = {}) {
   });
   const dMatrix = clone(input.dMatrix, null);
   const simulationConfig = executableModel.simulationConfig ?? {};
+  const savedSimulationConfig = {
+    duration: simulationConfig.duration ?? meta.duration ?? null,
+    stepSize: simulationConfig.stepSize ?? meta.stepSize ?? null
+  };
+  const savedMeta = {
+    ...meta,
+    duration: savedSimulationConfig.duration,
+    stepSize: savedSimulationConfig.stepSize
+  };
   const practiceFaults = clone(input.practiceFaults, []);
   const targetFault = practiceFaults[0] ?? null;
   const initialRecommendedPath = normalizeInitialRecommendedPath(targetFault?.troubleshootingPath);
@@ -215,33 +259,22 @@ export function buildPracticeTaskPackage(input = {}) {
     kind: '3d-practice-task-package',
     exportedAt: input.exportedAt ?? new Date().toISOString(),
     taskId: String(input.taskId ?? meta.resultId ?? `practice-${Date.now()}`),
-    meta,
+    meta: savedMeta,
     publicData: {
       modelRevision: Number.isInteger(input.modelRevision) ? input.modelRevision : 0,
       renderData: buildPublicRenderData(input.renderData),
       initialSimulationResult: {
-        status: meta.status ?? 'completed',
-        simulationConfig: {
-          duration: simulationConfig.duration ?? meta.duration ?? null,
-          stepSize: simulationConfig.stepSize ?? meta.stepSize ?? null
-        },
+        status: savedMeta.status ?? 'completed',
+        simulationConfig: clone(savedSimulationConfig),
         ...initialMeasurementData,
         summary: clone(input.summary, {})
       }
     },
     privateData: {
       executableModel,
-      rerunConfig: {
-        startTime: 0,
-        duration: simulationConfig.duration ?? meta.duration ?? null,
-        stepSize: simulationConfig.stepSize ?? meta.stepSize ?? null,
-        randomSeed: input.rerunConfig?.randomSeed ?? null,
-        initialConditions: clone(input.rerunConfig?.initialConditions, {}),
-        inputScenario: clone(input.rerunConfig?.inputScenario, {}),
-        resetPolicy: 'full-reset'
-      },
       targetFaultId: targetFault?.faultId ?? null,
       dMatrix,
+      displayConsoleControls: buildDisplayConsoleControls(input.renderData),
       initialPointStates: initialPointStates(dMatrix, executableModel),
       initialRecommendedPath
     }

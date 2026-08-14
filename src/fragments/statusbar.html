@@ -20,19 +20,21 @@
         <span>来源</span>
         <span>消息</span>
       </div>
-      <div class="sbar-row" data-log-entry data-level="info" data-view="log">
-        <span>10:24:31</span>
-        <span class="sbar-badge sbar-badge--info">信息</span>
-        <span>系统</span>
-        <span id="stxt">就绪 · 可导入系统模型或新建空白模型</span>
+      <div class="sbar-log-scroll" data-status-log-scroll tabindex="0" role="region" aria-label="日志内容">
+        <div class="sbar-row" data-log-entry data-level="info" data-view="log" data-status-live-row>
+          <span data-status-live-time>--:--:--</span>
+          <span class="sbar-badge sbar-badge--info">信息</span>
+          <span>系统</span>
+          <span id="stxt">就绪 · 可导入系统模型或新建空白模型</span>
+        </div>
+        <div class="sbar-row" data-log-entry data-level="ok" data-view="log">
+          <span data-status-created-time>--:--:--</span>
+          <span class="sbar-badge sbar-badge--ok">成功</span>
+          <span>建模</span>
+          <span>画布与组件库已加载</span>
+        </div>
+        <div class="sbar-empty is-hidden" data-status-empty>暂无匹配记录</div>
       </div>
-      <div class="sbar-row" data-log-entry data-level="ok" data-view="log">
-        <span>10:24:18</span>
-        <span class="sbar-badge sbar-badge--ok">成功</span>
-        <span>建模</span>
-        <span>画布与组件库已加载</span>
-      </div>
-      <div class="sbar-empty is-hidden" data-status-empty>暂无匹配记录</div>
     </div>
   </section>
   <section class="sbar-metrics">

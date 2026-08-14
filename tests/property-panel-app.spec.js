@@ -98,6 +98,46 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
+  it('shows module deletion only in the overview below execution mode and above model package status', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const block = window.createNode('simulation_block', 220, 220);
+    block.pythonBinding = {
+      bound: true,
+      fileName: 'controller.py',
+      moduleName: 'controller',
+      entryFunction: 'process',
+      executionMode: 'mock',
+      sourcePackageName: '测试模型包',
+      portMapping: { inputs: [], outputs: [], middleVars: [] }
+    };
+    await flushRuntime();
+
+    window.selectNode(block.id);
+    await flushRuntime();
+
+    const overviewDelete = document.querySelector('#pd .property-panel-overview-delete');
+    const overviewContent = document.querySelector('#pd .props-panel-shell__content');
+    const status = document.getElementById('model-package-status');
+    const executionModeRow = Array.from(document.querySelectorAll('#pd .prow'))
+      .find((row) => row.textContent.includes('执行模式'));
+
+    expect(overviewDelete?.querySelector('.props-danger')?.textContent.trim()).toBe('删除模块');
+    expect(overviewContent?.lastElementChild).toBe(overviewDelete);
+    expect(executionModeRow?.compareDocumentPosition(overviewDelete) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.getElementById('pd')?.nextElementSibling).toBe(status);
+
+    for (const tab of ['parameters', 'faults']) {
+      document.querySelector(`[data-props-tab="${tab}"]`).click();
+      await flushRuntime();
+      expect(document.querySelector('#pd .props-danger[onclick*="deleteSelectedNode"]')).toBeNull();
+      expect(document.querySelector('#pd .property-panel-overview-delete')).toBeNull();
+    }
+
+    wrapper.unmount();
+  });
+
   it('does not show a direct fault injection button for simulation or electrical components', async () => {
     const wrapper = await mountWorkbench();
 
@@ -314,7 +354,7 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('shows signal source definition above module status and hides canvas position for signal sources', async () => {
+  it('shows signal source definition and hides module status and canvas position for signal sources', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
@@ -328,8 +368,7 @@ describe('property panel interaction', () => {
     const overviewLabels = Array.from(document.querySelectorAll('#pd .pglbl'))
       .map((item) => item.textContent.trim());
     expect(overviewLabels).toContain('信号定义');
-    expect(overviewLabels).toContain('模块状态');
-    expect(overviewLabels.indexOf('信号定义')).toBeLessThan(overviewLabels.indexOf('模块状态'));
+    expect(overviewLabels).not.toContain('模块状态');
     expect(overviewLabels).not.toContain('画布位置');
     expect(document.getElementById('pd')?.textContent).toContain('信号名称');
     expect(document.getElementById('prop-name')).not.toBeNull();
@@ -721,7 +760,7 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it.skip('saves editable display names for Python-bound simulation ports', async () => {
+  it('saves editable display names for Python-bound simulation ports', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
@@ -748,15 +787,38 @@ describe('property panel interaction', () => {
     expect(inputPortCard?.querySelector('.props-port-card__var')).toBeNull();
     setFieldValue('[data-python-port-display-name][data-python-port-kind="inputs"]', '姿态误差');
     setFieldValue('[data-python-port-display-name][data-python-port-kind="outputs"]', '执行器指令');
-    setFieldValue('[data-python-port-display-name][data-python-port-kind="middleVars"]', '积分状态');
     document.querySelector('[data-property-save-node]').click();
     await flushRuntime();
 
     expect(block.pythonBinding.portMapping.inputs[0].displayName).toBe('姿态误差');
     expect(block.pythonBinding.portMapping.outputs[0].displayName).toBe('执行器指令');
-    expect(block.pythonBinding.portMapping.middleVars[0].displayName).toBe('积分状态');
+    expect(block.pythonBinding.portMapping.middleVars[0].displayName).toBe('积分量');
     expect(window.getNodePorts(block).inputs[0].label).toBe('姿态误差');
-    expect(window.getNodePorts(block).outputs.map((port) => port.label)).toEqual(['执行器指令', '积分状态']);
+    expect(window.getNodePorts(block).outputs.map((port) => port.label)).toEqual(['执行器指令']);
+
+    wrapper.unmount();
+  });
+
+  it('saves editable electrical component and port names', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const block = window.createNode('electrical_dc_boost', 320, 220);
+    await flushRuntime();
+
+    window.selectNode(block.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    setFieldValue('#prop-name', '可调直流升压器');
+    setFieldValue('[data-python-port-display-name][data-python-port-kind="inputs"]', '电池母线');
+    setFieldValue('[data-python-port-display-name][data-python-port-kind="outputs"]', '升压母线');
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+
+    expect(block.props.name).toBe('可调直流升压器');
+    expect(window.getNodePorts(block).inputs[0].label).toBe('电池母线');
+    expect(window.getNodePorts(block).outputs[0].label).toBe('升压母线');
 
     wrapper.unmount();
   });
@@ -1125,6 +1187,12 @@ describe('property panel interaction', () => {
 
     expect(document.querySelector('[data-fault-slot-variable="frame_counter"]')?.textContent).toContain('Frame counter');
     expect(document.querySelector('[data-fault-slot-layer="protocol"][data-fault-slot-var="frame_counter"]').checked).toBe(true);
+    expect(document.querySelector('[data-fault-slot-count]')?.textContent).toBe('1 / 1');
+
+    setCheckboxValue('[data-fault-slot-layer="protocol"][data-fault-slot-var="frame_counter"]', false);
+    expect(document.querySelector('[data-fault-slot-count]')?.textContent).toBe('0 / 1');
+    setCheckboxValue('[data-fault-slot-layer="protocol"][data-fault-slot-var="frame_counter"]', true);
+    expect(document.querySelector('[data-fault-slot-count]')?.textContent).toBe('1 / 1');
 
     document.querySelector('[data-save-fault-slots]').click();
     await flushRuntime();
@@ -1138,6 +1206,32 @@ describe('property panel interaction', () => {
         targetField: 'protocol.frameCounter'
       })
     ]);
+
+    wrapper.unmount();
+  });
+
+  it('defaults parameter variables to the physical fault layer before a declaration is saved', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    window.createNode('simulation_block', 300, 240);
+    await flushRuntime();
+
+    const block = window.__GZ_STATE__.modelNodes.find((node) => node.type === 'simulation_block');
+    block.props.parameters = [{ key: 'controller_gain', name: 'Controller gain' }];
+    block.props.inputs = [];
+    block.props.outputs = [];
+    block.props.middleVars = [];
+    delete block.props.faultInjection;
+    block.faultSlots = [];
+
+    window.selectNode(block.id);
+    await flushRuntime();
+    window.setPropertyPanelTab('faults');
+    await flushRuntime();
+
+    expect(document.querySelector('[data-fault-slot-layer="physical"][data-fault-slot-var="controller_gain"]')?.checked).toBe(true);
+    expect(document.querySelector('[data-fault-slot-count]')?.textContent).toBe('1 / 1');
 
     wrapper.unmount();
   });
@@ -2134,6 +2228,112 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
+  it('saves the complete four-input display-console time series', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const sources = Array.from({ length: 4 }, (_, index) => window.createNode('signal_source', 180, 160 + index * 90));
+    const displayConsole = window.createNode('display_console_1', 520, 260);
+    window.__GZ_STATE__.modelEdges.push(...sources.map((source, index) => ({
+      id: `edge-console-${index + 1}`,
+      sourceNodeId: source.id,
+      sourcePortIndex: 0,
+      targetNodeId: displayConsole.id,
+      targetPortIndex: index
+    })));
+    window.__GZ_SIM__.componentOutputs = {
+      time: [0, 0.1, 0.2],
+      steps: [0, 0.1, 0.2].map((time, stepIndex) => ({
+        time,
+        actual: Object.fromEntries(sources.map((source, inputIndex) => [
+          source.id,
+          { output: (inputIndex + 1) * 100 + stepIndex }
+        ])),
+        reference: {}
+      }))
+    };
+
+    const result = await window.buildSimulationResultSnapshot();
+    const savedConsole = result.publicData.renderData.devices.find((device) => device.id === displayConsole.id);
+
+    expect(savedConsole).toMatchObject({
+      type: 'display_console',
+      channels: {
+        centerFrequency: { inputIndex: 0, connected: true, displayScale: 1e-6 },
+        repetitionPeriod: { inputIndex: 1, connected: true, displayScale: 1e6 },
+        pulseWidth: { inputIndex: 2, connected: true, displayScale: 1e6 },
+        amplitude: { inputIndex: 3, connected: true, displayScale: 1 }
+      }
+    });
+    expect(savedConsole.channels.centerFrequency.series).toEqual([
+      { t: 0, value: 100 },
+      { t: 0.1, value: 101 },
+      { t: 0.2, value: 102 }
+    ]);
+    expect(savedConsole.channels.amplitude.series).toEqual([
+      { t: 0, value: 400 },
+      { t: 0.1, value: 401 },
+      { t: 0.2, value: 402 }
+    ]);
+
+    wrapper.unmount();
+  });
+
+  it('saves display-console applied parameters with backend and display units', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const displayConsole = window.createNode('display_console_1', 520, 260);
+    const controlled = window.createNode('rf_four_output_source', 220, 260);
+    controlled.props.parameterValues = {
+      ...controlled.props.parameterValues,
+      center_frequency_hz: 250000000,
+      pulse_width_seconds: 0.000002,
+      pulse_period_seconds: 0.00001
+    };
+    controlled.props.parameterUnits = {
+      center_frequency_hz: 'MHz'
+    };
+    displayConsole.props.controlTargetId = controlled.id;
+
+    const result = await window.buildSimulationResultSnapshot();
+    const savedConsole = result.publicData.renderData.devices.find((device) => device.id === displayConsole.id);
+
+    expect(savedConsole.controlState).toEqual({
+      targetComponentId: controlled.id,
+      targetComponentName: controlled.props.name,
+      componentType: 'rf_four_output_source',
+      parameters: [
+        {
+          key: 'center_frequency_hz',
+          name: expect.any(String),
+          value: 250000000,
+          unit: 'Hz',
+          displayValue: 250,
+          displayUnit: 'MHz'
+        },
+        {
+          key: 'pulse_width_seconds',
+          name: expect.any(String),
+          value: 0.000002,
+          unit: 's',
+          displayValue: 0.000002,
+          displayUnit: 's'
+        },
+        {
+          key: 'pulse_period_seconds',
+          name: expect.any(String),
+          value: 0.00001,
+          unit: 's',
+          displayValue: 0.00001,
+          displayUnit: 's'
+        }
+      ]
+    });
+
+    wrapper.unmount();
+  });
+
   it('opens, moves, configures, and closes the spectrum analyzer window', async () => {
     const wrapper = await mountWorkbench();
 
@@ -2438,7 +2638,7 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('keeps simulation component interfaces unchanged when saving the property panel', async () => {
+  it('saves editable simulation component and port names from the property panel', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
@@ -2455,18 +2655,18 @@ describe('property panel interaction', () => {
     window.setPropertyPanelTab('parameters');
     await flushRuntime();
 
-    expect(document.getElementById('prop-name')?.disabled).toBe(true);
-    expect(document.getElementById('sim-input-count')?.disabled).toBe(true);
-    expect(document.querySelector('[data-sim-field="name"]')?.disabled).toBe(true);
-    expect(document.querySelector('[data-sim-field="type"]')?.disabled).toBe(true);
+    expect(document.getElementById('prop-name')?.disabled).toBe(false);
+    expect(document.getElementById('sim-input-count')?.disabled).toBe(false);
+    expect(document.querySelector('[data-sim-field="name"]')?.disabled).toBe(false);
+    expect(document.querySelector('[data-sim-field="type"]')?.disabled).toBe(false);
 
     setFieldValue('#prop-name', 'renamed');
     setFieldValue('[data-sim-field="name"]', 'changed-port');
     document.querySelector('.props-save').click();
     await flushRuntime();
 
-    expect(block.props.name).toBe(original.name);
-    expect(block.props.inputs).toEqual(original.inputs);
+    expect(block.props.name).toBe('renamed');
+    expect(block.props.inputs[0].name).toBe('changed-port');
     expect(block.props.outputs).toEqual(original.outputs);
     expect(block.props.middleVars).toEqual(original.middleVars);
 

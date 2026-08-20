@@ -87,7 +87,7 @@ class TroubleshootingAlgorithmTests(unittest.TestCase):
         self.assertIn("M1", plan["keySteps"][0]["text"])
         self.assertEqual(plan["keySteps"][-1]["action"], "replaceComponent")
         self.assertEqual(plan["keySteps"][-1]["targetLabel"], "IMU")
-        self.assertIn("更换组件", plan["keySteps"][-1]["text"])
+        self.assertIn("更换设备", plan["keySteps"][-1]["text"])
         self.assertIn("IMU", plan["keySteps"][-1]["text"])
         self.assertEqual(plan["steps"][-1]["action"], "replaceComponent")
         self.assertEqual(plan["steps"][-1]["targetLabel"], "IMU")
@@ -105,7 +105,7 @@ class TroubleshootingAlgorithmTests(unittest.TestCase):
 
         self.assertEqual(plan["keySteps"][-1]["action"], "replaceWire")
         self.assertEqual(plan["keySteps"][-1]["targetId"], "edge-command-controller")
-        self.assertIn("更换关键连线", plan["keySteps"][-1]["text"])
+        self.assertIn("更换连线", plan["keySteps"][-1]["text"])
 
     def test_generates_both_wire_and_device_replacement_for_combined_repair_targets(self):
         matrix = sample_d_matrix()

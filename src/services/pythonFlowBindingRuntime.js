@@ -28,12 +28,19 @@ function sanitizeNumber(value) {
   return numeric;
 }
 
+function sanitizeSignalValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeNumber);
+  }
+  return sanitizeNumber(value);
+}
+
 export function getPythonBindingDefaultValue(port) {
   const type = normalizeType(port?.type);
   const fallback = port?.default;
 
   if (fallback === null || fallback === undefined || fallback === '') {
-    return 0;
+    return type === 'vector' || type === 'number[]' ? [] : 0;
   }
 
   if (type === 'bool' || type === 'boolean') {
@@ -48,7 +55,7 @@ export function getPythonBindingDefaultValue(port) {
     return fallback;
   }
 
-  return sanitizeNumber(fallback);
+  return sanitizeSignalValue(fallback);
 }
 
 export function executeFlowBlockPythonBindingSync({
@@ -71,7 +78,7 @@ export function executeFlowBlockPythonBindingSync({
       const upstreamValue = inputValues[index];
       const value = upstreamValue === undefined
         ? getPythonBindingDefaultValue(item)
-        : sanitizeNumber(upstreamValue);
+        : sanitizeSignalValue(upstreamValue);
       return [item.varName, value];
     })
   );
@@ -98,15 +105,15 @@ export function executeFlowBlockPythonBindingSync({
 
   const resolvedOutputs = outputs.map((item, index) => {
     const rawValue = readNamedValue(response.outputs, item, index);
-    return sanitizeNumber(rawValue);
+    return sanitizeSignalValue(rawValue);
   });
 
   const resolvedMiddleValues = middleVars.map((item, index) => {
     const rawValue = readNamedValue(response.middleVars, item, index);
-    return sanitizeNumber(rawValue);
+    return sanitizeSignalValue(rawValue);
   });
 
-  if (mode === 'actual' && typeof applyElectricalFault === 'function' && resolvedOutputs.length) {
+  if (mode === 'actual' && typeof applyElectricalFault === 'function' && resolvedOutputs.length && !Array.isArray(resolvedOutputs[0])) {
     resolvedOutputs[0] = sanitizeNumber(applyElectricalFault(resolvedOutputs[0], payload));
   }
 

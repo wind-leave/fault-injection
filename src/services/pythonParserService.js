@@ -133,6 +133,10 @@ function splitParamSignatureAndComment(segment) {
 
 function parseParams(paramsSource, baseLine, headerComment = '') {
   const compactComments = parseRoleCommentList(headerComment);
+  const namedParameterMarkers = new Set(
+    [...paramsSource.matchAll(/@(?:parameter|param|config)\b\s*[:：]\s*([A-Za-z_][A-Za-z0-9_]*)/gi)]
+      .map((match) => match[1])
+  );
   const rawParts = [];
 
   if (paramsSource.includes('#')) {
@@ -174,13 +178,24 @@ function parseParams(paramsSource, baseLine, headerComment = '') {
       throw createParseError(`无法解析参数定义: ${signature}`, baseLine + index);
     }
 
-    const comment = stripRolePrefix(inlineComment || compactComments[index] || '');
+    const rawComment = inlineComment || compactComments[index] || '';
+    // A default value is part of Python's calling convention, not proof that the
+    // argument is a component property.  For example, `process(socket02=0.0)`
+    // still exposes socket02 as a canvas input.  Authors can opt in to a model
+    // parameter with an inline marker such as `# @parameter: gain`.
+    const markerMatch = /@(?:parameter|param|config)\b(?:\s*[:：]\s*([A-Za-z_][A-Za-z0-9_]*))?/i.exec(rawComment);
+    const isParameter = namedParameterMarkers.has(match[1])
+      || Boolean(markerMatch && (!markerMatch[1] || markerMatch[1] === match[1]));
+    const comment = stripRolePrefix(rawComment)
+      .replace(/@(?:parameter|param|config)\b\s*[:：-]?\s*/i, '')
+      .trim();
     return {
       name: match[1],
       displayName: cleanDisplayName({ name: match[1], comment }),
       type: match[2]?.trim() ?? 'any',
       default: match[3]?.trim() ?? null,
-      comment
+      comment,
+      ...(isParameter ? { parameter: true } : {})
     };
   });
 }
@@ -194,7 +209,119 @@ function getFunctionBody(source, fn) {
   return fullSlice.slice(headerEndIndex + 1);
 }
 
+function findBalancedBlock(source, startIndex, openChar = '{', closeChar = '}') {
+  let depth = 0;
+  let quote = '';
+  let escaped = false;
+
+  for (let index = startIndex; index < source.length; index += 1) {
+    const char = source[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        quote = '';
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === openChar) {
+      depth += 1;
+    } else if (char === closeChar) {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(startIndex, index + 1);
+      }
+    }
+  }
+  return null;
+}
+
+function extractDirectMappingKeys(mappingSource) {
+  const keys = [];
+  let depth = 0;
+  let quote = '';
+  let escaped = false;
+
+  for (let index = 0; index < mappingSource.length; index += 1) {
+    const char = mappingSource[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        quote = '';
+      }
+      continue;
+    }
+    if (char === '{') {
+      depth += 1;
+      continue;
+    }
+    if (char === '}') {
+      depth -= 1;
+      continue;
+    }
+    if (depth !== 1 || (char !== '"' && char !== "'")) {
+      continue;
+    }
+
+    const keyStart = index + 1;
+    const keyQuote = char;
+    let keyEnd = keyStart;
+    while (keyEnd < mappingSource.length && mappingSource[keyEnd] !== keyQuote) {
+      if (mappingSource[keyEnd] === '\\') keyEnd += 1;
+      keyEnd += 1;
+    }
+    if (keyEnd >= mappingSource.length) {
+      break;
+    }
+    let cursor = keyEnd + 1;
+    while (/\s/.test(mappingSource[cursor] ?? '')) cursor += 1;
+    if (mappingSource[cursor] === ':') {
+      const key = mappingSource.slice(keyStart, keyEnd);
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+        keys.push(key);
+      }
+    }
+    index = keyEnd;
+  }
+
+  return keys;
+}
+
+function parseNamedOutputs(body) {
+  const returnIndex = body.lastIndexOf('return');
+  if (returnIndex < 0) {
+    return [];
+  }
+  const returnSource = body.slice(returnIndex);
+  const outputsMatch = /["']outputs["']\s*:\s*\{/.exec(returnSource);
+  if (!outputsMatch) {
+    return [];
+  }
+  const mappingStart = returnIndex + outputsMatch.index + outputsMatch[0].lastIndexOf('{');
+  const mapping = findBalancedBlock(body, mappingStart);
+  return mapping ? extractDirectMappingKeys(mapping) : [];
+}
+
 function parseOutputs(body, returnAnnotation) {
+  const namedOutputs = parseNamedOutputs(body);
+  if (namedOutputs.length) {
+    return namedOutputs.map((name) => ({
+      name,
+      displayName: name,
+      type: 'float',
+      comment: ''
+    }));
+  }
+
   const bodyLines = body.split('\n');
   const returnLine = [...bodyLines].reverse().find((line) => line.trim().startsWith('return '));
   const returnMatch = returnLine?.match(/return\s+(.+?)(?:\s*#\s*(.+))?$/);

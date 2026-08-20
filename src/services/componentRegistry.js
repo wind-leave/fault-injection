@@ -11,8 +11,17 @@ function clone(value) {
 
 function parameterDefaultValues(parameters = []) {
   return Object.fromEntries(parameters
-    .map((parameter) => [String(parameter?.key ?? '').trim(), Number(parameter?.default)])
-    .filter(([key, value]) => key && Number.isFinite(value)));
+    .map((parameter) => {
+      const key = String(parameter?.key ?? '').trim();
+      const rawValue = parameter?.default;
+      if (Array.isArray(rawValue)) {
+        const value = rawValue.map(Number);
+        return [key, value.every(Number.isFinite) ? value : undefined];
+      }
+      const value = Number(rawValue);
+      return [key, Number.isFinite(value) ? value : undefined];
+    })
+    .filter(([key, value]) => key && value !== undefined));
 }
 
 const SIMULATION_COMPONENT_MIN_WIDTH = 196;
@@ -80,6 +89,7 @@ export function createPythonSimulationComponent({
   type,
   group = 'simulation',
   simulationMenu,
+  simulationMenuLabel,
   label,
   moduleType,
   inputs = [],
@@ -89,6 +99,9 @@ export function createPythonSimulationComponent({
   description = `${label}模型`,
   entryFunction = 'process',
   executionMode = 'mock',
+  sourceKind = 'builtin',
+  moduleId = type,
+  fileName = `${moduleId}.py`,
   badge = '仿真',
   className = 'b-sim',
   width,
@@ -105,7 +118,6 @@ export function createPythonSimulationComponent({
   powerOutputs = [];
   powerInputs = powerInputs.map((port) => ({ ...port, supplyType: port.supplyType === 'AC' ? 'AC' : 'DC' }));
   const dimensions = resolveSimulationComponentDimensions(inputs, outputs, width, height);
-  const fileName = `${type}.py`;
   const isVector = (item) => item.dataType === 'vector' || item.type === 'vector' || item.type === '向量';
   const signalType = (item) => item.type ?? (isVector(item) ? 'vector' : 'float');
   const displayType = (item) => item.displayType ?? (isVector(item) ? '向量' : '标量');
@@ -148,7 +160,7 @@ export function createPythonSimulationComponent({
   };
   const parsedInterface = {
     fileName,
-    moduleName: type,
+    moduleName: moduleId,
     description,
     entryFunction,
     inputs: [
@@ -165,7 +177,8 @@ export function createPythonSimulationComponent({
         displayName: item.name,
         type: signalType(item),
         comment: item.name,
-        default: item.default
+        default: item.default,
+        parameter: true
       }))
     ],
     outputs: outputs.map((item) => ({
@@ -185,6 +198,7 @@ export function createPythonSimulationComponent({
     templateId: type,
     group,
     ...(simulationMenu ? { simulationMenu } : {}),
+    ...(simulationMenuLabel ? { simulationMenuLabel } : {}),
     label,
     badge,
     className,
@@ -223,10 +237,10 @@ export function createPythonSimulationComponent({
       // deliberately do not carry a copy of their Python source in every
       // workbench node.  Mark them explicitly to keep save/import from
       // mistaking the binding for an incomplete custom module.
-      sourceKind: 'builtin',
-      moduleId: type,
+      sourceKind,
+      moduleId,
       fileName,
-      moduleName: type,
+      moduleName: moduleId,
       moduleCategory: moduleType,
       description,
       entryFunction,
@@ -1228,19 +1242,30 @@ export function getSimulationMenuSections(
 ) {
   const sectionById = new Map(sections.map((section) => [section.id, section]));
   const categorized = new Map();
+  const dynamicSections = new Map();
 
   components.forEach((component) => {
-    const sectionId = sectionById.has(component.simulationMenu)
-      ? component.simulationMenu
-      : 'uncategorized';
+    const requestedSectionId = component.simulationMenu;
+    const sectionId = sectionById.has(requestedSectionId)
+      ? requestedSectionId
+      : requestedSectionId || 'uncategorized';
+    if (!sectionById.has(sectionId) && !dynamicSections.has(sectionId)) {
+      dynamicSections.set(sectionId, {
+        id: sectionId,
+        label: component.simulationMenuLabel || component.moduleType || '未分类模型',
+        icon: component.palette?.icon || '仿',
+        defaultOpen: true
+      });
+    }
     const items = categorized.get(sectionId) ?? [];
     items.push(component);
     categorized.set(sectionId, items);
   });
 
-  const resolvedSections = categorized.has('uncategorized')
-    ? [...sections, { id: 'uncategorized', label: '未分类模型', icon: '其', defaultOpen: true }]
-    : sections;
+  const resolvedSections = [
+    ...sections,
+    ...[...dynamicSections.values()].filter((section) => !sectionById.has(section.id))
+  ];
 
   return resolvedSections
     .filter((section) => categorized.has(section.id))

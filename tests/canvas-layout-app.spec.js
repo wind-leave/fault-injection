@@ -1299,7 +1299,11 @@ describe('canvas layout cleanup', () => {
 
     vi.stubGlobal('fetch', async (url, request) => {
       expect(url).toBe('/api/troubleshooting/plan');
-      expect(JSON.parse(request.body)).toMatchObject({ targetFaultId: 'manual-output-bias' });
+      expect(JSON.parse(request.body)).toMatchObject({
+        targetFaultIds: ['manual-output-bias'],
+        maxFaults: 2,
+        modelGraph: expect.objectContaining({ modelNodes: expect.any(Array), modelEdges: expect.any(Array) })
+      });
       return {
         ok: true,
         json: async () => ({
@@ -1332,7 +1336,7 @@ describe('canvas layout cleanup', () => {
     const pathPanel = window.openTroubleshootingPathPanel('manual-output-bias');
     await flushRuntime();
     const algorithmPath = window.buildTroubleshootingPathForFault('manual-output-bias');
-    expect(algorithmPath).toMatchObject({ ok: true, source: 'backend-algorithm', isCustomized: false });
+    expect(algorithmPath).toMatchObject({ ok: true, source: 'backend-knowledge-graph', isCustomized: false });
     expect(algorithmPath.keySteps[0].text).toBe('Backend confirms the fault target.');
     pathPanel?.querySelector('[data-edit-troubleshooting-path]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushRuntime();
@@ -1355,10 +1359,209 @@ describe('canvas layout cleanup', () => {
     pathPanel?.querySelector('[data-reset-troubleshooting-path]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await flushRuntime();
     expect(window.buildTroubleshootingPathForFault('manual-output-bias')).toMatchObject({
-      source: 'backend-algorithm',
+      source: 'backend-knowledge-graph',
       isCustomized: false
     });
 
+    wrapper.unmount();
+  });
+
+  it('generates a single or combined knowledge-graph path from all enabled D-matrix rows', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    const originalBuilder = window.buildDetectionMatrixModel;
+    const matrix = {
+      points: [
+        { pointId: 'tp-m1', shortName: 'M1', name: '测点一', pointType: 'virtual' },
+        { pointId: 'tp-m2', shortName: 'M2', name: '测点二', pointType: 'physical' }
+      ],
+      faults: [],
+      rows: [
+        {
+          faultId: 'fault-device-a', faultName: '设备A故障', faultDisplayName: '设备A故障',
+          targetKind: 'node', targetId: 'node-a', targetLabel: '设备A', layer: 'physical', detectableCount: 1,
+          cells: [
+            { pointId: 'tp-m1', pointCode: 'M1', pointName: '测点一', detectable: true, reason: '人工判定' },
+            { pointId: 'tp-m2', pointCode: 'M2', pointName: '测点二', detectable: false, reason: '人工判定' }
+          ]
+        },
+        {
+          faultId: 'fault-wire-b', faultName: '连线B故障', faultDisplayName: '连线B故障',
+          targetKind: 'edge', targetId: 'edge-b', targetLabel: '连线B', layer: 'electrical', detectableCount: 1,
+          cells: [
+            { pointId: 'tp-m1', pointCode: 'M1', pointName: '测点一', detectable: false, reason: '人工判定' },
+            { pointId: 'tp-m2', pointCode: 'M2', pointName: '测点二', detectable: true, reason: '人工判定' }
+          ]
+        }
+      ],
+      summary: { pointCount: 2, faultCount: 2, detectableCells: 2 }
+    };
+    window.buildDetectionMatrixModel = () => matrix;
+    let requestPayload = null;
+    vi.stubGlobal('fetch', async (url, request) => {
+      expect(url).toBe('/api/troubleshooting/plan');
+      requestPayload = JSON.parse(request.body);
+      return {
+        ok: true,
+        json: async () => ({
+          status: 'success',
+          plan: {
+            ok: true,
+            faultId: 'fault-device-a+fault-wire-b',
+            faultIds: ['fault-device-a', 'fault-wire-b'],
+            faultName: '设备A故障 + 连线B故障',
+            faultNames: ['设备A故障', '连线B故障'],
+            mode: 'multiple',
+            layer: 'physical + electrical',
+            targetLabel: '设备A、连线B',
+            source: 'backend-knowledge-graph',
+            isCustomized: false,
+            isolated: true,
+            knownConditions: [
+              { pointId: 'tp-m2', pointCode: 'M2', pointName: '测点二', pointType: 'physical', observed: 'normal', expectedState: 'normal' }
+            ],
+            summary: '已生成多故障组合路径。',
+            knowledgeGraph: {
+              nodes: [
+                { kind: 'fault', id: 'fault-device-a', label: '设备A故障' },
+                { kind: 'component', id: 'node-a', label: '设备A' }
+              ],
+              relations: [{
+                type: 'OCCURS_ON',
+                source: { kind: 'fault', id: 'fault-device-a' },
+                target: { kind: 'component', id: 'node-a' }
+              }],
+              summary: { nodeCount: 7, relationCount: 9 }
+            },
+            steps: [
+              { index: 1, action: 'measure', pointId: 'tp-m2', pointCode: 'M2', pointName: '测点二', expected: '旧方案错误地要求测量物理测点。' },
+              { index: 2, action: 'measure', pointId: 'tp-m1', pointCode: 'M1', pointName: '测点一', expected: '检测结果应为异常。', remainingFaultNames: ['设备A故障+连线B故障'] },
+              { index: 3, action: 'replaceComponent', targetId: 'node-a', targetLabel: '设备A', text: '更换设备：设备A。' },
+              { index: 4, action: 'replaceWire', targetId: 'edge-b', targetLabel: '连线B', text: '更换连线：连线B。' }
+            ],
+            keySteps: [
+              { id: 'measure-1-tp-m2', action: 'measure', pointId: 'tp-m2', pointCode: 'M2', text: '检测物理测点 M2。' }
+            ]
+          }
+        })
+      };
+    });
+
+    window.renderDetectionMatrixPanel();
+    let view = document.querySelector('[data-d-matrix-view]');
+    const initialGraphButton = view.querySelector('[data-open-dmatrix-knowledge-graph]');
+    expect(initialGraphButton.disabled).toBe(false);
+    initialGraphButton.click();
+    await flushRuntime();
+    expect(document.querySelector('[data-testid="knowledge-graph-page"]')?.textContent).toContain('设备A故障');
+    document.querySelector('[data-knowledge-graph-close]')?.click();
+    await flushRuntime();
+    expect(view.textContent).not.toContain('实践排查');
+    expect(view.querySelector('[data-d-matrix-path-fault]')).toBeNull();
+    const initialColumnOrder = Array.from(view.querySelectorAll('.d-matrix-table thead th')).map((cell) => cell.textContent.trim());
+    const initialFaultOrder = Array.from(view.querySelectorAll('.d-matrix-table tbody tr')).map((row) => row.querySelector('small')?.textContent.trim());
+    const wireEnabled = view.querySelector('[data-d-matrix-fault-enabled="fault-wire-b"]');
+    expect(wireEnabled?.type).toBe('checkbox');
+    wireEnabled.checked = false;
+    wireEnabled.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    view = document.querySelector('[data-d-matrix-view]');
+    expect(view.querySelector('[data-d-matrix-fault-enabled="fault-wire-b"]')?.checked).toBe(false);
+    expect(view.querySelector('[data-build-troubleshooting-path="fault-wire-b"]')?.disabled).toBe(true);
+    expect(view.querySelector('[data-build-enabled-troubleshooting-path]')?.textContent).toContain('已启用 1');
+    view.querySelector('[data-build-enabled-troubleshooting-path]').click();
+    await flushRuntime();
+    expect(requestPayload?.targetFaultIds).toEqual(['fault-device-a']);
+    expect(requestPayload?.dMatrix?.rows.map((row) => row.faultId)).toEqual(['fault-device-a', 'fault-wire-b']);
+    document.querySelector('[data-troubleshooting-path-panel]')?.remove();
+    requestPayload = null;
+    const wireDisabled = view.querySelector('[data-d-matrix-fault-enabled="fault-wire-b"]');
+    wireDisabled.checked = true;
+    wireDisabled.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    view = document.querySelector('[data-d-matrix-view]');
+    expect(Array.from(view.querySelectorAll('.d-matrix-table thead th')).map((cell) => cell.textContent.trim())).toEqual(initialColumnOrder);
+    expect(Array.from(view.querySelectorAll('.d-matrix-table tbody tr')).map((row) => row.querySelector('small')?.textContent.trim())).toEqual(initialFaultOrder);
+    expect(view.querySelector('[data-build-enabled-troubleshooting-path]')?.textContent).toContain('已启用 2');
+    view.querySelector('[data-build-enabled-troubleshooting-path]').click();
+    await flushRuntime();
+
+    expect(requestPayload).toMatchObject({
+      targetFaultIds: ['fault-device-a', 'fault-wire-b'],
+      maxFaults: 2,
+      dMatrix: matrix
+    });
+    const panel = document.querySelector('[data-troubleshooting-path-panel]');
+    expect(panel?.textContent).toContain('设备A故障 + 连线B故障');
+    expect(panel?.textContent).toContain('更换设备');
+    expect(panel?.textContent).toContain('更换连线');
+    expect(panel?.textContent).toContain('物理测点已知条件');
+    expect(panel?.textContent).toContain('M2 测点二：正常');
+    expect(Array.from(panel?.querySelectorAll('.troubleshooting-path__steps li') || []).some((step) => step.textContent.includes('M2'))).toBe(false);
+    expect(panel?.textContent).toContain('知识图谱 7 节点 / 9 关系');
+    const liveGraph = window.getDiagnosticKnowledgeGraph();
+    expect(liveGraph.source).toBe('live-canvas-and-manual-d-matrix');
+    expect(liveGraph.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'fault', id: 'fault-device-a' }),
+      expect.objectContaining({ kind: 'fault', id: 'fault-wire-b' }),
+      expect.objectContaining({ kind: 'measurementPoint', id: 'tp-m1' }),
+      expect.objectContaining({ kind: 'measurementPoint', id: 'tp-m2' })
+    ]));
+    expect(liveGraph.relations.filter((relation) => relation.type === 'DETECTABILITY')).toHaveLength(4);
+    const editCombinationPath = panel?.querySelector('[data-edit-troubleshooting-path]');
+    expect(editCombinationPath).not.toBeNull();
+    editCombinationPath?.click();
+    await flushRuntime();
+    expect(panel?.querySelectorAll('[data-troubleshooting-path-action]')).toHaveLength(3);
+    const combinationExpected = panel?.querySelector('[data-troubleshooting-path-expected]');
+    combinationExpected.value = '人工确认组合故障关键测点。';
+    combinationExpected.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    const combinationRepairText = panel?.querySelector('[data-troubleshooting-path-repair-text]');
+    combinationRepairText.value = '人工确认后更换目标设备。';
+    combinationRepairText.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    const wireAction = Array.from(panel?.querySelectorAll('[data-troubleshooting-path-action]') || [])
+      .find(select => select.value === 'replaceWire');
+    wireAction.value = 'replaceComponent';
+    wireAction.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    expect(window.buildTroubleshootingPathForFault(['fault-device-a', 'fault-wire-b'])).toMatchObject({
+      source: 'custom',
+      isCustomized: true,
+      steps: expect.arrayContaining([
+        expect.objectContaining({ expected: '人工确认组合故障关键测点。' }),
+        expect.objectContaining({ text: '人工确认后更换目标设备。' }),
+        expect.objectContaining({ action: 'replaceComponent', targetId: 'node-a' })
+      ])
+    });
+    expect(panel?.querySelector('[data-open-knowledge-graph]')).toBeNull();
+    const savedResult = await window.buildSimulationResultSnapshot();
+    expect(savedResult.privateData.targetFaultIds).toEqual(['fault-device-a', 'fault-wire-b']);
+    expect(savedResult.privateData.initialRecommendedPath).toMatchObject({
+      mode: 'multiple',
+      faultIds: ['fault-device-a', 'fault-wire-b'],
+      source: 'custom',
+      isCustomized: true,
+      steps: expect.arrayContaining([
+        expect.objectContaining({ expected: '人工确认组合故障关键测点。' }),
+        expect.objectContaining({ text: '人工确认后更换目标设备。' }),
+        expect.objectContaining({ actionType: 'replaceComponent', targetId: 'node-a' })
+      ])
+    });
+    expect(savedResult.privateData.keyMeasurementPoints).toEqual(expect.arrayContaining([
+      expect.objectContaining({ pointId: 'tp-m1', pointCode: 'M1', pointName: '测点一' }),
+      expect.objectContaining({ pointId: 'tp-m2', pointCode: 'M2', pointName: '测点二', pointType: 'physical', observed: 'normal' })
+    ]));
+    const graphButton = document.querySelector('[data-open-dmatrix-knowledge-graph]');
+    expect(graphButton?.disabled).toBe(false);
+    graphButton?.click();
+    await flushRuntime();
+    expect(document.querySelector('[data-testid="knowledge-graph-page"]')?.textContent).toContain('设备A故障');
+    document.querySelector('[data-knowledge-graph-close]')?.click();
+    await flushRuntime();
+
+    window.buildDetectionMatrixModel = originalBuilder;
     wrapper.unmount();
   });
 
@@ -1376,6 +1579,107 @@ describe('canvas layout cleanup', () => {
     window.doCreateBlankWorkspace();
 
     expect(window.__GZ_STATE__.manualDiagnosticTestPoints).toEqual([]);
+    wrapper.unmount();
+  });
+
+  it('creates an installed physical point only for connected display-console inputs and shows it in edge settings', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 180, 220);
+    const displayConsole = window.createNode('display_console_1', 520, 220);
+    expect(window.buildDiagnosticTestPointModel().positions.filter(point => point.displayConsoleInput)).toHaveLength(0);
+    window.__GZ_STATE__.modelEdges.push({
+      id: 'edge-default-console-observation',
+      sourceNodeId: source.id,
+      sourcePortIndex: 0,
+      targetNodeId: displayConsole.id,
+      targetPortIndex: 0,
+      label: '显控台中心频率输入'
+    });
+    await flushRuntime();
+
+    const pointModel = window.buildDiagnosticTestPointModel();
+    const consolePoints = pointModel.positions.filter(point => point.displayConsoleInput);
+    expect(consolePoints).toHaveLength(1);
+    expect(consolePoints.map(point => point.shortName)).toEqual(['M1']);
+    expect(consolePoints.every(point => point.pointType === 'physical' && point.installed)).toBe(true);
+    expect(consolePoints[0]).toMatchObject({
+      edgeId: 'edge-default-console-observation',
+      nodeId: displayConsole.id,
+      inputIndex: 0,
+      inputKey: 'centerFrequency',
+      defaultInstalled: true
+    });
+    expect(consolePoints.map(point => point.name)).toEqual(['显控台 1 · 中心频率（MHz）']);
+
+    const matrix = window.buildDetectionMatrixModel();
+    expect(matrix.points.filter(point => point.displayConsoleInput)).toHaveLength(1);
+    const graph = window.getDiagnosticKnowledgeGraph();
+    expect(graph.nodes.filter(node => node.kind === 'measurementPoint' && node.displayConsoleInput)).toHaveLength(1);
+    expect(graph.relations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'OBSERVES',
+        source: { kind: 'measurementPoint', id: consolePoints[0].pointId },
+        target: { kind: 'component', id: displayConsole.id },
+        inputIndex: 0,
+        inputKey: 'centerFrequency',
+        observationSource: 'display-console-input'
+      })
+    ]));
+
+    window.renderModelNodes();
+    window.renderEdges();
+    window.renderCanvasDiagnosticTestPointMarkers();
+    expect(document.querySelector(`[data-canvas-testpoint-marker][data-testpoint-id="${consolePoints[0].pointId}"]`)).toBeNull();
+    window.toggleCanvasTestpoints(true);
+    await flushRuntime();
+    expect(document.querySelector(`[data-canvas-testpoint-marker][data-testpoint-id="${consolePoints[0].pointId}"]`)).not.toBeNull();
+    window.selectEdge('edge-default-console-observation');
+    await flushRuntime();
+    window.setPropertyPanelTab('testpoints');
+    await flushRuntime();
+    const automaticCard = document.querySelector(`[data-edge-testpoint-card="${consolePoints[0].pointId}"]`);
+    expect(automaticCard).not.toBeNull();
+    expect(automaticCard?.textContent).not.toContain('自动测点');
+    expect(automaticCard?.classList.contains('is-automatic')).toBe(false);
+    expect(automaticCard?.querySelector('[data-edge-testpoint-type]')?.value).toBe('physical');
+    expect(automaticCard?.querySelector('[data-edge-testpoint-type]')?.disabled).toBe(true);
+    expect(automaticCard?.querySelector('[data-delete-edge-testpoint]')).toBeNull();
+    automaticCard.querySelector('[data-edge-testpoint-name]').value = '中心频率物理观测点';
+    automaticCard.querySelector('[data-save-edge-testpoint]').click();
+    await flushRuntime();
+    expect(window.__GZ_STATE__.manualDiagnosticTestPoints).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        pointId: consolePoints[0].pointId,
+        edgeId: 'edge-default-console-observation',
+        name: '中心频率物理观测点',
+        pointType: 'physical',
+        displayConsoleInput: true
+      })
+    ]));
+
+    window.selectEdge('edge-default-console-observation');
+    window.deleteSelectedEdge();
+    await flushRuntime();
+    expect(window.buildDiagnosticTestPointModel().positions.filter(point => point.displayConsoleInput)).toHaveLength(0);
+    window.__GZ_STATE__.modelEdges.push({
+      id: 'edge-reconnected-console-observation',
+      sourceNodeId: source.id,
+      sourcePortIndex: 0,
+      targetNodeId: displayConsole.id,
+      targetPortIndex: 0
+    });
+    expect(window.buildDiagnosticTestPointModel().positions.filter(point => point.displayConsoleInput)).toEqual([
+      expect.objectContaining({
+        pointId: consolePoints[0].pointId,
+        edgeId: 'edge-reconnected-console-observation',
+        name: '中心频率物理观测点',
+        pointType: 'physical'
+      })
+    ]);
+
     wrapper.unmount();
   });
 

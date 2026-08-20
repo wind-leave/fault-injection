@@ -337,6 +337,37 @@ describe('practiceTaskPackageService', () => {
     expect(result.privateData).not.toHaveProperty('keyNodes');
   });
 
+  it('saves the enabled-fault combination path and its key measurement points', () => {
+    const combinedTroubleshootingPath = {
+      ok: true,
+      mode: 'multiple',
+      faultIds: ['fault-a', 'fault-b'],
+      steps: [
+        { action: 'measure', pointId: 'tp-1', pointCode: 'M1' },
+        { action: 'replaceComponent', targetId: 'device-a' }
+      ],
+      keySteps: [{ action: 'measure', pointId: 'tp-1', pointCode: 'M1', text: '检测关键测点 M1。' }]
+    };
+    const keyMeasurementPoints = [{ pointId: 'tp-1', pointCode: 'M1', pointName: '关键测点一' }];
+    const result = buildPracticeTaskPackage({
+      targetFaultIds: ['fault-a', 'fault-b'],
+      combinedTroubleshootingPath,
+      keyMeasurementPoints
+    });
+
+    expect(result.privateData.targetFaultId).toBe('fault-a');
+    expect(result.privateData.targetFaultIds).toEqual(['fault-a', 'fault-b']);
+    expect(result.privateData.initialRecommendedPath).toMatchObject({
+      mode: 'multiple',
+      faultIds: ['fault-a', 'fault-b'],
+      steps: [
+        { actionType: 'measurePoint', target: { type: 'testPoint', id: 'tp-1' } },
+        { actionType: 'replaceComponent', target: { type: 'component', id: 'device-a' } }
+      ]
+    });
+    expect(result.privateData.keyMeasurementPoints).toEqual(keyMeasurementPoints);
+  });
+
   it('derives each saved measurement state from enabled faults and the D matrix', () => {
     const result = buildPracticeTaskPackage({
       dMatrix: {

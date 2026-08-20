@@ -22,6 +22,21 @@ def d_matrix_with_observation_rule():
 
 def d_matrix_with_physical_and_virtual_points():
     matrix = sample_d_matrix()
+    matrix["rows"][0].update({
+        "targetKind": "node",
+        "targetNodeId": "sim-1",
+        "targetLabel": "simulation component",
+    })
+    matrix["rows"][1].update({
+        "targetKind": "edge",
+        "targetEdgeId": "edge-sim-scope",
+        "targetLabel": "simulation output wire",
+    })
+    matrix["rows"][2].update({
+        "targetKind": "node",
+        "targetNodeId": "source-1",
+        "targetLabel": "signal source",
+    })
     matrix["points"][0]["pointType"] = "physical"
     matrix["points"][0]["channel"] = "scope-1.ch1"
     matrix["points"][0]["observationRule"] = {
@@ -135,6 +150,214 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(session.initial_best_path, initial_recommended_path)
         self.assertEqual(session.fault_tree_key_nodes, key_nodes)
 
+    def test_practice_candidates_are_fault_combinations_for_multi_fault_tasks(self):
+        matrix = sample_d_matrix()
+        matrix["points"][0]["pointType"] = "physical"
+        matrix["points"][1]["pointType"] = "physical"
+        matrix["rows"] = matrix["rows"][:2]
+        matrix["rows"][0]["cells"][0]["detectable"] = True
+        matrix["rows"][0]["cells"][1]["detectable"] = False
+        matrix["rows"][1]["cells"][0]["detectable"] = False
+        matrix["rows"][1]["cells"][1]["detectable"] = True
+
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": matrix,
+                "targetFaultIds": ["target-fault", "controller-fault"],
+                "initialPointStates": [
+                    {"pointCode": "M1", "observed": "abnormal"},
+                    {"pointCode": "M2", "observed": "abnormal"},
+                ],
+            },
+        )
+
+        self.assertEqual(status, 200)
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+        reference = session._build_dynamic_reference()
+        self.assertEqual(
+            reference["candidateFaultCombinations"],
+            [["target-fault", "controller-fault"]],
+        )
+        self.assertEqual(reference["candidateFaultIds"], ["target-fault", "controller-fault"])
+        self.assertEqual(reference["basis"], "currentEvidenceAndFaultCombinations")
+
+    def test_practice_session_builds_knowledge_graph_from_model_and_d_matrix(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": d_matrix_with_rankable_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+        graph = session.diagnostic_knowledge_graph
+        node_keys = {(node["kind"], node["id"]) for node in graph["nodes"]}
+        relation_types = {relation["type"] for relation in graph["relations"]}
+        self.assertIn(("component", "sim-1"), node_keys)
+        self.assertIn(("signalEdge", "edge-sim-scope"), node_keys)
+        self.assertIn(("measurementPoint", "tp-virtual"), node_keys)
+        self.assertTrue({"OUTPUTS_TO", "INPUTS_TO", "DETECTABILITY", "RESOLVED_BY_REPLACING"}.issubset(relation_types))
+
+    def test_measurement_recommendations_query_session_knowledge_graph_detectability(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": d_matrix_with_rankable_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+        before_point_codes = {
+            action.get("pointCode")
+            for action in session._build_dynamic_reference()["recommendedActionSet"]
+            if action.get("actionType") == "measurePoint"
+        }
+        self.assertIn("V1", before_point_codes)
+
+        session.diagnostic_knowledge_graph["relations"] = [
+            relation
+            for relation in session.diagnostic_knowledge_graph["relations"]
+            if not (
+                relation.get("type") == "DETECTABILITY"
+                and (relation.get("target") or {}).get("id") == "tp-virtual"
+            )
+        ]
+        session._index_diagnostic_knowledge_graph()
+        after_point_codes = {
+            action.get("pointCode")
+            for action in session._build_dynamic_reference()["recommendedActionSet"]
+            if action.get("actionType") == "measurePoint"
+        }
+        self.assertNotIn("V1", after_point_codes)
+
+    def test_submit_accepts_multiple_final_fault_ids_with_order_independent_exact_match(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultIds": ["target-fault", "controller-fault"],
+            },
+        )
+        self.assertEqual(status, 200)
+
+        status, submitted = self._post(
+            f"/api/practice/session/{created['practiceSessionId']}/submit",
+            {"finalFaultIds": ["controller-fault", "target-fault"]},
+        )
+
+        self.assertEqual(status, 200)
+        conclusion = submitted["evaluationReport"]["faultConclusion"]
+        self.assertTrue(conclusion["exactMatch"])
+        self.assertEqual(conclusion["setAccuracy"], 1.0)
+        self.assertEqual(conclusion["precision"], 1.0)
+        self.assertEqual(conclusion["recall"], 1.0)
+        self.assertEqual(conclusion["missedFaultIds"], [])
+        self.assertEqual(conclusion["extraFaultIds"], [])
+        score_details = {
+            item["item"]: item["score"]
+            for item in submitted["evaluationReport"]["scoreDetails"]
+        }
+        self.assertEqual(score_details["faultLocalization"], 30)
+
+    def test_submit_scores_partial_multi_fault_conclusion_by_jaccard_accuracy(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultIds": ["target-fault", "controller-fault"],
+            },
+        )
+        self.assertEqual(status, 200)
+
+        status, submitted = self._post(
+            f"/api/practice/session/{created['practiceSessionId']}/submit",
+            {"finalFaultIds": ["target-fault", "motor-fault"]},
+        )
+
+        self.assertEqual(status, 200)
+        conclusion = submitted["evaluationReport"]["faultConclusion"]
+        self.assertFalse(conclusion["exactMatch"])
+        self.assertEqual(conclusion["setAccuracy"], 0.333)
+        self.assertEqual(conclusion["precision"], 0.5)
+        self.assertEqual(conclusion["recall"], 0.5)
+        self.assertEqual(conclusion["matchedFaultIds"], ["target-fault"])
+        self.assertEqual(conclusion["missedFaultIds"], ["controller-fault"])
+        self.assertEqual(conclusion["extraFaultIds"], ["motor-fault"])
+        score_details = {
+            item["item"]: item["score"]
+            for item in submitted["evaluationReport"]["scoreDetails"]
+        }
+        self.assertEqual(score_details["faultLocalization"], 10)
+
+    def test_rank_one_does_not_promote_a_low_value_action_to_optimal(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+        self.assertEqual(
+            session._match_quality_score({"rank": 1, "recommendationTier": "lowValue"}),
+            ("lowValue", 0.4),
+        )
+
+    def test_repair_recommendations_use_candidate_knowledge_graph_not_runtime_fault_answer(self):
+        package = valid_package()
+        package["faultInstances"] = [{
+            "faultId": "runtime-answer",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 1.0,
+            "parameters": {"bias": 0.5},
+        }]
+        matrix = d_matrix_with_physical_and_virtual_points()
+        matrix["rows"][0].update({
+            "targetKind": "node",
+            "targetNodeId": "source-1",
+            "targetLabel": "signal source",
+        })
+
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": matrix,
+                "targetFaultId": "target-fault",
+                "initialPointStates": [
+                    {"pointCode": "M1", "observed": "abnormal"},
+                    {"pointCode": "M2", "observed": "abnormal"},
+                    {"pointCode": "M3", "observed": "normal"},
+                ],
+            },
+        )
+
+        self.assertEqual(status, 200)
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+        repair_targets = [
+            action["target"]
+            for action in session._build_dynamic_reference()["recommendedActionSet"]
+            if action["actionType"] in {"replaceComponent", "replaceWire"}
+        ]
+        self.assertIn({"type": "component", "id": "source-1"}, repair_targets)
+        self.assertNotIn({"type": "component", "id": "sim-1"}, repair_targets)
+
     def test_runs_valid_simulation_request(self):
         status, body = self._post("/api/simulations/run", valid_package())
 
@@ -166,9 +389,36 @@ class SimulationBackendServerTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(body["status"], "success")
-        self.assertEqual(body["plan"]["source"], "backend-algorithm")
+        self.assertEqual(body["plan"]["source"], "backend-knowledge-graph")
+        self.assertEqual(body["plan"]["pathGeneration"]["engine"], "knowledge-graph")
         self.assertGreater(len(body["plan"]["steps"]), 0)
         self.assertGreater(len(body["plan"]["keySteps"]), 0)
+
+    def test_builds_multi_fault_knowledge_graph_plan_through_the_backend_endpoint(self):
+        matrix = sample_d_matrix()
+        matrix["rows"][0].update({"targetKind": "node", "targetNodeId": "node-imu"})
+        matrix["rows"][1].update({"targetKind": "edge", "targetEdgeId": "edge-controller"})
+
+        status, body = self._post(
+            "/api/troubleshooting/plan",
+            {
+                "dMatrix": matrix,
+                "targetFaultIds": ["target-fault", "controller-fault"],
+                "maxFaults": 2,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["status"], "success")
+        self.assertEqual(body["plan"]["mode"], "multiple")
+        self.assertEqual(body["plan"]["source"], "backend-knowledge-graph")
+        self.assertEqual(body["plan"]["pathGeneration"]["engine"], "knowledge-graph")
+        self.assertEqual(body["plan"]["knowledgeGraph"]["summary"]["faultCount"], 3)
+        self.assertTrue(
+            {step["action"] for step in body["plan"]["steps"]}.issubset(
+                {"measure", "replaceWire", "replaceComponent"}
+            )
+        )
 
     def test_steps_simulation_session(self):
         status, created = self._post("/api/simulations/session", valid_package())
@@ -381,7 +631,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         package = valid_package()
         package["simulationConfig"]["duration"] = 0.5
         package["faultInstances"] = [{
-            "faultId": "fault-wire",
+            "faultId": "target-fault",
             "faultType": "wire_open",
             "targetId": "edge-sim-scope",
             "enabled": True,
@@ -389,11 +639,17 @@ class SimulationBackendServerTests(unittest.TestCase):
             "duration": 0.5,
             "parameters": {"bias": 0.5},
         }]
+        matrix = d_matrix_with_rankable_virtual_points()
+        matrix["rows"][0].update({
+            "targetKind": "edge",
+            "targetEdgeId": "edge-sim-scope",
+            "targetLabel": "simulation output wire",
+        })
         status, created = self._post(
             "/api/practice/session",
             {
                 "simulationPackage": package,
-                "dMatrix": d_matrix_with_rankable_virtual_points(),
+                "dMatrix": matrix,
                 "targetFaultId": "target-fault",
                 "initialPointStates": [{"pointCode": "V1", "observed": "abnormal"}],
             },
@@ -447,7 +703,7 @@ class SimulationBackendServerTests(unittest.TestCase):
             any(
                 step.get("actionType") == "replaceWire"
                 and step.get("target") == {"type": "wire", "id": "edge-sim-scope"}
-                and step.get("faultId") == "fault-wire"
+                and step.get("faultId") == "target-fault"
                 and step.get("routeRole") == "repairAttempt"
                 for step in initial_steps
             )
@@ -695,19 +951,34 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertGreater(measurement_match["score"], 0)
         self.assertLess(measurement_match["score"], 1.0)
         self.assertGreater(measurement_match["matchedAction"]["rank"], 1)
+        measurement_evaluation = evaluations[0]
+        self.assertGreater(measurement_evaluation["candidateCountBefore"], 0)
+        self.assertGreater(measurement_evaluation["informationGain"]["bestAvailableInformationGain"], 0)
+        self.assertEqual(
+            measurement_evaluation["informationGain"]["candidateReductionCount"],
+            measurement_evaluation["candidateCountBefore"] - measurement_evaluation["candidateCountAfter"],
+        )
+        self.assertIn(
+            "LOWER_INFORMATION_GAIN",
+            {item["code"] for item in measurement_evaluation["deductionReasons"]},
+        )
 
         repair_match = evaluations[1]["matchResult"]
         self.assertTrue(repair_match["matched"])
         self.assertEqual(repair_match["matchQuality"], "unsafe")
         self.assertEqual(repair_match["score"], 0.0)
         self.assertFalse(repair_match["safetyPrerequisiteSatisfied"])
+        self.assertEqual(
+            {item["code"] for item in evaluations[1]["deductionReasons"]},
+            {"SAFETY_PREREQUISITE_MISSING"},
+        )
 
     def test_initial_repair_actions_are_sorted_by_weight_and_include_safety_prerequisites(self):
         package = valid_package()
         package["simulationConfig"]["duration"] = 0.5
         package["faultInstances"] = [
             {
-                "faultId": "fault-bias",
+                "faultId": "target-fault",
                 "faultType": "sensor_bias",
                 "targetId": "sim-1",
                 "enabled": True,
@@ -716,7 +987,7 @@ class SimulationBackendServerTests(unittest.TestCase):
                 "parameters": {"bias": 0.5},
             },
             {
-                "faultId": "fault-wire",
+                "faultId": "controller-fault",
                 "faultType": "wire_open",
                 "targetId": "edge-sim-scope",
                 "enabled": True,
@@ -725,12 +996,15 @@ class SimulationBackendServerTests(unittest.TestCase):
                 "parameters": {"bias": 0.5},
             },
         ]
+        matrix = d_matrix_with_physical_and_virtual_points()
+        matrix["rows"] = matrix["rows"][:2]
         status, created = self._post(
             "/api/practice/session",
             {
                 "simulationPackage": package,
-                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "dMatrix": matrix,
                 "targetFaultId": "target-fault",
+                "targetFaultIds": ["target-fault", "controller-fault"],
                 "actionRules": {
                     "replaceComponent": {"requiresPowerOff": True, "durationSeconds": 120, "riskLevel": "high"},
                     "replaceWire": {"durationSeconds": 30, "riskLevel": "low"},
@@ -739,6 +1013,18 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         session_id = created["sessionId"]
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+        repair_nodes = [
+            node for node in session.fault_tree_key_nodes if node.get("type") == "repairTarget"
+        ]
+        self.assertEqual(
+            {tuple(sorted(node["target"].items())) for node in repair_nodes},
+            {
+                tuple(sorted({"type": "component", "id": "sim-1"}.items())),
+                tuple(sorted({"type": "wire", "id": "edge-sim-scope"}.items())),
+            },
+        )
+        self.assertEqual(sum(node["score"] for node in session.fault_tree_key_nodes), 12)
 
         status, submitted = self._post(
             f"/api/practice/session/{session_id}/submit",
@@ -1198,6 +1484,14 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(len(report["stepEvaluations"]), 2)
         self.assertTrue(all("studentRating" in step for step in report["stepEvaluations"]))
         self.assertTrue(all("systemRecommendedAction" in step for step in report["stepEvaluations"]))
+        self.assertTrue(all("candidateFaultCombinationsBefore" in step for step in report["stepEvaluations"]))
+        self.assertTrue(all("candidateFaultCombinationsAfter" in step for step in report["stepEvaluations"]))
+        self.assertTrue(all("informationGain" in step for step in report["stepEvaluations"]))
+        self.assertTrue(all("deductionReasons" in step for step in report["stepEvaluations"]))
+        self.assertEqual(
+            round(sum(step["deductedDecisionPoints"] for step in report["stepEvaluations"]), 3),
+            round(30 - next(item["score"] for item in report["scoreDetails"] if item["item"] == "informationGain"), 3),
+        )
         replacement_step = report["stepEvaluations"][1]
         self.assertEqual(replacement_step["studentRating"]["level"], "optimal")
         self.assertEqual(

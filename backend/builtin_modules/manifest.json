@@ -4,18 +4,31 @@
       "moduleId": "passthrough",
       "importPath": "backend.builtin_modules.passthrough",
       "entryFunction": "process",
-      "inputs": ["input"],
-      "outputs": ["output"],
+      "inputs": [
+        "input"
+      ],
+      "outputs": [
+        "output"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "gain",
       "importPath": "backend.builtin_modules.gain",
       "entryFunction": "process",
-      "inputs": ["input"],
-      "outputs": ["output"],
+      "inputs": [
+        "input"
+      ],
+      "outputs": [
+        "output"
+      ],
       "parameters": {
-        "gain": {"type": "number", "min": -20, "max": 20, "default": 1}
+        "gain": {
+          "type": "number",
+          "min": -20,
+          "max": 20,
+          "default": 1
+        }
       }
     },
     {
@@ -23,39 +36,83 @@
       "importPath": "backend.builtin_modules.electrical_ac_power_source",
       "entryFunction": "process",
       "inputs": [],
-      "outputs": ["ac_phase_a", "ac_phase_b", "ac_phase_c"],
+      "outputs": [
+        "ac_phase_a",
+        "ac_phase_b",
+        "ac_phase_c"
+      ],
       "parameters": {
-        "voltage_rms": {"type": "number", "min": 0, "max": 1000000, "default": 220},
-        "frequency_hz": {"type": "number", "min": 0, "max": 1000000000, "default": 50},
-        "phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0}
+        "voltage_rms": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000,
+          "default": 220
+        },
+        "frequency_hz": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000000,
+          "default": 50
+        },
+        "phase_deg": {
+          "type": "number",
+          "min": -360,
+          "max": 360,
+          "default": 0
+        }
       }
     },
     {
       "moduleId": "electrical_dc_boost",
       "importPath": "backend.builtin_modules.electrical_dc_boost",
       "entryFunction": "process",
-      "inputs": ["dc_input"],
-      "outputs": ["dc_output"],
+      "inputs": [
+        "dc_input"
+      ],
+      "outputs": [
+        "dc_output"
+      ],
       "parameters": {
-        "boost_ratio": {"type": "number", "min": 0, "max": 100, "default": 2},
-        "efficiency": {"type": "number", "min": 0, "max": 1, "default": 0.95}
+        "boost_ratio": {
+          "type": "number",
+          "min": 0,
+          "max": 100,
+          "default": 2
+        },
+        "efficiency": {
+          "type": "number",
+          "min": 0,
+          "max": 1,
+          "default": 0.95
+        }
       }
     },
     {
       "moduleId": "electrical_ac_dc_matching",
       "importPath": "backend.builtin_modules.electrical_ac_dc_matching",
       "entryFunction": "process",
-      "inputs": ["ac_input"],
-      "outputs": ["dc_output"],
+      "inputs": [
+        "ac_input"
+      ],
+      "outputs": [
+        "dc_output"
+      ],
       "parameters": {
-        "conversion_gain": {"type": "number", "min": 0, "max": 100, "default": 1}
+        "conversion_gain": {
+          "type": "number",
+          "min": 0,
+          "max": 100,
+          "default": 1
+        }
       }
     },
     {
       "moduleId": "electrical_ground",
       "importPath": "backend.builtin_modules.electrical_ground",
       "entryFunction": "process",
-      "inputs": ["ground_input"],
+      "inputs": [
+        "ground_input"
+      ],
       "outputs": [],
       "parameters": {}
     },
@@ -63,89 +120,146 @@
       "moduleId": "command_shaper",
       "importPath": "backend.builtin_modules.command_shaper",
       "entryFunction": "process",
-      "inputs": ["pitch_command"],
-      "outputs": ["shaped_command"],
+      "inputs": [
+        "pitch_command"
+      ],
+      "outputs": [
+        "shaped_command"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "attitude_controller",
       "importPath": "backend.builtin_modules.attitude_controller",
       "entryFunction": "process",
-      "inputs": ["attitude_error"],
-      "outputs": ["torque_command"],
+      "inputs": [
+        "attitude_error"
+      ],
+      "outputs": [
+        "torque_command"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "control_allocator",
       "importPath": "backend.builtin_modules.control_allocator",
       "entryFunction": "process",
-      "inputs": ["torque_command"],
-      "outputs": ["motor_total_command"],
+      "inputs": [
+        "torque_command"
+      ],
+      "outputs": [
+        "motor_total_command"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "motor_mixer",
       "importPath": "backend.builtin_modules.motor_mixer",
       "entryFunction": "process",
-      "inputs": ["motor_total_command"],
-      "outputs": ["motor_1_command", "motor_2_command", "motor_3_command", "motor_4_command"],
+      "inputs": [
+        "motor_total_command"
+      ],
+      "outputs": [
+        "motor_1_command",
+        "motor_2_command",
+        "motor_3_command",
+        "motor_4_command"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "motor_model",
       "importPath": "backend.builtin_modules.motor_model",
       "entryFunction": "process",
-      "inputs": ["motor_command"],
-      "outputs": ["thrust"],
+      "inputs": [
+        "motor_command"
+      ],
+      "outputs": [
+        "thrust"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "vehicle_dynamics",
       "importPath": "backend.builtin_modules.vehicle_dynamics",
       "entryFunction": "process",
-      "inputs": ["thrust_1", "thrust_2", "thrust_3", "thrust_4"],
-      "outputs": ["pitch_rate"],
+      "inputs": [
+        "thrust_1",
+        "thrust_2",
+        "thrust_3",
+        "thrust_4"
+      ],
+      "outputs": [
+        "pitch_rate"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "imu_gyro",
       "importPath": "backend.builtin_modules.imu_gyro",
       "entryFunction": "process",
-      "inputs": ["body_rate"],
-      "outputs": ["measured_rate"],
+      "inputs": [
+        "body_rate"
+      ],
+      "outputs": [
+        "measured_rate"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "pid_controller",
       "importPath": "backend.builtin_modules.pid_controller",
       "entryFunction": "process",
-      "inputs": ["attitude_command", "attitude_feedback"],
-      "outputs": ["moment_command"],
+      "inputs": [
+        "attitude_command",
+        "attitude_feedback"
+      ],
+      "outputs": [
+        "moment_command"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "control_allocation",
       "importPath": "backend.builtin_modules.control_allocation",
       "entryFunction": "process",
-      "inputs": ["moment_command", "speed_command", "altitude_command"],
-      "outputs": ["actuator_command"],
+      "inputs": [
+        "moment_command",
+        "speed_command",
+        "altitude_command"
+      ],
+      "outputs": [
+        "actuator_command"
+      ],
       "parameters": {
-        "allocationGain": {"type": "number", "min": 0, "max": 10, "default": 1}
+        "allocationGain": {
+          "type": "number",
+          "min": 0,
+          "max": 10,
+          "default": 1
+        }
       }
     },
     {
       "moduleId": "voltage_drop",
       "importPath": "backend.builtin_modules.voltage_drop",
       "entryFunction": "process",
-      "inputs": ["actuator_command", "bus_voltage"],
-      "outputs": ["voltage_limited_command"],
+      "inputs": [
+        "actuator_command",
+        "bus_voltage"
+      ],
+      "outputs": [
+        "voltage_limited_command"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "motor_actuator",
       "importPath": "backend.builtin_modules.motor_actuator",
       "entryFunction": "process",
-      "inputs": ["voltage_limited_command"],
+      "inputs": [
+        "voltage_limited_command"
+      ],
       "outputs": [
         "rotor_1_command",
         "rotor_2_command",
@@ -162,8 +276,12 @@
       "moduleId": "rotor_motor",
       "importPath": "backend.builtin_modules.rotor_motor",
       "entryFunction": "process",
-      "inputs": ["rotor_command"],
-      "outputs": ["rotor_thrust"],
+      "inputs": [
+        "rotor_command"
+      ],
+      "outputs": [
+        "rotor_thrust"
+      ],
       "parameters": {}
     },
     {
@@ -180,84 +298,127 @@
         "rotor_7_thrust",
         "rotor_8_thrust"
       ],
-      "outputs": ["total_force", "total_moment"],
+      "outputs": [
+        "total_force",
+        "total_moment"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "six_dof",
       "importPath": "backend.builtin_modules.six_dof",
       "entryFunction": "process",
-      "inputs": ["total_force", "total_moment"],
-      "outputs": ["attitude", "body_rate", "altitude"],
+      "inputs": [
+        "total_force",
+        "total_moment"
+      ],
+      "outputs": [
+        "attitude",
+        "body_rate",
+        "altitude"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "sensor_fault_injection",
       "importPath": "backend.builtin_modules.sensor_fault_injection",
       "entryFunction": "process",
-      "inputs": ["attitude", "body_rate", "altitude"],
-      "outputs": ["attitude_feedback", "rate_feedback", "altitude_feedback"],
+      "inputs": [
+        "attitude",
+        "body_rate",
+        "altitude"
+      ],
+      "outputs": [
+        "attitude_feedback",
+        "rate_feedback",
+        "altitude_feedback"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "barometer_sensor",
       "importPath": "backend.builtin_modules.barometer_sensor",
       "entryFunction": "process",
-      "inputs": ["true_altitude"],
-      "outputs": ["measured_altitude"],
+      "inputs": [
+        "true_altitude"
+      ],
+      "outputs": [
+        "measured_altitude"
+      ],
       "parameters": {
         "bias": {
           "type": "number",
-         "min": -1000,
+          "min": -1000,
           "max": 1000,
           "default": 0
         },
-       "scale": {
-         "type": "number",
-         "min": 0,
-         "max": 10,
-         "default": 1
+        "scale": {
+          "type": "number",
+          "min": 0,
+          "max": 10,
+          "default": 1
         }
-      } 
+      }
     },
     {
       "moduleId": "cabinet01_module",
       "importPath": "backend.builtin_modules.cabinet01",
       "entryFunction": "process",
-      "inputs": ["socket02"],
-      "outputs": ["socket03"],
+      "inputs": [
+        "socket02"
+      ],
+      "outputs": [
+        "socket03"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "cabinet02_module",
       "importPath": "backend.builtin_modules.cabinet02",
       "entryFunction": "process",
-      "inputs": ["socket02", "socket03"],
-      "outputs": ["socket04"],
+      "inputs": [
+        "socket02",
+        "socket03"
+      ],
+      "outputs": [
+        "socket04"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "cabinet03_module",
       "importPath": "backend.builtin_modules.cabinet03",
       "entryFunction": "process",
-      "inputs": ["socket03"],
-      "outputs": ["socket05"],
+      "inputs": [
+        "socket03"
+      ],
+      "outputs": [
+        "socket05"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "vector2_passthrough",
       "importPath": "backend.builtin_modules.vector2_passthrough",
       "entryFunction": "process",
-      "inputs": ["input_vector"],
-      "outputs": ["output_vector"],
+      "inputs": [
+        "input_vector"
+      ],
+      "outputs": [
+        "output_vector"
+      ],
       "parameters": {}
     },
     {
       "moduleId": "scalar_to_vector4",
       "importPath": "backend.builtin_modules.scalar_to_vector4",
       "entryFunction": "process",
-      "inputs": ["scalar_input"],
-      "outputs": ["vector_output"],
+      "inputs": [
+        "scalar_input"
+      ],
+      "outputs": [
+        "vector_output"
+      ],
       "parameters": {}
     },
     {
@@ -265,16 +426,58 @@
       "importPath": "backend.builtin_modules.rf_four_channel_source",
       "entryFunction": "process",
       "inputs": [],
-        "outputs": ["rf_samples"],
-        "parameters": {
-        "sample_1": {"type": "number", "min": -1000000, "max": 1000000, "default": 1.0},
-        "sample_2": {"type": "number", "min": -1000000, "max": 1000000, "default": 0.8},
-        "sample_3": {"type": "number", "min": -1000000, "max": 1000000, "default": 0.6},
-        "sample_4": {"type": "number", "min": -1000000, "max": 1000000, "default": 0.4},
-        "center_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 100},
-        "pulse_width_seconds": {"type": "number", "min": 0, "max": 3600, "default": 0.001},
-        "pulse_period_seconds": {"type": "number", "min": 0.000000001, "max": 3600, "default": 0.001},
-        "phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0}
+      "outputs": [
+        "rf_samples"
+      ],
+      "parameters": {
+        "sample_1": {
+          "type": "number",
+          "min": -1000000,
+          "max": 1000000,
+          "default": 1.0
+        },
+        "sample_2": {
+          "type": "number",
+          "min": -1000000,
+          "max": 1000000,
+          "default": 0.8
+        },
+        "sample_3": {
+          "type": "number",
+          "min": -1000000,
+          "max": 1000000,
+          "default": 0.6
+        },
+        "sample_4": {
+          "type": "number",
+          "min": -1000000,
+          "max": 1000000,
+          "default": 0.4
+        },
+        "center_frequency_hz": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000000000,
+          "default": 100
+        },
+        "pulse_width_seconds": {
+          "type": "number",
+          "min": 0,
+          "max": 3600,
+          "default": 0.001
+        },
+        "pulse_period_seconds": {
+          "type": "number",
+          "min": 1e-09,
+          "max": 3600,
+          "default": 0.001
+        },
+        "phase_deg": {
+          "type": "number",
+          "min": -360,
+          "max": 360,
+          "default": 0
+        }
       }
     },
     {
@@ -282,16 +485,61 @@
       "importPath": "backend.builtin_modules.rf_four_output_source",
       "entryFunction": "process",
       "inputs": [],
-      "outputs": ["rf_output_1", "rf_output_2", "rf_output_3", "rf_output_4"],
+      "outputs": [
+        "rf_output_1",
+        "rf_output_2",
+        "rf_output_3",
+        "rf_output_4"
+      ],
       "parameters": {
-        "sample_1": {"type": "number", "min": -1000000, "max": 1000000, "default": 1.0},
-        "sample_2": {"type": "number", "min": -1000000, "max": 1000000, "default": 0.8},
-        "sample_3": {"type": "number", "min": -1000000, "max": 1000000, "default": 0.6},
-        "sample_4": {"type": "number", "min": -1000000, "max": 1000000, "default": 0.4},
-        "center_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 100},
-        "pulse_width_seconds": {"type": "number", "min": 0, "max": 3600, "default": 0.001},
-        "pulse_period_seconds": {"type": "number", "min": 0.000000001, "max": 3600, "default": 0.001},
-        "phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0}
+        "sample_1": {
+          "type": "number",
+          "min": -1000000,
+          "max": 1000000,
+          "default": 1.0
+        },
+        "sample_2": {
+          "type": "number",
+          "min": -1000000,
+          "max": 1000000,
+          "default": 0.8
+        },
+        "sample_3": {
+          "type": "number",
+          "min": -1000000,
+          "max": 1000000,
+          "default": 0.6
+        },
+        "sample_4": {
+          "type": "number",
+          "min": -1000000,
+          "max": 1000000,
+          "default": 0.4
+        },
+        "center_frequency_hz": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000000000,
+          "default": 100
+        },
+        "pulse_width_seconds": {
+          "type": "number",
+          "min": 0,
+          "max": 3600,
+          "default": 0.001
+        },
+        "pulse_period_seconds": {
+          "type": "number",
+          "min": 1e-09,
+          "max": 3600,
+          "default": 0.001
+        },
+        "phase_deg": {
+          "type": "number",
+          "min": -360,
+          "max": 360,
+          "default": 0
+        }
       }
     },
     {
@@ -311,33 +559,100 @@
         "upconverted_output_2"
       ],
       "parameters": {
-        "downconvert_lo_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 100},
-        "upconvert_lo_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 100},
-        "lo_phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0},
-        "downconversion_gain": {"type": "number", "min": 0, "max": 1000000, "default": 1},
-        "upconversion_gain": {"type": "number", "min": 0, "max": 1000000, "default": 1},
-        "downconvert_low_pass_cutoff_hz": {"type": "number", "min": 0, "max": 1000000000, "default": 20}
+        "downconvert_lo_frequency_hz": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000000000,
+          "default": 100
+        },
+        "upconvert_lo_frequency_hz": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000000000,
+          "default": 100
+        },
+        "lo_phase_deg": {
+          "type": "number",
+          "min": -360,
+          "max": 360,
+          "default": 0
+        },
+        "downconversion_gain": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000,
+          "default": 1
+        },
+        "upconversion_gain": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000,
+          "default": 1
+        },
+        "downconvert_low_pass_cutoff_hz": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000000,
+          "default": 20
+        }
       }
     },
     {
       "moduleId": "rf_downconverter",
       "importPath": "backend.builtin_modules.rf_downconverter",
       "entryFunction": "process",
-      "inputs": ["rf_input", "rf_input_2"],
-      "outputs": ["if_i", "if_q"],
+      "inputs": [
+        "rf_input",
+        "rf_input_2"
+      ],
+      "outputs": [
+        "if_i",
+        "if_q"
+      ],
       "parameters": {
-        "input_mode": {"type": "integer", "min": 1, "max": 2, "enum": [1, 2], "default": 1},
-        "lo_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 990000000},
-        "lo_phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0},
-        "conversion_gain": {"type": "number", "min": 0, "max": 1000000, "default": 1},
-        "low_pass_cutoff_hz": {"type": "number", "min": 0, "max": 1000000000, "default": 20000000}
+        "input_mode": {
+          "type": "integer",
+          "min": 1,
+          "max": 2,
+          "enum": [
+            1,
+            2
+          ],
+          "default": 1
+        },
+        "lo_frequency_hz": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000000000,
+          "default": 990000000
+        },
+        "lo_phase_deg": {
+          "type": "number",
+          "min": -360,
+          "max": 360,
+          "default": 0
+        },
+        "conversion_gain": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000,
+          "default": 1
+        },
+        "low_pass_cutoff_hz": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000000,
+          "default": 20000000
+        }
       }
     },
     {
       "moduleId": "rf_pulse_feature_extractor",
       "importPath": "backend.builtin_modules.rf_pulse_feature_extractor",
       "entryFunction": "process",
-      "inputs": ["rf_signal"],
+      "inputs": [
+        "rf_signal"
+      ],
       "outputs": [
         "center_frequency_hz",
         "pulse_period_seconds",
@@ -345,37 +660,100 @@
         "pulse_amplitude_adc"
       ],
       "parameters": {
-        "fft_size": {"type": "number", "min": 4, "max": 4096, "default": 1024},
-        "adc_full_scale": {"type": "number", "min": 0.000000001, "max": 1000000, "default": 1},
-        "envelope_threshold_adc": {"type": "number", "min": 0, "max": 255, "default": 12}
+        "fft_size": {
+          "type": "number",
+          "min": 4,
+          "max": 4096,
+          "default": 1024
+        },
+        "adc_full_scale": {
+          "type": "number",
+          "min": 1e-09,
+          "max": 1000000,
+          "default": 1
+        },
+        "envelope_threshold_adc": {
+          "type": "number",
+          "min": 0,
+          "max": 255,
+          "default": 12
+        }
       }
     },
     {
       "moduleId": "11",
       "importPath": "backend.builtin_modules.11",
       "entryFunction": "process",
-      "inputs": ["a", "b"],
-      "outputs": ["A", "B" ],
-      "parameters": {
-      }
+      "inputs": [
+        "a",
+        "b"
+      ],
+      "outputs": [
+        "A",
+        "B"
+      ],
+      "parameters": {}
     },
     {
       "moduleId": "rf_limit_amplify_downconvert_split8",
       "importPath": "backend.builtin_modules.rf_limit_amplify_downconvert_split8",
       "entryFunction": "process",
-      "inputs": ["rf_input"],
+      "inputs": [
+        "rf_input"
+      ],
       "outputs": [
-        "rf_output_1", "rf_output_2", "rf_output_3", "rf_output_4",
-        "rf_output_5", "rf_output_6", "rf_output_7", "rf_output_8"
+        "rf_output_1",
+        "rf_output_2",
+        "rf_output_3",
+        "rf_output_4",
+        "rf_output_5",
+        "rf_output_6",
+        "rf_output_7",
+        "rf_output_8"
       ],
       "parameters": {
-        "limit_amplitude": {"type": "number", "min": 0, "max": 1000000, "default": 1},
-        "gain_db": {"type": "number", "min": -120, "max": 120, "default": 0},
-        "lo_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 5},
-        "lo_phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0},
-        "conversion_gain": {"type": "number", "min": 0, "max": 1000000, "default": 1},
-        "low_pass_cutoff_hz": {"type": "number", "min": 0, "max": 1000000000, "default": 5},
-        "split_insertion_loss_db": {"type": "number", "min": 0, "max": 120, "default": 0}
+        "limit_amplitude": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000,
+          "default": 1
+        },
+        "gain_db": {
+          "type": "number",
+          "min": -120,
+          "max": 120,
+          "default": 0
+        },
+        "lo_frequency_hz": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000000000,
+          "default": 5
+        },
+        "lo_phase_deg": {
+          "type": "number",
+          "min": -360,
+          "max": 360,
+          "default": 0
+        },
+        "conversion_gain": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000,
+          "default": 1
+        },
+        "low_pass_cutoff_hz": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000000,
+          "default": 5
+        },
+        "split_insertion_loss_db": {
+          "type": "number",
+          "min": 0,
+          "max": 120,
+          "default": 0
+        }
       }
     }
   ]

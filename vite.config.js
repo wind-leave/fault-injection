@@ -15,6 +15,10 @@ export default defineConfig({
       '/api/troubleshooting': {
         target: 'http://127.0.0.1:8766',
         changeOrigin: true
+      },
+      '/api/components': {
+        target: 'http://127.0.0.1:8766',
+        changeOrigin: true
       }
     }
   },

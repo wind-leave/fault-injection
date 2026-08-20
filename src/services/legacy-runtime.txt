@@ -46,7 +46,11 @@ const S={
   selectedDiagnosticTestPointId:'',
   testPointDiagnosis:null,
   confirmedDiagnosticFaults:{},
-  practiceFaultIds:[]
+  practiceFaultIds:[],
+  dMatrixFaultEnabledStates:{},
+  dMatrixFaultOrder:[],
+  dMatrixPointOrder:[],
+  dMatrixTroubleshootingPlanOverrides:{}
 };
 
 S.rootCanvasId='canvas-root';
@@ -634,6 +638,7 @@ function updateUI(){
   document.getElementById('sblk').textContent=`组件: ${S.modelNodes.length} · 连线: ${S.modelEdges.length}`;
   document.getElementById('sflt').textContent=`故障模型: ${S.faultModels}`;
   updateSimbarEnabled();
+  window.scheduleDiagnosticKnowledgeGraphRefresh?.();
 }
 // --- 基础工具 ---
 function clamp(value,min,max){return Math.min(Math.max(value,min),max);}
@@ -1003,6 +1008,10 @@ function restoreSystemModelSnapshot(snapshot){
   S.workspaceSource=typeof restored.workspaceSource==='string'?restored.workspaceSource:(S.workspaceSource||'');
   S.faultedBlks=restored.faultedBlks||[];
   S.importedFaultModels=restored.importedFaultModels||[];
+  S.dMatrixFaultEnabledStates={};
+  S.dMatrixFaultOrder=[];
+  S.dMatrixPointOrder=[];
+  S.dMatrixTroubleshootingPlanOverrides={};
   S.faultInstances=Array.isArray(restored.faultInstances)?restored.faultInstances:[];
   S.faultTags=Array.isArray(restored.faultTags)?restored.faultTags:[];
   S.faultInjectionLinks=Array.isArray(restored.faultInjectionLinks)?restored.faultInjectionLinks:[];
@@ -4724,6 +4733,46 @@ function getDisplayConsoleInputDefinitions(node){
     :DISPLAY_CONSOLE_INPUTS;
 }
 
+function buildDisplayConsoleInputPhysicalTestPoints(runtimeNodes=getRuntimeNodes(),runtimeEdges=getRuntimeEdges()){
+  const nodes=Array.isArray(runtimeNodes)?runtimeNodes:[];
+  const edges=Array.isArray(runtimeEdges)?runtimeEdges:[];
+  const nodeName=node=>node?.props?.name||node?.name||node?.label||node?.id||'未命名组件';
+  return nodes.filter(node=>node?.type==='display_console'&&node?.id).flatMap(node=>{
+    const consoleName=nodeName(node);
+    return getDisplayConsoleInputDefinitions(node).map((input,inputIndex)=>{
+      const edge=edges.find(item=>
+        (item?.targetNodeId||item?.target||item?.to||item?.targetId)===node.id
+        &&Number(item?.targetPortIndex||0)===inputIndex
+      );
+      if(!edge?.id){return null;}
+      const sourceId=edge?.sourceNodeId||edge?.source||edge?.from||edge?.sourceId;
+      const source=nodes.find(item=>item?.id===sourceId)||getNode(sourceId);
+      const inputKey=input?.key||`input-${inputIndex+1}`;
+      const inputLabel=input?.label||`输入 ${inputIndex+1}`;
+      return {
+        pointId:`tp-display-console-${node.id}-input-${inputIndex}`,
+        name:`${consoleName} · ${inputLabel}`,
+        edgeId:edge.id,
+        signalId:edge?.signalId||edge?.signalID||edge?.signal||inputKey,
+        nodeId:node.id,
+        targetNodeId:node.id,
+        inputIndex,
+        inputKey,
+        inputLabel,
+        sourceName:nodeName(source),
+        targetName:consoleName,
+        signalPathZh:`${nodeName(source)} -> ${consoleName} · ${inputLabel}`,
+        pointType:'physical',
+        detects:[],
+        autoAdded:true,
+        displayConsoleInput:true,
+        defaultInstalled:true,
+        readOnly:true
+      };
+    }).filter(Boolean);
+  });
+}
+
 function getDisplayConsoleColumnDefinitions(node){
   const configured=getDisplayConsoleTemplateConfig(node)?.columns;
   return Array.isArray(configured)&&configured.length
@@ -6493,7 +6542,7 @@ if(!window.__GZ_PYTHON_BINDING_EVENTS__){
   const runtimeListeners=getRuntimeListenerStore();
   runtimeListeners.pythonBindingConfirm=event=>{
     if(event?.detail?.nodeId&&event?.detail?.binding){
-      applyPythonBindingToNode(event.detail.nodeId,event.detail.binding);
+      applyPythonBindingToNode(event.detail.nodeId,event.detail.binding,event.detail.interfaceDefinition||null);
     }
   };
   runtimeListeners.pythonBindingUnbind=event=>{
@@ -6961,10 +7010,31 @@ openPythonBindingDialog = function(nodeId=''){
   }));
 };
 
-applyPythonBindingToNode = function(nodeId,binding){
+applyPythonBindingToNode = function(nodeId,binding,interfaceDefinition=null){
   const node=getNode(nodeId);
   if(!node||node.type!=='simulation_block'){return;}
   node.pythonBinding=cloneDefaults(binding);
+  if(interfaceDefinition){
+    const definition=cloneDefaults(interfaceDefinition);
+    node.props={...(node.props||{})};
+    node.props.inputs=cloneDefaults(definition.inputs||[]);
+    node.props.outputs=cloneDefaults(definition.outputs||[]);
+    node.props.middleVars=cloneDefaults(definition.middleVars||[]);
+    node.props.parameters=cloneDefaults(definition.parameters||[]);
+    const existingValues=node.props.parameterValues||{};
+    node.props.parameterValues=Object.fromEntries(node.props.parameters.map(item=>[
+      item.key||item.varName||item.name,
+      existingValues[item.key||item.varName||item.name]??item.default??0
+    ]));
+    node.ports={inputs:cloneDefaults(definition.inputs||[]),outputs:cloneDefaults(definition.outputs||[])};
+    node.parameters=cloneDefaults(node.props.parameters);
+    node.stateVariables=cloneDefaults(node.props.middleVars);
+    node.simulationInterfaceDefinition={
+      name:node.props.name||'',
+      ports:{inputs:cloneDefaults(node.props.inputs),outputs:cloneDefaults(node.props.outputs),middleVars:cloneDefaults(node.props.middleVars)},
+      pythonPortMapping:cloneDefaults(binding.portMapping||{inputs:[],outputs:[],middleVars:[]})
+    };
+  }
   applyNodeGeometry(node);
   const removedEdges=pruneInvalidEdgesForNode(node);
   syncAllPythonInputConnectionState();
@@ -7556,6 +7626,10 @@ window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__ = function(pkg,prepared){
   S.activeLineType=restored.activeLineType||'normal';
   S.faultedBlks=restored.faultedBlks||[];
   S.importedFaultModels=restored.importedFaultModels||[];
+  S.dMatrixFaultEnabledStates={};
+  S.dMatrixFaultOrder=[];
+  S.dMatrixPointOrder=[];
+  S.dMatrixTroubleshootingPlanOverrides={};
   S.diagnosticTestPoints=Array.isArray(restored.diagnosticTestPoints)?cloneDefaults(restored.diagnosticTestPoints):[];
   S.testPoints=Array.isArray(restored.testPoints)?cloneDefaults(restored.testPoints):[];
   S.manualDiagnosticTestPoints=Array.isArray(restored.manualDiagnosticTestPoints)?cloneDefaults(restored.manualDiagnosticTestPoints):[];
@@ -7981,35 +8055,182 @@ function buildSimulationRenderDataSnapshot(actualScopeSamples,actualInstrumentSa
   return {devices,connections};
 }
 
-function buildPracticeFaultSnapshots(dMatrix){
-  const selectedIds=Array.isArray(S.practiceFaultIds)?S.practiceFaultIds:[];
-  if(!selectedIds.length) return [];
-  const rows=Array.isArray(dMatrix?.rows)?dMatrix.rows:[];
-  return selectedIds.map(faultId=>{
-    const row=rows.find(item=>item.faultId===faultId)||{};
-    const troubleshootingPath=typeof window.buildTroubleshootingPathForFault==='function'
-      ?cloneDefaults(window.buildTroubleshootingPathForFault(faultId))
-      :null;
-    return {
-      faultId,
-      faultName:row.faultName||row.faultDisplayName||faultId,
-      faultDisplayName:row.faultDisplayName||row.faultName||faultId,
-      targetLabel:row.targetLabel||'',
-      layer:row.layer||'',
-      selected:true,
-      troubleshootingPath
-    };
-  });
+function getEnabledSimulationResultFaultIds(dMatrix){
+  const overrides=S.dMatrixFaultEnabledStates&&typeof S.dMatrixFaultEnabledStates==='object'
+    ?S.dMatrixFaultEnabledStates
+    :{};
+  return (Array.isArray(dMatrix?.rows)?dMatrix.rows:[])
+    .filter(row=>Object.prototype.hasOwnProperty.call(overrides,row.faultId)?Boolean(overrides[row.faultId]):row.enabled!==false)
+    .map(row=>String(row.faultId||'').trim())
+    .filter(Boolean);
 }
 
-async function ensureSelectedPracticeFaultPlans(){
-  const selectedIds=Array.isArray(S.practiceFaultIds)?S.practiceFaultIds.filter(Boolean):[];
-  if(!selectedIds.length) return;
+function buildTroubleshootingKeyMeasurementPoints(troubleshootingPath,dMatrix){
+  const points=Array.isArray(dMatrix?.points)?dMatrix.points:[];
+  const result=new Map();
+  [...(Array.isArray(troubleshootingPath?.knownConditions)?troubleshootingPath.knownConditions:[]),...(Array.isArray(troubleshootingPath?.steps)?troubleshootingPath.steps:[]),...(Array.isArray(troubleshootingPath?.keySteps)?troubleshootingPath.keySteps:[])]
+    .filter(step=>step?.action==='measure'||step?.actionType==='measurePoint'||step?.pointId||step?.pointCode)
+    .forEach(step=>{
+      const point=points.find(item=>item.pointId===step.pointId||item.shortName===step.pointCode)||{};
+      const pointId=step.pointId||point.pointId||'';
+      const pointCode=step.pointCode||point.shortName||pointId;
+      const key=String(pointId||pointCode||'').trim();
+      if(!key||result.has(key)){return;}
+      result.set(key,{
+        pointId:pointId||null,
+        pointCode,
+        pointName:step.pointName||point.name||pointCode,
+        pointType:step.pointType||point.pointType||null,
+        expectedState:step.expectedState||null,
+        observed:step.observed||null,
+        source:step.source||null,
+        expected:step.expected||step.text||''
+      });
+    });
+  return Array.from(result.values());
+}
+
+function buildEnabledFaultCombinationSnapshot(dMatrix,faultIds,troubleshootingPath){
+  if(!faultIds.length||!troubleshootingPath){return [];}
+  const rows=(Array.isArray(dMatrix?.rows)?dMatrix.rows:[]).filter(row=>faultIds.includes(row.faultId));
+  const faultNames=rows.map(row=>row.faultDisplayName||row.faultName||row.faultId);
+  return [{
+    faultId:faultIds.join('+'),
+    faultIds:cloneDefaults(faultIds),
+    faultName:faultNames.join(' + '),
+    faultNames,
+    mode:faultIds.length===1?'single':'multiple',
+    selected:true,
+    troubleshootingPath:cloneDefaults(troubleshootingPath)
+  }];
+}
+
+function buildLocalEnabledFaultCombinationPlan(dMatrix,faultIds){
+  const knowledgeGraph=window.getDiagnosticKnowledgeGraph?.()||window.refreshDiagnosticKnowledgeGraph?.({publish:false})||{};
+  const graphNodes=Array.isArray(knowledgeGraph.nodes)?knowledgeGraph.nodes:[];
+  const graphRelations=Array.isArray(knowledgeGraph.relations)?knowledgeGraph.relations:[];
+  const faultNodes=graphNodes.filter(node=>node?.kind==='fault');
+  const pointNodes=graphNodes.filter(node=>node?.kind==='measurementPoint');
+  const targetFaultNodes=faultNodes.filter(node=>faultIds.includes(node.id));
+  const pointCodeById=new Map(pointNodes.map(point=>[point.id,point.pointCode||point.id]));
+  const pointCodes=pointNodes.map(point=>point.pointCode||point.id);
+  const detectsPoint=(faultId,pointCode)=>graphRelations.some(relation=>
+    relation?.type==='DETECTABILITY'
+    &&relation?.source?.kind==='fault'
+    &&relation?.source?.id===faultId
+    &&pointCodeById.get(relation?.target?.id)===pointCode
+    &&Boolean(relation?.detectable)
+  );
+  const targetSignature=pointCodes.map(pointCode=>faultIds.some(faultId=>detectsPoint(faultId,pointCode))?'1':'0').join('');
+  const indistinguishableSingles=faultNodes.filter(node=>
+    !faultIds.includes(node.id)
+    &&pointCodes.map(pointCode=>detectsPoint(node.id,pointCode)?'1':'0').join('')===targetSignature
+  );
+  const isolated=indistinguishableSingles.length===0;
+  const knownConditions=pointNodes
+    .filter(point=>normalizeDiagnosticTestPointType(point.pointType)==='physical')
+    .map(point=>{
+      const pointCode=point.pointCode||point.id;
+      const abnormal=faultIds.some(faultId=>detectsPoint(faultId,pointCode));
+      return {
+        pointId:point.id,
+        pointCode,
+        pointName:point.label||pointCode,
+        pointType:'physical',
+        observed:abnormal?'abnormal':'normal',
+        expectedState:abnormal?'abnormal':'normal',
+        source:'target-signature'
+      };
+    });
+  const measured=new Set();
+  const measurementSteps=[];
+  pointNodes.forEach(point=>{
+    if(normalizeDiagnosticTestPointType(point.pointType)==='physical'){return;}
+    const pointCode=point.pointCode||point.id;
+    const detectsTarget=faultIds.some(faultId=>detectsPoint(faultId,pointCode));
+    if(!detectsTarget||measured.has(pointCode)){return;}
+    measured.add(pointCode);
+    measurementSteps.push({
+      index:measurementSteps.length+1,
+      action:'measure',
+      pointId:point.id,
+      pointCode,
+      pointName:point.label||pointCode,
+      expected:'依据知识图谱的可检测关系确认该测点是否出现对应故障特征。'
+    });
+  });
+  const repairs=[];
+  const repairKeys=new Set();
+  if(isolated){graphRelations.filter(relation=>
+    relation?.type==='RESOLVED_BY_REPLACING'
+    &&relation?.source?.kind==='fault'
+    &&faultIds.includes(relation?.source?.id)
+  ).forEach(relation=>{
+    const kind=relation?.target?.kind==='signalEdge'?'edge':'node';
+    const targetId=relation?.target?.id;
+    const key=`${kind}:${targetId}`;
+    if(!targetId||repairKeys.has(key)){return;}
+    repairKeys.add(key);
+    const targetNode=graphNodes.find(node=>node?.kind===relation?.target?.kind&&node?.id===targetId);
+    const targetLabel=targetNode?.label||targetId;
+    repairs.push({
+      index:measurementSteps.length+repairs.length+1,
+      action:relation?.action||(kind==='edge'?'replaceWire':'replaceComponent'),
+      targetId,
+      targetLabel,
+      text:`${kind==='edge'?'更换连线':'更换设备'}：${targetLabel}。`
+    });
+  });}
+  const faultNames=targetFaultNodes.map(node=>node.label||node.id);
+  const steps=[...measurementSteps,...repairs];
+  return {
+    ok:true,
+    faultId:faultIds.join('+'),
+    faultIds:cloneDefaults(faultIds),
+    faultName:faultNames.join(' + '),
+    faultNames,
+    mode:faultIds.length===1?'single':'multiple',
+    isolated,
+    knownConditions,
+    remainingCandidateFaultSets:[cloneDefaults(faultIds),...indistinguishableSingles.map(node=>[node.id])],
+    remainingCandidateFaultSetNames:[faultNames.join(' + '),...indistinguishableSingles.map(node=>node.label||node.id)],
+    steps,
+    keySteps:steps.map(step=>({
+      id:step.action==='measure'?`measure-${step.pointId||step.pointCode}`:`${step.action}-${step.targetId}`,
+      action:step.action,
+      pointId:step.pointId,
+      pointCode:step.pointCode,
+      targetId:step.targetId,
+      targetLabel:step.targetLabel,
+      text:step.action==='measure'?`检测关键测点：${step.pointCode} ${step.pointName}。`:step.text
+    })),
+    summary:isolated
+      ?'后端方案暂不可用，已保存依据当前知识图谱关系生成的本地组合排故路径。'
+      :'后端方案暂不可用，且当前知识图谱中存在测点特征相同的其他故障；路径停止在检测步骤，不给出更换动作。',
+    knowledgeGraph:cloneDefaults(knowledgeGraph),
+    pathGeneration:{engine:'knowledge-graph-local-fallback',candidateSource:'DETECTABILITY',repairSource:'RESOLVED_BY_REPLACING'},
+    source:'local-knowledge-graph-fallback',
+    isCustomized:false
+  };
+}
+
+async function ensureEnabledFaultCombinationPlan(dMatrix){
+  const faultIds=getEnabledSimulationResultFaultIds(dMatrix);
+  if(!faultIds.length){return {faultIds,plan:null};}
+  const withManualOverride=plan=>typeof window.applyTroubleshootingPlanOverride==='function'
+    ?window.applyTroubleshootingPlanOverride(faultIds,cloneDefaults(plan))
+    :plan;
   const ensurePlan=window.ensureBackendTroubleshootingPlan;
   if(typeof ensurePlan!=='function'){
-    throw new Error('后端排故方案服务未就绪');
+    return {faultIds,plan:withManualOverride(buildLocalEnabledFaultCombinationPlan(dMatrix,faultIds))};
   }
-  await Promise.all(selectedIds.map(faultId=>ensurePlan(faultId)));
+  try{
+    const plan=await ensurePlan(faultIds);
+    if(plan?.ok){return {faultIds,plan:withManualOverride(plan)};}
+  }catch(error){
+    console.warn('Failed to load enabled-fault combination plan; using the local knowledge-graph fallback',error);
+  }
+  return {faultIds,plan:withManualOverride(buildLocalEnabledFaultCombinationPlan(dMatrix,faultIds))};
 }
 
 async function buildSimulationResultSnapshot(){
@@ -8023,8 +8244,10 @@ async function buildSimulationResultSnapshot(){
   const dMatrix=typeof window.buildDetectionMatrixModel==='function'
     ?cloneDefaults(window.buildDetectionMatrixModel())
     :null;
-  await ensureSelectedPracticeFaultPlans();
-  const practiceFaults=buildPracticeFaultSnapshots(dMatrix);
+  const combination=await ensureEnabledFaultCombinationPlan(dMatrix);
+  const combinedTroubleshootingPath=combination.plan;
+  const keyMeasurementPoints=buildTroubleshootingKeyMeasurementPoints(combinedTroubleshootingPath,dMatrix);
+  const practiceFaults=buildEnabledFaultCombinationSnapshot(dMatrix,combination.faultIds,combinedTroubleshootingPath);
   const status=getSimulationResultStatus();
   const meta={
     resultId:`sim-${exportSequence}`,
@@ -8066,6 +8289,9 @@ async function buildSimulationResultSnapshot(){
     componentOutputs,
     dMatrix,
     practiceFaults,
+    targetFaultIds:combination.faultIds,
+    combinedTroubleshootingPath,
+    keyMeasurementPoints,
     renderData,
     summary,
     executableModel
@@ -8120,6 +8346,10 @@ window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__ = function(pkg,prepared){
   S.activeLineType=restored.activeLineType||'normal';
   S.faultedBlks=restored.faultedBlks||[];
   S.importedFaultModels=restored.importedFaultModels||[];
+  S.dMatrixFaultEnabledStates={};
+  S.dMatrixFaultOrder=[];
+  S.dMatrixPointOrder=[];
+  S.dMatrixTroubleshootingPlanOverrides={};
   S.diagnosticTestPoints=Array.isArray(restored.diagnosticTestPoints)?cloneDefaults(restored.diagnosticTestPoints):[];
   S.testPoints=Array.isArray(restored.testPoints)?cloneDefaults(restored.testPoints):[];
   S.manualDiagnosticTestPoints=Array.isArray(restored.manualDiagnosticTestPoints)?cloneDefaults(restored.manualDiagnosticTestPoints):[];
@@ -11723,6 +11953,10 @@ function resetSimulationRuntimeForBlankWorkspace(){
 
 function clearModelTransientStateForBlankWorkspace(){
   S.importedFaultModels=[];
+  S.dMatrixFaultEnabledStates={};
+  S.dMatrixFaultOrder=[];
+  S.dMatrixPointOrder=[];
+  S.dMatrixTroubleshootingPlanOverrides={};
   S.faultTags=[];
   S.faultInjectionLinks=[];
   S.selFaultTag=null;
@@ -15736,10 +15970,14 @@ Object.assign(window,{
       seen.add(key);
       return true;
     });
+    const automaticConsolePoints=typeof window.buildDiagnosticTestPointModel==='function'
+      ?list(window.buildDiagnosticTestPointModel()?.positions).filter(point=>point?.displayConsoleInput)
+      :buildDisplayConsoleInputPhysicalTestPoints().map((point,index)=>({...point,shortName:`M${index+1}`}));
     return [
       ...collect(state.manualDiagnosticTestPoints,'tp-manual-edge'),
       ...collect(state.diagnosticTestPoints,'tp-config-edge'),
-      ...collect(state.testPoints,'tp-config-edge')
+      ...collect(state.testPoints,'tp-config-edge'),
+      ...collect(automaticConsolePoints,'tp-display-console-input')
     ];
   }
 
@@ -15890,7 +16128,7 @@ Object.assign(window,{
 
   function createEdgeTestPointDraft(edge){
     const state=S;
-    const pointCount=list(state.diagnosticTestPoints).length+list(state.testPoints).length+list(state.manualDiagnosticTestPoints).length;
+    const nextNumber=getNextEdgeTestPointNumber(state);
     const existingIds=new Set([
       ...list(state.diagnosticTestPoints),
       ...list(state.testPoints),
@@ -15905,7 +16143,8 @@ Object.assign(window,{
     return {
       pointId,
       id:pointId,
-      shortName:`M${pointCount+1}`,
+      shortName:`M${nextNumber}`,
+      createdAt:Date.now(),
       name:getEdgeTestPointDefaultName(edge),
       edgeId:edge.id,
       signalId:edge.signalId||'',
@@ -15918,12 +16157,24 @@ Object.assign(window,{
     };
   }
 
+  function getNextEdgeTestPointNumber(state=S){
+    const reserved=Number(state?.diagnosticTestPointNextNumber);
+    if(Number.isInteger(reserved)&&reserved>0){return reserved;}
+    const numbers=[
+      ...list(state?.diagnosticTestPoints),
+      ...list(state?.testPoints),
+      ...list(state?.manualDiagnosticTestPoints)
+    ].map(point=>Number(String(point?.shortName||point?.code||'').match(/^M(\d+)$/i)?.[1]||0));
+    return Math.max(0,...numbers)+1;
+  }
+
   function addEdgeManualTestPoint(edge){
     if(!edge?.id) return null;
     const state=S;
     if(!Array.isArray(state.manualDiagnosticTestPoints)) state.manualDiagnosticTestPoints=[];
     const manualPoint=createEdgeTestPointDraft(edge);
     state.manualDiagnosticTestPoints.push(manualPoint);
+    state.diagnosticTestPointNextNumber=getNextEdgeTestPointNumber(state)+1;
     state.diagnosticTestPointManualCleared=false;
     delete state.compactDiagnosticFixedPoints;
     delete state.compactDiagnosticFixedPointSignature;
@@ -16024,6 +16275,7 @@ Object.assign(window,{
 
   function renderEdgeTestPointCard(edge,point,index){
     const pointId=point.pointId||point.id||`tp-${edge.id}-${index+1}`;
+    const automaticDisplayConsolePoint=Boolean(point?.displayConsoleInput);
     return `
       <div class="edge-testpoint-card" data-edge-testpoint-card="${text(pointId)}">
         <div class="edge-testpoint-card-head">
@@ -16035,7 +16287,7 @@ Object.assign(window,{
         </div>
         <div class="props-field">
           <label>测点类型</label>
-          <select data-edge-testpoint-type>
+          <select data-edge-testpoint-type ${automaticDisplayConsolePoint?'disabled':''}>
             <option value="physical" ${normalizeDiagnosticTestPointType(point.pointType)==='physical'?'selected':''}>物理测点</option>
             <option value="virtual" ${normalizeDiagnosticTestPointType(point.pointType)==='virtual'?'selected':''}>虚拟测点</option>
           </select>
@@ -16049,7 +16301,7 @@ Object.assign(window,{
         </div>
         <div class="props-actions edge-testpoint-actions">
           <button type="button" class="props-save" data-save-edge-testpoint="${text(pointId)}">保存测点</button>
-          <button type="button" class="props-danger" data-delete-edge-testpoint="${text(pointId)}">删除测点</button>
+          ${automaticDisplayConsolePoint?'':'<button type="button" class="props-danger" data-delete-edge-testpoint="'+text(pointId)+'">删除测点</button>'}
         </div>
       </div>`;
   }
@@ -16060,7 +16312,7 @@ Object.assign(window,{
       <div class="props-form" data-edge-testpoint-panel>
         <div class="pgroup">
           <div class="pglbl">测点设置</div>
-          <div class="props-help">测点绑定到当前连线，可检测故障来自源节点可注入的故障类型。</div>
+          <div class="props-help">测点绑定到当前连线；连接显控台输入端口时会自动生成固定的物理测点，可检测故障仍由人工配置。</div>
           <div class="edge-testpoint-list">
             ${points.length
               ?points.map((point,index)=>renderEdgeTestPointCard(edge,point,index)).join('')
@@ -17985,7 +18237,7 @@ function ensureDiagnosticTestPointState(points=null){
       pointNameZh:point.positionNameZh||point.signalNameZh||point.labelZh,
       signalPathZh:point.signalPathZh||'',
       status:abnormal?'abnormal':'normal',
-      statusLabelZh:abnormal?'疑似故障':'未发现异常',
+      statusLabelZh:abnormal?'发现异常':'未发现异常',
       checkedAt:new Date().toISOString(),
       candidates,
       confirmedFaultTypeIds:cloneDefaults(S.confirmedDiagnosticFaults?.[pointId]||[])
@@ -18059,6 +18311,8 @@ function ensureDiagnosticTestPointState(points=null){
     const overlay=ensureDiagnosticTestPointDialog();
     const body=overlay.querySelector('#testpoint-diagnosis-body');
     if(body){
+      const selectedCandidate=diagnosis.candidates.find(candidate=>candidate.confirmed)||null;
+      const selectedCandidateId=selectedCandidate&&(selectedCandidate.faultTypeId||selectedCandidate.id);
       body.innerHTML=`
         <section class="testpoint-diagnosis-summary">
           <div><span>测点</span><strong>${escapeHtml(diagnosis.pointNameZh)}</strong></div>
@@ -22630,6 +22884,11 @@ function decorateDataflowEdges(){
 
   function syncFaultTagEnabledToRuntimeTarget(tag,enabled){
     if(!tag){return;}
+    if(!S.dMatrixFaultEnabledStates||typeof S.dMatrixFaultEnabledStates!=='object'){
+      S.dMatrixFaultEnabledStates={};
+    }
+    const diagnosticFaultId=tag.faultModelId||tag.faultTypeId||tag.modelId||tag.faultId||tag.id;
+    if(diagnosticFaultId){S.dMatrixFaultEnabledStates[diagnosticFaultId]=Boolean(enabled);}
     tag.runtimeEnabled=enabled;
     if(tag.injectedFault){
       tag.injectedFault={...tag.injectedFault,active:enabled,enabled};
@@ -22670,6 +22929,57 @@ function decorateDataflowEdges(){
     }
     markTopologyDirty('fault');
   }
+
+  window.setDiagnosticFaultEnabled=function(faultId,enabled,options={}){
+    const normalizedFaultId=String(faultId||'').trim();
+    if(!normalizedFaultId){return false;}
+    const nextEnabled=Boolean(enabled);
+    if(!S.dMatrixFaultEnabledStates||typeof S.dMatrixFaultEnabledStates!=='object'){
+      S.dMatrixFaultEnabledStates={};
+    }
+    S.dMatrixFaultEnabledStates[normalizedFaultId]=nextEnabled;
+    const matchingTags=Array.isArray(S.faultTags)
+      ?S.faultTags.filter(tag=>faultTagRefMatches(tag,normalizedFaultId)||tag?.id===normalizedFaultId)
+      :[];
+    matchingTags.forEach(tag=>syncFaultTagEnabledToRuntimeTarget(tag,nextEnabled));
+
+    const updateRecord=(record)=>{
+      if(!record||typeof record!=='object'||(!faultTagRefMatches(record,normalizedFaultId)&&record.id!==normalizedFaultId&&record.faultId!==normalizedFaultId)){
+        return record;
+      }
+      return {
+        ...record,
+        active:nextEnabled,
+        enabled:nextEnabled,
+        runtimeEnabled:nextEnabled,
+        status:nextEnabled?'active':'disabled',
+        injectedFault:record.injectedFault?{...record.injectedFault,active:nextEnabled,enabled:nextEnabled}:record.injectedFault
+      };
+    };
+    ['importedFaultModels','injectedFaults','activeFaults','faultInstances','selectedFaults','appliedFaults'].forEach(key=>{
+      if(Array.isArray(S[key])){S[key]=S[key].map(updateRecord);}
+    });
+    [...(Array.isArray(S.modelNodes)?S.modelNodes:[]),...(Array.isArray(S.modelEdges)?S.modelEdges:[])].forEach(target=>{
+      if(target?.injectedFault){target.injectedFault=updateRecord(target.injectedFault);}
+      ['faults','faultBindings','activeFaults','faultInstances','appliedFaults','selectedFaults'].forEach(key=>{
+        if(Array.isArray(target?.[key])){target[key]=target[key].map(updateRecord);}
+      });
+    });
+    if(S.activeModelPackage&&Array.isArray(S.faultInstances)){
+      S.activeModelPackage.faultInstances=cloneBridgeValue(S.faultInstances);
+    }
+    renderModelNodes();
+    renderEdges();
+    updateUI();
+    if((document.getElementById('cw')?.dataset.view==='dmatrix'||document.querySelector('[data-d-matrix-view]'))&&options.renderMatrix!==false){
+      window.renderDetectionMatrixPanel?.();
+    }
+    const selectedTag=matchingTags.find(tag=>tag.id===S.selFaultTag)||matchingTags[0];
+    if(selectedTag&&S.selFaultTag===selectedTag.id){renderFaultTagPropertyPanel(selectedTag);}
+    window.scheduleDiagnosticKnowledgeGraphRefresh?.();
+    if(options.toast!==false){toast(nextEnabled?'故障已启用，可参与排故与仿真':'故障已禁用，不参与排故与仿真','s');}
+    return true;
+  };
 
   function syncFaultTagNameToRuntimeTarget(tag,nextName){
     if(!tag){return;}
@@ -22985,12 +23295,8 @@ function decorateDataflowEdges(){
     });
     const enabledControl=pd.querySelector('[data-fault-tag-enabled]');
     enabledControl?.addEventListener('change',()=>{
-      syncFaultTagEnabledToRuntimeTarget(tag,enabledControl.value==='true');
-      renderModelNodes();
-      renderEdges();
-      updateUI();
-      renderFaultTagPropertyPanel(tag);
-      toast(enabledControl.value==='true'?'故障已启用，可参与仿真':'故障已禁用，不参与仿真','s');
+      const faultId=tag.faultModelId||tag.faultTypeId||tag.modelId||tag.faultId||tag.id;
+      window.setDiagnosticFaultEnabled?.(faultId,enabledControl.value==='true');
     });
     const inputs=Array.from(pd.querySelectorAll('[data-fault-tag-param]'));
     const applyButton=pd.querySelector('[data-fault-tag-apply]');
@@ -25717,9 +26023,11 @@ function decorateDataflowEdges(){
     return arr(state.edges).length?arr(state.edges):arr(state.modelEdges);
   }
 
-  function getVisualFaultTagModels(){
+  function getVisualFaultTagModels(options={}){
     const state=getState();
-    return arr(state.faultTags).filter(tag=>tag?.active!==false&&tag?.enabled!==false).map(tag=>{
+    return arr(state.faultTags).filter(tag=>options.includeDisabled||(
+      tag?.runtimeEnabled!==false&&tag?.active!==false&&tag?.enabled!==false&&tag?.injectedFault?.active!==false&&tag?.injectedFault?.enabled!==false
+    )).map(tag=>{
       const targetKind=tag.targetKind||tag.target?.kind||'';
       const targetId=tag.targetId||tag.target?.id||'';
       return {
@@ -25795,6 +26103,10 @@ function decorateDataflowEdges(){
 
   function diagnosticPointBelongsToActiveCanvas(point,activeEdges=getActiveDiagnosticEdges(),activeNodes=getActiveDiagnosticNodes()){
     const activeCanvasId=getActiveDiagnosticCanvasId();
+    if(point?.displayConsoleInput){
+      const connectedEdgeId=getDiagnosticPointEdgeId(point,activeEdges);
+      return Boolean(connectedEdgeId&&activeEdges.some(edge=>edge?.id===connectedEdgeId));
+    }
     const pointCanvasId=findDiagnosticPointCanvasId(point);
     if(pointCanvasId) return pointCanvasId===activeCanvasId;
     const edgeId=getDiagnosticPointEdgeId(point,activeEdges);
@@ -25892,7 +26204,8 @@ function decorateDataflowEdges(){
     const state=getState();
     const library=[
       ...arr(state.importedFaultModels),
-      ...getActiveRuntimeFaultModels()
+      ...getActiveRuntimeFaultModels(),
+      ...getVisualFaultTagModels({includeDisabled:true})
     ];
     const merged=new Map();
     library.forEach(model=>{
@@ -25950,19 +26263,33 @@ function decorateDataflowEdges(){
     delete state.compactDiagnosticPointSignature;
   }
 
+  function getNextDiagnosticTestPointNumber(state=getState()){
+    const reserved=Number(state?.diagnosticTestPointNextNumber);
+    if(Number.isInteger(reserved)&&reserved>0){return reserved;}
+    const numbers=[
+      ...arr(state?.diagnosticTestPoints),
+      ...arr(state?.testPoints),
+      ...arr(state?.manualDiagnosticTestPoints)
+    ].map(point=>Number(String(point?.shortName||point?.code||'').match(/^M(\d+)$/i)?.[1]||0));
+    return Math.max(0,...numbers)+1;
+  }
+
   function createManualPointForEdge(edge,index=0,options={}){
+    const state=getState();
     const base=pointForEdge(edge,index);
+    const generatedShortName=options.shortName||`M${getNextDiagnosticTestPointNumber(state)}`;
     return {
       ...base,
       ...options,
       pointId:options.pointId||base.pointId||`tp-${edge.id||index}`,
-      shortName:options.shortName||base.shortName||`M${index+1}`,
+      shortName:generatedShortName,
       name:options.name||base.name,
       edgeId:edge.id,
       sourceName:options.sourceName||base.sourceName,
       targetName:options.targetName||base.targetName,
       pointType:options.pointType||'virtual',
-      manuallyAdded:true
+      manuallyAdded:true,
+      createdAt:options.createdAt||Date.now()
     };
   }
 
@@ -25999,6 +26326,10 @@ function decorateDataflowEdges(){
       usedEdges.add(edge.id);
     });
     return points;
+  }
+
+  function getDisplayConsolePhysicalDiagnosticPoints(runtimeNodes=getActiveDiagnosticNodes(),runtimeEdges=getActiveDiagnosticEdges()){
+    return buildDisplayConsoleInputPhysicalTestPoints(runtimeNodes,runtimeEdges);
   }
 
   function edgeSourceId(edge){
@@ -26119,7 +26450,13 @@ function decorateDataflowEdges(){
       point.vectorIndex??'',
       arr(point.detects).join('|')
     ].join(':')).join('|');
-    const edgeSignature=[activeCanvasId,runtimeEdges.map(edge=>edge.id).join('|'),runtimeNodes.map(node=>node.id).join('|'),explicitSignature,manualSignature].join('::');
+    const displayConsoleSignature=runtimeNodes.filter(node=>node?.type==='display_console').map(node=>[
+      node.id,
+      node?.props?.name||node?.name||'',
+      getDisplayConsoleInputDefinitions(node).map(input=>[input?.key,input?.label]).join('|'),
+      runtimeEdges.filter(edge=>edgeTargetId(edge)===node.id).map(edge=>[edge.id,edge.targetPortIndex]).join('|')
+    ].join(':')).join('|');
+    const edgeSignature=[activeCanvasId,runtimeEdges.map(edge=>edge.id).join('|'),runtimeNodes.map(node=>node.id).join('|'),explicitSignature,manualSignature,displayConsoleSignature].join('::');
     if(Array.isArray(state.compactDiagnosticFixedPoints)&&state.compactDiagnosticFixedPointSignature===edgeSignature){
       return state.compactDiagnosticFixedPoints;
     }
@@ -26166,6 +26503,37 @@ function decorateDataflowEdges(){
     }else{
       points=[];
     }
+    const usedPointIds=new Set(points.map(point=>point.pointId||point.id).filter(Boolean));
+    let nextPointNumber=Math.max(0,...points.map(point=>Number(String(point?.shortName||point?.code||'').match(/^M(\d+)$/i)?.[1]||0)))+1;
+    getDisplayConsolePhysicalDiagnosticPoints(runtimeNodes,runtimeEdges).forEach(point=>{
+      const existingIndex=points.findIndex(item=>(item.pointId||item.id)===point.pointId);
+      if(existingIndex>=0){
+        const existing=points[existingIndex];
+        points[existingIndex]={
+          ...point,
+          ...existing,
+          pointId:point.pointId,
+          edgeId:point.edgeId,
+          signalId:point.signalId,
+          nodeId:point.nodeId,
+          targetNodeId:point.targetNodeId,
+          inputIndex:point.inputIndex,
+          inputKey:point.inputKey,
+          inputLabel:point.inputLabel,
+          sourceName:point.sourceName,
+          targetName:point.targetName,
+          signalPathZh:point.signalPathZh,
+          shortName:existing.shortName||`M${nextPointNumber++}`,
+          pointType:'physical',
+          displayConsoleInput:true,
+          defaultInstalled:true,
+          readOnly:true
+        };
+        return;
+      }
+      usedPointIds.add(point.pointId);
+      points.push({...point,shortName:`M${nextPointNumber++}`});
+    });
     points=points.filter(point=>diagnosticPointBelongsToActiveCanvas(point,runtimeEdges,runtimeNodes));
     points=points.map((point,index)=>{
       const edge=runtimeEdges.find(item=>item.id===point.edgeId);
@@ -26201,7 +26569,11 @@ function decorateDataflowEdges(){
     }
     const valid=new Set(points.map(point=>point.pointId));
     state.installedDiagnosticTestPointIds=Array.from(new Set(state.installedDiagnosticTestPointIds.filter(Boolean)));
-    return state.installedDiagnosticTestPointIds.filter(id=>valid.has(id));
+    const defaultInstalledIds=points.filter(point=>point?.defaultInstalled).map(point=>point.pointId).filter(Boolean);
+    return Array.from(new Set([
+      ...state.installedDiagnosticTestPointIds.filter(id=>valid.has(id)),
+      ...defaultInstalledIds
+    ]));
   }
 
   function clearDiagnosticScanState(state=getState()){
@@ -26427,6 +26799,7 @@ function decorateDataflowEdges(){
               <span class="tp-panel-actions">
                 <button type="button" data-install-testpoint="${html(installPointId)}" ${installPointId?'':'disabled'}>启用测点</button>
                 <button type="button" data-install-all-testpoints>全部启用</button>
+                <button type="button" data-rename-testpoints title="按创建顺序重排为 M1、M2…">重命名测点</button>
               </span>
             </div>
             <div class="tp-manual-point-add">
@@ -26478,6 +26851,7 @@ function decorateDataflowEdges(){
     if(document.getElementById('cw')?.dataset.view==='components'&&typeof window.renderSimulationViewPanel==='function'){
       try{window.renderSimulationViewPanel();}catch(err){console.warn('[diagnosis-console] renderSimulationViewPanel failed',err);}
     }
+    window.scheduleDiagnosticKnowledgeGraphRefresh?.();
   }
 
   window.selectDiagnosticTestPoint=function(pointId){
@@ -26509,6 +26883,41 @@ function decorateDataflowEdges(){
       injectedFaults:getInjectedFaults(),
       faultLibrary:getRuntimeFaultLibrary()
     };
+  };
+
+  window.renameDiagnosticTestPoints=function(){
+    const state=getState();
+    const points=getConfiguredPoints();
+    const indexed=points.map((point,index)=>{
+      const raw=point?.createdAt??point?.createdOn??point?.createdTime??point?.createdTimestamp;
+      const timestamp=typeof raw==='number'?raw:Date.parse(raw||'');
+      // Legacy packages have no timestamp; their saved array order is the
+      // closest equivalent to creation order and predates new manual points.
+      return {point,index,timestamp:Number.isFinite(timestamp)?timestamp:index};
+    }).sort((left,right)=>left.timestamp-right.timestamp||left.index-right.index);
+    const labelsById=new Map(indexed.map(({point},index)=>[
+      point?.pointId||point?.id,
+      `M${index+1}`
+    ]).filter(([pointId])=>Boolean(pointId)));
+    const updateLabels=collection=>arr(collection).forEach(point=>{
+      const label=labelsById.get(point?.pointId||point?.id);
+      if(!label) return;
+      point.shortName=label;
+      if(point.code==null||/^M\d+$/i.test(String(point.code))){point.code=label;}
+    });
+    updateLabels(state.diagnosticTestPoints);
+    updateLabels(state.testPoints);
+    updateLabels(state.manualDiagnosticTestPoints);
+    updateLabels(state.diagnosticModel?.testPoints);
+    updateLabels(state.diagnosticModel?.dMatrix?.points);
+    updateLabels(state.activeModelPackage?.diagnosticModel?.testPoints);
+    updateLabels(state.activeModelPackage?.diagnosticModel?.dMatrix?.points);
+    state.diagnosticTestPointNextNumber=indexed.length+1;
+    invalidateConfiguredDiagnosticPoints();
+    clearDiagnosticScanState(state);
+    if(typeof markTopologyDirty==='function'){markTopologyDirty('diagnostic');}
+    refreshDiagnosisViews();
+    return indexed.map(({point},index)=>({pointId:point.pointId||point.id,shortName:`M${index+1}`}));
   };
 
   function getFaultTargetText(fault){
@@ -26672,6 +27081,23 @@ function decorateDataflowEdges(){
     return {title,detail:getFaultKey(fault)};
   }
 
+  function isDMatrixFaultEnabled(fault){
+    const faultId=getFaultKey(fault);
+    const overrides=getState().dMatrixFaultEnabledStates;
+    if(faultId&&overrides&&typeof overrides==='object'&&Object.prototype.hasOwnProperty.call(overrides,faultId)){
+      return Boolean(overrides[faultId]);
+    }
+    const values=[
+      fault?.runtimeEnabled,
+      fault?.active,
+      fault?.enabled,
+      fault?.injectedFault?.active,
+      fault?.injectedFault?.enabled
+    ];
+    const explicit=values.find(value=>typeof value==='boolean');
+    return explicit===undefined?true:explicit;
+  }
+
   function mapDiagnosticMatrixRowToFault(row){
     const id=row?.faultId||row?.faultTypeId||row?.caseId||row?.id;
     if(!id) return null;
@@ -26710,10 +27136,27 @@ function decorateDataflowEdges(){
     return targets;
   }
 
+  function keepDMatrixItemOrder(items,stateKey,keyGetter){
+    const state=getState();
+    const keyed=arr(items).map((item,index)=>({item,index,key:String(keyGetter(item)||'').trim()}));
+    const currentKeys=new Set(keyed.map(entry=>entry.key).filter(Boolean));
+    const previousOrder=arr(state[stateKey]).map(value=>String(value||'')).filter(key=>currentKeys.has(key));
+    const nextOrder=[...previousOrder];
+    keyed.forEach(entry=>{
+      if(entry.key&&!nextOrder.includes(entry.key)){nextOrder.push(entry.key);}
+    });
+    state[stateKey]=nextOrder;
+    const positions=new Map(nextOrder.map((key,index)=>[key,index]));
+    return keyed
+      .slice()
+      .sort((left,right)=>(positions.get(left.key)??Number.MAX_SAFE_INTEGER)-(positions.get(right.key)??Number.MAX_SAFE_INTEGER)||left.index-right.index)
+      .map(entry=>entry.item);
+  }
+
   window.buildDetectionMatrixModel=function(){
     const pointModel=window.buildDiagnosticTestPointModel();
-    const points=arr(pointModel.installed);
-    const faults=getRuntimeInjectedFaultLibrary();
+    const points=keepDMatrixItemOrder(pointModel.installed,'dMatrixPointOrder',point=>point?.pointId||point?.id||point?.shortName);
+    const faults=keepDMatrixItemOrder(getRuntimeInjectedFaultLibrary(),'dMatrixFaultOrder',fault=>getFaultKey(fault));
     const rows=faults.map(fault=>{
       const display=getDMatrixFaultDisplay(fault);
       const cells=points.map(point=>{
@@ -26736,6 +27179,7 @@ function decorateDataflowEdges(){
         faultName:fault.name||getFaultKey(fault),
         faultDisplayName:display.title,
         faultDisplayDetail:display.detail,
+        enabled:isDMatrixFaultEnabled(fault),
         layer:getFaultLayerText(fault),
         category:fault.category||fault.modelClass||fault.layer||'故障',
         targetKind:fault.targetKind||(fault.targetEdgeId?'edge':'node'),
@@ -26759,6 +27203,164 @@ function decorateDataflowEdges(){
       },
       generatedAt:new Date().toISOString()
     };
+  };
+
+  function buildLiveDiagnosticKnowledgeGraph(){
+    const matrix=window.buildDetectionMatrixModel();
+    const graphNodes=new Map();
+    const relations=[];
+    const relationKeys=new Set();
+    const addNode=(kind,id,label,properties={})=>{
+      const normalizedId=String(id||'').trim();
+      if(!normalizedId){return;}
+      const key=`${kind}:${normalizedId}`;
+      graphNodes.set(key,{
+        ...(graphNodes.get(key)||{}),
+        id:normalizedId,
+        kind,
+        label:String(label||normalizedId),
+        ...Object.fromEntries(Object.entries(properties).filter(([,value])=>value!==undefined&&value!==null&&value!==''))
+      });
+    };
+    const addRelation=(type,sourceKind,sourceId,targetKind,targetId,properties={})=>{
+      const normalizedSourceId=String(sourceId||'').trim();
+      const normalizedTargetId=String(targetId||'').trim();
+      if(!normalizedSourceId||!normalizedTargetId){return;}
+      const key=JSON.stringify([type,sourceKind,normalizedSourceId,targetKind,normalizedTargetId,properties]);
+      if(relationKeys.has(key)){return;}
+      relationKeys.add(key);
+      relations.push({
+        type,
+        source:{kind:sourceKind,id:normalizedSourceId},
+        target:{kind:targetKind,id:normalizedTargetId},
+        ...properties
+      });
+    };
+
+    getRuntimeNodes().forEach(node=>{
+      addNode('component',node?.id,node?.props?.name||node?.name||node?.label||node?.id,{
+        componentType:node?.type,
+        canvasId:node?.canvasId||getState().activeCanvasId
+      });
+    });
+    getRuntimeEdges().forEach(edge=>{
+      addNode('signalEdge',edge?.id,edge?.label||edge?.signalLabel||edge?.name||edge?.signalId||edge?.id,{
+        signalId:edge?.signalId||edge?.signalID||edge?.signal,
+        lineType:edge?.lineType||edge?.type,
+        canvasId:edge?.canvasId||getState().activeCanvasId
+      });
+      addRelation('OUTPUTS_TO','component',edge?.sourceNodeId,'signalEdge',edge?.id);
+      addRelation('INPUTS_TO','signalEdge',edge?.id,'component',edge?.targetNodeId);
+    });
+    arr(matrix.points).forEach(point=>{
+      const pointId=point?.pointId||point?.id||point?.shortName;
+      addNode('measurementPoint',pointId,point?.name||point?.shortName||pointId,{
+        pointCode:point?.shortName||point?.code,
+        pointType:point?.pointType,
+        edgeId:point?.edgeId,
+        signalId:point?.signalId,
+        nodeId:point?.nodeId||point?.targetNodeId,
+        inputIndex:point?.inputIndex,
+        inputKey:point?.inputKey,
+        displayConsoleInput:Boolean(point?.displayConsoleInput)
+      });
+      if(point?.edgeId){addRelation('OBSERVES','measurementPoint',pointId,'signalEdge',point.edgeId);}
+      if(point?.nodeId||point?.targetNodeId){
+        addRelation('OBSERVES','measurementPoint',pointId,'component',point.nodeId||point.targetNodeId,{
+          inputIndex:point?.inputIndex,
+          inputKey:point?.inputKey,
+          observationSource:point?.displayConsoleInput?'display-console-input':'component-input'
+        });
+      }
+    });
+    arr(matrix.rows).forEach(row=>{
+      const faultId=row?.faultId||row?.id;
+      const targetKind=row?.targetKind==='edge'||row?.targetEdgeId?'signalEdge':'component';
+      const targetId=targetKind==='signalEdge'
+        ?(row?.targetEdgeId||row?.targetId)
+        :(row?.targetNodeId||row?.targetId);
+      addNode('fault',faultId,row?.faultDisplayName||row?.faultName||faultId,{
+        enabled:isDMatrixRowEnabled(row),
+        layer:row?.layer,
+        category:row?.category,
+        targetKind:row?.targetKind,
+        targetId
+      });
+      if(targetId){
+        addNode(targetKind,targetId,row?.targetLabel||targetId);
+        addRelation('OCCURS_ON','fault',faultId,targetKind,targetId);
+      }
+      arr(row?.cells).forEach(cell=>{
+        const pointId=cell?.pointId||arr(matrix.points).find(point=>point?.shortName===cell?.pointCode)?.pointId||cell?.pointCode;
+        addRelation('DETECTABILITY','fault',faultId,'measurementPoint',pointId,{
+          detectable:Boolean(cell?.detectable),
+          evidenceSource:'manual-d-matrix',
+          reason:cell?.reason||''
+        });
+      });
+      const graphRepairTargets=arr(row?.repairTargets).length
+        ?arr(row.repairTargets)
+        :(targetId?[{kind:targetKind==='signalEdge'?'edge':'node',id:targetId,label:row?.targetLabel||targetId}]:[]);
+      graphRepairTargets.forEach(target=>{
+        const repairKind=target?.kind==='edge'||target?.targetKind==='edge'?'signalEdge':'component';
+        const repairId=target?.id||target?.targetId;
+        addNode(repairKind,repairId,target?.label||target?.targetLabel||repairId);
+        addRelation('RESOLVED_BY_REPLACING','fault',faultId,repairKind,repairId,{
+          action:repairKind==='signalEdge'?'replaceWire':'replaceComponent'
+        });
+      });
+    });
+
+    const nodes=Array.from(graphNodes.values());
+    return {
+      nodes,
+      relations,
+      summary:{
+        nodeCount:nodes.length,
+        relationCount:relations.length,
+        componentCount:nodes.filter(node=>node.kind==='component').length,
+        signalEdgeCount:nodes.filter(node=>node.kind==='signalEdge').length,
+        faultCount:nodes.filter(node=>node.kind==='fault').length,
+        measurementPointCount:nodes.filter(node=>node.kind==='measurementPoint').length,
+        manualDetectabilityCount:relations.filter(relation=>relation.type==='DETECTABILITY'&&relation.detectable).length,
+        manualDetectabilityRelationCount:relations.filter(relation=>relation.type==='DETECTABILITY').length
+      },
+      source:'live-canvas-and-manual-d-matrix',
+      canvasId:getState().activeCanvasId||''
+    };
+  }
+
+  let diagnosticKnowledgeGraphSignature='';
+  let diagnosticKnowledgeGraphRefreshPending=false;
+  function diagnosticKnowledgeGraphFingerprint(graph){
+    return JSON.stringify({
+      nodes:arr(graph?.nodes).map(node=>[node.kind,node.id,node.label,node.enabled,node.targetId,node.edgeId]),
+      relations:arr(graph?.relations).map(relation=>[
+        relation.type,relation.source?.kind,relation.source?.id,relation.target?.kind,relation.target?.id,
+        relation.detectable,relation.action,relation.reason
+      ])
+    });
+  }
+
+  window.refreshDiagnosticKnowledgeGraph=function(options={}){
+    const graph=buildLiveDiagnosticKnowledgeGraph();
+    const signature=diagnosticKnowledgeGraphFingerprint(graph);
+    const changed=signature!==diagnosticKnowledgeGraphSignature;
+    diagnosticKnowledgeGraphSignature=signature;
+    S.diagnosticKnowledgeGraph=cloneDefaults(graph);
+    if(options.publish!==false&&(changed||options.force)){
+      window.dispatchEvent(new CustomEvent('gz:knowledge-graph-updated',{detail:{graph:cloneDefaults(graph)}}));
+    }
+    return cloneDefaults(graph);
+  };
+
+  window.scheduleDiagnosticKnowledgeGraphRefresh=function(){
+    if(diagnosticKnowledgeGraphRefreshPending){return;}
+    diagnosticKnowledgeGraphRefreshPending=true;
+    Promise.resolve().then(()=>{
+      diagnosticKnowledgeGraphRefreshPending=false;
+      window.refreshDiagnosticKnowledgeGraph?.();
+    });
   };
 
   function getMatrixCellForPoint(row,pointCode){
@@ -26855,29 +27457,119 @@ function decorateDataflowEdges(){
     return S.dMatrixBackendTroubleshootingPlans;
   }
 
-  function getBackendTroubleshootingPlan(faultId){
-    const plan=getBackendTroubleshootingPlans()[faultId];
-    if(plan){return plan;}
+  const DIAGNOSTIC_PLAN_CACHE_VERSION='physical-points-as-known-v1';
+
+  function getTroubleshootingMatrixSignature(matrix){
+    return JSON.stringify({
+      points:arr(matrix?.points).map(point=>[
+        point.pointId||point.id||'',point.shortName||point.pointCode||'',point.name||'',
+        normalizeDiagnosticTestPointType(point.pointType),point.edgeId||''
+      ]),
+      rows:arr(matrix?.rows).map(row=>[
+        row.faultId||'',row.faultName||row.faultDisplayName||'',row.layer||'',
+        row.targetKind||'',row.targetId||row.targetNodeId||row.targetEdgeId||'',row.targetLabel||'',
+        arr(row.cells).map(cell=>[cell.pointId||'',cell.pointCode||'',Boolean(cell.detectable)]),
+        arr(row.repairTargets).map(target=>[
+          target.kind||target.targetKind||'',target.id||target.targetId||'',target.label||target.targetLabel||''
+        ])
+      ]),
+      faultRelations:arr(matrix?.faultRelations).map(relation=>[
+        relation.type||relation.relationType||'',arr(relation.faultIds),
+        relation.sourceFaultId||'',relation.targetFaultId||'',arr(relation.pointIds),relation.pointId||relation.pointCode||''
+      ]),
+      canvasNodes:getRuntimeNodes().map(node=>[node?.id||'',node?.type||'',node?.props?.name||node?.name||node?.label||'']),
+      canvasEdges:getRuntimeEdges().map(edge=>[
+        edge?.id||'',edge?.sourceNodeId||'',edge?.targetNodeId||'',edge?.label||edge?.signalId||'',edge?.lineType||edge?.type||''
+      ])
+    });
+  }
+
+  function normalizePlanPhysicalKnownConditions(plan,matrix,faultIds){
+    const physicalPoints=arr(matrix?.points).filter(point=>normalizeDiagnosticTestPointType(point.pointType)==='physical');
+    if(!physicalPoints.length){return plan;}
+    const physicalKeys=new Set(physicalPoints.flatMap(point=>[point.pointId,point.id,point.shortName,point.pointCode].filter(Boolean)));
+    const targetRows=arr(matrix?.rows).filter(row=>faultIds.includes(row.faultId));
+    const existingByKey=new Map();
+    arr(plan?.knownConditions).forEach(condition=>{
+      [condition.pointId,condition.pointCode].filter(Boolean).forEach(key=>existingByKey.set(key,condition));
+    });
+    const knownConditions=physicalPoints.map(point=>{
+      const pointId=point.pointId||point.id||point.shortName;
+      const pointCode=point.shortName||point.pointCode||pointId;
+      const existing=existingByKey.get(pointId)||existingByKey.get(pointCode);
+      if(existing){return {...existing,pointId,pointCode,pointName:existing.pointName||point.name||pointCode,pointType:'physical'};}
+      const abnormal=targetRows.some(row=>arr(row.cells).some(cell=>(cell.pointId===pointId||cell.pointCode===pointCode)&&cell.detectable));
+      return {
+        pointId,
+        pointCode,
+        pointName:point.name||pointCode,
+        pointType:'physical',
+        observed:abnormal?'abnormal':'normal',
+        expectedState:abnormal?'abnormal':'normal',
+        source:'target-signature'
+      };
+    });
+    const isPhysicalMeasurement=step=>{
+      const measurement=step?.action==='measure'||step?.actionType==='measurePoint'||String(step?.id||'').startsWith('measure-');
+      return measurement&&[step?.pointId,step?.pointCode].some(key=>key&&physicalKeys.has(key));
+    };
+    const steps=arr(plan?.steps).filter(step=>!isPhysicalMeasurement(step)).map((step,index)=>({...step,index:index+1}));
+    const keySteps=arr(plan?.keySteps).filter(step=>!isPhysicalMeasurement(step));
+    return {...plan,knownConditions,steps,keySteps};
+  }
+
+  function normalizeTroubleshootingFaultIds(faultRef){
+    const values=Array.isArray(faultRef)?faultRef:[faultRef];
+    return Array.from(new Set(values.map(value=>String(value||'').trim()).filter(Boolean)));
+  }
+
+  function getTroubleshootingPlanKey(faultRef){
+    return normalizeTroubleshootingFaultIds(faultRef).slice().sort().join('||');
+  }
+
+  function getBackendTroubleshootingPlan(faultRef){
+    const key=getTroubleshootingPlanKey(faultRef);
+    const record=getBackendTroubleshootingPlans()[key];
+    const matrix=window.buildDetectionMatrixModel();
+    const signature=getTroubleshootingMatrixSignature(matrix);
+    if(record?.version===DIAGNOSTIC_PLAN_CACHE_VERSION&&record?.signature===signature&&record?.plan){
+      return normalizePlanPhysicalKnownConditions(record.plan,matrix,normalizeTroubleshootingFaultIds(faultRef));
+    }
+    if(record){delete getBackendTroubleshootingPlans()[key];}
     return {
       ok:false,
       error:'backend-plan-not-loaded',
-      faultId,
+      faultId:key,
+      faultIds:normalizeTroubleshootingFaultIds(faultRef),
       steps:[],
       keySteps:[],
       summary:'尚未从后端获取排故方案。'
     };
   }
 
-  async function requestBackendTroubleshootingPlan(faultId,options={}){
+  async function requestBackendTroubleshootingPlan(faultRef,options={}){
     if(typeof window.fetch!=='function'){
       throw new Error('浏览器不支持后端方案请求。');
     }
+    const faultIds=normalizeTroubleshootingFaultIds(faultRef);
+    if(!faultIds.length){throw new Error('请至少选择一个具体故障。');}
+    const fullMatrix=window.buildDetectionMatrixModel();
+    const enabledRows=arr(fullMatrix.rows).filter(isDMatrixRowEnabled);
+    const enabledFaultIds=new Set(enabledRows.map(row=>row.faultId));
+    const disabledTargets=faultIds.filter(faultId=>!enabledFaultIds.has(faultId));
+    if(disabledTargets.length){throw new Error(`故障已禁用，不能生成排故路径：${disabledTargets.join('、')}`);}
+    // Enabled rows define the target combination. Every D-matrix row remains
+    // in the candidate universe so a disabled but observationally equivalent
+    // fault cannot be silently excluded from the diagnosis.
+    const dMatrix=fullMatrix;
     const response=await window.fetch('/api/troubleshooting/plan',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        dMatrix:window.buildDetectionMatrixModel(),
-        targetFaultId:faultId,
+        dMatrix,
+        targetFaultIds:faultIds,
+        maxFaults:Math.max(2,faultIds.length),
+        modelGraph:{modelNodes:getRuntimeNodes(),modelEdges:getRuntimeEdges()},
         maxSteps:Number.isFinite(options.maxSteps)?options.maxSteps:4
       })
     });
@@ -26885,14 +27577,37 @@ function decorateDataflowEdges(){
     if(!response.ok||payload?.status==='error'||!payload?.plan){
       throw new Error(payload?.message||'后端未能生成排故方案。');
     }
-    const plan={...payload.plan,source:'backend-algorithm',isCustomized:false};
-    getBackendTroubleshootingPlans()[faultId]=plan;
+    const plan=normalizePlanPhysicalKnownConditions({...payload.plan,source:'backend-knowledge-graph',isCustomized:false},dMatrix,faultIds);
+    if(plan.knowledgeGraph){
+      S.backendDiagnosticKnowledgeGraph=cloneDefaults(plan.knowledgeGraph);
+    }
+    window.scheduleDiagnosticKnowledgeGraphRefresh?.();
+    getBackendTroubleshootingPlans()[getTroubleshootingPlanKey(faultIds)]={
+      version:DIAGNOSTIC_PLAN_CACHE_VERSION,
+      signature:getTroubleshootingMatrixSignature(dMatrix),
+      plan
+    };
     return plan;
   }
 
-  window.ensureBackendTroubleshootingPlan=async function(faultId,options={}){
-    const cached=getBackendTroubleshootingPlan(faultId);
-    return cached.ok?cached:requestBackendTroubleshootingPlan(faultId,options);
+  window.getDiagnosticKnowledgeGraph=function(){
+    return window.refreshDiagnosticKnowledgeGraph({publish:false});
+  };
+
+  window.openDiagnosticKnowledgeGraph=function(graph){
+    const knowledgeGraph=graph||window.refreshDiagnosticKnowledgeGraph({publish:false});
+    if(!knowledgeGraph||!Array.isArray(knowledgeGraph.nodes)||!Array.isArray(knowledgeGraph.relations)){
+      return false;
+    }
+    window.dispatchEvent(new CustomEvent('gz:open-knowledge-graph',{
+      detail:{graph:cloneDefaults(knowledgeGraph)}
+    }));
+    return true;
+  };
+
+  window.ensureBackendTroubleshootingPlan=async function(faultRef,options={}){
+    const cached=getBackendTroubleshootingPlan(faultRef);
+    return cached.ok?cached:requestBackendTroubleshootingPlan(faultRef,options);
   };
 
   function getTroubleshootingPlanOverrides(){
@@ -26917,13 +27632,17 @@ function decorateDataflowEdges(){
       .filter(step=>step.text);
   }
 
-  function getTroubleshootingPointStep(faultId,pointId,index){
+  function getTroubleshootingPointStep(faultRef,pointId,index){
     const model=window.buildDetectionMatrixModel();
     const point=arr(model.points).find(item=>item.pointId===pointId||item.shortName===pointId)||{};
-    const row=arr(model.rows).find(item=>item.faultId===faultId)||{};
-    const cell=getMatrixCellForPoint(row,point.shortName||pointId)||{};
+    const targetFaultIds=new Set(normalizeTroubleshootingFaultIds(faultRef));
+    const cells=arr(model.rows)
+      .filter(item=>targetFaultIds.has(item.faultId))
+      .map(row=>getMatrixCellForPoint(row,point.shortName||pointId)||{});
+    const cell=cells.find(item=>item.detectable)||cells[0]||{};
     return {
       index:index+1,
+      action:'measure',
       pointId:point.pointId||pointId,
       pointCode:point.shortName||pointId,
       pointName:compactDiagnosticPointName(point.name||cell.pointName||'测点'),
@@ -26934,44 +27653,88 @@ function decorateDataflowEdges(){
     };
   }
 
-  function createEditableTroubleshootingPlan(faultId){
-    const path=window.buildTroubleshootingPathForFault(faultId);
+  function createEditableTroubleshootingPlan(faultRef){
+    const path=window.buildTroubleshootingPathForFault(faultRef);
     return {
       steps:cloneTroubleshootingSteps(path.steps),
       keySteps:cloneTroubleshootingKeySteps(path.keySteps)
     };
   }
 
-  function saveEditableTroubleshootingPlan(faultId,plan){
+  function saveEditableTroubleshootingPlan(faultRef,plan){
     const overrides=getTroubleshootingPlanOverrides();
-    overrides[faultId]={
+    overrides[getTroubleshootingPlanKey(faultRef)]={
       steps:cloneTroubleshootingSteps(plan.steps),
       keySteps:cloneTroubleshootingKeySteps(plan.keySteps),
       updatedAt:new Date().toISOString()
     };
   }
 
-  window.buildTroubleshootingPathForFault=function(faultId,options={}){
-    const algorithmPath=getBackendTroubleshootingPlan(faultId);
-    if(options.algorithmOnly||!algorithmPath.ok){return algorithmPath;}
-    const override=getTroubleshootingPlanOverrides()[faultId];
+  function applyTroubleshootingPlanOverride(faultRef,algorithmPath){
+    if(!algorithmPath?.ok){return algorithmPath;}
+    const override=getTroubleshootingPlanOverrides()[getTroubleshootingPlanKey(faultRef)];
     if(!override){return algorithmPath;}
-    const steps=cloneTroubleshootingSteps(override.steps);
-    const keySteps=cloneTroubleshootingKeySteps(override.keySteps);
     return {
       ...algorithmPath,
-      steps,
-      keySteps,
+      steps:cloneTroubleshootingSteps(override.steps),
+      keySteps:cloneTroubleshootingKeySteps(override.keySteps),
       source:'custom',
       isCustomized:true,
-      summary:'当前为手工调整方案；可随时恢复为 D 矩阵算法生成的路径和关键步骤。'
+      summary:'当前为人工调整方案；可随时恢复为知识图谱生成的路径和关键步骤。'
     };
+  }
+
+  window.applyTroubleshootingPlanOverride=applyTroubleshootingPlanOverride;
+
+  window.buildTroubleshootingPathForFault=function(faultRef,options={}){
+    const faultId=getTroubleshootingPlanKey(faultRef);
+    const algorithmPath=getBackendTroubleshootingPlan(faultRef);
+    if(options.algorithmOnly||!algorithmPath.ok){return algorithmPath;}
+    return applyTroubleshootingPlanOverride(faultId,algorithmPath);
   };
 
   function renderTroubleshootingPointOptions(selectedPointId){
     return arr(window.buildDetectionMatrixModel().points).map(point=>`
       <option value="${html(point.pointId)}" ${point.pointId===selectedPointId?'selected':''}>${html(point.shortName)} · ${html(compactDiagnosticPointName(point.name))}</option>
     `).join('');
+  }
+
+  function troubleshootingActionLabel(action){
+    if(action==='replaceWire'){return '更换连线';}
+    if(action==='replaceComponent'){return '更换设备';}
+    return '检测测点';
+  }
+
+  function renderTroubleshootingRepairTargetOptions(path,action,selectedTargetId){
+    const targetKind=action==='replaceWire'?'signalEdge':'component';
+    const nodes=arr(path?.knowledgeGraph?.nodes).filter(node=>node?.kind===targetKind&&node?.id);
+    const options=nodes.map(node=>`
+      <option value="${html(node.id)}" ${node.id===selectedTargetId?'selected':''}>${html(node.label||node.id)}</option>
+    `);
+    if(selectedTargetId&&!nodes.some(node=>node.id===selectedTargetId)){
+      options.unshift(`<option value="${html(selectedTargetId)}" selected>${html(selectedTargetId)}</option>`);
+    }
+    return options.join('');
+  }
+
+  function getTroubleshootingRepairStep(faultRef,action,targetId,index,existing={}){
+    const path=window.buildTroubleshootingPathForFault(faultRef);
+    const targetKind=action==='replaceWire'?'signalEdge':'component';
+    const nodes=arr(path?.knowledgeGraph?.nodes).filter(node=>node?.kind===targetKind&&node?.id);
+    const targetNode=nodes.find(node=>node.id===targetId)||nodes[0]||{};
+    const normalizedTargetId=targetId||targetNode.id||'';
+    const targetLabel=targetNode.label||existing.targetLabel||normalizedTargetId;
+    return {
+      ...existing,
+      index:index+1,
+      action,
+      targetId:normalizedTargetId,
+      targetLabel,
+      relatedFaultIds:arr(existing.relatedFaultIds),
+      text:existing.action===action&&existing.text
+        ?existing.text
+        :`${troubleshootingActionLabel(action)}：${targetLabel||'请选择目标'}。`
+    };
   }
 
   function renderTroubleshootingPath(path,options={}){
@@ -26993,21 +27756,34 @@ function decorateDataflowEdges(){
       <div class="troubleshooting-path__meta">
         <span>${html(path.layer||'故障层级')}</span>
         <span>${html(path.targetLabel||'目标对象')}</span>
+        ${path.knowledgeGraph?.summary?`<span>知识图谱 ${html(path.knowledgeGraph.summary.nodeCount)} 节点 / ${html(path.knowledgeGraph.summary.relationCount)} 关系</span>`:''}
         <span class="troubleshooting-path__source${path.isCustomized?' is-customized':''}">${path.isCustomized?'已手工调整':'算法生成'}</span>
       </div>
       <p>${html(path.summary)}</p>
+      ${arr(path.knownConditions).length?`<div class="troubleshooting-path__known"><b>物理测点已知条件</b><span>${arr(path.knownConditions).map(condition=>`${html(condition.pointCode)} ${html(condition.pointName)}：<em class="${condition.observed==='abnormal'?'is-abnormal':'is-normal'}">${condition.observed==='abnormal'?'异常':'正常'}</em>`).join('</span><span>')}</span></div>`:''}
+      ${path.isolated===false?`<div class="troubleshooting-path__ambiguity"><b>尚未排除的候选：</b>${arr(path.remainingCandidateFaultSetNames).map(name=>html(name)).join('；')||'存在与目标组合测点特征相同的其他故障候选'}</div>`:''}
       ${editing?`<div class="troubleshooting-path__edit-note">修改将自动保存到当前方案。</div>`:''}
       <ol class="troubleshooting-path__steps">
         ${arr(path.steps).map(step=>{
           const isRepair=step.action==='replaceComponent'||step.action==='replaceWire';
-          const actionLabel=step.action==='replaceWire'?'更换线路':'更换组件';
+          const actionLabel=troubleshootingActionLabel(step.action);
           return `
           <li class="${isRepair?'is-repair':''}">
-            <b>${html(isRepair?'处置':step.pointCode)}</b>
+            <b>${html(editing?step.index:(isRepair?'处置':step.pointCode))}</b>
             <div>
-              ${editing&&!isRepair?`
-                <label>测点<select data-troubleshooting-path-point data-step-index="${step.index-1}">${renderTroubleshootingPointOptions(step.pointId)}</select></label>
-                <label>检查要求<textarea data-troubleshooting-path-expected data-step-index="${step.index-1}">${html(step.expected)}</textarea></label>
+              ${editing?`
+                <label>动作<select data-troubleshooting-path-action data-step-index="${step.index-1}">
+                  <option value="measure" ${isRepair?'':'selected'}>检测测点</option>
+                  <option value="replaceWire" ${step.action==='replaceWire'?'selected':''}>更换连线</option>
+                  <option value="replaceComponent" ${step.action==='replaceComponent'?'selected':''}>更换设备</option>
+                </select></label>
+                ${isRepair?`
+                  <label>处置目标<select data-troubleshooting-path-repair-target data-step-index="${step.index-1}">${renderTroubleshootingRepairTargetOptions(path,step.action,step.targetId)}</select></label>
+                  <label>处置说明<textarea data-troubleshooting-path-repair-text data-step-index="${step.index-1}">${html(step.text||`${actionLabel}：${step.targetLabel||''}。`)}</textarea></label>
+                `:`
+                  <label>测点<select data-troubleshooting-path-point data-step-index="${step.index-1}">${renderTroubleshootingPointOptions(step.pointId)}</select></label>
+                  <label>检查要求<textarea data-troubleshooting-path-expected data-step-index="${step.index-1}">${html(step.expected)}</textarea></label>
+                `}
                 <div class="troubleshooting-path__edit-actions">
                   <button type="button" data-troubleshooting-path-up="${step.index-1}" ${step.index===1?'disabled':''}>上移</button>
                   <button type="button" data-troubleshooting-path-down="${step.index-1}" ${step.index===path.steps.length?'disabled':''}>下移</button>
@@ -27023,7 +27799,7 @@ function decorateDataflowEdges(){
         `;
         }).join('')}
       </ol>
-      ${editing?`<button type="button" class="troubleshooting-path__add" data-add-troubleshooting-path-step>添加测点步骤</button>`:''}
+      ${editing?`<button type="button" class="troubleshooting-path__add" data-add-troubleshooting-path-step>添加步骤</button>`:''}
       <section class="troubleshooting-key-steps">
         <div class="troubleshooting-key-steps__head">
           <h3>关键步骤</h3>
@@ -27049,11 +27825,11 @@ function decorateDataflowEdges(){
     `;
   }
 
-  function renderTroubleshootingPathPanel(panel,faultId,editing=false){
-    panel.dataset.faultId=faultId;
+  function renderTroubleshootingPathPanel(panel,faultRef,editing=false){
+    panel.dataset.faultId=getTroubleshootingPlanKey(faultRef);
     panel.dataset.editing=editing?'true':'false';
-    panel.innerHTML=renderTroubleshootingPath(window.buildTroubleshootingPathForFault(faultId),{editing});
-    bindTroubleshootingPathPanel(panel,faultId);
+    panel.innerHTML=renderTroubleshootingPath(window.buildTroubleshootingPathForFault(faultRef),{editing});
+    bindTroubleshootingPathPanel(panel,faultRef);
   }
 
   function moveItem(items,index,direction){
@@ -27068,114 +27844,138 @@ function decorateDataflowEdges(){
     panel.innerHTML='<div class="troubleshooting-path__empty">正在请求后端算法生成排故路径和关键步骤…</div>';
   }
 
-  function renderBackendPlanError(panel,faultId,error){
+  function renderBackendPlanError(panel,faultRef,error){
     panel.innerHTML=`
       <div class="troubleshooting-path__empty">${html(error?.message||'后端排故方案生成失败。')}</div>
       <button type="button" class="troubleshooting-path__reset" data-retry-backend-troubleshooting-plan>重试</button>
       <button type="button" data-close-troubleshooting-path>关闭</button>
     `;
     panel.querySelector('[data-close-troubleshooting-path]')?.addEventListener('click',()=>panel.remove());
-    panel.querySelector('[data-retry-backend-troubleshooting-plan]')?.addEventListener('click',()=>loadBackendTroubleshootingPlan(panel,faultId));
+    panel.querySelector('[data-retry-backend-troubleshooting-plan]')?.addEventListener('click',()=>loadBackendTroubleshootingPlan(panel,faultRef));
   }
 
-  async function loadBackendTroubleshootingPlan(panel,faultId,options={}){
+  async function loadBackendTroubleshootingPlan(panel,faultRef,options={}){
     renderBackendPlanLoading(panel);
     try{
-      await requestBackendTroubleshootingPlan(faultId,options);
-      if(options.resetCustom){delete getTroubleshootingPlanOverrides()[faultId];}
-      if(panel.isConnected){renderTroubleshootingPathPanel(panel,faultId,false);}
+      await requestBackendTroubleshootingPlan(faultRef,options);
+      if(options.resetCustom){delete getTroubleshootingPlanOverrides()[getTroubleshootingPlanKey(faultRef)];}
+      if(panel.isConnected){renderTroubleshootingPathPanel(panel,faultRef,false);}
     }catch(error){
-      if(panel.isConnected){renderBackendPlanError(panel,faultId,error);}
+      if(panel.isConnected){renderBackendPlanError(panel,faultRef,error);}
     }
   }
 
-  function bindTroubleshootingPathPanel(panel,faultId){
-    const rerender=(editing=panel.dataset.editing==='true')=>renderTroubleshootingPathPanel(panel,faultId,editing);
+  function bindTroubleshootingPathPanel(panel,faultRef){
+    const rerender=(editing=panel.dataset.editing==='true')=>renderTroubleshootingPathPanel(panel,faultRef,editing);
     panel.querySelector('[data-close-troubleshooting-path]')?.addEventListener('click',()=>panel.remove());
     panel.querySelector('[data-edit-troubleshooting-path]')?.addEventListener('click',()=>rerender(panel.dataset.editing!=='true'));
-    panel.querySelector('[data-reset-troubleshooting-path]')?.addEventListener('click',()=>loadBackendTroubleshootingPlan(panel,faultId,{resetCustom:true}));
-    panel.querySelectorAll('[data-troubleshooting-path-point]').forEach(select=>select.addEventListener('change',()=>{
-      const plan=createEditableTroubleshootingPlan(faultId);
+    panel.querySelector('[data-reset-troubleshooting-path]')?.addEventListener('click',()=>loadBackendTroubleshootingPlan(panel,faultRef,{resetCustom:true}));
+    panel.querySelectorAll('[data-troubleshooting-path-action]').forEach(select=>select.addEventListener('change',()=>{
+      const plan=createEditableTroubleshootingPlan(faultRef);
       const index=Number(select.dataset.stepIndex);
-      if(plan.steps[index]){plan.steps[index]=getTroubleshootingPointStep(faultId,select.value,index);}
-      saveEditableTroubleshootingPlan(faultId,plan);
+      if(select.value==='measure'){
+        const point=arr(window.buildDetectionMatrixModel().points)[0];
+        if(point){plan.steps[index]=getTroubleshootingPointStep(faultRef,point.pointId,index);}
+      }else{
+        plan.steps[index]=getTroubleshootingRepairStep(faultRef,select.value,'',index,plan.steps[index]);
+      }
+      saveEditableTroubleshootingPlan(faultRef,plan);
+      rerender(true);
+    }));
+    panel.querySelectorAll('[data-troubleshooting-path-point]').forEach(select=>select.addEventListener('change',()=>{
+      const plan=createEditableTroubleshootingPlan(faultRef);
+      const index=Number(select.dataset.stepIndex);
+      if(plan.steps[index]){plan.steps[index]=getTroubleshootingPointStep(faultRef,select.value,index);}
+      saveEditableTroubleshootingPlan(faultRef,plan);
       rerender(true);
     }));
     panel.querySelectorAll('[data-troubleshooting-path-expected]').forEach(input=>input.addEventListener('change',()=>{
-      const plan=createEditableTroubleshootingPlan(faultId);
+      const plan=createEditableTroubleshootingPlan(faultRef);
       const index=Number(input.dataset.stepIndex);
       if(plan.steps[index]){plan.steps[index].expected=input.value.trim()||'检查该测点的实际值与参考值是否一致。';}
-      saveEditableTroubleshootingPlan(faultId,plan);
+      saveEditableTroubleshootingPlan(faultRef,plan);
+      rerender(true);
+    }));
+    panel.querySelectorAll('[data-troubleshooting-path-repair-target]').forEach(select=>select.addEventListener('change',()=>{
+      const plan=createEditableTroubleshootingPlan(faultRef);
+      const index=Number(select.dataset.stepIndex);
+      if(plan.steps[index]){
+        plan.steps[index]=getTroubleshootingRepairStep(faultRef,plan.steps[index].action,select.value,index,plan.steps[index]);
+        plan.steps[index].text=`${troubleshootingActionLabel(plan.steps[index].action)}：${plan.steps[index].targetLabel}。`;
+      }
+      saveEditableTroubleshootingPlan(faultRef,plan);
+      rerender(true);
+    }));
+    panel.querySelectorAll('[data-troubleshooting-path-repair-text]').forEach(input=>input.addEventListener('change',()=>{
+      const plan=createEditableTroubleshootingPlan(faultRef);
+      const index=Number(input.dataset.stepIndex);
+      if(plan.steps[index]){plan.steps[index].text=input.value.trim()||`${troubleshootingActionLabel(plan.steps[index].action)}：${plan.steps[index].targetLabel}。`;}
+      saveEditableTroubleshootingPlan(faultRef,plan);
       rerender(true);
     }));
     panel.querySelectorAll('[data-troubleshooting-path-up],[data-troubleshooting-path-down],[data-troubleshooting-path-remove]').forEach(button=>button.addEventListener('click',()=>{
-      const plan=createEditableTroubleshootingPlan(faultId);
+      const plan=createEditableTroubleshootingPlan(faultRef);
       const index=Number(button.dataset.troubleshootingPathUp??button.dataset.troubleshootingPathDown??button.dataset.troubleshootingPathRemove);
       if(button.hasAttribute('data-troubleshooting-path-up')){plan.steps=moveItem(plan.steps,index,-1);}
       else if(button.hasAttribute('data-troubleshooting-path-down')){plan.steps=moveItem(plan.steps,index,1);}
       else{plan.steps.splice(index,1);}
-      saveEditableTroubleshootingPlan(faultId,plan);
+      saveEditableTroubleshootingPlan(faultRef,plan);
       rerender(true);
     }));
     panel.querySelector('[data-add-troubleshooting-path-step]')?.addEventListener('click',()=>{
-      const plan=createEditableTroubleshootingPlan(faultId);
+      const plan=createEditableTroubleshootingPlan(faultRef);
       const point=arr(window.buildDetectionMatrixModel().points)[0];
-      if(point){plan.steps.push(getTroubleshootingPointStep(faultId,point.pointId,plan.steps.length));}
-      saveEditableTroubleshootingPlan(faultId,plan);
+      if(point){plan.steps.push(getTroubleshootingPointStep(faultRef,point.pointId,plan.steps.length));}
+      saveEditableTroubleshootingPlan(faultRef,plan);
       rerender(true);
     });
     panel.querySelectorAll('[data-troubleshooting-key-step]').forEach(input=>input.addEventListener('change',()=>{
-      const plan=createEditableTroubleshootingPlan(faultId);
+      const plan=createEditableTroubleshootingPlan(faultRef);
       const index=Number(input.dataset.keyStepIndex);
       if(plan.keySteps[index]){plan.keySteps[index].text=input.value.trim();}
-      saveEditableTroubleshootingPlan(faultId,plan);
+      saveEditableTroubleshootingPlan(faultRef,plan);
       rerender(true);
     }));
     panel.querySelectorAll('[data-troubleshooting-key-step-up],[data-troubleshooting-key-step-down],[data-troubleshooting-key-step-remove]').forEach(button=>button.addEventListener('click',()=>{
-      const plan=createEditableTroubleshootingPlan(faultId);
+      const plan=createEditableTroubleshootingPlan(faultRef);
       const index=Number(button.dataset.troubleshootingKeyStepUp??button.dataset.troubleshootingKeyStepDown??button.dataset.troubleshootingKeyStepRemove);
       if(button.hasAttribute('data-troubleshooting-key-step-up')){plan.keySteps=moveItem(plan.keySteps,index,-1);}
       else if(button.hasAttribute('data-troubleshooting-key-step-down')){plan.keySteps=moveItem(plan.keySteps,index,1);}
       else{plan.keySteps.splice(index,1);}
-      saveEditableTroubleshootingPlan(faultId,plan);
+      saveEditableTroubleshootingPlan(faultRef,plan);
       rerender(true);
     }));
     panel.querySelector('[data-add-troubleshooting-key-step]')?.addEventListener('click',()=>{
-      const plan=createEditableTroubleshootingPlan(faultId);
+      const plan=createEditableTroubleshootingPlan(faultRef);
       plan.keySteps.push({id:`key-step-${Date.now()}`,text:'补充关键排故步骤。'});
-      saveEditableTroubleshootingPlan(faultId,plan);
+      saveEditableTroubleshootingPlan(faultRef,plan);
       rerender(true);
     });
   }
 
-  window.openTroubleshootingPathPanel=function(faultId){
+  window.openTroubleshootingPathPanel=function(faultRef){
     document.querySelector('[data-troubleshooting-path-panel]')?.remove();
     const host=document.querySelector('[data-d-matrix-view]')||document.getElementById('d-matrix-panel')||document.body;
     const panel=document.createElement('aside');
     panel.className='troubleshooting-path';
     panel.dataset.troubleshootingPathPanel='true';
     host.appendChild(panel);
-    loadBackendTroubleshootingPlan(panel,faultId);
+    loadBackendTroubleshootingPlan(panel,faultRef);
     return panel;
   };
 
-  function getPracticeFaultIdSet(){
-    const state=getState();
-    if(!Array.isArray(state.practiceFaultIds)) state.practiceFaultIds=[];
-    return new Set(state.practiceFaultIds);
+  function isDMatrixRowEnabled(row){
+    const faultId=String(row?.faultId||row?.id||'');
+    const overrides=getState().dMatrixFaultEnabledStates;
+    if(faultId&&overrides&&typeof overrides==='object'&&Object.prototype.hasOwnProperty.call(overrides,faultId)){
+      return Boolean(overrides[faultId]);
+    }
+    return row?.enabled!==false;
   }
-
-  window.setDMatrixPracticeFault=function(faultId,selected){
-    const state=getState();
-    if(!Array.isArray(state.practiceFaultIds)) state.practiceFaultIds=[];
-    state.practiceFaultIds=selected&&faultId?[faultId]:[];
-    return state.practiceFaultIds;
-  };
 
   function renderDetectionMatrixTable(model){
     const points=arr(model?.points);
     const rows=arr(model?.rows);
-    const practiceFaultIds=getPracticeFaultIdSet();
     return `
       <div class="d-matrix-table-wrap">
         <table class="d-matrix-table">
@@ -27184,8 +27984,8 @@ function decorateDataflowEdges(){
               <th class="d-matrix-sticky">故障类型</th>
               <th>目标模块/连线</th>
               <th>层级</th>
+              <th>是否启用</th>
               <th>可测点</th>
-              <th>实践排查</th>
               <th>排故路径</th>
               ${points.map(point=>`<th title="${html(point.name)}">${html(point.shortName)}</th>`).join('')}
             </tr>
@@ -27199,14 +27999,11 @@ function decorateDataflowEdges(){
                 </td>
                 <td>${html(row.targetLabel)}</td>
                 <td>${html(row.layer)}</td>
-                <td>${row.detectableCount}/${points.length}</td>
                 <td>
-                  <label class="d-matrix-practice">
-                    <input type="radio" name="d-matrix-practice-fault" data-d-matrix-practice-fault="${html(row.faultId)}" ${practiceFaultIds.has(row.faultId)?'checked':''}>
-                    <span>排查</span>
-                  </label>
+                  <input type="checkbox" class="d-matrix-enabled-checkbox" data-d-matrix-fault-enabled="${html(row.faultId)}" aria-label="启用${html(row.faultDisplayName||row.faultName)}" title="勾选启用，取消勾选禁用" ${isDMatrixRowEnabled(row)?'checked':''}>
                 </td>
-                <td><button type="button" class="d-matrix-path-action" data-build-troubleshooting-path="${html(row.faultId)}">生成</button></td>
+                <td>${row.detectableCount}/${points.length}</td>
+                <td><button type="button" class="d-matrix-path-action" data-build-troubleshooting-path="${html(row.faultId)}" ${isDMatrixRowEnabled(row)?'':'disabled title="该故障已禁用"'}>生成</button></td>
                 ${row.cells.map(cell=>`
                   <td class="d-matrix-cell${cell.detectable?' is-detectable':' is-empty'}" title="${html(cell.pointCode)} · ${html(cell.pointName)} · ${html(cell.reason)}">${cell.detectable?'1':'0'}</td>
                 `).join('')}
@@ -27222,6 +28019,7 @@ function decorateDataflowEdges(){
     const host=document.getElementById('d-matrix-panel')||document.querySelector('.d-matrix-panel');
     if(!host) return;
     const model=window.buildDetectionMatrixModel();
+    const enabledFaultIds=arr(model.rows).filter(isDMatrixRowEnabled).map(row=>row.faultId).filter(Boolean);
     host.innerHTML=`
       <section class="d-matrix" data-d-matrix-view>
         <header class="d-matrix-header">
@@ -27230,10 +28028,15 @@ function decorateDataflowEdges(){
             <h2>D矩阵</h2>
             <p>按检测栏内已启用测点，列出每类故障能否在对应测点被检测到。</p>
           </div>
-          <button type="button" class="d-matrix-export" data-d-matrix-export>导出 CSV</button>
+          <span class="d-matrix-header__actions">
+            <button type="button" class="d-matrix-export" data-open-dmatrix-knowledge-graph title="查看随画布实时更新的诊断知识图谱">查看知识图谱</button>
+            <button type="button" class="d-matrix-export" data-build-enabled-troubleshooting-path ${enabledFaultIds.length?'':'disabled'}>生成组合路径（已启用 ${enabledFaultIds.length}）</button>
+            <button type="button" class="d-matrix-export" data-d-matrix-export>导出 CSV</button>
+          </span>
         </header>
         <div class="d-matrix-summary">
           <span><b>${model.summary.faultCount}</b><em>故障类型</em></span>
+          <span><b>${enabledFaultIds.length}</b><em>已启用故障</em></span>
           <span><b>${model.summary.pointCount}</b><em>已启用测点</em></span>
           <span><b>${model.summary.detectableCells}</b><em>可检测关系</em></span>
         </div>
@@ -27249,7 +28052,7 @@ function decorateDataflowEdges(){
 
   window.exportDetectionMatrixCsv=function(options={}){
     const model=window.buildDetectionMatrixModel();
-    const header=['故障类型','故障ID','目标模块/连线','层级','可测点',...model.points.map(point=>point.shortName)];
+    const header=['故障类型','故障ID','目标模块/连线','层级','是否启用','可测点',...model.points.map(point=>point.shortName)];
     const lines=[header.map(escapeCsvValue).join(',')];
     model.rows.forEach(row=>{
       const values=[
@@ -27257,6 +28060,7 @@ function decorateDataflowEdges(){
         row.faultId,
         row.targetLabel,
         row.layer,
+        isDMatrixRowEnabled(row)?'启用':'禁用',
         `${row.detectableCount}/${model.points.length}`,
         ...row.cells.map(cell=>cell.detectable?'1':'0')
       ];
@@ -27311,6 +28115,9 @@ function decorateDataflowEdges(){
       point.pointId=`tp-${edge.id}-${manual.length+1}`;
     }
     manual.push(point);
+    if(!options.shortName){
+      state.diagnosticTestPointNextNumber=getNextDiagnosticTestPointNumber(state)+1;
+    }
     state.selectedDiagnosticTestPointId=point.pointId;
     state.diagnosticTestPointManualCleared=false;
     invalidateConfiguredDiagnosticPoints();
@@ -27418,9 +28225,11 @@ function decorateDataflowEdges(){
       pointCode:point.shortName,
       pointName:point.name,
       pointNameZh:point.name,
+      pointType:normalizeDiagnosticTestPointType(point.pointType),
+      pointTypeLabelZh:diagnosticPointTypeLabel(point.pointType),
       signalPathZh:point.signalPathZh||`${point.sourceName||point.signalId||point.edgeId}${point.targetName?` -> ${point.targetName}`:''}`,
       status:activeAffectsPoint?'abnormal':'normal',
-      statusLabelZh:activeAffectsPoint?'疑似故障':'未发现异常',
+      statusLabelZh:activeAffectsPoint?'发现异常':'未发现异常',
       candidates,
       confirmedFaultTypeIds:arr(state.confirmedDiagnosticFaults?.[point.pointId]),
       time:Date.now()
@@ -27460,8 +28269,9 @@ function decorateDataflowEdges(){
     if(!state.confirmedDiagnosticFaults||typeof state.confirmedDiagnosticFaults!=='object'){
       state.confirmedDiagnosticFaults={};
     }
-    const ids=new Set(arr(state.confirmedDiagnosticFaults[pointId]));
-    checked?ids.add(faultTypeId):ids.delete(faultTypeId);
+    // A diagnostic result has one active fault hypothesis at a time.  Keeping
+    // this invariant in state also covers confirmations made outside the dialog.
+    const ids=checked?new Set([faultTypeId]):new Set();
     state.confirmedDiagnosticFaults[pointId]=Array.from(ids);
     if(state.testPointDiagnosis?.pointId===pointId){
       state.testPointDiagnosis.confirmedFaultTypeIds=Array.from(ids);
@@ -27485,6 +28295,155 @@ function decorateDataflowEdges(){
     }
     return true;
   };
+
+  function nodeLabelForFaultChain(node){
+    return node?.props?.name||node?.name||node?.label||node?.templateId||node?.type||node?.id||'未命名组件';
+  }
+
+  function nodeKindForFaultChain(node){
+    if(node?.type==='signal_source'){return '信号源';}
+    if(node?.type==='simulation_block'){return '仿真组件';}
+    if(String(node?.type||'').startsWith('instrument_')){return '仪器组件';}
+    return '组件';
+  }
+
+  function resolveFaultPointChain(pointId,fault){
+    const point=getConfiguredPoints().find(item=>(item.pointId||item.id)===pointId);
+    const edges=getRuntimeEdges().filter(edge=>edge?.id);
+    const nodes=getRuntimeNodes();
+    const nodeById=new Map(nodes.map(node=>[node.id,node]));
+    const pointEdge=edges.find(edge=>edge.id===point?.edgeId);
+    if(!point||!pointEdge){return null;}
+    const targetNodeId=edgeTargetId(pointEdge);
+    const incoming=new Set(edges.map(edge=>edgeTargetId(edge)).filter(Boolean));
+    const roots=nodes.filter(node=>node?.id&&(node.type==='signal_source'||!incoming.has(node.id))).map(node=>node.id);
+    const outgoing=new Map();
+    edges.forEach(edge=>{
+      const sourceId=edgeSourceId(edge);
+      if(!outgoing.has(sourceId)){outgoing.set(sourceId,[]);}
+      outgoing.get(sourceId).push(edge);
+    });
+    const faultEdgeIds=new Set(getFaultTargetEdges(fault));
+    const faultNodeIds=new Set([
+      fault?.targetNodeId,fault?.targetNodeID,fault?.recommendedModuleId,
+      fault?.injectionDesign?.targetNodeId,fault?.injectionDesign?.targetId,fault?.injectionTarget?.nodeId
+    ].filter(Boolean));
+    const queue=(roots.length?roots:[edgeSourceId(pointEdge)]).map(nodeId=>({nodeIds:[nodeId],edgeIds:[]}));
+    const candidates=[];
+    let guard=0;
+    while(queue.length&&guard<512){
+      guard+=1;
+      const current=queue.shift();
+      const currentNodeId=current.nodeIds[current.nodeIds.length-1];
+      if(currentNodeId===targetNodeId){
+        const hasFaultEdge=current.edgeIds.some(id=>faultEdgeIds.has(id));
+        const hasFaultNode=current.nodeIds.some(id=>faultNodeIds.has(id));
+        candidates.push({...current,score:(hasFaultEdge?100:0)+(hasFaultNode?80:0)-current.edgeIds.length});
+        continue;
+      }
+      (outgoing.get(currentNodeId)||[]).forEach(edge=>{
+        const nextNodeId=edgeTargetId(edge);
+        if(!nextNodeId||current.nodeIds.includes(nextNodeId)||current.nodeIds.length>24){return;}
+        queue.push({nodeIds:[...current.nodeIds,nextNodeId],edgeIds:[...current.edgeIds,edge.id]});
+      });
+    }
+    const upstreamCandidates=candidates.length
+      ?candidates
+      :[{nodeIds:[edgeSourceId(pointEdge),targetNodeId].filter(Boolean),edgeIds:[pointEdge.id],score:0}];
+    const completedPaths=[];
+    let downstreamGuard=0;
+    const downstreamQueue=upstreamCandidates.map(path=>({nodeIds:[...path.nodeIds],edgeIds:[...path.edgeIds]}));
+    while(downstreamQueue.length&&downstreamGuard<2048){
+      downstreamGuard+=1;
+      const current=downstreamQueue.shift();
+      const currentNodeId=current.nodeIds[current.nodeIds.length-1];
+      const nextEdges=(outgoing.get(currentNodeId)||[]).filter(edge=>{
+        const nextNodeId=edgeTargetId(edge);
+        const nextNode=nodeById.get(nextNodeId);
+        const edgeRole=[edge?.label,edge?.signalLabel,edge?.signalId].filter(Boolean).join(' ');
+        const isFeedback=/反馈|feedback/i.test(edgeRole);
+        const isInstrument=String(nextNode?.type||'').startsWith('instrument_');
+        return nextNodeId&&!current.nodeIds.includes(nextNodeId)&&current.nodeIds.length<28&&!isFeedback&&!isInstrument;
+      });
+      if(!nextEdges.length){
+        completedPaths.push(current);
+        continue;
+      }
+      nextEdges.forEach(edge=>{
+        const nextNodeId=edgeTargetId(edge);
+        downstreamQueue.push({nodeIds:[...current.nodeIds,nextNodeId],edgeIds:[...current.edgeIds,edge.id]});
+      });
+    }
+    if(!completedPaths.length){completedPaths.push(...downstreamQueue,...upstreamCandidates);}
+    const pathScore=path=>{
+      const hasFaultEdge=path.edgeIds.some(id=>faultEdgeIds.has(id));
+      const hasFaultNode=path.nodeIds.some(id=>faultNodeIds.has(id));
+      const endNode=nodeById.get(path.nodeIds[path.nodeIds.length-1]);
+      const instrumentEnd=String(endNode?.type||'').startsWith('instrument_');
+      return (hasFaultEdge?1000:0)+(hasFaultNode?800:0)+(instrumentEnd?-200:100)+path.edgeIds.length;
+    };
+    const selected=completedPaths.sort((left,right)=>pathScore(right)-pathScore(left))[0];
+    return {
+      point,
+      pointNodeId:targetNodeId,
+      faultEdgeIds,
+      faultNodeIds,
+      nodes:selected.nodeIds.map(id=>nodeById.get(id)||{id,name:id}),
+      edges:selected.edgeIds.map(id=>edges.find(edge=>edge.id===id)).filter(Boolean)
+    };
+  }
+
+  function renderFaultPointChain(pointId,fault){
+    if(!fault){
+      return '<section class="testpoint-fault-chain testpoint-fault-chain--empty"><strong>故障—测点链路</strong><span>勾选上方一个候选故障后，显示从信号源到当前测点的完整组件链路。</span></section>';
+    }
+    let chain=null;
+    try{
+      chain=resolveFaultPointChain(pointId,fault);
+    }catch(error){
+      console.warn('无法计算故障—测点链路：',error);
+      return '<section class="testpoint-fault-chain testpoint-fault-chain--empty"><strong>故障—测点链路</strong><span>当前模型的拓扑信息不完整，暂时无法生成链路；请重新选择候选故障或检查模型连线。</span></section>';
+    }
+    if(!chain?.nodes?.length){
+      return '<section class="testpoint-fault-chain testpoint-fault-chain--empty"><strong>故障—测点链路</strong><span>未找到该故障到当前测点的可视化拓扑路径。</span></section>';
+    }
+    const renderNode=(node,index)=>{
+      const isFault=chain.faultNodeIds.has(node.id);
+      const isPoint=node.id===chain.pointNodeId;
+      const isEnd=index===chain.nodes.length-1;
+      return `<article class="testpoint-fault-chain__node${isFault?' is-fault':''}${isPoint?' is-point':''}${isEnd?' is-end':''}">
+          <em>${html(nodeKindForFaultChain(node))}</em><strong>${html(nodeLabelForFaultChain(node))}</strong>
+          ${isFault?'<b>故障位置</b>':''}${isPoint?`<b>${html(chain.point.shortName||'测点')}</b>`:''}${isEnd&&!isPoint?'<b>系统末端</b>':''}
+        </article>`;
+    };
+    const renderLink=(edge,direction='forward',turn=false)=>{
+      const isFaultEdge=edge&&chain.faultEdgeIds.has(edge.id);
+      const edgeLabel=edge?.label||edge?.signalLabel||edge?.signalId||'信号';
+      if(turn){
+        return `<div class="testpoint-fault-chain__turn${direction==='right'?' is-right':' is-left'}${isFaultEdge?' is-fault':''}"><span>${html(edgeLabel)}</span><i>↓</i>${isFaultEdge?'<b>故障注入</b>':''}</div>`;
+      }
+      return `<div class="testpoint-fault-chain__link${isFaultEdge?' is-fault':''}"><span>${html(edgeLabel)}</span><i>${direction==='reverse'?'←':'→'}</i>${isFaultEdge?'<b>故障注入</b>':''}</div>`;
+    };
+    const rowSize=4;
+    const rows=[];
+    for(let start=0,rowIndex=0;start<chain.nodes.length;start+=rowSize,rowIndex+=1){
+      const end=Math.min(start+rowSize,chain.nodes.length);
+      const indices=Array.from({length:end-start},(_,offset)=>start+offset);
+      const reversed=rowIndex%2===1;
+      const visualIndices=reversed?[...indices].reverse():indices;
+      const content=visualIndices.map((nodeIndex,visualIndex)=>{
+        if(visualIndex===0){return renderNode(chain.nodes[nodeIndex],nodeIndex);}
+        const previousIndex=visualIndices[visualIndex-1];
+        const edge=chain.edges[Math.min(previousIndex,nodeIndex)];
+        return `${renderLink(edge,reversed?'reverse':'forward')}${renderNode(chain.nodes[nodeIndex],nodeIndex)}`;
+      }).join('');
+      rows.push(`<div class="testpoint-fault-chain__row${reversed?' is-reverse':''}">${content}</div>`);
+      if(end<chain.nodes.length){
+        rows.push(renderLink(chain.edges[end-1],reversed?'left':'right',true));
+      }
+    }
+    return `<section class="testpoint-fault-chain"><div class="testpoint-fault-chain__head"><div><strong>故障—测点信号链路</strong><span>${html(fault.name||fault.displayName||fault.faultTypeId||fault.id)} → ${html(chain.point.shortName||'测点')} → 系统末端</span></div><small>从上游信号源经过检测测点，继续追踪至下游末端</small></div><div class="testpoint-fault-chain__flow">${rows.join('')}</div></section>`;
+  }
 
   window.openDiagnosticTestPointDialog=function(pointId){
     const diagnosis=window.detectDiagnosticTestPoint(pointId);
@@ -27514,27 +28473,46 @@ function decorateDataflowEdges(){
     }
     const body=overlay.querySelector('#testpoint-diagnosis-body');
     if(body){
+      const selectedCandidate=diagnosis.candidates.find(candidate=>candidate.confirmed)||null;
+      const selectedCandidateId=selectedCandidate&&(selectedCandidate.faultTypeId||selectedCandidate.id);
       body.innerHTML=`
-        <section class="testpoint-diagnosis-summary">
-          <div><span>检测测点</span><strong>${html(diagnosis.pointNameZh||diagnosis.pointName)}</strong></div>
-          <div><span>信号链路</span><strong>${html(diagnosis.signalPathZh||diagnosis.edgeId)}</strong></div>
-          <div><span>诊断结论</span><strong>${html(diagnosis.statusLabelZh)}</strong></div>
-        </section>
-        <section class="testpoint-candidate-list">
-          ${diagnosis.candidates.length
-            ?diagnosis.candidates.map(candidate=>`
-              <label class="testpoint-candidate" data-fault-candidate="${html(candidate.faultTypeId)}">
-                <input type="checkbox" data-confirm-fault-candidate="${html(candidate.faultTypeId)}" ${candidate.confirmed?'checked':''}>
-                <span class="testpoint-candidate__body">
-                  <strong>${html(candidate.name||candidate.faultTypeId)}</strong>
-                  <em>${html(candidate.category||candidate.layer||'候选故障')}</em>
-                </span>
-              </label>`).join('')
-            :'<div class="testpoint-candidate-empty">当前测点没有匹配到候选故障类型。</div>'}
-        </section>`;
+        <div class="testpoint-diagnosis-upper">
+          <section class="testpoint-diagnosis-summary">
+            <div class="testpoint-diagnosis-summary__point"><span>检测测点</span><strong>${html(diagnosis.pointNameZh||diagnosis.pointName)}</strong><small><b>${html(diagnosis.shortName||diagnosis.pointCode||diagnosis.pointId)}</b><em>${html(diagnosis.pointTypeLabelZh||diagnosticPointTypeLabel(diagnosis.pointType))}</em></small></div>
+            <div><span>信号链路</span><strong>${html(diagnosis.signalPathZh||diagnosis.edgeId)}</strong></div>
+            <div><span>诊断结论</span><strong>${html(diagnosis.statusLabelZh)}</strong></div>
+          </section>
+          <section class="testpoint-candidate-area">
+            <div class="testpoint-candidate-area__head"><strong>可能的故障</strong><span>选择故障后显示下方链路</span></div>
+            <div class="testpoint-candidate-list">
+              ${diagnosis.candidates.length
+                ?diagnosis.candidates.map(candidate=>`
+                  <label class="testpoint-candidate" data-fault-candidate="${html(candidate.faultTypeId)}">
+                    <input type="checkbox" data-confirm-fault-candidate="${html(candidate.faultTypeId)}" ${(candidate.faultTypeId||candidate.id)===selectedCandidateId?'checked':''}>
+                    <span class="testpoint-candidate__body">
+                      <strong>${html(candidate.name||candidate.faultTypeId)}</strong>
+                      <em>${html(candidate.category||candidate.layer||'候选故障')}</em>
+                    </span>
+                  </label>`).join('')
+                :'<div class="testpoint-candidate-empty">当前测点没有匹配到候选故障类型。</div>'}
+            </div>
+          </section>
+        </div>
+        <div class="testpoint-diagnosis-chain-slot" data-fault-point-chain>${renderFaultPointChain(pointId,selectedCandidate)}</div>`;
       body.querySelectorAll('[data-confirm-fault-candidate]').forEach(input=>{
         input.addEventListener('change',()=>{
+          if(input.checked){
+            body.querySelectorAll('[data-confirm-fault-candidate]').forEach(other=>{
+              if(other!==input){other.checked=false;}
+            });
+          }
           window.toggleDiagnosticFaultConfirmation(pointId,input.dataset.confirmFaultCandidate,input.checked);
+          const selectedId=input.checked
+            ?input.dataset.confirmFaultCandidate
+            :body.querySelector('[data-confirm-fault-candidate]:checked')?.dataset.confirmFaultCandidate;
+          const candidate=diagnosis.candidates.find(item=>(item.faultTypeId||item.id)===selectedId)||null;
+          const chainHost=body.querySelector('[data-fault-point-chain]');
+          if(chainHost){chainHost.innerHTML=renderFaultPointChain(pointId,candidate);}
           refreshDiagnosisViews();
         });
       });
@@ -28141,10 +29119,10 @@ function decorateDataflowEdges(){
   if(typeof document!=='undefined'&&!window.__compactDiagnosisConsoleEvents){
     window.__compactDiagnosisConsoleEvents=true;
     document.addEventListener('change',event=>{
-      const practiceFaultToggle=event.target.closest?.('[data-d-matrix-practice-fault]');
-      if(!practiceFaultToggle) return;
-      const faultId=practiceFaultToggle.getAttribute('data-d-matrix-practice-fault')||'';
-      window.setDMatrixPracticeFault?.(faultId,Boolean(practiceFaultToggle.checked));
+      const enabledControl=event.target.closest?.('[data-d-matrix-fault-enabled]');
+      if(!enabledControl) return;
+      const faultId=enabledControl.getAttribute('data-d-matrix-fault-enabled')||'';
+      window.setDiagnosticFaultEnabled?.(faultId,enabledControl.checked===true);
     });
     document.addEventListener('click',event=>{
       const locateFault=event.target.closest?.('[data-locate-fault-injection]');
@@ -28205,6 +29183,12 @@ function decorateDataflowEdges(){
         window.installAllDiagnosticTestPoints();
         return;
       }
+      if(event.target.closest?.('[data-rename-testpoints]')){
+        event.preventDefault();
+        const renamed=window.renameDiagnosticTestPoints?.()||[];
+        if(typeof toast==='function') toast(renamed.length?`已按创建顺序重命名 ${renamed.length} 个测点。`:'当前没有可重命名的测点。',renamed.length?'s':'w');
+        return;
+      }
       if(event.target.closest?.('[data-run-fault-detection]')){
         event.preventDefault();
         window.runAllDiagnosticTestPointDetections();
@@ -28227,10 +29211,16 @@ function decorateDataflowEdges(){
         window.exportDetectionMatrixCsv?.();
         return;
       }
-      const practiceFaultToggle=event.target.closest?.('[data-d-matrix-practice-fault]');
-      if(practiceFaultToggle){
-        const faultId=practiceFaultToggle.getAttribute('data-d-matrix-practice-fault')||'';
-        window.setDMatrixPracticeFault?.(faultId,Boolean(practiceFaultToggle.checked));
+      if(event.target.closest?.('[data-build-enabled-troubleshooting-path]')){
+        event.preventDefault();
+        const model=window.buildDetectionMatrixModel();
+        const faultIds=arr(model.rows).filter(isDMatrixRowEnabled).map(row=>row.faultId).filter(Boolean);
+        if(faultIds.length){window.openTroubleshootingPathPanel?.(faultIds);}
+        return;
+      }
+      if(event.target.closest?.('[data-open-dmatrix-knowledge-graph]')){
+        event.preventDefault();
+        window.openDiagnosticKnowledgeGraph?.();
         return;
       }
       const pathTrigger=event.target.closest?.('[data-build-troubleshooting-path]');
@@ -30520,6 +31510,7 @@ function decorateDataflowEdges(){
     const paletteKey=node?.templateId||node?.type;
     return window.__GZ_COMPONENT_REGISTRY__?.[paletteKey]?.group==='electrical';
   };
+
   const isSimulationNode=node=>node?.type==='simulation_block';
 
   function isEdgeVisible(edge){

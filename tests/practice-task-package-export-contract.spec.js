@@ -29,7 +29,9 @@ describe('practice task package export integration contract', () => {
 
     expect(implementation).toContain('window.__GZ_BACKEND_SIMULATION__?.buildExecutablePackage');
     expect(implementation).toContain('window.__GZ_PRACTICE_TASK_PACKAGE__?.buildPracticeTaskPackage');
-    expect(implementation).toContain('await ensureSelectedPracticeFaultPlans()');
+    expect(implementation).toContain('await ensureEnabledFaultCombinationPlan(dMatrix)');
+    expect(implementation).toContain('combinedTroubleshootingPath');
+    expect(implementation).toContain('keyMeasurementPoints');
     expect(implementation).toContain('practiceFaults');
     expect(implementation).toContain('dMatrix');
     expect(implementation).toContain('duration:SIM.duration');
@@ -38,11 +40,11 @@ describe('practice task package export integration contract', () => {
     expect(implementation).not.toContain("kind:'simulation-result'");
   });
 
-  it('loads an uncached selected-fault plan before exporting', () => {
+  it('loads the enabled-fault combination plan before exporting', () => {
     const runtime = readWorkspaceFile('src/services/legacy-runtime.txt');
 
     expect(runtime).toContain('window.ensureBackendTroubleshootingPlan=async function');
-    expect(runtime).toContain('await Promise.all(selectedIds.map(faultId=>ensurePlan(faultId)))');
+    expect(runtime).toContain('const plan=await ensurePlan(faultIds)');
     expect(runtime).toContain('const result=await buildSimulationResultSnapshot();');
   });
 });

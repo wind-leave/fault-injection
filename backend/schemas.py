@@ -121,7 +121,7 @@ def validate_numeric_parameters(parameters, field, text_parameters=None):
     for key, value in parameters.items():
         if key in allowed_text and isinstance(value, str):
             continue
-        if key == "value" and isinstance(value, list):
+        if isinstance(value, list):
             ensure_signal_value(value, f"{field}.{key}")
             continue
         ensure_number(value, f"{field}.{key}")

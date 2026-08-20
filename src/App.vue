@@ -15,6 +15,7 @@ import PythonBindingDialog from './components/dialogs/PythonBindingDialog.vue';
 import ComponentAuthoringDialog from './components/dialogs/ComponentAuthoringDialog.vue';
 import FaultAuthoringDialog from './components/dialogs/FaultAuthoringDialog.vue';
 import ToastHost from './components/dialogs/ToastHost.vue';
+import KnowledgeGraphPage from './components/KnowledgeGraphPage.vue';
 import { useWorkbenchState } from './composables/useWorkbenchState.js';
 import { mountLegacyRuntime } from './services/legacyRuntimeBootstrap.js';
 import { bindStatusBarInteractions, unbindStatusBarInteractions } from './services/statusBarRuntime.js';
@@ -262,5 +263,6 @@ onBeforeUnmount(() => {
     <ComponentAuthoringDialog />
     <FaultAuthoringDialog />
     <ToastHost />
+    <KnowledgeGraphPage />
   </div>
 </template>

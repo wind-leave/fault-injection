@@ -274,10 +274,14 @@ def evaluate_path_quality(
         initial_physical_measurement_snapshot,
     )
     information_gain = calculate_information_gain_score(dynamic_history)
-    path_efficiency = _path_efficiency_score(
-        ineffective_repairs,
-        repairs,
-        dynamic_quality_counts["unmatched"],
+    path_efficiency = (
+        _path_efficiency_score(
+            ineffective_repairs,
+            repairs,
+            dynamic_quality_counts["unmatched"],
+        )
+        if steps
+        else 0
     )
     diagnostic_tree_path_breakdown = {
         "keyNodeCoverage": key_node_coverage["score"],
@@ -348,6 +352,7 @@ def evaluate_practice_submission_score(
     scoring_rules,
     student_actions,
     path_evaluation,
+    fault_set_accuracy=None,
 ):
     scoring_config = scoring_rules if isinstance(scoring_rules, dict) else {}
     safe_path_evaluation = path_evaluation if isinstance(path_evaluation, dict) else {}
@@ -361,7 +366,15 @@ def evaluate_practice_submission_score(
     safety_violations = sum(1 for action in _arr(student_actions) if action.get("safetyViolation"))
     safety = max(0, SAFETY_SCORE - (safety_violations * 5))
     efficiency = EFFICIENCY_SCORE if elapsed_seconds <= float(scoring_config.get("fullEfficiencySeconds", 600)) else EFFICIENCY_SCORE / 2
-    fault_detection = FAULT_DETECTION_SCORE if correct else 0
+    if fault_set_accuracy is None:
+        normalized_fault_set_accuracy = 1.0 if correct else 0.0
+    else:
+        try:
+            normalized_fault_set_accuracy = float(fault_set_accuracy)
+        except (TypeError, ValueError):
+            normalized_fault_set_accuracy = 0.0
+        normalized_fault_set_accuracy = max(0.0, min(1.0, normalized_fault_set_accuracy))
+    fault_detection = _round_score(FAULT_DETECTION_SCORE * normalized_fault_set_accuracy)
     score_breakdown = {
         "faultLocalization": fault_detection,
         "diagnosticTreePath": _round_score(diagnostic_tree_path),
@@ -372,7 +385,10 @@ def evaluate_practice_submission_score(
     score = sum(score_breakdown.values())
     deductions = []
     if not correct:
-        deductions.append({"reason": "最终故障判断错误", "points": -FAULT_DETECTION_SCORE})
+        deductions.append({
+            "reason": "最终故障集合未完全匹配",
+            "points": _round_score(-(FAULT_DETECTION_SCORE - fault_detection)),
+        })
     if safety_violations:
         deductions.append({"reason": "存在安全违规操作", "points": -(SAFETY_SCORE - safety)})
     return {

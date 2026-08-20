@@ -75,15 +75,19 @@ class RegisteredModule:
         resolved = {}
         for name, spec in self.parameters.items():
             value = parameters.get(name, spec.get("default", 0.0))
-            numeric = ensure_number(value, f"parameters.{name}")
+            is_vector = str(spec.get("dataType", spec.get("type", "number"))).lower() == "vector"
+            numeric = ensure_signal_value(value, f"parameters.{name}") if is_vector else ensure_number(value, f"parameters.{name}")
+            if is_vector and spec.get("vectorLength") is not None and len(numeric) != int(spec["vectorLength"]):
+                raise SimulationBackendError("PARAM_OUT_OF_RANGE", f"parameters.{name}", f"{name} has an invalid vector length")
             minimum = spec.get("min")
             maximum = spec.get("max")
-            if minimum is not None and numeric < float(minimum):
+            values = numeric if is_vector else [numeric]
+            if minimum is not None and any(item < float(minimum) for item in values):
                 raise SimulationBackendError("PARAM_OUT_OF_RANGE", f"parameters.{name}", f"{name} is below minimum")
-            if maximum is not None and numeric > float(maximum):
+            if maximum is not None and any(item > float(maximum) for item in values):
                 raise SimulationBackendError("PARAM_OUT_OF_RANGE", f"parameters.{name}", f"{name} is above maximum")
             allowed_values = spec.get("enum")
-            if allowed_values is not None and numeric not in {float(item) for item in allowed_values}:
+            if allowed_values is not None and any(item not in {float(allowed) for allowed in allowed_values} for item in values):
                 raise SimulationBackendError("PARAM_OUT_OF_RANGE", f"parameters.{name}", f"{name} is not an allowed value")
             resolved[name] = numeric
         return resolved
@@ -95,19 +99,44 @@ class ModuleRegistry:
 
     @classmethod
     def from_builtin_manifest(cls):
-        manifest_path = Path(__file__).parent / "builtin_modules" / "manifest.json"
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        modules = [
-            RegisteredModule(
-                module_id=item["moduleId"],
-                import_path=item["importPath"],
-                entry_function=item.get("entryFunction", "process"),
-                inputs=tuple(item.get("inputs", [])),
-                outputs=tuple(item.get("outputs", [])),
-                parameters=item.get("parameters", {}),
-            )
-            for item in data.get("modules", [])
-        ]
+        return cls.from_manifest(cls.builtin_manifest_path())
+
+    @staticmethod
+    def builtin_manifest_path():
+        return Path(__file__).parent / "builtin_modules" / "manifest.json"
+
+    @classmethod
+    def from_manifest(cls, manifest_path):
+        return cls.from_manifests([manifest_path])
+
+    @classmethod
+    def from_manifests(cls, manifest_paths):
+        """Build a registry from the immutable built-ins and persistent custom manifests."""
+        modules = []
+        module_ids = set()
+        for manifest_path in manifest_paths:
+            manifest_path = Path(manifest_path)
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest_modules = data.get("modules", [])
+            if not isinstance(manifest_modules, list):
+                raise SimulationBackendError("INVALID_SCHEMA", "manifest.modules", "manifest modules must be an array")
+            for item in manifest_modules:
+                if not isinstance(item, dict) or not isinstance(item.get("moduleId"), str):
+                    raise SimulationBackendError("INVALID_SCHEMA", "manifest.modules", "each manifest module must have a moduleId")
+                module_id = item["moduleId"]
+                if module_id in module_ids:
+                    raise SimulationBackendError("INVALID_SCHEMA", "manifest.modules", f"duplicate moduleId: {module_id}")
+                module_ids.add(module_id)
+                modules.append(
+                    RegisteredModule(
+                        module_id=module_id,
+                        import_path=item["importPath"],
+                        entry_function=item.get("entryFunction", "process"),
+                        inputs=tuple(item.get("inputs", [])),
+                        outputs=tuple(item.get("outputs", [])),
+                        parameters=item.get("parameters", {}),
+                    )
+                )
         return cls(modules)
 
     def require(self, module_id, field="pythonBinding.moduleId"):

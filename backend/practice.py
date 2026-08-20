@@ -1,5 +1,7 @@
 import time
+from itertools import combinations
 
+from backend.diagnostic_knowledge import build_diagnostic_knowledge_graph
 from backend.practice_action_protocol import normalize_practice_action
 from backend.practice_action_rules import PracticeActionRuleEngine
 from backend.practice_actions import PracticeActionRuntime
@@ -18,7 +20,6 @@ from backend.schemas import SimulationBackendError
 from backend.troubleshooting import (
     TroubleshootingSession,
     _fault_id,
-    is_directly_diagnosable_from_physical_points,
 )
 
 
@@ -109,6 +110,7 @@ class PracticeSession:
         simulation_session,
         d_matrix,
         target_fault_id,
+        target_fault_ids=None,
         initial_point_states=None,
         initial_recommended_path=None,
         key_nodes=None,
@@ -117,6 +119,7 @@ class PracticeSession:
         action_rules=None,
         resource_limits=None,
         display_console_controls=None,
+        model_graph=None,
         default_max_actions=200,
     ):
         self.practice_session_id = practice_session_id
@@ -127,18 +130,50 @@ class PracticeSession:
             display_console_controls=display_console_controls,
         )
         self.rule_engine = PracticeActionRuleEngine(simulation_session, rules=action_rules)
-        self.troubleshooting = TroubleshootingSession(d_matrix, target_fault_id)
+        normalized_target_fault_ids = []
+        for fault_id in _arr(target_fault_ids) or [target_fault_id]:
+            normalized_fault_id = _text(fault_id)
+            if normalized_fault_id and normalized_fault_id not in normalized_target_fault_ids:
+                normalized_target_fault_ids.append(normalized_fault_id)
+        primary_target_fault_id = _text(target_fault_id) or (
+            normalized_target_fault_ids[0] if normalized_target_fault_ids else ""
+        )
+        self.troubleshooting = TroubleshootingSession(d_matrix, primary_target_fault_id)
+        matrix_fault_ids = {
+            _fault_id(row)
+            for row in _arr(self.troubleshooting.d_matrix.get("rows"))
+            if _fault_id(row)
+        }
+        missing_target_fault_ids = [
+            fault_id for fault_id in normalized_target_fault_ids if fault_id not in matrix_fault_ids
+        ]
+        if missing_target_fault_ids:
+            raise SimulationBackendError(
+                "INVALID_SCHEMA",
+                "targetFaultIds",
+                f"targetFaultIds contains faults that are not present in dMatrix.rows: {', '.join(missing_target_fault_ids)}",
+            )
+        self.target_fault_ids = normalized_target_fault_ids or [primary_target_fault_id]
+        self.max_candidate_fault_count = max(1, len(self.target_fault_ids))
+        self.diagnostic_knowledge_graph = build_diagnostic_knowledge_graph(
+            self.troubleshooting.d_matrix,
+            model_graph=model_graph,
+        )
+        self._knowledge_graph_measurement_points = {}
+        self._knowledge_graph_detectability = {}
+        self._index_diagnostic_knowledge_graph()
         # Keep the original matrix for final-fault validation and retain a
         # session-local working matrix for the iterative diagnosis process.
-        # Each virtual measurement consumes one point column and filters rows
-        # whose expected state disagrees with the saved point state.
+        # Each virtual measurement consumes one point column. Single-fault
+        # sessions retain the legacy row filtering, while multi-fault sessions
+        # evaluate the saved evidence against fault-row combinations.
         self.active_d_matrix = _clone(self.troubleshooting.d_matrix)
         self.initial_point_states = (
             _clone(initial_point_states)
             if isinstance(initial_point_states, list)
             else self._initial_point_states_from_d_matrix()
         )
-        self.target_fault_id = _text(target_fault_id)
+        self.target_fault_id = primary_target_fault_id
         self.scoring_rules = scoring_rules if isinstance(scoring_rules, dict) else {}
         self.started_at = time.time()
         self.submitted_at = None
@@ -225,10 +260,12 @@ class PracticeSession:
         }
 
     def _build_troubleshooting_state(self):
+        candidate_combinations = self._candidate_fault_id_combinations_from_current_evidence()
         return {
             "virtualMeasurements": _clone(self.virtual_measurements),
             "repairAttempts": _clone(self.repair_attempts),
-            "faultCandidates": _clone(self.troubleshooting.remaining_fault_ids),
+            "faultCandidates": self._flatten_candidate_fault_ids(candidate_combinations),
+            "faultCandidateCombinations": _clone(candidate_combinations),
             "status": "resolved" if not _arr((self.latest_physical_measurement_snapshot or {}).get("abnormalPointCodes")) else "inProgress",
         }
 
@@ -332,6 +369,7 @@ class PracticeSession:
         }
 
     def _append_measurement_path_step(self, action_record, virtual_measurement):
+        candidate_fault_combinations = self._candidate_fault_id_combinations_from_current_evidence()
         self.actual_troubleshooting_steps.append({
             "stepIndex": len(self.actual_troubleshooting_steps) + 1,
             "operationId": action_record.get("operationId") or f"operation-{len(self.actual_troubleshooting_steps) + 1}",
@@ -341,11 +379,13 @@ class PracticeSession:
             "observed": virtual_measurement.get("observed") or "unknown",
             "routeRole": "evidenceCollection",
             "virtualMeasurement": _clone(virtual_measurement),
-            "candidateFaultsAfterAction": self._candidate_fault_ids_from_current_evidence(),
+            "candidateFaultsAfterAction": self._flatten_candidate_fault_ids(candidate_fault_combinations),
+            "candidateFaultCombinationsAfterAction": candidate_fault_combinations,
         })
 
     def _append_repair_path_step(self, action_record, action_application, repair_effect):
         action_type = action_record.get("actionType") or ""
+        candidate_fault_combinations = self._candidate_fault_id_combinations_from_current_evidence()
         self.actual_troubleshooting_steps.append({
             "stepIndex": len(self.actual_troubleshooting_steps) + 1,
             "operationId": action_record.get("operationId") or f"operation-{len(self.actual_troubleshooting_steps) + 1}",
@@ -355,7 +395,8 @@ class PracticeSession:
             "routeRole": "repairAttempt",
             "appliedAction": _clone(action_application),
             "repairEffect": _clone(repair_effect),
-            "candidateFaultsAfterAction": _clone(self.troubleshooting.remaining_fault_ids),
+            "candidateFaultsAfterAction": self._flatten_candidate_fault_ids(candidate_fault_combinations),
+            "candidateFaultCombinationsAfterAction": candidate_fault_combinations,
         })
 
     def _actual_troubleshooting_path(self):
@@ -410,6 +451,7 @@ class PracticeSession:
             return []
 
         nodes = []
+        measurement_node = None
         cells = [
             cell
             for cell in _arr(target_row.get("cells"))
@@ -426,15 +468,17 @@ class PracticeSession:
                 key=lambda item: (-self._expected_information_gain(_text(item.get("pointCode"))), _text(item.get("pointCode"))),
             )
             point_code = _text(ranked_virtual[0].get("pointCode"))
-            nodes.append({
+            measurement_node = {
                 "nodeId": f"measure-{point_code}",
                 "type": "measurePoint",
                 "pointCode": point_code,
                 "label": self._key_node_label_for_point("测量虚拟测点", point_code),
-                "score": 6,
-            })
+                "score": 0,
+            }
+            nodes.append(measurement_node)
 
         edge_ids = {edge.id for edge in self.simulation_session.graph.edges}
+        repair_nodes_by_target = {}
         for fault in self.simulation_session.fault_runtime.fault_instances:
             if not bool(fault.get("enabled", True)):
                 continue
@@ -450,15 +494,39 @@ class PracticeSession:
                 label = "更换故障线路"
             else:
                 continue
-            nodes.append({
-                "nodeId": f"repair-{fault_id}",
-                "type": "repairTarget",
-                "target": target,
-                "faultId": fault_id,
-                "label": label,
-                "score": 6,
-            })
-            break
+            target_identity = (target["type"], target["id"])
+            repair_node = repair_nodes_by_target.get(target_identity)
+            if repair_node is None:
+                repair_node = {
+                    "nodeId": f"repair-{fault_id}",
+                    "type": "repairTarget",
+                    "target": target,
+                    "faultId": fault_id,
+                    "faultIds": [fault_id],
+                    "label": label,
+                    "score": 0,
+                }
+                repair_nodes_by_target[target_identity] = repair_node
+                nodes.append(repair_node)
+            elif fault_id not in repair_node["faultIds"]:
+                repair_node["faultIds"].append(fault_id)
+
+        repair_nodes = list(repair_nodes_by_target.values())
+        measurement_budget = 6.0 if measurement_node and repair_nodes else 12.0 if measurement_node else 0.0
+        repair_budget = 12.0 - measurement_budget
+        if measurement_node:
+            measurement_node["score"] = _round_score(measurement_budget)
+        if repair_nodes:
+            repair_score = repair_budget / len(repair_nodes)
+            allocated_repair_score = 0.0
+            for index, repair_node in enumerate(repair_nodes):
+                node_score = (
+                    repair_budget - allocated_repair_score
+                    if index == len(repair_nodes) - 1
+                    else _round_score(repair_score)
+                )
+                repair_node["score"] = _round_score(node_score)
+                allocated_repair_score += repair_node["score"]
         return nodes
 
     def _known_point_observations(self):
@@ -555,7 +623,7 @@ class PracticeSession:
             return
 
         normalized_observed = _text(observed).lower()
-        if normalized_observed in {"normal", "abnormal"}:
+        if self.max_candidate_fault_count == 1 and normalized_observed in {"normal", "abnormal"}:
             expected_detectable = normalized_observed == "abnormal"
             self.active_d_matrix["rows"] = [
                 row
@@ -575,46 +643,117 @@ class PracticeSession:
                 if _text(cell.get("pointCode") or cell.get("pointId")) != point_code
             ]
 
-    def _candidate_rows_from_current_evidence(self):
-        rows = _arr(self.active_d_matrix.get("rows"))
-        target_row = next((row for row in rows if _fault_id(row) == self.target_fault_id), None)
-        if target_row and is_directly_diagnosable_from_physical_points(self.active_d_matrix, target_row, rows):
-            return [target_row]
+    def _index_diagnostic_knowledge_graph(self):
+        self._knowledge_graph_measurement_points = {}
+        self._knowledge_graph_detectability = {}
+        measurement_point_codes_by_id = {}
+        for node in _arr(self.diagnostic_knowledge_graph.get("nodes")):
+            if node.get("kind") != "measurementPoint":
+                continue
+            point_code = _text(node.get("pointCode") or node.get("id"))
+            point_id = _text(node.get("id"))
+            if not point_code or not point_id:
+                continue
+            measurement_point_codes_by_id[point_id] = point_code
+            self._knowledge_graph_measurement_points[point_code] = _clone(node)
+
+        for relation in _arr(self.diagnostic_knowledge_graph.get("relations")):
+            if relation.get("type") != "DETECTABILITY":
+                continue
+            source = relation.get("source") if isinstance(relation.get("source"), dict) else {}
+            target = relation.get("target") if isinstance(relation.get("target"), dict) else {}
+            fault_id = _text(source.get("id"))
+            point_code = measurement_point_codes_by_id.get(_text(target.get("id")))
+            if fault_id and point_code:
+                self._knowledge_graph_detectability[(fault_id, point_code)] = bool(
+                    relation.get("detectable")
+                )
+
+    def _combined_expected_observation(self, candidate_rows, point_code):
+        detectable_states = [
+            self._knowledge_graph_detectability[(fault_id, point_code)]
+            for row in candidate_rows
+            for fault_id in [_fault_id(row)]
+            if (fault_id, point_code) in self._knowledge_graph_detectability
+        ]
+        if not detectable_states:
+            return None
+        return "abnormal" if any(detectable_states) else "normal"
+
+    def _all_candidate_fault_combinations(self):
+        rows = [row for row in _arr(self.troubleshooting.d_matrix.get("rows")) if _fault_id(row)]
+        max_fault_count = min(self.max_candidate_fault_count, len(rows))
+        return [
+            list(candidate_rows)
+            for fault_count in range(1, max_fault_count + 1)
+            for candidate_rows in combinations(rows, fault_count)
+        ]
+
+    def _candidate_fault_combinations_from_current_evidence(self):
+        all_combinations = self._all_candidate_fault_combinations()
         observations = self._known_point_observations()
         if not observations:
-            return list(rows)
+            return all_combinations
 
         candidates = []
-        for row in rows:
-            row_matches = True
+        for candidate_rows in all_combinations:
+            matches = True
             for point_code, observed in observations.items():
-                cell = _matrix_cell(row, point_code)
-                if cell is None:
-                    continue
-                expected = "abnormal" if bool(cell.get("detectable")) else "normal"
-                if expected != observed:
-                    row_matches = False
+                expected = self._combined_expected_observation(candidate_rows, point_code)
+                if expected is not None and expected != observed:
+                    matches = False
                     break
-            if row_matches:
-                candidates.append(row)
-        return candidates or list(rows)
+            if matches:
+                candidates.append(candidate_rows)
+        return candidates or all_combinations
+
+    def _candidate_rows_from_current_evidence(self):
+        rows = []
+        seen_fault_ids = set()
+        for candidate_rows in self._candidate_fault_combinations_from_current_evidence():
+            for row in candidate_rows:
+                fault_id = _fault_id(row)
+                if fault_id and fault_id not in seen_fault_ids:
+                    seen_fault_ids.add(fault_id)
+                    rows.append(row)
+        return rows
+
+    def _candidate_fault_id_combinations_from_current_evidence(self):
+        return [
+            [_fault_id(row) for row in candidate_rows if _fault_id(row)]
+            for candidate_rows in self._candidate_fault_combinations_from_current_evidence()
+        ]
+
+    def _flatten_candidate_fault_ids(self, candidate_fault_combinations):
+        fault_ids = []
+        for candidate_fault_ids in candidate_fault_combinations:
+            for fault_id in candidate_fault_ids:
+                if fault_id and fault_id not in fault_ids:
+                    fault_ids.append(fault_id)
+        return fault_ids
 
     def _candidate_fault_ids_from_current_evidence(self):
-        return [_fault_id(row) for row in self._candidate_rows_from_current_evidence() if _fault_id(row)]
+        return self._flatten_candidate_fault_ids(
+            self._candidate_fault_id_combinations_from_current_evidence()
+        )
 
-    def _expected_information_gain(self, point_code, candidate_rows=None):
-        rows = candidate_rows if candidate_rows is not None else self._candidate_rows_from_current_evidence()
+    def _expected_information_gain(self, point_code, candidate_combinations=None):
+        candidate_combinations = (
+            candidate_combinations
+            if candidate_combinations is not None
+            else self._candidate_fault_combinations_from_current_evidence()
+        )
         known = self._known_point_observations()
-        if point_code in known or len(rows) <= 1:
+        if point_code in known or len(candidate_combinations) <= 1:
             return 0.0
 
         detectable = 0
         non_detectable = 0
-        for row in rows:
-            cell = _matrix_cell(row, point_code)
-            if cell is None:
+        for candidate_rows in candidate_combinations:
+            expected = self._combined_expected_observation(candidate_rows, point_code)
+            if expected is None:
                 continue
-            if bool(cell.get("detectable")):
+            if expected == "abnormal":
                 detectable += 1
             else:
                 non_detectable += 1
@@ -657,7 +796,7 @@ class PracticeSession:
 
     def _match_quality_score(self, candidate):
         tier = candidate.get("recommendationTier")
-        if tier == "optimal" or int(candidate.get("rank") or 0) == 1:
+        if tier == "optimal":
             return "optimal", 1.0
         if tier == "acceptable":
             return "acceptable", 0.7
@@ -671,17 +810,29 @@ class PracticeSession:
             for measurement in self.virtual_measurements
             if _text(measurement.get("pointCode"))
         }
-        candidate_rows = self._candidate_rows_from_current_evidence()
+        candidate_combinations = self._candidate_fault_combinations_from_current_evidence()
+        active_point_codes = {
+            _point_code(point)
+            for point in _arr(self.active_d_matrix.get("points"))
+            if _point_code(point)
+        }
         actions = []
-        for point in _arr(self.active_d_matrix.get("points")):
-            point_code = _point_code(point)
-            if not point_code or point_code in measured_codes:
+        for point_code, graph_point in self._knowledge_graph_measurement_points.items():
+            if point_code not in active_point_codes or point_code in measured_codes:
                 continue
-            if point_type(self.active_d_matrix, point_code) != "virtual":
+            graph_point_type = _text(graph_point.get("pointType")).lower()
+            if (graph_point_type or point_type(self.active_d_matrix, point_code)) != "virtual":
                 continue
+            if not any(
+                (fault_id, point_code) in self._knowledge_graph_detectability
+                for candidate_rows in candidate_combinations
+                for fault_id in [_fault_id(row) for row in candidate_rows]
+            ):
+                continue
+            point = _point_by_code(self.troubleshooting.d_matrix, point_code)
             target_id = _text(point.get("channel") or point.get("pointId"))
-            information_gain = self._expected_information_gain(point_code, candidate_rows)
-            if len(candidate_rows) <= 1:
+            information_gain = self._expected_information_gain(point_code, candidate_combinations)
+            if len(candidate_combinations) <= 1:
                 priority = 45 + int(information_gain * 10)
             else:
                 priority = 70 + int(information_gain * 25)
@@ -698,20 +849,86 @@ class PracticeSession:
             })
         return actions
 
-    def _repair_action_priority(self, candidate_count, best_measurement_gain, observed_count):
-        if candidate_count <= 1:
+    def _repair_action_priority(
+        self,
+        candidate_count,
+        best_measurement_gain,
+        observed_count,
+        support_ratio,
+    ):
+        if candidate_count <= 1 and support_ratio > 0:
             return 92, 0.9
         if best_measurement_gain > 0:
-            return 62, 0.55 if observed_count else 0.45
-        return (84, 0.72) if observed_count else (72, 0.58)
+            priority = 35 + int(round(35 * support_ratio))
+        else:
+            priority = 45 + int(round(40 * support_ratio))
+        confidence = 0.35 + (0.5 * support_ratio) + (0.05 if observed_count else 0)
+        return priority, min(0.9, confidence)
+
+    def _knowledge_graph_repair_relations_by_fault(self):
+        relations_by_fault = {}
+        graph_node_ids = set(self.simulation_session.graph.nodes)
+        graph_edge_ids = {edge.id for edge in self.simulation_session.graph.edges}
+        for relation in _arr(self.diagnostic_knowledge_graph.get("relations")):
+            if relation.get("type") != "RESOLVED_BY_REPLACING":
+                continue
+            source = relation.get("source") if isinstance(relation.get("source"), dict) else {}
+            target = relation.get("target") if isinstance(relation.get("target"), dict) else {}
+            fault_id = _text(source.get("id"))
+            target_id = _text(target.get("id"))
+            target_kind = _text(target.get("kind"))
+            action_type = _text(relation.get("action"))
+            if action_type not in {"replaceComponent", "replaceWire"}:
+                action_type = "replaceWire" if target_kind == "signalEdge" else "replaceComponent"
+            if action_type == "replaceComponent":
+                target_type = "component"
+                if target_id not in graph_node_ids:
+                    continue
+            else:
+                target_type = "wire"
+                if target_id not in graph_edge_ids:
+                    continue
+            if fault_id and target_id:
+                relations_by_fault.setdefault(fault_id, []).append({
+                    "actionType": action_type,
+                    "target": {"type": target_type, "id": target_id},
+                })
+        return relations_by_fault
+
+    def _candidate_repair_target_support(self, candidate_combinations):
+        relations_by_fault = self._knowledge_graph_repair_relations_by_fault()
+        support_by_target = {}
+        for candidate_rows in candidate_combinations:
+            combination_targets = {}
+            for row in candidate_rows:
+                fault_id = _fault_id(row)
+                for relation in relations_by_fault.get(fault_id, []):
+                    target = relation["target"]
+                    identity = (relation["actionType"], target["type"], target["id"])
+                    item = combination_targets.setdefault(identity, {
+                        **_clone(relation),
+                        "faultIds": [],
+                    })
+                    if fault_id not in item["faultIds"]:
+                        item["faultIds"].append(fault_id)
+            for identity, combination_target in combination_targets.items():
+                support = support_by_target.setdefault(identity, {
+                    **_clone(combination_target),
+                    "faultIds": [],
+                    "supportingCombinationCount": 0,
+                })
+                support["supportingCombinationCount"] += 1
+                for fault_id in combination_target["faultIds"]:
+                    if fault_id not in support["faultIds"]:
+                        support["faultIds"].append(fault_id)
+        return list(support_by_target.values())
 
     def _repair_reference_actions(self):
-        edge_ids = {edge.id for edge in self.simulation_session.graph.edges}
-        candidate_rows = self._candidate_rows_from_current_evidence()
-        candidate_count = len(candidate_rows)
+        candidate_combinations = self._candidate_fault_combinations_from_current_evidence()
+        candidate_count = len(candidate_combinations)
         best_measurement_gain = max(
             (
-                self._expected_information_gain(_point_code(point), candidate_rows)
+                self._expected_information_gain(_point_code(point), candidate_combinations)
                 for point in _arr(self.active_d_matrix.get("points"))
                 if point_type(self.active_d_matrix, _point_code(point)) == "virtual"
             ),
@@ -719,50 +936,43 @@ class PracticeSession:
         )
         observed_count = len(self._known_point_observations())
         actions = []
-        for fault in self.simulation_session.fault_runtime.fault_instances:
-            if not bool(fault.get("enabled", True)):
-                continue
-            fault_id = _text(fault.get("faultId"))
-            target_id = _text(fault.get("targetId"))
-            if not fault_id or not target_id:
-                continue
-            priority, confidence = self._repair_action_priority(candidate_count, best_measurement_gain, observed_count)
-            if target_id in self.simulation_session.graph.nodes:
-                rule = self.rule_engine.rules.get("replaceComponent", {})
-                action = {
-                    "actionType": "replaceComponent",
-                    "target": {"type": "component", "id": target_id},
-                    "faultId": fault_id,
-                    "routeRole": "repairAttempt",
-                    "priority": priority,
-                    "recommendationTier": self._recommendation_tier(priority),
-                    "confidence": _round_score(confidence),
-                    "timeCostSeconds": rule.get("durationSeconds", 0),
-                    "riskCost": self._risk_cost(rule.get("riskLevel", "medium")),
-                    "reason": "active fault target is repairable",
-                }
-                safety_prerequisites = self._safety_prerequisites("replaceComponent")
-                if safety_prerequisites:
-                    action["safetyPrerequisites"] = safety_prerequisites
-                actions.append(action)
-            elif target_id in edge_ids:
-                rule = self.rule_engine.rules.get("replaceWire", {})
-                action = {
-                    "actionType": "replaceWire",
-                    "target": {"type": "wire", "id": target_id},
-                    "faultId": fault_id,
-                    "routeRole": "repairAttempt",
-                    "priority": priority,
-                    "recommendationTier": self._recommendation_tier(priority),
-                    "confidence": _round_score(confidence),
-                    "timeCostSeconds": rule.get("durationSeconds", 0),
-                    "riskCost": self._risk_cost(rule.get("riskLevel", "low")),
-                    "reason": "active fault target is repairable",
-                }
-                safety_prerequisites = self._safety_prerequisites("replaceWire")
-                if safety_prerequisites:
-                    action["safetyPrerequisites"] = safety_prerequisites
-                actions.append(action)
+        for target_support in self._candidate_repair_target_support(candidate_combinations):
+            support_count = int(target_support.get("supportingCombinationCount") or 0)
+            support_ratio = support_count / candidate_count if candidate_count else 0.0
+            priority, confidence = self._repair_action_priority(
+                candidate_count,
+                best_measurement_gain,
+                observed_count,
+                support_ratio,
+            )
+            action_type = target_support["actionType"]
+            rule = self.rule_engine.rules.get(action_type, {})
+            fault_ids = _arr(target_support.get("faultIds"))
+            action = {
+                "actionType": action_type,
+                "target": _clone(target_support["target"]),
+                "faultId": fault_ids[0] if fault_ids else "",
+                "faultIds": _clone(fault_ids),
+                "routeRole": "repairAttempt",
+                "candidateSupportRatio": _round_score(support_ratio),
+                "supportingCombinationCount": support_count,
+                "candidateCombinationCount": candidate_count,
+                "priority": priority,
+                "recommendationTier": self._recommendation_tier(priority),
+                "confidence": _round_score(confidence),
+                "timeCostSeconds": rule.get("durationSeconds", 0),
+                "riskCost": self._risk_cost(
+                    rule.get("riskLevel", "low" if action_type == "replaceWire" else "medium")
+                ),
+                "reason": (
+                    f"knowledge-graph repair target is supported by {support_count} "
+                    f"of {candidate_count} candidate fault combinations"
+                ),
+            }
+            safety_prerequisites = self._safety_prerequisites(action_type)
+            if safety_prerequisites:
+                action["safetyPrerequisites"] = safety_prerequisites
+            actions.append(action)
         return actions
 
     def _rank_repair_actions(self, actions):
@@ -799,9 +1009,11 @@ class PracticeSession:
 
     def _build_dynamic_reference(self):
         observations = self._known_point_observations()
+        candidate_fault_combinations = self._candidate_fault_id_combinations_from_current_evidence()
         return {
-            "basis": "currentEvidenceAndActiveFaults",
-            "candidateFaultIds": self._candidate_fault_ids_from_current_evidence(),
+            "basis": "currentEvidenceAndFaultCombinations",
+            "candidateFaultIds": self._flatten_candidate_fault_ids(candidate_fault_combinations),
+            "candidateFaultCombinations": candidate_fault_combinations,
             "observedPointStates": [
                 {"pointCode": point_code, "observed": observed}
                 for point_code, observed in sorted(observations.items())
@@ -1007,27 +1219,88 @@ class PracticeSession:
     def submit(self, payload):
         if not isinstance(payload, dict):
             raise SimulationBackendError("INVALID_SCHEMA", "submission", "submission must be an object")
-        final_fault_input = _text(payload.get("finalFaultName") or payload.get("faultName") or payload.get("finalFaultId") or payload.get("faultId"))
-        if not final_fault_input:
-            raise SimulationBackendError("INVALID_SCHEMA", "finalFaultName", "finalFaultName is required")
-        target_fault_name = _text(self.troubleshooting.target_row.get("faultName"), self.target_fault_id)
-        matched_final_row = next(
-            (
-                row
-                for row in _arr(self.troubleshooting.d_matrix.get("rows"))
-                if _fault_id(row) == final_fault_input or _text(row.get("faultName")) == final_fault_input
-            ),
-            None,
-        )
-        final_fault_id = _fault_id(matched_final_row) if matched_final_row else _text(payload.get("finalFaultId") or payload.get("faultId"))
-        final_fault_name = (
-            _text(matched_final_row.get("faultName"), final_fault_id)
-            if matched_final_row
-            else _text(payload.get("finalFaultName") or payload.get("faultName"), final_fault_input)
-        )
+        final_fault_inputs = payload.get("finalFaultIds")
+        if final_fault_inputs is not None:
+            if not isinstance(final_fault_inputs, list) or not final_fault_inputs:
+                raise SimulationBackendError(
+                    "INVALID_SCHEMA",
+                    "finalFaultIds",
+                    "finalFaultIds must be a non-empty array",
+                )
+        else:
+            legacy_final_fault = _text(
+                payload.get("finalFaultName")
+                or payload.get("faultName")
+                or payload.get("finalFaultId")
+                or payload.get("faultId")
+            )
+            final_fault_inputs = [legacy_final_fault] if legacy_final_fault else []
+        normalized_final_fault_inputs = []
+        for value in final_fault_inputs:
+            normalized_value = _text(value)
+            if normalized_value and normalized_value not in normalized_final_fault_inputs:
+                normalized_final_fault_inputs.append(normalized_value)
+        if not normalized_final_fault_inputs:
+            raise SimulationBackendError(
+                "INVALID_SCHEMA",
+                "finalFaultIds",
+                "finalFaultIds or finalFaultId is required",
+            )
+
+        matrix_rows = _arr(self.troubleshooting.d_matrix.get("rows"))
+        final_faults = []
+        for final_fault_input in normalized_final_fault_inputs:
+            matched_row = next(
+                (
+                    row
+                    for row in matrix_rows
+                    if _fault_id(row) == final_fault_input
+                    or _text(row.get("faultName")) == final_fault_input
+                ),
+                None,
+            )
+            final_fault_id = _fault_id(matched_row) if matched_row else final_fault_input
+            if any(item["faultId"] == final_fault_id for item in final_faults):
+                continue
+            final_faults.append({
+                "faultId": final_fault_id,
+                "faultName": (
+                    _text(matched_row.get("faultName"), final_fault_id)
+                    if matched_row
+                    else final_fault_input
+                ),
+            })
+
+        target_faults = []
+        for target_fault_id in self.target_fault_ids:
+            target_row = next((row for row in matrix_rows if _fault_id(row) == target_fault_id), None)
+            target_faults.append({
+                "faultId": target_fault_id,
+                "faultName": _text((target_row or {}).get("faultName"), target_fault_id),
+            })
+
+        target_fault_id_set = {item["faultId"] for item in target_faults}
+        final_fault_id_set = {item["faultId"] for item in final_faults}
+        matched_fault_ids = [
+            item["faultId"] for item in target_faults if item["faultId"] in final_fault_id_set
+        ]
+        missed_fault_ids = [
+            item["faultId"] for item in target_faults if item["faultId"] not in final_fault_id_set
+        ]
+        extra_fault_ids = [
+            item["faultId"] for item in final_faults if item["faultId"] not in target_fault_id_set
+        ]
+        intersection_count = len(target_fault_id_set & final_fault_id_set)
+        union_count = len(target_fault_id_set | final_fault_id_set)
+        set_accuracy = intersection_count / union_count if union_count else 1.0
+        precision = intersection_count / len(final_fault_id_set) if final_fault_id_set else 0.0
+        recall = intersection_count / len(target_fault_id_set) if target_fault_id_set else 0.0
+        correct = target_fault_id_set == final_fault_id_set
+        target_fault_name = target_faults[0]["faultName"]
+        final_fault_id = final_faults[0]["faultId"]
+        final_fault_name = final_faults[0]["faultName"]
         self.submitted_at = time.time()
         self.close("submitted", now=self.submitted_at)
-        correct = bool(matched_final_row and _fault_id(matched_final_row) == self.target_fault_id)
         elapsed_seconds = max(0.0, self.submitted_at - self.started_at)
         path_evaluation = self._evaluate_path_quality()
         scoring_result = evaluate_practice_submission_score(
@@ -1036,6 +1309,7 @@ class PracticeSession:
             scoring_rules=self.scoring_rules,
             student_actions=self.student_actions,
             path_evaluation=path_evaluation,
+            fault_set_accuracy=set_accuracy,
         )
         evaluation_report = build_practice_evaluation_report(
             score=scoring_result["score"],
@@ -1046,6 +1320,14 @@ class PracticeSession:
             final_fault_id=final_fault_id,
             final_fault_name=final_fault_name,
             correct=correct,
+            target_faults=target_faults,
+            final_faults=final_faults,
+            set_accuracy=set_accuracy,
+            precision=precision,
+            recall=recall,
+            matched_fault_ids=matched_fault_ids,
+            missed_fault_ids=missed_fault_ids,
+            extra_fault_ids=extra_fault_ids,
             initial_optimal_path=self.initial_best_path,
             actual_steps=self.actual_troubleshooting_steps,
             dynamic_reference_history=self.dynamic_reference_history,

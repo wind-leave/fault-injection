@@ -249,6 +249,7 @@ POST /api/practice/session/{practiceSessionId}/submit
 | `executableModel.faultInstances` | 初始故障实例 |
 | `executableModel.measurementPoints` | 后端仿真曲线测量通道定义 |
 | `targetFaultId` | 本次实践的真实目标故障，实践过程中属于后端私有答案；没有选择实践故障时为 `null` |
+| `targetFaultIds` | 本次实践的真实目标故障集合；单故障时为单元素数组，多故障时保存全部目标故障 |
 | `dMatrix` | 故障—测点检测矩阵 |
 | `displayConsoleControls` | 显控台到受控组件及允许修改参数的后端白名单 |
 | `initialRecommendedPath` | 导出前由后端方案接口生成并标准化的初始最优排故路径；没有选择实践故障时为 `null` |
@@ -260,11 +261,12 @@ POST /api/practice/session/{practiceSessionId}/submit
 | `privateData.executableModel` | `simulationPackage` |
 | `privateData.dMatrix` | `dMatrix` |
 | `privateData.targetFaultId` | `targetFaultId` |
+| `privateData.targetFaultIds` | `targetFaultIds` |
 | `privateData.initialRecommendedPath` | `initialRecommendedPath` |
 | `privateData.initialPointStates` | `initialPointStates` |
 | `privateData.displayConsoleControls` | `displayConsoleControls` |
 
-三维端仅在 `targetFaultId` 为非空字符串时创建实践任务；未选择实践故障的导出包仍可用于展示仿真结果，但不能直接创建后端实践会话。
+三维端在 `targetFaultIds` 为非空数组或 `targetFaultId` 为非空字符串时创建实践任务；未选择实践故障的导出包仍可用于展示仿真结果，但不能直接创建后端实践会话。
 
 ## 4. 创建实践任务
 
@@ -296,6 +298,7 @@ POST /api/practice/session
     "rows": []
   },
   "targetFaultId": "fault-001",
+  "targetFaultIds": ["fault-001"],
   "displayConsoleControls": [],
   "initialRecommendedPath": {
     "steps": [],
@@ -309,7 +312,8 @@ POST /api/practice/session
 | --- | --- | --- | --- |
 | `simulationPackage` | object | 是 | `privateData.executableModel` |
 | `dMatrix` | object | 是 | `privateData.dMatrix` |
-| `targetFaultId` | string | 是 | `privateData.targetFaultId` |
+| `targetFaultId` | string | 单故障兼容字段 | `privateData.targetFaultId`；未提供时后端使用 `targetFaultIds[0]` |
+| `targetFaultIds` | array | 是 | `privateData.targetFaultIds`；单故障为单元素数组，多故障为全部目标故障，候选组合允许包含的最大故障数由此确定 |
 | `initialRecommendedPath` | object | 否 | `privateData.initialRecommendedPath`；缺省时后端根据 D 矩阵生成 |
 | `initialPointStates` | array | 是 | `privateData.initialPointStates`；后端直接读取各测点的 `observed` 作为初始诊断状态 |
 | `displayConsoleControls` | array | 有显控台控制时必填 | `privateData.displayConsoleControls`；用于约束实践动作可修改的组件及参数 |
@@ -317,6 +321,11 @@ POST /api/practice/session
 | `lifecycle` | object | 否 | 最大生命周期和空闲超时配置；缺省时分别为 3600 秒和 900 秒 |
 | `resourceLimits` | object | 否 | 最大动作数量等资源限制 |
 | `actionRules` | object | 否 | 更换动作安全规则，例如是否要求断电 |
+
+创建实践会话时，后端使用 `simulationPackage` 中的组件、连线和测点拓扑，以及 `dMatrix`
+中的故障位置、可检测关系和维修目标，重新构建该会话独立持有的知识图谱。客户端不需要提交
+预先生成的 `knowledgeGraph`。会话图谱包含 `OUTPUTS_TO`、`INPUTS_TO`、`OBSERVES`、
+`DETECTABILITY`、`OCCURS_ON` 和 `RESOLVED_BY_REPLACING` 等关系。
 
 ### 4.3 成功响应
 
@@ -539,21 +548,21 @@ POST /api/practice/session/{practiceSessionId}/submit
 
 ```json
 {
-  "finalFaultId": "fault-001",
-  "finalFaultName": "IMU 偏差",
+  "finalFaultIds": ["fault-001", "fault-002"],
   "submittedAt": "2026-07-16T10:05:00+08:00"
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
+| `finalFaultIds` | array | 多故障任务必填 | 学员最终选择的故障 ID 集合；自动去重且不考虑顺序 |
 | `finalFaultName` | string | 条件必填 | 学员最终判断的故障名称；与 `finalFaultId` 至少提供一个 |
-| `finalFaultId` | string | 条件必填 | 学员最终选择的故障 ID；与 `finalFaultName` 至少提供一个 |
+| `finalFaultId` | string | 单故障兼容字段 | 学员最终选择的单个故障 ID；后端按单元素集合处理 |
 | `faultName` | string | 否 | `finalFaultName` 的兼容别名 |
 | `faultId` | string | 否 | `finalFaultId` 的兼容别名 |
 | `submittedAt` | string/number | 否 | 客户端提交时间 |
 
-正式实践中，`finalFaultId` 和 `finalFaultName` 必须来自学员最终选择，三维端不得使用后端私有 `targetFaultId` 替代学员答案。
+正式实践中，`finalFaultIds`、`finalFaultId` 和 `finalFaultName` 必须来自学员最终选择，三维端不得使用后端私有 `targetFaultIds` 或 `targetFaultId` 替代学员答案。
 
 ### 6.3 成功响应
 
@@ -587,7 +596,21 @@ POST /api/practice/session/{practiceSessionId}/submit
       "faultId": "fault-001",
       "faultName": "IMU 偏差"
     },
-    "correct": true
+    "correct": false,
+    "exactMatch": false,
+    "targetFaults": [
+      {"faultId": "fault-001", "faultName": "IMU 偏差"},
+      {"faultId": "fault-002", "faultName": "线路断路"}
+    ],
+    "studentFaults": [
+      {"faultId": "fault-001", "faultName": "IMU 偏差"}
+    ],
+    "setAccuracy": 0.5,
+    "precision": 1.0,
+    "recall": 0.5,
+    "matchedFaultIds": ["fault-001"],
+    "missedFaultIds": ["fault-002"],
+    "extraFaultIds": []
   },
   "scoreDetails": [
     {
@@ -649,6 +672,25 @@ POST /api/practice/session/{practiceSessionId}/submit
         "confidence": 0.9,
         "reason": "virtual point can reduce remaining uncertainty"
       },
+      "candidateFaultCombinationsBefore": [["fault-001"], ["fault-002"]],
+      "candidateFaultCombinationsAfter": [["fault-001"]],
+      "candidateCountBefore": 2,
+      "candidateCountAfter": 1,
+      "removedCandidateCombinations": [["fault-002"]],
+      "addedCandidateCombinations": [],
+      "informationGain": {
+        "expectedInformationGain": 1.0,
+        "bestAvailableInformationGain": 1.0,
+        "candidateReductionCount": 1,
+        "candidateReductionRatio": 0.5,
+        "candidateSupportRatio": 0
+      },
+      "decisionScore": 1.0,
+      "bestAvailableDecisionScore": 1.0,
+      "maxDecisionPoints": 15,
+      "earnedDecisionPoints": 15,
+      "deductedDecisionPoints": 0,
+      "deductionReasons": [],
       "matchResult": {}
     }
   ],
@@ -704,6 +746,16 @@ POST /api/practice/session/{practiceSessionId}/submit
 | `efficiency` | 排故效率 | 5 |
 | `safetyCompliance` | 安全合规 | 15 |
 
+多故障任务的 `faultLocalization` 按集合正确率计分：
+
+```text
+setAccuracy = |targetFaultIds ∩ finalFaultIds| / |targetFaultIds ∪ finalFaultIds|
+faultLocalization = 30 × setAccuracy
+```
+
+`exactMatch` 仅在两个故障集合完全相同时为 `true`。`precision` 表示学员所选故障中的正确比例，
+`recall` 表示真实故障被识别出的比例。单故障 `finalFaultId` 按单元素集合参与同一计算。
+
 ### 7.2 学生步骤评级
 
 | `level` | 含义 |
@@ -720,6 +772,31 @@ POST /api/practice/session/{practiceSessionId}/submit
 - 学员动作相对当时推荐集合的评级和得分。
 - 动作发生前，后端实时计算并排名第一的最佳推荐动作。
 - 最佳推荐动作的评级、优先级、置信度和原因。
+- 操作前后的候选故障组合、候选数量以及被移除或新增的组合。
+- 检测动作的预期信息增益、当前最佳信息增益和实际候选缩减比例。
+- 维修动作的候选组合支持率。
+- 当前步骤获得与扣除的单步决策分，以及结构化扣分原因和改进建议。
+
+`rank` 只表示推荐集合内部的排序，不直接决定步骤得分。步骤得分由
+`recommendationTier` 决定：`optimal`、`acceptable`、`lowValue` 分别对应
+1.0、0.7、0.4；不安全或未匹配动作得 0 分。
+
+每次学员操作前，后端都会根据当前证据重新查询会话知识图谱：检测动作依据测点节点、
+`OBSERVES` 和 `DETECTABILITY` 关系计算信息增益；更换设备和更换连线依据候选故障组合及
+`RESOLVED_BY_REPLACING` 关系生成。操作完成后更新证据并再次生成推荐集合。运行时真实注入
+故障不参与操作前推荐和步骤合理性评分，仅用于动作执行后的维修效果与最终答案评估。
+
+`deductionReasons[].code` 使用稳定的机器可读标识，当前包括：
+
+- `LOWER_INFORMATION_GAIN`：所选测点的信息增益低于当前最佳测点。
+- `NO_CANDIDATE_REDUCTION`：检测后没有缩小候选故障组合。
+- `REPEATED_MEASUREMENT`：重复检测已知测点。
+- `UNRECOMMENDED_MEASUREMENT`：测点不在当前知识图谱推荐集合中。
+- `LOW_TARGET_SUPPORT`：维修目标只得到部分候选组合支持。
+- `PREMATURE_REPAIR`：仍有高价值检测动作时提前维修。
+- `WRONG_REPAIR_TARGET`：维修目标不在当前知识图谱维修关系中。
+- `SAFETY_PREREQUISITE_MISSING`：未满足安全前置条件。
+- `LOW_VALUE_ACTION`、`SUBOPTIMAL_ACTION`、`UNMATCHED_ACTION`：其他低价值、次优或未匹配操作。
 
 ### 7.3 关键节点覆盖
 
@@ -727,6 +804,9 @@ POST /api/practice/session/{practiceSessionId}/submit
 
 - `covered`：是否覆盖。
 - `coverageStatus`：`covered` 或 `missed`。
+
+多故障任务会为全部启用故障生成维修关键节点；指向同一设备或同一连线的故障合并为一个
+维修节点。关键节点分值在 12 分总额内按检测节点与去重后的维修目标动态分配。
 
 ### 7.4 扣分分析与改进建议
 

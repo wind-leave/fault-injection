@@ -16,7 +16,8 @@ const dialogsState = reactive({
   },
   componentAuthoring: {
     open: false,
-    parsedInterface: null
+    parsedInterface: null,
+    editingComponent: null
   },
   faultAuthoring: {
     open: false,
@@ -52,11 +53,13 @@ export function setPythonBindingError(message) {
 export function openComponentAuthoringDialog(payload = {}) {
   dialogsState.componentAuthoring.open = true;
   dialogsState.componentAuthoring.parsedInterface = payload.parsedInterface ?? null;
+  dialogsState.componentAuthoring.editingComponent = payload.editingComponent ?? null;
 }
 
 export function closeComponentAuthoringDialog() {
   dialogsState.componentAuthoring.open = false;
   dialogsState.componentAuthoring.parsedInterface = null;
+  dialogsState.componentAuthoring.editingComponent = null;
 }
 
 export function openFaultAuthoringDialog(payload = {}) {

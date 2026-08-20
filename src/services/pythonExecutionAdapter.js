@@ -3,9 +3,16 @@ function sanitizeNumber(value) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function sanitizeSignalValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeNumber);
+  }
+  return sanitizeNumber(value);
+}
+
 function readInputEnvironment(payload) {
   return Object.fromEntries(
-    Object.entries(payload.inputs ?? {}).map(([key, value]) => [key, sanitizeNumber(value)])
+    Object.entries(payload.inputs ?? {}).map(([key, value]) => [key, sanitizeSignalValue(value)])
   );
 }
 
@@ -86,8 +93,8 @@ function buildSourceExecutionResult(payload) {
   }
 
   return {
-    outputs: Object.fromEntries(outputNames.map((name) => [name, sanitizeNumber(env[name])])),
-    middleVars: Object.fromEntries(middleVarNames.map((name) => [name, sanitizeNumber(env[name])]))
+    outputs: Object.fromEntries(outputNames.map((name) => [name, sanitizeSignalValue(env[name])])),
+    middleVars: Object.fromEntries(middleVarNames.map((name) => [name, sanitizeSignalValue(env[name])]))
   };
 }
 
@@ -98,7 +105,7 @@ function buildMockExecutionResult(payload) {
   }
 
   const values = Object.values(payload.inputs ?? {});
-  const baseValue = typeof values[0] === 'number' ? values[0] : Number(values[0] ?? 0);
+  const baseValue = sanitizeSignalValue(values[0] ?? 0);
 
   return {
     outputs: Object.fromEntries(

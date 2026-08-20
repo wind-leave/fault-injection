@@ -91,4 +91,25 @@ describe('pythonFlowBindingRuntime', () => {
     expect(result.outputs).toEqual([11, 2]);
     expect(result.middleValues).toEqual([3]);
   });
+
+  it('preserves numeric arrays through the Python binding payload and outputs', () => {
+    const vectorBinding = {
+      ...binding,
+      portMapping: {
+        inputs: [{ varName: 'samples', type: 'vector', default: [1, 2, 3] }],
+        outputs: [{ varName: 'filtered', type: 'vector' }],
+        middleVars: []
+      }
+    };
+
+    const result = executeFlowBlockPythonBindingSync({
+      nodeId: 'node-vector',
+      binding: vectorBinding,
+      inputValues: [[2, 4, 6]],
+      executeSync: () => ({ outputs: { filtered: [1, 2, 3] }, middleVars: {} })
+    });
+
+    expect(result.payload.inputs.samples).toEqual([2, 4, 6]);
+    expect(result.outputs).toEqual([[1, 2, 3]]);
+  });
 });

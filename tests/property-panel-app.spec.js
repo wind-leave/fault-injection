@@ -2033,6 +2033,20 @@ describe('property panel interaction', () => {
     expect(block.injectedFault.active).toBe(false);
     expect(state.faultTags).toHaveLength(1);
 
+    window.setCanvasView('dmatrix');
+    await flushRuntime();
+    const matrixEnabled = document.querySelector('[data-d-matrix-fault-enabled="controller_gain_bias"]');
+    expect(matrixEnabled?.type).toBe('checkbox');
+    expect(matrixEnabled?.checked).toBe(false);
+    matrixEnabled.checked = true;
+    matrixEnabled.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+
+    expect(state.faultTags[0].runtimeEnabled).toBe(true);
+    expect(block.faultBindings[0].active).toBe(true);
+    expect(block.injectedFault.active).toBe(true);
+    expect(document.querySelector('[data-fault-tag-enabled]')?.value).toBe('true');
+
     wrapper.unmount();
   });
 

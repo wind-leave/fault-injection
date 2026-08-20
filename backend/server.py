@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 import time
 import uuid
@@ -6,11 +7,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 from backend.graph_compiler import compile_graph
+from backend.component_registration import ComponentRegistrar
+from backend.diagnostic_knowledge import build_multi_fault_troubleshooting_plan
 from backend.module_registry import ModuleRegistry
 from backend.practice import PracticeSession
 from backend.schemas import SimulationBackendError
 from backend.simulation_engine import SimulationSession, run_simulation
-from backend.troubleshooting import build_troubleshooting_plan
 
 
 MAX_REQUEST_BYTES = 1_000_000
@@ -26,7 +28,14 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
     session_endpoint = "/api/simulations/session"
     practice_endpoint = "/api/practice/session"
     troubleshooting_plan_endpoint = "/api/troubleshooting/plan"
-    registry = ModuleRegistry.from_builtin_manifest()
+    component_registration_endpoint = "/api/components/register"
+    component_batch_delete_endpoint = "/api/components/batch-delete"
+    component_endpoint = "/api/components"
+    component_registrar = ComponentRegistrar.for_persistent_storage()
+    registry = ModuleRegistry.from_manifests([
+        ModuleRegistry.builtin_manifest_path(),
+        component_registrar.manifest_path,
+    ])
     sessions = {}
     sessions_lock = threading.Lock()
     practice_sessions = {}
@@ -38,6 +47,13 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         return
+
+    def _load_component_registry(self):
+        """Reload both shipped modules and the persistent custom component catalog."""
+        return ModuleRegistry.from_manifests([
+            ModuleRegistry.builtin_manifest_path(),
+            self.component_registrar.manifest_path,
+        ])
 
     def _send_json(self, status_code, payload):
         body = _json_bytes(payload)
@@ -152,6 +168,13 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
             return ""
         return session_id
 
+    def _component_delete_path(self, path):
+        prefix = f"{self.component_endpoint}/"
+        if not path.startswith(prefix):
+            return ""
+        module_id = path[len(prefix):].strip("/")
+        return module_id if module_id and "/" not in module_id else ""
+
     def _validate_steps(self, payload):
         steps = payload.get("steps", 1)
         if isinstance(steps, bool) or not isinstance(steps, int):
@@ -166,18 +189,113 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         payload = self._read_json()
         d_matrix = payload.get("dMatrix")
         target_fault_id = payload.get("targetFaultId")
-        if not isinstance(target_fault_id, str) or not target_fault_id.strip():
-            raise SimulationBackendError("INVALID_SCHEMA", "targetFaultId", "targetFaultId is required")
+        target_fault_ids = payload.get("targetFaultIds")
+        if target_fault_ids is not None:
+            if not isinstance(target_fault_ids, list) or not target_fault_ids:
+                raise SimulationBackendError("INVALID_SCHEMA", "targetFaultIds", "targetFaultIds must be a non-empty array")
+        elif not isinstance(target_fault_id, str) or not target_fault_id.strip():
+            raise SimulationBackendError("INVALID_SCHEMA", "targetFaultId", "targetFaultId or targetFaultIds is required")
         max_steps = payload.get("maxSteps", 4)
         if isinstance(max_steps, bool) or not isinstance(max_steps, int) or not 1 <= max_steps <= 12:
             raise SimulationBackendError("INVALID_SCHEMA", "maxSteps", "maxSteps must be an integer from 1 to 12")
-        plan = build_troubleshooting_plan(d_matrix, target_fault_id.strip(), max_steps=max_steps)
+        normalized_target_fault_ids = target_fault_ids if target_fault_ids is not None else [target_fault_id.strip()]
+        plan = build_multi_fault_troubleshooting_plan(
+            d_matrix,
+            normalized_target_fault_ids,
+            observations=payload.get("observations"),
+            max_faults=payload.get("maxFaults", max(2, len(normalized_target_fault_ids))),
+            max_steps=max_steps,
+            model_graph=payload.get("modelGraph"),
+        )
         self._send_json(
             200,
             {
                 "runId": run_id,
                 "status": "success",
                 "plan": plan,
+                "metrics": {"elapsedMs": round((time.monotonic() - started) * 1000, 3)},
+            },
+        )
+
+    def _register_component(self, run_id, started):
+        # Registration installs executable source.  Keep the endpoint local by
+        # default; a deployed service can opt into a bearer-like shared token.
+        required_token = os.environ.get("GZ_COMPONENT_REGISTRATION_TOKEN", "")
+        client_host = self.client_address[0]
+        if required_token:
+            if self.headers.get("X-GZ-Component-Registration-Token", "") != required_token:
+                raise SimulationBackendError("UNAUTHORIZED", "X-GZ-Component-Registration-Token", "invalid component registration token")
+        elif client_host not in {"127.0.0.1", "::1"}:
+            raise SimulationBackendError("UNAUTHORIZED", "client", "component registration is limited to localhost")
+        component = self.component_registrar.register(self._read_json())
+        type(self).registry = self._load_component_registry()
+        self._send_json(
+            201,
+            {
+                "runId": run_id,
+                "status": "success",
+                "component": component,
+                "metrics": {"elapsedMs": round((time.monotonic() - started) * 1000, 3)},
+            },
+        )
+
+    def _delete_component(self, run_id, module_id, started):
+        required_token = os.environ.get("GZ_COMPONENT_REGISTRATION_TOKEN", "")
+        client_host = self.client_address[0]
+        if required_token:
+            if self.headers.get("X-GZ-Component-Registration-Token", "") != required_token:
+                raise SimulationBackendError("UNAUTHORIZED", "X-GZ-Component-Registration-Token", "invalid component registration token")
+        elif client_host not in {"127.0.0.1", "::1"}:
+            raise SimulationBackendError("UNAUTHORIZED", "client", "component registration is limited to localhost")
+        component = self.component_registrar.unregister(module_id)
+        type(self).registry = self._load_component_registry()
+        self._send_json(
+            200,
+            {
+                "runId": run_id,
+                "status": "success",
+                "component": component,
+                "metrics": {"elapsedMs": round((time.monotonic() - started) * 1000, 3)},
+            },
+        )
+
+    def _update_component(self, run_id, module_id, started):
+        required_token = os.environ.get("GZ_COMPONENT_REGISTRATION_TOKEN", "")
+        client_host = self.client_address[0]
+        if required_token:
+            if self.headers.get("X-GZ-Component-Registration-Token", "") != required_token:
+                raise SimulationBackendError("UNAUTHORIZED", "X-GZ-Component-Registration-Token", "invalid component registration token")
+        elif client_host not in {"127.0.0.1", "::1"}:
+            raise SimulationBackendError("UNAUTHORIZED", "client", "component registration is limited to localhost")
+        component = self.component_registrar.update(module_id, self._read_json())
+        type(self).registry = self._load_component_registry()
+        self._send_json(
+            200,
+            {
+                "runId": run_id,
+                "status": "success",
+                "component": component,
+                "metrics": {"elapsedMs": round((time.monotonic() - started) * 1000, 3)},
+            },
+        )
+
+    def _delete_components(self, run_id, started):
+        required_token = os.environ.get("GZ_COMPONENT_REGISTRATION_TOKEN", "")
+        client_host = self.client_address[0]
+        if required_token:
+            if self.headers.get("X-GZ-Component-Registration-Token", "") != required_token:
+                raise SimulationBackendError("UNAUTHORIZED", "X-GZ-Component-Registration-Token", "invalid component registration token")
+        elif client_host not in {"127.0.0.1", "::1"}:
+            raise SimulationBackendError("UNAUTHORIZED", "client", "component registration is limited to localhost")
+        payload = self._read_json()
+        components = self.component_registrar.unregister_many(payload.get("moduleIds"))
+        type(self).registry = self._load_component_registry()
+        self._send_json(
+            200,
+            {
+                "runId": run_id,
+                "status": "success",
+                "components": components,
                 "metrics": {"elapsedMs": round((time.monotonic() - started) * 1000, 3)},
             },
         )
@@ -242,12 +360,24 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         practice_session_id = f"practice-{uuid.uuid4().hex[:12]}"
         simulation_session_id = f"session-{uuid.uuid4().hex[:12]}"
         simulation_session = SimulationSession(graph, run_id=run_id)
+        target_fault_ids = payload.get("targetFaultIds")
+        target_fault_id = payload.get("targetFaultId")
+        if target_fault_ids is not None:
+            if not isinstance(target_fault_ids, list) or not target_fault_ids:
+                raise SimulationBackendError(
+                    "INVALID_SCHEMA",
+                    "targetFaultIds",
+                    "targetFaultIds must be a non-empty array",
+                )
+            if not target_fault_id:
+                target_fault_id = target_fault_ids[0]
         session = PracticeSession(
             practice_session_id,
             simulation_session_id,
             simulation_session,
             payload.get("dMatrix"),
-            payload.get("targetFaultId"),
+            target_fault_id,
+            target_fault_ids=target_fault_ids,
             initial_point_states=payload.get("initialPointStates"),
             initial_recommended_path=payload.get("initialRecommendedPath"),
             key_nodes=payload.get("keyNodes"),
@@ -256,6 +386,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
             action_rules=payload.get("actionRules"),
             resource_limits=payload.get("resourceLimits"),
             display_console_controls=payload.get("displayConsoleControls"),
+            model_graph=simulation_package,
             default_max_actions=self.default_max_practice_actions,
         )
         with self.sessions_lock:
@@ -374,7 +505,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         session_id = self._session_step_path(path)
         practice_action_session_id = self._practice_action_path(path)
         practice_submit_session_id = self._practice_submit_path(path)
-        if path != self.endpoint and path != self.session_endpoint and path != self.practice_endpoint and path != self.troubleshooting_plan_endpoint and not session_id and not practice_action_session_id and not practice_submit_session_id:
+        if path != self.endpoint and path != self.session_endpoint and path != self.practice_endpoint and path != self.troubleshooting_plan_endpoint and path != self.component_registration_endpoint and path != self.component_batch_delete_endpoint and not session_id and not practice_action_session_id and not practice_submit_session_id:
             self._send_not_found(run_id)
             return
 
@@ -382,6 +513,12 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         try:
             if path == self.troubleshooting_plan_endpoint:
                 self._build_troubleshooting_plan(run_id, started)
+                return
+            if path == self.component_registration_endpoint:
+                self._register_component(run_id, started)
+                return
+            if path == self.component_batch_delete_endpoint:
+                self._delete_components(run_id, started)
                 return
             if path == self.practice_endpoint:
                 self._create_practice_session(run_id, started)
@@ -423,9 +560,33 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._send_json(500, {"runId": run_id, "status": "error", "errorCode": "INTERNAL_ERROR", "field": "server", "message": str(exc)})
 
+    def do_PUT(self):
+        run_id = f"run-{uuid.uuid4().hex[:12]}"
+        module_id = self._component_delete_path(urlparse(self.path).path)
+        if not module_id:
+            self._send_not_found(run_id)
+            return
+        started = time.monotonic()
+        try:
+            self._update_component(run_id, module_id, started)
+        except SimulationBackendError as exc:
+            self._send_json(400, exc.to_response(run_id))
+        except Exception as exc:
+            self._send_json(500, {"runId": run_id, "status": "error", "errorCode": "INTERNAL_ERROR", "field": "server", "message": str(exc)})
+
     def do_DELETE(self):
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         path = urlparse(self.path).path
+        component_module_id = self._component_delete_path(path)
+        if component_module_id:
+            started = time.monotonic()
+            try:
+                self._delete_component(run_id, component_module_id, started)
+            except SimulationBackendError as exc:
+                self._send_json(400, exc.to_response(run_id))
+            except Exception as exc:
+                self._send_json(500, {"runId": run_id, "status": "error", "errorCode": "INTERNAL_ERROR", "field": "server", "message": str(exc)})
+            return
         practice_session_id = self._practice_delete_path(path)
         if practice_session_id:
             started = time.monotonic()

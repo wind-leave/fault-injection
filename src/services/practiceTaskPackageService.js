@@ -251,7 +251,15 @@ export function buildPracticeTaskPackage(input = {}) {
   };
   const practiceFaults = clone(input.practiceFaults, []);
   const targetFault = practiceFaults[0] ?? null;
-  const initialRecommendedPath = normalizeInitialRecommendedPath(targetFault?.troubleshootingPath);
+  const initialRecommendedPath = normalizeInitialRecommendedPath(input.combinedTroubleshootingPath ?? targetFault?.troubleshootingPath);
+  const targetFaultIds = Array.from(new Set((Array.isArray(input.targetFaultIds)
+    ? input.targetFaultIds
+    : Array.isArray(initialRecommendedPath?.faultIds)
+      ? initialRecommendedPath.faultIds
+      : targetFault?.faultIds ?? [targetFault?.faultId])
+    .map((faultId) => String(faultId ?? '').trim())
+    .filter(Boolean)));
+  const keyMeasurementPoints = clone(input.keyMeasurementPoints, []);
   const initialMeasurementData = buildInitialMeasurementData(dMatrix, executableModel, input.renderData, input.componentOutputs);
 
   return {
@@ -272,11 +280,13 @@ export function buildPracticeTaskPackage(input = {}) {
     },
     privateData: {
       executableModel,
-      targetFaultId: targetFault?.faultId ?? null,
+      targetFaultId: targetFaultIds[0] ?? null,
+      targetFaultIds,
       dMatrix,
       displayConsoleControls: buildDisplayConsoleControls(input.renderData),
       initialPointStates: initialPointStates(dMatrix, executableModel),
-      initialRecommendedPath
+      initialRecommendedPath,
+      keyMeasurementPoints
     }
   };
 }

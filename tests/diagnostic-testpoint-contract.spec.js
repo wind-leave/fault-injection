@@ -116,4 +116,24 @@ describe('diagnostic testpoint workbench contract', () => {
     expect(firstUseIndex).toBeGreaterThan(helperIndex);
   });
 
+  it('shows testpoint identity metadata and renders the fault chain as alternating snake rows', () => {
+    const runtime = readWorkspaceFile('src/services/legacy-runtime.txt');
+    const css = readWorkspaceFile('src/styles/components.css');
+
+    expect(runtime).toContain('pointTypeLabelZh:diagnosticPointTypeLabel(point.pointType)');
+    expect(runtime).toContain('testpoint-diagnosis-summary__point');
+    expect(runtime).toContain("const rowSize=4;");
+    expect(runtime).toContain("rowIndex%2===1");
+    expect(runtime).toContain("direction==='reverse'?'←':'→'");
+    expect(runtime).toContain('故障—测点信号链路');
+    expect(runtime).toContain('const downstreamQueue=upstreamCandidates.map');
+    expect(runtime).toContain('pointNodeId:targetNodeId');
+    expect(runtime).toContain("const isFeedback=/反馈|feedback/i.test(edgeRole)");
+    expect(runtime).toContain("startsWith('instrument_')");
+    expect(runtime).toContain('继续追踪至下游末端');
+    expect(css).toContain('.testpoint-fault-chain__row');
+    expect(css).toContain('.testpoint-fault-chain__turn.is-right');
+    expect(css).toContain('.testpoint-fault-chain__turn.is-left');
+  });
+
 });

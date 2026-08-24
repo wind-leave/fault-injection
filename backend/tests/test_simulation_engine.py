@@ -3,7 +3,14 @@ import unittest
 
 from backend.graph_compiler import compile_graph
 from backend.module_registry import ModuleRegistry, RegisteredModule
-from backend.simulation_engine import SimulationSession, _source_value, run_simulation
+from backend.simulation_engine import (
+    MAX_FULL_RUN_SAMPLES,
+    SimulationSession,
+    _source_value,
+    _validate_full_run_sample_count,
+    run_simulation,
+)
+from backend.schemas import SimulationBackendError
 from backend.tests.fixtures import valid_package
 
 
@@ -12,6 +19,15 @@ class SimulationEngineTests(unittest.TestCase):
         self.assertEqual(len(actual), len(expected))
         for actual_value, expected_value in zip(actual, expected):
             self.assertAlmostEqual(actual_value, expected_value, places=10)
+
+    def test_full_run_sample_limit_accepts_boundary_and_rejects_one_more(self):
+        _validate_full_run_sample_count(MAX_FULL_RUN_SAMPLES)
+
+        with self.assertRaises(SimulationBackendError) as context:
+            _validate_full_run_sample_count(MAX_FULL_RUN_SAMPLES + 1)
+
+        self.assertEqual(context.exception.error_code, "SIMULATION_LIMIT_EXCEEDED")
+        self.assertEqual(context.exception.field, "simulationConfig.samples")
 
     def test_simulation_component_requires_matching_power_connection(self):
         package = {

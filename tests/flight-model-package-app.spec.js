@@ -448,7 +448,7 @@ describe('Flight model package app integration', () => {
 
 
 
-  it('records signal-edge injections for electrical line fault slots', async () => {
+  it('rejects electrical faults and accepts protocol faults on a normal line', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
@@ -504,6 +504,13 @@ describe('Flight model package app integration', () => {
           layer: 'electrical',
           runtimeBehavior: 'additive_bias',
           defaultParameters: { bias: 0.1 }
+        },
+        {
+          id: 'edge_protocol_delay',
+          displayName: 'Edge protocol delay',
+          layer: 'protocol',
+          runtimeBehavior: 'delay',
+          defaultParameters: { delay_steps: 2 }
         }
       ],
       faultCapabilityMap: [
@@ -520,6 +527,15 @@ describe('Flight model package app integration', () => {
               targetVariable: 'cmd.signal',
               targetField: 'signal.value',
               allowedFaultIds: ['edge_signal_bias']
+            },
+            {
+              slotId: 'protocol:edge-command-message',
+              slotName: 'Command message',
+              layer: 'protocol',
+              bindingObject: 'cmd.signal',
+              targetVariable: 'cmd.signal',
+              targetField: 'protocol.payload',
+              allowedFaultIds: ['edge_protocol_delay']
             }
           ]
         }
@@ -541,20 +557,22 @@ describe('Flight model package app integration', () => {
     const result = window.activateFaultForTarget(edge, 'edge_signal_bias', {}, { layer: 'electrical' });
     await flushRuntime();
 
-    expect(result.ok).toBe(true);
-    expect(window.__GZ_STATE__.faultInstances).toContainEqual(expect.objectContaining({
+    expect(result).toMatchObject({ ok: false, error: 'incompatible-target' });
+    expect(window.__GZ_STATE__.faultInstances).not.toContainEqual(expect.objectContaining({
       faultTypeId: 'edge_signal_bias',
-      targetKind: 'edge',
-      injectionForm: 'signal-edge',
-      bindingObject: 'cmd.signal',
-      targetVariable: 'cmd.signal'
+      targetKind: 'edge'
     }));
-    expect(edge.injectedFault).toMatchObject({
-      modelId: 'edge_signal_bias',
-      injectionForm: 'signal-edge',
-      bindingObject: 'cmd.signal',
-      targetVariable: 'cmd.signal'
-    });
+    expect(edge.injectedFault).toBeUndefined();
+
+    const protocolResult = window.activateFaultForTarget(edge, 'edge_protocol_delay', {}, { layer: 'protocol' });
+    await flushRuntime();
+
+    expect(protocolResult.ok).toBe(true);
+    expect(window.__GZ_STATE__.faultInstances).toContainEqual(expect.objectContaining({
+      faultTypeId: 'edge_protocol_delay',
+      targetKind: 'edge',
+      injectionForm: 'protocol-bus'
+    }));
 
     wrapper.unmount();
   });

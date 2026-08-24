@@ -41,6 +41,13 @@ class ModuleRegistryTests(unittest.TestCase):
 
         self.assertEqual(result["outputs"]["output"], 6.0)
 
+    def test_cabinet03_module_applies_line_loss(self):
+        registry = ModuleRegistry.from_builtin_manifest()
+
+        result = registry.require("cabinet03_module").call({"socket03": 10.0}, {})
+
+        self.assertAlmostEqual(result["outputs"]["socket05"], 9.8, places=12)
+
     def test_electrical_modules_generate_ac_boost_dc_and_match_rms_ac_to_dc(self):
         registry = ModuleRegistry.from_builtin_manifest()
 

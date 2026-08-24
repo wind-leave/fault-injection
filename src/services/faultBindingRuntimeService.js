@@ -191,7 +191,9 @@ function faultOptionMatchesFilters(option = {}, target = {}, filters = {}) {
     return false;
   }
   if (normalized.layer) {
-    const slotLayer = normalizeFaultLayer(getCapabilitySlotLayer(option.slot));
+    const slotLayer = inferTargetKind(target) === 'edge'
+      ? normalizeFaultLayer(option.model?.layer || option.model?.layerKey)
+      : normalizeFaultLayer(getCapabilitySlotLayer(option.slot));
     const modelLayer = normalizeFaultLayer(option.model?.layer || option.model?.layerKey || slotLayer);
     return slotLayer === normalized.layer && (!modelLayer || modelLayer === normalized.layer);
   }
@@ -484,7 +486,10 @@ export function getCompatibleFaultOptionsForTarget(target = {}, options = {}) {
   return slots.flatMap((slot, index) => {
     const slotId = getSlotId(slot, `slot-${index + 1}`);
     return models
-      .filter((model) => capabilitySlotAllowsModel(slot, model))
+      .filter((model) => (
+        (targetKind !== 'edge' || normalizeFaultLayer(model.layer || model.layerKey) === 'protocol')
+        && capabilitySlotAllowsModel(slot, model)
+      ))
       .map((model) => {
         const key = `${model.id}::${slotId}`;
         if (seen.has(key)) {
@@ -528,6 +533,11 @@ export function createFaultInstancePlan(options = {}) {
   }
 
   const targetKind = options.targetKind || inferTargetKind(target);
+  if (targetKind === 'edge' && (
+    normalizeFaultLayer(model.layer || model.layerKey) !== 'protocol'
+  )) {
+    return { ok: false, error: 'incompatible-target' };
+  }
   const slotId = getSlotId(slot, options.slotId || '');
   const faultTypeId = model.id || model.faultTypeId || model.modelId || '';
   const duplicate = list(options.existingInstances).find((instance) => (

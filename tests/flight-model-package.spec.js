@@ -1232,6 +1232,19 @@ describe('flightModelPackageService', () => {
     expect(byId.random.defaultParameters).toMatchObject({ seed: 1, std: 0.08 });
   });
 
+  it('limits protocol-layer math models to attenuation and cutoff', () => {
+    expect(FAULT_MATH_MODEL_DEFINITIONS.protocol).toEqual([
+      expect.objectContaining({
+        id: 'attenuation',
+        defaultParameters: { scale: 0.5, start: 0, duration: '' }
+      }),
+      expect.objectContaining({
+        id: 'data_cutoff',
+        defaultParameters: { start: 0, duration: '' }
+      })
+    ]);
+  });
+
   it('normalizes edge fault slots when applying packages that do not declare them yet', () => {
     const packageData = {
       ...VALID_PACKAGE,
@@ -1262,8 +1275,8 @@ describe('flightModelPackageService', () => {
     const canEdge = applied.snapshot.modelEdges.find((edge) => edge.id === 'edge-can');
 
     expect(applied.ok).toBe(true);
-    expect(normalEdge.faultSlots.map((slot) => slot.layer)).toEqual(['electrical']);
-    expect(canEdge.faultSlots.map((slot) => slot.layer)).toEqual(['electrical', 'protocol']);
+    expect(normalEdge.faultSlots.map((slot) => slot.layer)).toEqual(['protocol']);
+    expect(canEdge.faultSlots.map((slot) => slot.layer)).toEqual(['protocol']);
   });
 
 

@@ -1,3 +1,4 @@
+import copy
 import time
 from itertools import combinations
 
@@ -125,6 +126,9 @@ class PracticeSession:
         self.practice_session_id = practice_session_id
         self.simulation_session_id = simulation_session_id
         self.simulation_session = simulation_session
+        # Practice actions and direct simulation steps touch the same runtime.
+        # Sharing one lock prevents the two endpoints from mutating it at once.
+        self.lock = simulation_session.lock
         self.action_runtime = PracticeActionRuntime(
             simulation_session,
             display_console_controls=display_console_controls,
@@ -178,7 +182,6 @@ class PracticeSession:
         self.started_at = time.time()
         self.submitted_at = None
         self.student_actions = []
-        self.simulation_results = []
         self.simulation_action_history = []
         self.recommended_path_history = []
         self.actual_troubleshooting_steps = []
@@ -186,6 +189,7 @@ class PracticeSession:
         self.physical_measurement_snapshots = []
         self.virtual_measurements = []
         self.repair_attempts = []
+        self.operation_results = {}
         self.latest_physical_measurement_snapshot = None
         self.initial_physical_measurement_snapshot = None
         generated_initial_path = self._build_initial_recommended_path(self.troubleshooting.initial_response()["currentPath"])
@@ -1116,71 +1120,131 @@ class PracticeSession:
             "lifecycle": self.lifecycle_summary(),
         }
 
+    def _create_action_transaction_snapshot(self):
+        session_fields = (
+            "active_d_matrix",
+            "student_actions",
+            "simulation_action_history",
+            "recommended_path_history",
+            "actual_troubleshooting_steps",
+            "dynamic_reference_history",
+            "physical_measurement_snapshots",
+            "virtual_measurements",
+            "repair_attempts",
+            "latest_physical_measurement_snapshot",
+            "last_activity_at",
+        )
+        return {
+            "simulation": self.simulation_session.create_state_snapshot(),
+            "practice": {
+                field: copy.deepcopy(getattr(self, field))
+                for field in session_fields
+            },
+        }
+
+    def _restore_action_transaction_snapshot(self, snapshot):
+        self.simulation_session.restore_state_snapshot(snapshot["simulation"])
+        for field, value in snapshot["practice"].items():
+            setattr(self, field, copy.deepcopy(value))
+
+    def _cached_operation_result(self, normalized_action):
+        operation_id = normalized_action.get("operationId") or ""
+        if not operation_id:
+            return None
+        existing = self.operation_results.get(operation_id)
+        if existing is None:
+            return None
+        if existing["action"] != normalized_action:
+            raise SimulationBackendError(
+                "OPERATION_ID_CONFLICT",
+                "operationId",
+                f"operationId has already been used with a different action: {operation_id}",
+            )
+        return copy.deepcopy(existing["result"])
+
+    def _remember_operation_result(self, normalized_action, result):
+        operation_id = normalized_action.get("operationId") or ""
+        if operation_id:
+            self.operation_results[operation_id] = {
+                "action": copy.deepcopy(normalized_action),
+                "result": copy.deepcopy(result),
+            }
+        return result
+
     def record_action(self, action, steps=1):
         if not isinstance(action, dict):
             raise SimulationBackendError("INVALID_SCHEMA", "action", "action must be an object")
+        action_record = normalize_practice_action(action)
+        normalized_action = _clone(action_record)
+        cached_result = self._cached_operation_result(normalized_action)
+        if cached_result is not None:
+            return cached_result
         if len(self.student_actions) >= self.max_actions:
             raise SimulationBackendError(
                 "SIMULATION_LIMIT_EXCEEDED",
                 "resourceLimits.maxActions",
                 "practice action count is outside the allowed range",
             )
-        action_record = normalize_practice_action(action)
-        normalized_action = _clone(action_record)
         action_record.setdefault("recordedAt", time.time())
         reference_before = self._build_dynamic_reference()
         if action_record.get("actionType") == "measurePoint":
-            return self._record_measure_point_action(action_record, normalized_action, steps, reference_before)
+            result = self._record_measure_point_action(action_record, normalized_action, steps, reference_before)
+            return self._remember_operation_result(normalized_action, result)
 
-        safety_check = self.rule_engine.evaluate(action_record)
-        action_application = self.action_runtime.apply(action_record)
-        action_record["simulationActionResult"] = _clone(action_application)
-        if safety_check.get("safetyViolation"):
-            action_record["safetyViolation"] = True
-        self.student_actions.append(action_record)
-        self.last_activity_at = action_record["recordedAt"]
-        self.simulation_action_history.append({
-            "index": len(self.simulation_action_history) + 1,
-            "operationId": action_record.get("operationId") or f"operation-{len(self.simulation_action_history) + 1}",
-            "recordedAt": action_record["recordedAt"],
-            "result": _clone(action_application),
-        })
-        previous_snapshot = _clone(self.latest_physical_measurement_snapshot or {})
-        simulation_result = self.simulation_session.run_from_zero()
-        simulation_result["sessionId"] = self.simulation_session_id
-        snapshot = evaluate_physical_measurement_snapshot(self.troubleshooting.d_matrix, simulation_result)
-        repair_effect = compare_physical_snapshots(previous_snapshot, snapshot)
-        self.latest_physical_measurement_snapshot = _clone(snapshot)
-        self.physical_measurement_snapshots.append(_clone(snapshot))
-        repair_attempt = {
-            "operationId": action_record.get("operationId") or f"operation-{len(self.repair_attempts) + 1}",
-            "actionType": action_record.get("actionType") or "",
-            "target": _clone(action_record.get("target") or {}),
-            "faultId": action_record.get("faultId") or "",
-            "appliedAction": _clone(action_application),
-            "repairEffect": _clone(repair_effect),
-        }
-        if action_record.get("safetyViolation"):
-            repair_attempt["safetyViolation"] = True
-        self.repair_attempts.append(repair_attempt)
-        action_record["repairEffect"] = _clone(repair_effect)
-        action_record["physicalMeasurementSnapshot"] = _clone(snapshot)
-        self._append_repair_path_step(action_record, action_application, repair_effect)
-        self._append_dynamic_reference_record(action_record, reference_before)
-        self.simulation_results.append(_clone(simulation_result))
-        return {
-            "status": "success",
-            "sessionId": self.practice_session_id,
-            "practiceSessionId": self.practice_session_id,
-            "simulationSessionId": self.simulation_session_id,
-            "normalizedAction": normalized_action,
-            "simulationResult": self._build_measurement_result(simulation_result),
-            **(
-                {"appliedParameters": _clone(action_application.get("changes") or [])}
-                if action_record.get("actionType") == "adjustDisplayConsoleParameter"
-                else {}
-            ),
-        }
+        transaction_snapshot = self._create_action_transaction_snapshot()
+        try:
+            safety_check = self.rule_engine.evaluate(action_record)
+            action_application = self.action_runtime.apply(action_record)
+            action_record["simulationActionResult"] = _clone(action_application)
+            if safety_check.get("safetyViolation"):
+                action_record["safetyViolation"] = True
+            self.student_actions.append(action_record)
+            self.last_activity_at = action_record["recordedAt"]
+            self.simulation_action_history.append({
+                "index": len(self.simulation_action_history) + 1,
+                "operationId": action_record.get("operationId") or f"operation-{len(self.simulation_action_history) + 1}",
+                "recordedAt": action_record["recordedAt"],
+                "result": _clone(action_application),
+            })
+            previous_snapshot = _clone(self.latest_physical_measurement_snapshot or {})
+            simulation_result = self.simulation_session.run_from_zero()
+            simulation_result["sessionId"] = self.simulation_session_id
+            snapshot = evaluate_physical_measurement_snapshot(self.troubleshooting.d_matrix, simulation_result)
+            repair_effect = compare_physical_snapshots(previous_snapshot, snapshot)
+            self.latest_physical_measurement_snapshot = _clone(snapshot)
+            self.physical_measurement_snapshots.append(_clone(snapshot))
+            repair_attempt = {
+                "operationId": action_record.get("operationId") or f"operation-{len(self.repair_attempts) + 1}",
+                "actionType": action_record.get("actionType") or "",
+                "target": _clone(action_record.get("target") or {}),
+                "faultId": action_record.get("faultId") or "",
+                "appliedAction": _clone(action_application),
+                "repairEffect": _clone(repair_effect),
+            }
+            if action_record.get("safetyViolation"):
+                repair_attempt["safetyViolation"] = True
+            self.repair_attempts.append(repair_attempt)
+            action_record["repairEffect"] = _clone(repair_effect)
+            action_record["physicalMeasurementSnapshot"] = _clone(snapshot)
+            self._append_repair_path_step(action_record, action_application, repair_effect)
+            self._append_dynamic_reference_record(action_record, reference_before)
+            result = {
+                "status": "success",
+                "sessionId": self.practice_session_id,
+                "practiceSessionId": self.practice_session_id,
+                "simulationSessionId": self.simulation_session_id,
+                "normalizedAction": normalized_action,
+                "simulationResult": self._build_measurement_result(simulation_result),
+                **(
+                    {"appliedParameters": _clone(action_application.get("changes") or [])}
+                    if action_record.get("actionType") == "adjustDisplayConsoleParameter"
+                    else {}
+                ),
+            }
+            return self._remember_operation_result(normalized_action, result)
+        except Exception:
+            self._restore_action_transaction_snapshot(transaction_snapshot)
+            raise
 
     def _record_measure_point_action(self, action_record, normalized_action, steps, reference_before):
         measured_point_type = point_type(self.troubleshooting.d_matrix, action_record.get("pointCode"))

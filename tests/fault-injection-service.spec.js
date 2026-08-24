@@ -128,6 +128,36 @@ describe('faultInjectionService', () => {
     })).toBe(0);
   });
 
+  it('applies protocol attenuation by coefficient and keeps a blank-duration cutoff active', () => {
+    const attenuation = { layer: 'protocol', runtimeBehavior: 'attenuation' };
+    const cutoff = { layer: 'protocol', runtimeBehavior: 'data_cutoff' };
+
+    expect(applyScalarFault(8, {
+      faultModel: attenuation,
+      params: { scale: 0.25, start: 2, duration: '' },
+      time: 1.9,
+      state: {}
+    })).toBe(8);
+    expect(applyScalarFault(8, {
+      faultModel: attenuation,
+      params: { scale: 0.25, start: 2, duration: '' },
+      time: 2,
+      state: {}
+    })).toBe(2);
+    expect(applyScalarFault(8, {
+      faultModel: cutoff,
+      params: { start: 2, duration: '' },
+      time: 999,
+      state: {}
+    })).toBe(0);
+    expect(applyScalarFault(8, {
+      faultModel: cutoff,
+      params: { start: 2, duration: 1 },
+      time: 3.1,
+      state: {}
+    })).toBe(8);
+  });
+
   it('applies representative physical, electrical, and protocol faults with state', () => {
     expect(applyScalarFault(1, {
       faultModel: { id: 'physical_parameter_drift', defaultParameters: { rate: 0.5, start: 2 } },
@@ -208,7 +238,7 @@ describe('faultInjectionService', () => {
     expect(findCompatibleFaultTarget(protocolFault, { nodes, edges, selectedEdgeId: 'edge-can' })).toEqual({
       kind: 'edge',
       id: 'edge-can',
-      reason: 'selected-can-edge'
+      reason: 'selected-edge'
     });
   });
 
@@ -282,7 +312,7 @@ describe('faultInjectionService', () => {
     expect(findCompatibleFaultTarget(communicationFault, { nodes, edges })).toEqual({
       kind: 'edge',
       id: 'edge-imu-error',
-      reason: 'module-target-can-edge'
+      reason: 'module-target-edge'
     });
   });
 

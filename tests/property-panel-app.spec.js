@@ -940,7 +940,7 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('applies electrical bias to the bound edge signal', async () => {
+  it('rejects electrical fault binding to a line', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
@@ -970,9 +970,60 @@ describe('property panel interaction', () => {
       parameters: { bias: 0.5, start: 0, duration: '' }
     });
 
-    expect(result.ok).toBe(true);
-    expect(window.resolveNodeOutput(gain.id, 0, 'actual', 0.25, 0.1, new Map(), new Set())).toBeCloseTo(1.5);
+    expect(result).toMatchObject({ ok: false, reason: 'incompatible-layer' });
+    expect(window.canBindLayeredFaultInjectorToTarget(injector.id, edge)).toBe(false);
+    expect(window.resolveNodeOutput(gain.id, 0, 'actual', 0.25, 0.1, new Map(), new Set())).toBeCloseTo(1);
 
+    wrapper.unmount();
+  });
+
+  it('opens the protocol fault binding dialog when a normal line is selected', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 180, 220);
+    const gain = window.createNode('simulation_block', 480, 220);
+    gain.props.inputs = [{ name: '合力', type: '标量' }];
+    const injector = window.createNode('protocol_fault_injector', 320, 420);
+    const edge = {
+      id: 'edge-protocol-normal',
+      lineType: 'normal',
+      signalId: 'normal_link_variable',
+      sourceNodeId: source.id,
+      targetNodeId: gain.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0
+    };
+    window.__GZ_STATE__.modelEdges.push(edge);
+    window.renderModelNodes();
+    await flushRuntime();
+
+    expect(window.getLayeredFaultSlotsForTarget(edge)).toEqual([
+      expect.objectContaining({
+        layer: 'protocol',
+        bindingObject: 'normal_link_variable'
+      })
+    ]);
+    expect(window.canBindLayeredFaultInjectorToTarget(injector.id, edge)).toBe(true);
+    expect(window.beginLayeredFaultBinding(injector.id)).toBe(true);
+    await flushRuntime();
+
+    const edgePath = document.querySelector(`.edge-path[data-edge-id="${edge.id}"]`);
+    expect(edgePath).not.toBeNull();
+    edgePath.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, cancelable: true }));
+    await flushRuntime();
+
+    const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    expect(dialog).not.toBeNull();
+    const slotOptions = dialog.querySelectorAll('[data-layered-fault-option="slot"]');
+    expect(slotOptions).toHaveLength(1);
+    expect(slotOptions[0].textContent).toBe('合力');
+    expect([...dialog.querySelectorAll('[data-layered-fault-option="model"]')]
+      .map((option) => option.dataset.layeredFaultOptionValue))
+      .toEqual(['attenuation', 'data_cutoff']);
+    expect(dialog.querySelector('[data-layered-fault-param="scale"]')).not.toBeNull();
+    expect(dialog.querySelector('[data-layered-fault-param="start"]')).not.toBeNull();
+    expect(dialog.querySelector('[data-layered-fault-param="duration"]')).not.toBeNull();
     wrapper.unmount();
   });
 
@@ -1210,7 +1261,7 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('defaults parameter variables to the physical fault layer before a declaration is saved', async () => {
+  it('defaults parameters to physical faults and inputs and outputs to electrical faults before a declaration is saved', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
@@ -1219,8 +1270,8 @@ describe('property panel interaction', () => {
 
     const block = window.__GZ_STATE__.modelNodes.find((node) => node.type === 'simulation_block');
     block.props.parameters = [{ key: 'controller_gain', name: 'Controller gain' }];
-    block.props.inputs = [];
-    block.props.outputs = [];
+    block.props.inputs = [{ key: 'command', name: 'Command' }];
+    block.props.outputs = [{ key: 'torque', name: 'Torque' }];
     block.props.middleVars = [];
     delete block.props.faultInjection;
     block.faultSlots = [];
@@ -1231,7 +1282,11 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     expect(document.querySelector('[data-fault-slot-layer="physical"][data-fault-slot-var="controller_gain"]')?.checked).toBe(true);
-    expect(document.querySelector('[data-fault-slot-count]')?.textContent).toBe('1 / 1');
+    expect(document.querySelector('[data-fault-slot-layer="electrical"][data-fault-slot-var="command"]')?.checked).toBe(true);
+    expect(document.querySelector('[data-fault-slot-layer="electrical"][data-fault-slot-var="torque"]')?.checked).toBe(true);
+    expect(document.querySelector('[data-fault-slot-layer="protocol"][data-fault-slot-var="command"]')).toBeNull();
+    expect(document.querySelector('[data-fault-slot-layer="protocol"][data-fault-slot-var="torque"]')).toBeNull();
+    expect(document.querySelector('[data-fault-slot-count]')?.textContent).toBe('3 / 3');
 
     wrapper.unmount();
   });
@@ -1477,6 +1532,25 @@ describe('property panel interaction', () => {
     expect(injectedCards[0].querySelector('[data-edge-testpoint-component] [data-edge-testpoint-fault="source_noise"]')).not.toBeNull();
     expect(injectedCards[0].querySelector('[data-edge-testpoint-fault="target_fault"]')).toBeNull();
 
+    const monitoredEdge = state.modelEdges.find((item) => item.id === 'edge-source-scope-testpoint');
+    monitoredEdge.injectedFault = {
+      modelId: 'bound_edge_protocol_fault',
+      name: 'Bound edge protocol fault',
+      layer: 'protocol',
+      active: true
+    };
+    monitoredEdge.faultBindings = [{
+      faultModelId: 'bound_edge_protocol_fault',
+      layer: 'protocol',
+      active: true,
+      injectedFault: monitoredEdge.injectedFault
+    }];
+    window.selectEdge('edge-source-scope-testpoint');
+    await flushRuntime();
+    window.setPropertyPanelTab('testpoints');
+    await flushRuntime();
+    expect(document.querySelector('[data-edge-testpoint-fault="bound_edge_protocol_fault"]')).not.toBeNull();
+
     const unrelated = window.createNode('simulation_block', 700, 360);
     unrelated.props.name = 'Unrelated injected module';
     state.faultInstances.push({
@@ -1487,6 +1561,27 @@ describe('property panel interaction', () => {
       displayName: 'Target fault',
       active: true
     });
+    unrelated.injectedFault = {
+      modelId: 'target_fault',
+      name: 'Target fault',
+      layer: 'electrical',
+      active: true
+    };
+    unrelated.faultBindings = [{
+      faultModelId: 'target_fault',
+      layer: 'electrical',
+      active: true,
+      injectedFault: unrelated.injectedFault
+    }];
+    state.faultInstances.push({
+      instanceId: 'orphan-edge-protocol-fault',
+      faultTypeId: 'orphan_edge_protocol_fault',
+      targetKind: 'edge',
+      targetId: 'edge-source-scope-testpoint',
+      displayName: 'Orphan edge protocol fault',
+      layer: 'protocol',
+      active: true
+    });
     window.selectEdge('edge-source-scope-testpoint');
     await flushRuntime();
     window.setPropertyPanelTab('testpoints');
@@ -1494,13 +1589,16 @@ describe('property panel interaction', () => {
 
     const globallyInjectedCards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
     const componentGroups = Array.from(globallyInjectedCards[0].querySelectorAll('[data-edge-testpoint-component]'));
-    expect(componentGroups.map((group) => group.getAttribute('data-edge-testpoint-component'))).toEqual([
+    expect(componentGroups.map((group) => group.getAttribute('data-edge-testpoint-component'))).toEqual(expect.arrayContaining([
       source.id,
+      monitoredEdge.id,
       unrelated.id
-    ]);
+    ]));
     expect(componentGroups[0].querySelector('[data-edge-testpoint-fault="source_bias"]')).not.toBeNull();
     expect(componentGroups[0].querySelector('[data-edge-testpoint-fault="source_noise"]')).not.toBeNull();
-    expect(componentGroups[1].querySelector('[data-edge-testpoint-fault="target_fault"]')).not.toBeNull();
+    expect(globallyInjectedCards[0].querySelector('[data-edge-testpoint-fault="bound_edge_protocol_fault"]')).not.toBeNull();
+    expect(globallyInjectedCards[0].querySelector('[data-edge-testpoint-fault="target_fault"]')).not.toBeNull();
+    expect(globallyInjectedCards[0].querySelector('[data-edge-testpoint-fault="orphan_edge_protocol_fault"]')).toBeNull();
 
     globallyInjectedCards[0].querySelector('[data-edge-testpoint-name]').value = 'Controller output monitor A';
     globallyInjectedCards[0].querySelector('[data-edge-testpoint-name]').dispatchEvent(new Event('input', { bubbles: true }));

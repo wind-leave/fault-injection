@@ -309,9 +309,17 @@ onBeforeUnmount(() => {
       <div class="knowledge-graph-page__body">
         <main class="knowledge-graph-canvas">
           <div class="knowledge-graph-legend" aria-label="节点图例">
-            <span v-for="kind in visibleLegendKinds" :key="kind.value" :class="`is-${kind.value}`">
-              <i></i>{{ kind.label }}
-            </span>
+            <template v-for="kind in visibleLegendKinds" :key="kind.value">
+              <span v-if="kind.value === 'fault'" class="is-fault is-enabled">
+                <i></i>故障（已启用）
+              </span>
+              <span v-if="kind.value === 'fault'" class="is-fault is-disabled">
+                <i></i>故障（未启用）
+              </span>
+              <span v-if="kind.value !== 'fault'" :class="`is-${kind.value}`">
+                <i></i>{{ kind.label }}
+              </span>
+            </template>
             <span class="is-detectable"><i></i>人工可检测</span>
             <span v-if="showNegativeDetectability" class="is-undetectable"><i></i>人工不可检测</span>
           </div>
@@ -379,23 +387,21 @@ onBeforeUnmount(() => {
 
         <aside v-if="selectedNode" class="knowledge-graph-detail" aria-live="polite">
           <button type="button" class="knowledge-graph-detail__close" aria-label="关闭节点详情" @click="selectedNodeKey = ''">×</button>
-          <template>
-            <span class="knowledge-graph-detail__kind">{{ nodeKindLabel(selectedNode.kind) }}</span>
-            <h2>{{ selectedNode.label }}</h2>
-            <code>{{ selectedNode.id }}</code>
-            <dl class="knowledge-graph-detail__properties">
-              <div><dt>关联度</dt><dd>{{ selectedNode.degree }}</dd></div>
-              <div v-for="property in selectedProperties" :key="property.key"><dt>{{ property.key }}</dt><dd>{{ property.value }}</dd></div>
-            </dl>
-            <h3>关联关系（{{ selectedRelations.length }}）</h3>
-            <ol class="knowledge-graph-detail__relations">
-              <li v-for="relation in selectedRelations" :key="relation.id">
-                <span>{{ relation.label }}</span>
-                <p>{{ relatedNodeLabel(relation, 'source') }} → {{ relatedNodeLabel(relation, 'target') }}</p>
-                <small v-if="relation.source">{{ relation.source.kind }} → {{ relation.target.kind }}</small>
-              </li>
-            </ol>
-          </template>
+          <span class="knowledge-graph-detail__kind">{{ nodeKindLabel(selectedNode.kind) }}</span>
+          <h2>{{ selectedNode.label }}</h2>
+          <code>{{ selectedNode.id }}</code>
+          <dl class="knowledge-graph-detail__properties">
+            <div><dt>关联度</dt><dd>{{ selectedNode.degree }}</dd></div>
+            <div v-for="property in selectedProperties" :key="property.key"><dt>{{ property.key }}</dt><dd>{{ property.value }}</dd></div>
+          </dl>
+          <h3>关联关系（{{ selectedRelations.length }}）</h3>
+          <ol class="knowledge-graph-detail__relations">
+            <li v-for="relation in selectedRelations" :key="relation.id">
+              <span>{{ relation.label }}</span>
+              <p>{{ relatedNodeLabel(relation, 'source') }} → {{ relatedNodeLabel(relation, 'target') }}</p>
+              <small v-if="relation.source">{{ relation.source.kind }} → {{ relation.target.kind }}</small>
+            </li>
+          </ol>
         </aside>
       </div>
     </section>
@@ -461,10 +467,11 @@ onBeforeUnmount(() => {
 .knowledge-graph-node__glyph{fill:var(--text);font-family:var(--font-data);font-size:9px;font-weight:600;pointer-events:none}
 .knowledge-graph-node__label{fill:var(--text);font-size:10px;font-weight:600;pointer-events:none}
 .knowledge-graph-node__id{fill:var(--textm);font-family:var(--font-data);font-size:7.5px;pointer-events:none}
-.knowledge-graph-legend{position:absolute;top:10px;left:12px;z-index:2;display:flex;flex-wrap:wrap;gap:5px 10px;max-width:calc(100% - 24px);padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,.9);color:var(--text2);font-size:8px;pointer-events:none}
-.knowledge-graph-legend span{display:flex;align-items:center;gap:4px;white-space:nowrap}
-.knowledge-graph-legend i{width:8px;height:8px;border-radius:3px;background:var(--blue)}
+.knowledge-graph-legend{position:absolute;top:12px;left:14px;z-index:2;display:flex;flex-wrap:wrap;gap:8px 16px;max-width:calc(100% - 28px);padding:10px 12px;border:1px solid var(--border);border-radius:7px;background:rgba(255,255,255,.9);color:var(--text2);font-size:11px;line-height:1.4;pointer-events:none}
+.knowledge-graph-legend span{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.knowledge-graph-legend i{width:12px;height:12px;flex:0 0 12px;border-radius:3px;background:var(--blue)}
 .knowledge-graph-legend .is-fault i{background:var(--red)}
+.knowledge-graph-legend .is-fault.is-disabled i{border:1px dashed var(--textm);background:var(--bg-card)}
 .knowledge-graph-legend .is-signalEdge i{background:var(--orange)}
 .knowledge-graph-legend .is-measurementPoint i,.knowledge-graph-legend .is-detectable i{background:var(--green)}
 .knowledge-graph-legend .is-undetectable i{border:1px dashed var(--textm);background:transparent}

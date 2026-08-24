@@ -348,6 +348,7 @@ POST /api/practice/session
 ```
 
 三维端必须保存 `practiceSessionId`。后续动作和最终提交均使用该 ID。`simulationSessionId` 为后端内部关联的仿真会话 ID。
+后端每 30 秒主动扫描过期会话；实践会话过期时会同步删除其关联的仿真会话。新建会话前也会立即执行一次回收，避免过期记录占用容量。
 
 `dMatrix`、`targetFaultId` 和 `initialRecommendedPath` 不在创建响应中返回。
 
@@ -374,6 +375,8 @@ POST /api/practice/session/{practiceSessionId}/action
 | `safetyState` | object | 否 | 安全状态，例如 `powerOff` |
 | `clientTime` | string | 否 | ISO 8601 客户端动作时间 |
 | `rawAction` | object | 否 | 三维端原始交互信息 |
+
+同一实践会话内，后端按 `operationId` 提供幂等保护。相同 `operationId` 和相同动作内容重试时，后端返回首次成功结果且不会重复执行；相同 `operationId` 携带不同动作内容时返回 `409 OPERATION_ID_CONFLICT`。执行失败的动作不会占用该 ID，可以使用原请求重试。
 
 ### 5.3 修改显控台受控组件参数并重跑
 
@@ -846,6 +849,7 @@ faultLocalization = 30 × setAccuracy
 | `UNSUPPORTED_ACTION_TYPE` | 动作不是 `measurePoint`、`replaceWire`、`replaceComponent` 或 `adjustDisplayConsoleParameter` |
 | `PARAMETER_NOT_ALLOWED` | 指定参数不在该显控台的控制白名单中 |
 | `TARGET_NOT_FOUND` | 组件、线缆或故障目标不存在 |
+| `OPERATION_ID_CONFLICT` | 同一实践会话中重复使用 `operationId`，但动作内容与首次请求不同 |
 | `SESSION_NOT_FOUND` | 实践任务不存在、已提交或后端已重启 |
 | `SESSION_EXPIRED` | 实践任务超过生命周期或空闲超时 |
 | `SIMULATION_LIMIT_EXCEEDED` | 动作数、样本数或仿真规模超过限制 |

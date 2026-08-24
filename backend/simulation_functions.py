@@ -1128,7 +1128,7 @@ __all__ = [
     "adc_convert_rf",
     "adc_codes_to_normalized_iq",
     "amplify_rf_excitation",
-    "amplify_rf_final_power_16",
+    "amplify_rf_final_power_2",
     "amplify_rf_power",
     "amplify_rf_relay",
     "amplify_rf_signal",

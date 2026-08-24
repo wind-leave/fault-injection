@@ -1704,7 +1704,7 @@ function rejectSubsystemFaultTarget(showMessage=true){
 }
 
 function isProtocolInjectableEdge(edge){
-  return !!edge&&edge.lineType==='can';
+  return !!edge&&!!edge.id;
 }
 
 function isFaultNodeType(type){
@@ -3651,7 +3651,7 @@ function renderPropertyPanel(node){
       </div>
       <div class="props-form">
         <div class="pgroup">
-          <div class="props-help">${isProtocolInjectableEdge(node)?'当前连线为 CAN 总线，可在此导入协议层故障；普通连接线暂不支持协议注入。':'当前选中的是一条独立连线，可直接删除，不影响其他模块。'}</div>
+          <div class="props-help">${isProtocolInjectableEdge(node)?'当前连线可注入协议层故障。':'当前选中的是一条独立连线，可直接删除，不影响其他模块。'}</div>
         </div>
         <div class="props-actions">
           ${isProtocolInjectableEdge(node)?`<button class="props-secondary props-protocol-action" onclick="openProtocolFaultImport()">${protocolFault?'更换协议故障':'导入协议故障'}</button>`:''}
@@ -4219,7 +4219,7 @@ function renderProtocolInjectModal(){
     importedList.innerHTML='';
     targetCard.innerHTML='';
     grid.innerHTML='';
-    detail.innerHTML='<div class="einj-empty">未选择可注入的 CAN 总线。</div>';
+    detail.innerHTML='<div class="einj-empty">未选择可注入协议层故障的连线。</div>';
     hint.textContent='请选择一条 CAN 总线。';
     return;
   }
@@ -4286,7 +4286,7 @@ function renderProtocolInjectModal(){
 function openProtocolFaultImport(){
   const edge=getEdge(S.selEdge);
   if(!isProtocolInjectableEdge(edge)){
-    toast('当前仅支持对 CAN 总线导入协议层故障','w');
+    toast('请选择可注入协议层故障的连线','w');
     return;
   }
   S.protocolInjectTargetId=edge.id;
@@ -4304,7 +4304,7 @@ function openProtocolFaultImport(){
 function confirmProtocolFaultInjection(){
   const target=getEdge(S.protocolInjectTargetId);
   if(!isProtocolInjectableEdge(target)){
-    toast('当前没有可注入的 CAN 总线','w');
+    toast('当前没有可注入协议层故障的连线','w');
     return;
   }
   const selected=getCurrentProtocolSelection();
@@ -6669,7 +6669,7 @@ function renderPropertyPanel(node){
       </div>
       <div class="props-form">
         <div class="pgroup">
-          <div class="props-help">${isProtocolInjectableEdge(node)?'当前连线为 CAN 总线，可在此导入协议层故障；普通连接线暂不支持协议注入。':'当前选中的是一条独立连线，可直接删除，不影响其他模块。'}</div>
+          <div class="props-help">${isProtocolInjectableEdge(node)?'当前连线可注入协议层故障。':'当前选中的是一条独立连线，可直接删除，不影响其他模块。'}</div>
         </div>
         <div class="props-actions">
           ${isProtocolInjectableEdge(node)?`<button class="props-secondary props-protocol-action" onclick="openProtocolFaultImport()">${protocolFault?'更换协议故障':'导入协议故障'}</button>`:''}
@@ -15162,7 +15162,7 @@ Object.assign(window,{
   const FAULT_SLOT_CONFIG_MODELS={
     physical:['bias','drift','step','degradation','freeze','random'],
     electrical:['bias','noise','attenuation','data_cutoff','freeze','intermittent'],
-    protocol:['delay','dropout','tamper','stale']
+    protocol:['attenuation','data_cutoff']
   };
 
   function list(value){
@@ -15358,6 +15358,11 @@ Object.assign(window,{
       .filter(variable=>variable?.role==='parameter')
       .forEach(variable=>{
         if(variable.key&&!declaration.physical.includes(variable.key)) declaration.physical.push(variable.key);
+      });
+    list(variables)
+      .filter(variable=>variable?.role==='input'||variable?.role==='output')
+      .forEach(variable=>{
+        if(variable.key&&!declaration.electrical.includes(variable.key)) declaration.electrical.push(variable.key);
       });
     return declaration;
   }
@@ -16023,6 +16028,75 @@ Object.assign(window,{
     });
   }
 
+  function getEdgeTestPointFaultRecordId(record){
+    return record?.faultModelId||record?.faultTypeId||record?.modelId||record?.faultId||record?.id||'';
+  }
+
+  function getEdgeTestPointFaultTarget(record){
+    const targetKind=record?.targetKind||record?.target?.kind||'';
+    const targetId=record?.targetId||record?.target?.id||'';
+    const targetEdgeId=record?.targetEdgeId||(targetKind==='edge'?targetId:'')||record?.edgeId||'';
+    const targetNodeId=record?.targetNodeId||(targetKind==='node'?targetId:'')||record?.hostNodeId||'';
+    if(targetEdgeId){
+      return list(S.modelEdges).concat(list(S.edges)).find(item=>item?.id===targetEdgeId)||null;
+    }
+    if(targetNodeId){
+      return list(S.modelNodes).concat(list(S.nodes)).find(item=>item?.id===targetNodeId)||null;
+    }
+    return null;
+  }
+
+  function isCanvasBoundEdgeTestPointFault(record,{visualTag=false}={}){
+    const target=getEdgeTestPointFaultTarget(record);
+    if(!target) return false;
+    // A visible fault tag is itself evidence of an existing canvas fault. For
+    // compact fault-instance records, require the target to retain the same
+    // active injected-fault or binding record so stale state cannot surface.
+    if(visualTag) return true;
+    const recordId=getEdgeTestPointFaultRecordId(record);
+    if(!recordId) return false;
+    return [
+      target.injectedFault,
+      target.fault,
+      ...list(target.faults),
+      ...list(target.faultBindings)
+    ].some(binding=>{
+      if(binding?.active===false||binding?.enabled===false) return false;
+      return getEdgeTestPointFaultRecordId(binding)===recordId
+        ||binding?.injectedFault&&getEdgeTestPointFaultRecordId(binding.injectedFault)===recordId;
+    });
+  }
+
+  function getCanvasBoundFaultRecordsForEdgeTestPoint(){
+    const records=[];
+    const appendTargetRecords=(target,targetKind)=>{
+      if(!target?.id) return;
+      [
+        target.injectedFault,
+        target.fault,
+        ...list(target.faults),
+        ...list(target.faultBindings)
+      ].forEach(record=>{
+        if(!record||record.active===false||record.enabled===false) return;
+        const payload=record.injectedFault&&typeof record.injectedFault==='object'
+          ?record.injectedFault
+          :{};
+        const normalized={
+          ...payload,
+          ...record,
+          targetKind,
+          targetId:target.id,
+          targetNodeId:targetKind==='node'?target.id:'',
+          targetEdgeId:targetKind==='edge'?target.id:''
+        };
+        if(getEdgeTestPointFaultRecordId(normalized)) records.push(normalized);
+      });
+    };
+    list(S.modelNodes).concat(list(S.nodes)).forEach(node=>appendTargetRecords(node,'node'));
+    list(S.modelEdges).concat(list(S.edges)).forEach(edge=>appendTargetRecords(edge,'edge'));
+    return records;
+  }
+
   function getInjectedFaultModelsForEdgeTestPoint(edge){
     const rows=getDiagnosticRowsForEdgeTestPointOptions();
     const rowByFaultId=new Map(rows.map(row=>[getDiagnosticRowFaultId(row),row]).filter(([id])=>id));
@@ -16053,10 +16127,21 @@ Object.assign(window,{
       const existing=models.get(id);
       models.set(id,existing?{...existing,...merged,id}:{...merged,id});
     };
-    list(S.faultTags).filter(tag=>tag?.active!==false&&tag?.enabled!==false).forEach(tag=>{
+    getCanvasBoundFaultRecordsForEdgeTestPoint().forEach(record=>{
+      append(record,getEdgeTestPointFaultRecordId(record),{force:true});
+    });
+    list(S.faultTags).filter(tag=>
+      tag?.active!==false
+      &&tag?.enabled!==false
+      &&isCanvasBoundEdgeTestPointFault(tag,{visualTag:true})
+    ).forEach(tag=>{
       append(tag,tag.faultModelId||tag.faultTypeId||tag.modelId||tag.faultId||tag.id,{force:true});
     });
-    list(S.faultInstances).forEach(instance=>{
+    list(S.faultInstances).filter(instance=>
+      instance?.active!==false
+      &&instance?.enabled!==false
+      &&isCanvasBoundEdgeTestPointFault(instance)
+    ).forEach(instance=>{
       append(instance,instance.faultTypeId||instance.faultModelId||instance.modelId||instance.id,{force:true});
     });
     return Array.from(models.values());
@@ -24004,12 +24089,14 @@ function decorateDataflowEdges(){
     if(api&&modeKey==='actual'&&hasConfiguredFault&&!activeBindings.length){
       return value;
     }
-    if(api&&modeKey==='actual'&&hasSignalTransformFault&&!Array.isArray(value)){
+    if(api&&modeKey==='actual'&&hasSignalTransformFault){
       const bucket=SIM.actual;
       const edgeState=ensureEdgeRuntime(bucket,edge);
-      const base=Number.isFinite(value)?value:0;
+      const base=Array.isArray(value)
+        ?value.map(item=>Number.isFinite(item)?item:0)
+        :(Number.isFinite(value)?value:0);
       if(api.applyScalarFaultBindings&&executableBindings.length){
-        const nextValue=api.applyScalarFaultBindings(base,{
+        const applyBindings=input=>api.applyScalarFaultBindings(input,{
           target:{...edge,faultBindings:executableBindings},
           resolveFaultModel:(binding)=>getFaultModelForInjected(binding.injectedFault)||getImportedFaultModel(binding.faultModelId||'')||binding,
           stateBucket:edgeState,
@@ -24018,6 +24105,7 @@ function decorateDataflowEdges(){
           stepIndex:SIM.stepIndex,
           seed:getNodeSeed(edge.id)
         });
+        const nextValue=Array.isArray(base)?base.map(applyBindings):applyBindings(base);
         edgeState.lastOutput=nextValue;
         edgeState.lastTransmissionDropped=Boolean(edgeState.lastDropout);
         edgeState.lastTransmissionDropTime=edgeState.lastTransmissionDropped?time:null;
@@ -29389,7 +29477,7 @@ function decorateDataflowEdges(){
       layerLabel:'协议层',
       label:'协议层注入',
       faultType:'数字协议故障',
-      defaultModel:'tamper',
+      defaultModel:'attenuation',
       targetKind:'edge'
     }
   };
@@ -29431,7 +29519,8 @@ function decorateDataflowEdges(){
   }
 
   function getLayeredFaultInjectorTargetKind(injector){
-    const type=typeof injector==='string'?injector:injector?.type;
+    const resolvedInjector=typeof injector==='string'?getRuntimeNode(injector):injector;
+    const type=resolvedInjector?.type||injector;
     return getLayeredFaultInjectorConfig(type)?.targetKind||'any';
   }
 
@@ -29504,7 +29593,7 @@ function decorateDataflowEdges(){
   const COMPONENT_LAYER_MODELS={
     physical:['bias','drift','step','degradation','freeze','random'],
     electrical:['bias','noise','attenuation','data_cutoff','freeze','intermittent'],
-    protocol:['delay','dropout','tamper','stale']
+    protocol:['attenuation','data_cutoff']
   };
 
   function plainText(value,fallback=''){
@@ -29759,36 +29848,45 @@ function decorateDataflowEdges(){
     ));
   }
 
-  function getEdgeElectricalSlots(edge){
-    if(!edge?.id) return [];
-    return [makeSlot(
-      'electrical',
-      `electrical:${edge.id}:signal`,
-      edge.label||edge.signalName||edge.signalId||'连接信号',
-      edge,
-      {signalId:edge.signalId||'', signalRole:edge.signalRole||''}
-    )];
+  function edgeHasProtocolCapability(edge){
+    return !!edge?.id;
   }
 
-  function edgeHasProtocolCapability(edge){
-    return edge?.lineType==='can'
-      || !!edge?.canMessageId
-      || !!edge?.messageId
-      || !!edge?.channelId
-      || !!edge?.protocol
-      || edge?.bus==='CAN';
+  function getEdgeTargetPortName(edge){
+    const target=getNode(edge?.targetNodeId);
+    const portIndex=Math.max(0,Number.parseInt(edge?.targetPortIndex,10)||0);
+    let port=null;
+    try{
+      port=typeof getNodePorts==='function'?getNodePorts(target)?.inputs?.[portIndex]:null;
+    }catch(error){
+      port=null;
+    }
+    const declaredInput=arr(target?.props?.inputs)[portIndex]||arr(target?.inputs)[portIndex]||port?.meta||{};
+    return plainText(
+      declaredInput?.displayName
+      ||declaredInput?.name
+      ||declaredInput?.label
+      ||declaredInput?.varName
+      ||edge?.targetPort?.displayName
+      ||edge?.targetPort?.name
+      ||edge?.targetPort?.label
+      ||edge?.targetPort?.varName
+      ||port?.label,
+      ''
+    );
   }
 
   function getEdgeProtocolSlots(edge){
     if(!edgeHasProtocolCapability(edge)) return [];
     const bindingObject=plainText(edge.signalId||edge.signalName||edge.name||edge.label||edge.messageId||edge.canMessageId||edge.channelId,edge.id);
+    const slotName=getEdgeTargetPortName(edge)||bindingObject;
     const allowedModels=[...new Set(arr(edge.faultSlots)
       .filter(slot=>(slot?.layer||slot?.layerKey)==='protocol'||String(slot?.slotId||slot?.id||'').includes('protocol'))
       .flatMap(slot=>arr(slot.allowedModels)))];
     return [makeSlot(
       'protocol',
       `protocol:${edge.id}:can`,
-      bindingObject,
+      slotName,
       edge,
       {
         channelId:edge.channelId||'',
@@ -29886,11 +29984,10 @@ function decorateDataflowEdges(){
     if(isSubsystemFaultTarget(target)) return [];
     const declared=getDeclaredFaultSlots(target);
     if(getTargetKind(target)==='edge'){
-      const protocolSlots=getEdgeProtocolSlots(target);
-      const declaredEdgeSlots=declared.filter(slot=>slot.layer!=='protocol'||!protocolSlots.length);
-      const inferred=[];
-      if(!hasLayeredFaultSlot(declaredEdgeSlots,'electrical')) inferred.push(...getEdgeElectricalSlots(target));
-      return mergeLayeredFaultSlots([...declaredEdgeSlots,...inferred,...protocolSlots]);
+      // `faultSlots` on an edge provide capability metadata (for example the
+      // allowed protocol fault models).  They must not become a second UI
+      // target alongside the connection variable itself.
+      return getEdgeProtocolSlots(target);
     }
     if(hasComponentFaultDeclaration(target)){
       return mergeLayeredFaultSlots(mergeComponentDeclaredSlots(getComponentDeclaredFaultSlots(target),target));
@@ -29903,7 +30000,13 @@ function decorateDataflowEdges(){
   }
 
   function resolveInjectorLayer(injector){
-    if(typeof injector==='string') return getLayeredFaultInjectorConfig(injector)?.layer||'';
+    if(typeof injector==='string'){
+      const resolvedInjector=getRuntimeNode(injector);
+      return resolvedInjector?.faultInjector?.layer
+        || resolvedInjector?.props?.layerKey
+        || getLayeredFaultInjectorConfig(resolvedInjector?.type||injector)?.layer
+        || '';
+    }
     return injector?.faultInjector?.layer
       || injector?.props?.layerKey
       || getLayeredFaultInjectorConfig(injector?.type)?.layer
@@ -29915,15 +30018,18 @@ function decorateDataflowEdges(){
     if(!layer||!target?.id) return false;
     if(isSubsystemFaultTarget(target)) return false;
     if(!canLayeredInjectorUseTargetKind(injector,target)) return false;
+    if(getTargetKind(target)==='edge'&&layer!=='protocol') return false;
     return getLayeredFaultSlotsForTarget(target).some(slot=>slot.layer===layer);
   }
 
   function defaultLayeredFaultParameters(layer,mathModel){
     if(mathModel==='data_cutoff'){
-      return {start:0};
+      return {start:0,duration:''};
     }
     if(mathModel==='attenuation'){
-      return {attenuation_db:6,start:0,duration:''};
+      return layer==='protocol'
+        ?{scale:0.5,start:0,duration:''}
+        :{attenuation_db:6,start:0,duration:''};
     }
     if(mathModel==='degradation'){
       return {scale:0.85,start:0,duration:''};
@@ -30299,7 +30405,6 @@ function decorateDataflowEdges(){
     window.__layeredFaultTargetCleanups=[];
     const diagram=document.getElementById('diagram');
     diagram?.classList.remove('fault-drop-preview','fault-drop-preview--node','fault-drop-preview--edge','fault-drop-preview--protocol');
-    document.querySelectorAll('[data-layered-fault-edge-marker]').forEach(el=>el.remove());
     document.querySelectorAll('.fault-drop-compatible,.fault-drop-incompatible').forEach(el=>{
       el.classList.remove('fault-drop-compatible','fault-drop-incompatible');
       delete el.dataset.faultDropState;
@@ -30308,62 +30413,6 @@ function decorateDataflowEdges(){
       el.classList.remove('is-fault-drop-compatible','is-fault-drop-incompatible');
       delete el.dataset.faultDropState;
     });
-  }
-
-  function getLayeredFaultEdgeMarkerPoint(edge){
-    const path=Array.from(document.querySelectorAll('.edge-path[data-edge-id]'))
-      .find(el=>el.dataset.edgeId===edge?.id);
-    if(path&&typeof path.getTotalLength==='function'&&typeof path.getPointAtLength==='function'){
-      try{
-        const point=path.getPointAtLength(path.getTotalLength()*0.5);
-        if(Number.isFinite(point.x)&&Number.isFinite(point.y)){
-          return {x:point.x,y:point.y};
-        }
-      }catch{}
-    }
-    const sourceNode=getRuntimeNode(edge?.sourceNodeId);
-    const targetNode=getRuntimeNode(edge?.targetNodeId);
-    const sourcePort=sourceNode?getPortInfo(sourceNode,'output',edge.sourcePortIndex||0):null;
-    const targetPort=targetNode?getPortInfo(targetNode,'input',edge.targetPortIndex||0):null;
-    if(isFiniteCanvasPoint(sourcePort)&&isFiniteCanvasPoint(targetPort)){
-      return {
-        x:(sourcePort.x+targetPort.x)/2,
-        y:(sourcePort.y+targetPort.y)/2-12
-      };
-    }
-    return null;
-  }
-
-  function renderLayeredFaultEdgeMarker(edge){
-    const edgeControlLayer=typeof window.ensureCanvasEdgeControlLayer==='function'?window.ensureCanvasEdgeControlLayer():null;
-    if(!edgeControlLayer||!edge?.id) return;
-    const point=getLayeredFaultEdgeMarkerPoint(edge);
-    if(!point) return;
-    const marker=document.createElementNS('http://www.w3.org/2000/svg','g');
-    marker.setAttribute('class','layered-fault-edge-marker');
-    marker.setAttribute('data-layered-fault-edge-marker','true');
-    marker.setAttribute('data-edge-id',edge.id);
-    marker.setAttribute('transform',`translate(${Math.round(point.x)} ${Math.round(point.y)})`);
-    const title=document.createElementNS('http://www.w3.org/2000/svg','title');
-    title.textContent='协议层故障注入目标';
-    const halo=document.createElementNS('http://www.w3.org/2000/svg','circle');
-    halo.setAttribute('class','layered-fault-edge-marker__halo');
-    halo.setAttribute('r','15');
-    const pin=document.createElementNS('http://www.w3.org/2000/svg','rect');
-    pin.setAttribute('class','layered-fault-edge-marker__pin');
-    pin.setAttribute('x','-10');
-    pin.setAttribute('y','-10');
-    pin.setAttribute('width','20');
-    pin.setAttribute('height','20');
-    pin.setAttribute('rx','4');
-    const label=document.createElementNS('http://www.w3.org/2000/svg','text');
-    label.setAttribute('class','layered-fault-edge-marker__label');
-    label.setAttribute('text-anchor','middle');
-    label.setAttribute('dominant-baseline','central');
-    label.textContent='F';
-    marker.append(title,halo,pin,label);
-    attachLayeredFaultTargetHandlers(marker,edge);
-    edgeControlLayer.appendChild(marker);
   }
 
   function getPendingLayeredFaultInjector(){
@@ -30433,9 +30482,6 @@ function decorateDataflowEdges(){
         el.dataset.faultDropState='compatible';
         attachLayeredFaultTargetHandlers(el,edge);
       });
-      if(protocolMode){
-        renderLayeredFaultEdgeMarker(edge);
-      }
     });
     diagram?.classList.toggle('fault-drop-preview--node',compatibleNodeCount>0);
     diagram?.classList.toggle('fault-drop-preview--edge',compatibleEdgeCount>0);
@@ -30581,10 +30627,8 @@ function decorateDataflowEdges(){
     }
     if(layer==='protocol'){
       return [
-        {value:'tamper',label:'篡改模型'},
-        {value:'dropout',label:'丢包模型'},
-        {value:'delay',label:'延迟模型'},
-        {value:'stale',label:'陈旧模型'}
+        {value:'attenuation',label:'衰减模型'},
+        {value:'data_cutoff',label:'通断模型'}
       ];
     }
     return [
@@ -30707,6 +30751,9 @@ function decorateDataflowEdges(){
     const runtimeService=window.__GZ_FAULT_BINDING_RUNTIME__;
     const fromSlot=runtimeService?.getFaultSlotVectorLength?.(slot);
     if(fromSlot>1) return fromSlot;
+    // Protocol bindings target an edge rather than a component interface, so
+    // they never expose per-port vector injection controls.
+    if(getTargetKind(target)==='edge') return 0;
     const targetField=String(slot?.targetField||'').toLowerCase();
     const fieldMatch=targetField.match(/^(inputs|outputs|middlevars)\.(.+)$/);
     const role=fieldMatch?.[1]==='middlevars'?'middleVars':fieldMatch?.[1];

@@ -150,6 +150,8 @@ class FaultRuntime:
         if fault_type == "sensor_bias":
             return result + float(params.get("bias", 0.0))
         if fault_type == "signal_attenuation":
+            if "scale" in params:
+                return result * float(params.get("scale", 1.0))
             attenuation_db = max(0.0, float(params.get("attenuation_db", params.get("attenuationDb", 0.0))))
             return result * (10.0 ** (-attenuation_db / 20.0))
         if fault_type == "noise_increase":

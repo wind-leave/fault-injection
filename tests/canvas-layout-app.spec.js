@@ -488,6 +488,16 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('anchors D-matrix header actions to the expanded canvas right edge when the component library is hidden', () => {
+    const collapsedActionsRule = findCssRule(
+      readComponentsCss(),
+      '.gz-app.is-left-panel-collapsed .d-matrix-header__actions'
+    );
+
+    expect(collapsedActionsRule).toContain('justify-self:end;');
+    expect(collapsedActionsRule).toContain('margin-left:auto;');
+  });
+
   it('collapses and restores the right inspector while preserving its edge toggle', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -670,7 +680,7 @@ describe('canvas layout cleanup', () => {
     expect(findCssRule(componentsCss, '.edge-hit.is-fault-drop-compatible')).toMatch(/stroke-width\s*:\s*36!important/);
     expect(findCssRule(componentsCss, '.edge-label.is-fault-drop-compatible')).toMatch(/pointer-events\s*:\s*auto/);
     expect(findCssRule(componentsCss, '.diagram.fault-drop-preview--protocol .edge-path.is-fault-drop-compatible')).toMatch(/stroke\s*:\s*#2f73ff!important/);
-    expect(findCssRule(componentsCss, '.layered-fault-edge-marker__pin')).toMatch(/fill\s*:\s*#dc2626/);
+    expect(componentsCss).not.toContain('.layered-fault-edge-marker');
     expect(findCssRule(componentsCss, '.diagram.fault-drop-preview .fault-tag-card')).toMatch(/opacity\s*:\s*\.16/);
     expect(componentsCss).not.toMatch(/@media\s*\(max-height:820px\)[\s\S]*?\.sbar\s*\{[\s\S]*?height:78px/);
     expect(componentsCss).not.toMatch(/\.sbar\s*\{[\s\S]*?max-height:78px/);

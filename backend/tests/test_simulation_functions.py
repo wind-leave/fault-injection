@@ -6,7 +6,7 @@ from backend.simulation_functions import (
     adc_convert_rf,
     adc_codes_to_normalized_iq,
     amplify_rf_excitation,
-    amplify_rf_final_power_16,
+    amplify_rf_final_power_2,
     amplify_rf_power,
     amplify_rf_relay,
     amplify_rf_signal,
@@ -89,8 +89,8 @@ class SimulationFunctionsTests(unittest.TestCase):
             2.0,
         )
 
-    def test_sixteen_element_final_power_amplifier_uses_gate_control(self):
-        outputs = amplify_rf_final_power_16(
+    def test_two_element_final_power_amplifier_uses_gate_control(self):
+        outputs = amplify_rf_final_power_2(
             small_signal_inputs=(1.0, 1.0),
             gate_controls=(1.0, 0.0),
             gain_db=20.0,
@@ -99,10 +99,9 @@ class SimulationFunctionsTests(unittest.TestCase):
             gate_threshold=0.5,
         )
 
-        self.assertEqual(len(outputs), 16)
+        self.assertEqual(len(outputs), 2)
         self.assertEqual(outputs[0], 2.0)
         self.assertEqual(outputs[1], 0.0)
-        self.assertTrue(all(value == 0.0 for value in outputs[2:]))
 
     def test_rf_adc_converts_bipolar_samples_to_unsigned_codes(self):
         self.assertEqual(adc_convert_rf(-1.0, resolution_bits=12, full_scale_amplitude=1.0), 0)

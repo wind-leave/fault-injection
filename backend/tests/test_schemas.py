@@ -77,6 +77,47 @@ class SchemaValidationTests(unittest.TestCase):
         self.assertEqual(context.exception.error_code, "INVALID_SCHEMA")
         self.assertEqual(context.exception.field, "nodes[0].parameters.value")
 
+    def test_rejects_duplicate_internal_model_ids(self):
+        cases = []
+
+        duplicate_nodes = valid_package()
+        duplicate_nodes["nodes"][1]["id"] = duplicate_nodes["nodes"][0]["id"]
+        cases.append((duplicate_nodes, "nodes[1].id"))
+
+        duplicate_edges = valid_package()
+        duplicate_edges["edges"][1]["id"] = duplicate_edges["edges"][0]["id"]
+        cases.append((duplicate_edges, "edges[1].id"))
+
+        duplicate_measurements = valid_package()
+        duplicate_measurements["measurementPoints"].append(
+            dict(duplicate_measurements["measurementPoints"][0])
+        )
+        cases.append((duplicate_measurements, "measurementPoints[1].id"))
+
+        duplicate_faults = valid_package()
+        duplicate_faults["faultInstances"] = [
+            {"faultId": "fault-1"},
+            {"faultId": "fault-1"},
+        ]
+        cases.append((duplicate_faults, "faultInstances[1].faultId"))
+
+        for package, expected_field in cases:
+            with self.subTest(field=expected_field):
+                with self.assertRaises(SimulationBackendError) as context:
+                    validate_executable_package(package)
+                self.assertEqual(context.exception.error_code, "INVALID_SCHEMA")
+                self.assertEqual(context.exception.field, expected_field)
+
+    def test_rejects_missing_fault_id(self):
+        package = valid_package()
+        package["faultInstances"] = [{"faultType": "sensor_bias", "targetId": "sim-1"}]
+
+        with self.assertRaises(SimulationBackendError) as context:
+            validate_executable_package(package)
+
+        self.assertEqual(context.exception.error_code, "INVALID_SCHEMA")
+        self.assertEqual(context.exception.field, "faultInstances[0].faultId")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -128,6 +128,25 @@ def validate_numeric_parameters(parameters, field, text_parameters=None):
     return parameters
 
 
+def _validate_unique_ids(items, collection, key, default_factory=None):
+    seen = {}
+    for index, item in enumerate(items):
+        ensure_mapping(item, f"{collection}[{index}]")
+        value = item.get(key)
+        if value is None and default_factory is not None:
+            value = default_factory(item, index)
+        field = f"{collection}[{index}].{key}"
+        if not isinstance(value, str) or not value.strip():
+            raise SimulationBackendError("INVALID_SCHEMA", field, f"{key} is required")
+        if value in seen:
+            raise SimulationBackendError(
+                "INVALID_SCHEMA",
+                field,
+                f"duplicate {key}: {value}; first declared at {collection}[{seen[value]}].{key}",
+            )
+        seen[value] = index
+
+
 def validate_sum_block_parameters(parameters, field):
     if parameters is None:
         return {}
@@ -167,6 +186,21 @@ def validate_executable_package(package):
         raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "faultInstances", "too many fault instances")
     if len(measurement_points) > LIMITS["max_measurement_points"]:
         raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "measurementPoints", "too many measurement points")
+
+    _validate_unique_ids(nodes, "nodes", "id")
+    _validate_unique_ids(
+        edges,
+        "edges",
+        "id",
+        default_factory=lambda _item, index: f"edge-{index}",
+    )
+    _validate_unique_ids(
+        measurement_points,
+        "measurementPoints",
+        "id",
+        default_factory=lambda item, _index: f"{item.get('scopeNodeId')}.ch1",
+    )
+    _validate_unique_ids(faults, "faultInstances", "faultId")
 
     for index, node in enumerate(nodes):
         ensure_mapping(node, f"nodes[{index}]")

@@ -2,8 +2,8 @@ export const DEFAULT_FAULT_SLOT_LAYERS = ['physical', 'electrical', 'protocol'];
 
 export const DEFAULT_FAULT_SLOT_ROLE_LAYER_RULES = {
   parameter: ['physical'],
-  input: ['electrical', 'protocol'],
-  output: ['electrical', 'protocol']
+  input: ['electrical'],
+  output: ['electrical']
 };
 
 export const DEFAULT_FAULT_SLOT_LABELS = {

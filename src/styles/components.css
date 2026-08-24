@@ -764,28 +764,6 @@ main{flex:1;display:flex;overflow:hidden;}
 .diagram.fault-drop-preview--protocol .edge-label.is-fault-drop-compatible{
   fill:#1d4ed8!important;
 }
-.layered-fault-edge-marker{
-  pointer-events:auto;
-  cursor:pointer;
-}
-.layered-fault-edge-marker__halo{
-  fill:rgba(220,38,38,0.12);
-  stroke:rgba(220,38,38,0.22);
-  stroke-width:2;
-}
-.layered-fault-edge-marker__pin{
-  fill:#dc2626;
-  stroke:#ffffff;
-  stroke-width:2;
-  filter:drop-shadow(0 5px 9px rgba(185,28,28,0.24));
-}
-.layered-fault-edge-marker__label{
-  fill:#ffffff;
-  font-family:var(--font-data);
-  font-size:11px;
-  font-weight:900;
-  pointer-events:none;
-}
 @keyframes lineFaultDropPulse{
   0%,100%{stroke-width:3.2;}
   50%{stroke-width:4.6;}
@@ -3500,6 +3478,11 @@ button:focus-visible,
   display:flex;
   align-items:center;
   gap:8px;
+}
+/* Anchor the action group to the expanded canvas edge after hiding the palette. */
+.gz-app.is-left-panel-collapsed .d-matrix-header__actions{
+  justify-self:end;
+  margin-left:auto;
 }
 .d-matrix-header span{
   color:#0f62fe;

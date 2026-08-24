@@ -67,34 +67,22 @@ export const FAULT_MATH_MODEL_DEFINITIONS = Object.freeze({
   ],
   protocol: [
     {
-      id: 'delay',
-      name: '报文延迟',
-      formula: 'payload_fault[k] = payload[k - d]',
-      defaultParameters: { delay_steps: 3, start: 0, duration: '' }
+      id: 'attenuation',
+      name: '衰减模型',
+      formula: 'payload_fault = payload * scale',
+      defaultParameters: { scale: 0.5, start: 0, duration: '' }
     },
     {
-      id: 'dropout',
-      name: '报文丢失',
-      formula: 'payload_fault = previous(payload) when drop(seed, rate)',
-      defaultParameters: { drop_rate: 0.08, seed: 1, start: 0, duration: '' }
-    },
-    {
-      id: 'tamper',
-      name: '报文篡改',
-      formula: 'payload_fault = tamper(payload)',
-      defaultParameters: { bias: 0.1, scale: 1, start: 0, duration: '' }
-    },
-    {
-      id: 'stale',
-      name: '陈旧报文',
-      formula: 'payload_fault = hold(payload, start)',
+      id: 'data_cutoff',
+      name: '通断模型',
+      formula: 'payload_fault = 0',
       defaultParameters: { start: 0, duration: '' }
     }
   ]
 });
 
 const EDGE_ELECTRICAL_MODELS = Object.freeze(['bias', 'noise', 'freeze', 'intermittent']);
-const EDGE_PROTOCOL_MODELS = Object.freeze(['delay', 'dropout', 'tamper', 'stale']);
+const EDGE_PROTOCOL_MODELS = Object.freeze(['attenuation', 'data_cutoff']);
 const FAULT_LAYERS = Object.freeze(['physical', 'electrical', 'protocol']);
 const NODE_LAYER_MODELS = Object.freeze({
   physical: FAULT_MATH_MODEL_DEFINITIONS.physical.map((model) => model.id),
@@ -472,32 +460,16 @@ export function isProtocolEdge(edge = {}) {
 }
 
 function createDefaultEdgeFaultSlots(edge = {}) {
-  const slots = [
-    {
-      slotId: 'electrical:signal_value',
-      slotName: text(edge.label ?? edge.signalName ?? edge.signalId, '信号值'),
-      layer: 'electrical',
-      targetField: 'signal.value',
-      allowedModels: EDGE_ELECTRICAL_MODELS.slice(),
-      signalId: text(edge.signalId),
-      lineType: text(edge.lineType ?? edge.type, 'normal')
-    }
-  ];
-
-  if (isProtocolEdge(edge)) {
-    slots.push({
-      slotId: 'protocol:can_message',
-      slotName: text(edge.messageId ?? edge.canMessageId ?? edge.channelId, 'CAN 报文'),
-      layer: 'protocol',
-      targetField: 'can.payload',
-      allowedModels: EDGE_PROTOCOL_MODELS.slice(),
-      signalId: text(edge.signalId),
-      channelId: text(edge.channelId),
-      messageId: text(edge.messageId ?? edge.canMessageId)
-    });
-  }
-
-  return slots;
+  return [{
+    slotId: 'protocol:message',
+    slotName: text(edge.messageId ?? edge.canMessageId ?? edge.channelId ?? edge.label ?? edge.signalName ?? edge.signalId, '连线消息'),
+    layer: 'protocol',
+    targetField: 'protocol.payload',
+    allowedModels: EDGE_PROTOCOL_MODELS.slice(),
+    signalId: text(edge.signalId),
+    channelId: text(edge.channelId),
+    messageId: text(edge.messageId ?? edge.canMessageId)
+  }];
 }
 
 function createDefaultNodeFaultSlots(node = {}, options = {}) {
@@ -587,15 +559,22 @@ export function normalizeModelNode(node = {}, { faultCapabilityMap = [] } = {}) 
 
 export function normalizeModelEdge(edge = {}, { faultCapabilityMap = [] } = {}) {
   const safeEdge = isPlainObject(edge) ? clone(edge) : {};
+  const normalizedEdge = {
+    ...safeEdge,
+    // A connection represents a protocol transport boundary only.  Signal
+    // faults belong on the connected component input or output instead.
+    faultSlots: arrayOrEmpty(safeEdge.faultSlots).filter((slot) => normalizeSlotLayer(slot) === 'protocol')
+  };
   const defaults = [
-    ...capabilitySlotsForTarget(safeEdge, 'edge', faultCapabilityMap),
+    ...capabilitySlotsForTarget(safeEdge, 'edge', faultCapabilityMap)
+      .filter((slot) => normalizeSlotLayer(slot) === 'protocol'),
     ...createDefaultEdgeFaultSlots(safeEdge)
   ];
 
   return {
-    ...safeEdge,
+    ...normalizedEdge,
     lineType: text(safeEdge.lineType ?? safeEdge.type, 'normal'),
-    faultSlots: mergeFaultSlots(safeEdge, defaults)
+    faultSlots: mergeFaultSlots(normalizedEdge, defaults)
   };
 }
 

@@ -1,8 +1,12 @@
+import copy
 import json
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from http.client import HTTPConnection
-from http.server import HTTPServer
+from http.server import ThreadingHTTPServer
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from backend.server import SimulationBackendHandler
 from backend.tests.fixtures import valid_package
@@ -86,7 +90,8 @@ class SimulationBackendServerTests(unittest.TestCase):
         SimulationBackendHandler.max_active_practice_sessions = 100
         SimulationBackendHandler.max_response_samples = 1000
         SimulationBackendHandler.default_max_practice_actions = 200
-        self.server = HTTPServer(("127.0.0.1", 0), SimulationBackendHandler)
+        SimulationBackendHandler.default_simulation_session_idle_timeout_seconds = 900.0
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), SimulationBackendHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
 
@@ -365,6 +370,16 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(body["status"], "success")
         self.assertIn("scope-1.ch1.actual", body["curves"]["channels"])
 
+    def test_full_run_rejects_total_sample_count_above_hard_limit(self):
+        package = valid_package()
+        package["simulationConfig"] = {"duration": 1000.0, "stepSize": 0.0005}
+
+        status, body = self._post("/api/simulations/run", package)
+
+        self.assertEqual(status, 400)
+        self.assertEqual(body["errorCode"], "SIMULATION_LIMIT_EXCEEDED")
+        self.assertEqual(body["field"], "simulationConfig.samples")
+
     def test_returns_structured_error_for_unknown_module(self):
         package = valid_package()
         package["nodes"][1]["pythonBinding"]["moduleId"] = "unknown"
@@ -438,6 +453,39 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(second["curves"]["time"], [0.1, 0.2])
         self.assertTrue(second["metrics"]["done"])
 
+    def test_step_session_keeps_small_step_size_and_allows_long_total_timeline(self):
+        package = valid_package()
+        package["simulationConfig"] = {"duration": 1000.0, "stepSize": 0.0005}
+
+        status, created = self._post("/api/simulations/session", package)
+        self.assertEqual(status, 200)
+
+        status, first = self._post(
+            f"/api/simulations/session/{created['sessionId']}/step",
+            {"steps": 1},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(first["metrics"]["sampleCount"], 1)
+        self.assertEqual(first["metrics"]["stepIndex"], 1)
+        self.assertFalse(first["metrics"]["done"])
+
+    def test_generated_ids_use_full_uuid_and_retry_store_collisions(self):
+        status, created = self._post("/api/simulations/session", valid_package())
+
+        self.assertEqual(status, 200)
+        self.assertRegex(created["runId"], r"^run-[0-9a-f]{32}$")
+        self.assertRegex(created["sessionId"], r"^session-[0-9a-f]{32}$")
+
+        duplicate = "a" * 32
+        replacement = "b" * 32
+        existing = {f"session-{duplicate}": object()}
+        with patch(
+            "backend.server.uuid.uuid4",
+            side_effect=[SimpleNamespace(hex=duplicate), SimpleNamespace(hex=replacement)],
+        ):
+            generated = SimulationBackendHandler._new_id("session", existing)
+        self.assertEqual(generated, f"session-{replacement}")
+
     def test_returns_404_for_unknown_session(self):
         status, body = self._post("/api/simulations/session/missing/step", {})
 
@@ -456,6 +504,19 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(status, 404)
         self.assertEqual(missing["errorCode"], "SESSION_NOT_FOUND")
 
+    def test_active_reaper_removes_idle_standalone_simulation_session(self):
+        status, created = self._post("/api/simulations/session", valid_package())
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+        session = SimulationBackendHandler.sessions[session_id]
+        session.idle_timeout_seconds = 10.0
+        session.last_activity_at = 100.0
+
+        removed = SimulationBackendHandler.purge_expired_sessions(now=111.0)
+
+        self.assertEqual(removed, {"practiceSessions": 0, "simulationSessions": 1})
+        self.assertNotIn(session_id, SimulationBackendHandler.sessions)
+
     def test_rejects_new_simulation_session_when_active_session_limit_is_reached(self):
         SimulationBackendHandler.max_active_simulation_sessions = 1
         status, created = self._post("/api/simulations/session", valid_package())
@@ -467,6 +528,18 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(rejected["status"], "error")
         self.assertEqual(rejected["errorCode"], "SIMULATION_LIMIT_EXCEEDED")
         self.assertEqual(rejected["field"], "sessions")
+        self.assertEqual(len(SimulationBackendHandler.sessions), 1)
+
+    def test_concurrent_session_creation_keeps_capacity_check_atomic(self):
+        SimulationBackendHandler.max_active_simulation_sessions = 1
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(
+                lambda _: self._post("/api/simulations/session", valid_package()),
+                range(2),
+            ))
+
+        self.assertEqual(sorted(status for status, _ in results), [200, 400])
         self.assertEqual(len(SimulationBackendHandler.sessions), 1)
 
     def test_rejects_step_batch_that_would_exceed_response_sample_limit(self):
@@ -583,6 +656,36 @@ class SimulationBackendServerTests(unittest.TestCase):
             self.assertNotIn(field, submitted)
         self.assertNotIn("record", submitted)
 
+    def test_practice_full_rerun_rejects_total_sample_count_and_rolls_back_action(self):
+        package = valid_package()
+        package["simulationConfig"] = {"duration": 1000.0, "stepSize": 0.0005}
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+
+        status, rejected = self._post(
+            f"/api/practice/session/{created['practiceSessionId']}/action",
+            {
+                "operationId": "op-full-run-limit",
+                "actionType": "replaceComponent",
+                "target": {"type": "component", "id": "sim-1"},
+            },
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(rejected["errorCode"], "SIMULATION_LIMIT_EXCEEDED")
+        self.assertEqual(rejected["field"], "simulationConfig.samples")
+        self.assertEqual(session.student_actions, [])
+        self.assertEqual(session.simulation_action_history, [])
+        self.assertEqual(session.repair_attempts, [])
+
     def test_adjusts_display_console_parameter_and_returns_full_rerun_result(self):
         status, created = self._post(
             "/api/practice/session",
@@ -626,6 +729,258 @@ class SimulationBackendServerTests(unittest.TestCase):
             [sample["actual"] for sample in updated["simulationResult"]["physicalMeasurements"][0]["samples"]],
             [2.5, 2.5, 2.5],
         )
+
+    def test_operation_id_is_idempotent_and_rejects_conflicting_reuse(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+                "resourceLimits": {"maxActions": 1},
+                "displayConsoleControls": [{
+                    "displayConsoleId": "console-1",
+                    "targetComponentId": "source-1",
+                    "componentType": "signal_source",
+                    "parameterKeys": ["value"],
+                }],
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["practiceSessionId"]
+        action = {
+            "operationId": "op-idempotent",
+            "actionType": "adjustDisplayConsoleParameter",
+            "target": {"type": "displayConsole", "id": "console-1"},
+            "componentId": "source-1",
+            "parameters": {"value": 2.5},
+        }
+
+        first_status, first = self._post(f"/api/practice/session/{session_id}/action", action)
+        retry_status, retry = self._post(f"/api/practice/session/{session_id}/action", action)
+
+        self.assertEqual((first_status, retry_status), (200, 200))
+        self.assertEqual(first["normalizedAction"], retry["normalizedAction"])
+        session = SimulationBackendHandler.practice_sessions[session_id]
+        self.assertEqual(len(session.student_actions), 1)
+        self.assertEqual(len(session.simulation_action_history), 1)
+        self.assertEqual(session.simulation_session.graph.nodes["source-1"].parameters["value"], 2.5)
+
+        conflict_status, conflict = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {**action, "parameters": {"value": 3.0}},
+        )
+        self.assertEqual(conflict_status, 409)
+        self.assertEqual(conflict["errorCode"], "OPERATION_ID_CONFLICT")
+        self.assertEqual(conflict["field"], "operationId")
+        self.assertEqual(len(session.student_actions), 1)
+        self.assertEqual(session.simulation_session.graph.nodes["source-1"].parameters["value"], 2.5)
+
+    def test_different_practice_sessions_can_rerun_concurrently(self):
+        session_ids = []
+        for index in range(2):
+            status, created = self._post(
+                "/api/practice/session",
+                {
+                    "simulationPackage": valid_package(),
+                    "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                    "targetFaultId": "target-fault",
+                    "displayConsoleControls": [{
+                        "displayConsoleId": f"console-{index}",
+                        "targetComponentId": "source-1",
+                        "componentType": "signal_source",
+                        "parameterKeys": ["value"],
+                    }],
+                },
+            )
+            self.assertEqual(status, 200)
+            session_ids.append(created["practiceSessionId"])
+
+        barrier = threading.Barrier(2)
+        for session_id in session_ids:
+            simulation = SimulationBackendHandler.practice_sessions[session_id].simulation_session
+            original_rerun = simulation.run_from_zero
+
+            def synchronized_rerun(original=original_rerun):
+                barrier.wait(timeout=3)
+                return original()
+
+            simulation.run_from_zero = synchronized_rerun
+
+        def adjust(index):
+            return self._post(
+                f"/api/practice/session/{session_ids[index]}/action",
+                {
+                    "operationId": f"op-concurrent-{index}",
+                    "actionType": "adjustDisplayConsoleParameter",
+                    "target": {"type": "displayConsole", "id": f"console-{index}"},
+                    "componentId": "source-1",
+                    "parameters": {"value": 2.0 + index},
+                },
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(adjust, range(2)))
+
+        self.assertEqual([status for status, _ in results], [200, 200])
+
+    def test_failed_practice_creation_releases_both_capacity_reservations(self):
+        with patch(
+            "backend.server.PracticeSession.initial_response",
+            side_effect=RuntimeError("forced initial response failure"),
+        ), self.assertLogs("backend.server", level="ERROR"):
+            status, response = self._post(
+                "/api/practice/session",
+                {
+                    "simulationPackage": valid_package(),
+                    "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                    "targetFaultId": "target-fault",
+                },
+            )
+
+        self.assertEqual(status, 500)
+        self.assertEqual(response["errorCode"], "INTERNAL_ERROR")
+        self.assertNotIn("forced initial response failure", response["message"])
+        self.assertEqual(SimulationBackendHandler.practice_sessions, {})
+        self.assertEqual(SimulationBackendHandler.sessions, {})
+
+    def test_failed_wire_repair_rolls_back_simulation_and_practice_state(self):
+        package = valid_package()
+        package["faultInstances"] = [{
+            "faultId": "target-fault",
+            "faultType": "wire_open",
+            "targetId": "edge-sim-scope",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.3,
+            "parameters": {},
+        }]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+        simulation = session.simulation_session
+        simulation.step_index = 1
+        simulation.fault_runtime.disconnect_edge("edge-sim-scope")
+        simulation.fault_runtime.edge_state["edge-sim-scope"] = {"last": 7.0}
+        simulation.module_states["actual"]["existing"] = {"value": 1.0}
+        simulation.previous_values[("actual", "existing")] = 2.0
+        initial_runtime_state = {
+            "stepIndex": simulation.step_index,
+            "edgeState": copy.deepcopy(simulation.fault_runtime.edge_state),
+            "disconnectedEdgeIds": copy.deepcopy(simulation.fault_runtime.disconnected_edge_ids),
+            "moduleStates": copy.deepcopy(simulation.module_states),
+            "previousValues": copy.deepcopy(simulation.previous_values),
+        }
+        initial_practice_state = {
+            "studentActions": copy.deepcopy(session.student_actions),
+            "simulationActionHistory": copy.deepcopy(session.simulation_action_history),
+            "repairAttempts": copy.deepcopy(session.repair_attempts),
+            "physicalMeasurementSnapshots": copy.deepcopy(session.physical_measurement_snapshots),
+            "latestPhysicalMeasurementSnapshot": copy.deepcopy(session.latest_physical_measurement_snapshot),
+            "lastActivityAt": session.last_activity_at,
+        }
+
+        def fail_rerun():
+            simulation.step_index = 2
+            simulation.fault_runtime.edge_state["dirty"] = {"last": 9.0}
+            simulation.module_states["actual"]["dirty"] = {"value": 9.0}
+            simulation.previous_values[("actual", "dirty")] = 9.0
+            raise RuntimeError("forced rerun failure")
+
+        simulation.run_from_zero = fail_rerun
+        status, response = self._post(
+            f"/api/practice/session/{created['practiceSessionId']}/action",
+            {
+                "operationId": "op-rollback-wire",
+                "actionType": "replaceWire",
+                "target": {"type": "wire", "id": "edge-sim-scope"},
+            },
+        )
+
+        self.assertEqual(status, 500)
+        self.assertEqual(response["errorCode"], "INTERNAL_ERROR")
+        self.assertEqual(
+            response["message"],
+            "internal server error; use runId to locate the server log",
+        )
+        self.assertEqual(simulation.step_index, initial_runtime_state["stepIndex"])
+        self.assertEqual(simulation.fault_runtime.edge_state, initial_runtime_state["edgeState"])
+        self.assertEqual(
+            simulation.fault_runtime.disconnected_edge_ids,
+            initial_runtime_state["disconnectedEdgeIds"],
+        )
+        self.assertEqual(simulation.module_states, initial_runtime_state["moduleStates"])
+        self.assertEqual(simulation.previous_values, initial_runtime_state["previousValues"])
+        self.assertTrue(simulation.fault_runtime.fault_instances[0]["enabled"])
+        self.assertTrue(simulation.graph.fault_instances[0]["enabled"])
+        self.assertIs(simulation.fault_runtime.fault_instances, simulation.graph.fault_instances)
+        self.assertEqual(session.student_actions, initial_practice_state["studentActions"])
+        self.assertEqual(
+            session.simulation_action_history,
+            initial_practice_state["simulationActionHistory"],
+        )
+        self.assertEqual(session.repair_attempts, initial_practice_state["repairAttempts"])
+        self.assertEqual(
+            session.physical_measurement_snapshots,
+            initial_practice_state["physicalMeasurementSnapshots"],
+        )
+        self.assertEqual(
+            session.latest_physical_measurement_snapshot,
+            initial_practice_state["latestPhysicalMeasurementSnapshot"],
+        )
+        self.assertEqual(session.last_activity_at, initial_practice_state["lastActivityAt"])
+
+    def test_failed_display_parameter_action_restores_node_parameters(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+                "displayConsoleControls": [{
+                    "displayConsoleId": "console-1",
+                    "targetComponentId": "source-1",
+                    "componentType": "signal_source",
+                    "parameterKeys": ["value"],
+                }],
+            },
+        )
+        self.assertEqual(status, 200)
+
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+
+        def fail_rerun():
+            raise RuntimeError("forced parameter rerun failure")
+
+        session.simulation_session.run_from_zero = fail_rerun
+        status, response = self._post(
+            f"/api/practice/session/{created['practiceSessionId']}/action",
+            {
+                "operationId": "op-rollback-parameter",
+                "actionType": "adjustDisplayConsoleParameter",
+                "target": {"type": "displayConsole", "id": "console-1"},
+                "componentId": "source-1",
+                "parameters": {"value": 2.5},
+            },
+        )
+
+        self.assertEqual(status, 500)
+        self.assertEqual(
+            response["message"],
+            "internal server error; use runId to locate the server log",
+        )
+        self.assertEqual(session.simulation_session.graph.nodes["source-1"].parameters["value"], 1.0)
+        self.assertEqual(session.student_actions, [])
+        self.assertEqual(session.simulation_action_history, [])
+        self.assertEqual(session.repair_attempts, [])
 
     def test_submit_returns_internal_action_path_for_measurement_and_wire_repair(self):
         package = valid_package()
@@ -858,8 +1213,6 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
-        self.assertEqual(session.simulation_results, [])
-
         status, measured = self._post(
             f"/api/practice/session/{created['sessionId']}/action",
             {
@@ -1554,6 +1907,26 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(rejected["errorCode"], "SIMULATION_LIMIT_EXCEEDED")
         self.assertEqual(rejected["field"], "practiceSessions")
 
+    def test_new_practice_session_proactively_reclaims_expired_capacity(self):
+        SimulationBackendHandler.max_active_practice_sessions = 1
+        payload = {
+            "simulationPackage": valid_package(),
+            "dMatrix": sample_d_matrix(),
+            "targetFaultId": "target-fault",
+        }
+        status, first = self._post("/api/practice/session", payload)
+        self.assertEqual(status, 200)
+        expired_session = SimulationBackendHandler.practice_sessions[first["practiceSessionId"]]
+        expired_session.max_lifetime_seconds = 0.0
+
+        status, second = self._post("/api/practice/session", payload)
+
+        self.assertEqual(status, 200)
+        self.assertNotIn(first["practiceSessionId"], SimulationBackendHandler.practice_sessions)
+        self.assertNotIn(first["simulationSessionId"], SimulationBackendHandler.sessions)
+        self.assertIn(second["practiceSessionId"], SimulationBackendHandler.practice_sessions)
+        self.assertEqual(expired_session.lifecycle_state, "expired")
+
     def test_practice_session_rejects_actions_after_action_limit(self):
         package = valid_package()
         package["simulationConfig"]["duration"] = 0.4
@@ -1737,6 +2110,28 @@ class SimulationBackendServerTests(unittest.TestCase):
         status, missing_simulation = self._post(f"/api/simulations/session/{simulation_session_id}/step", {})
         self.assertEqual(status, 404)
         self.assertEqual(missing_simulation["errorCode"], "SESSION_NOT_FOUND")
+
+    def test_active_reaper_removes_expired_practice_and_bound_simulation_session(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        practice_session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+        practice_session.created_at = 100.0
+        practice_session.last_activity_at = 100.0
+        practice_session.max_lifetime_seconds = 10.0
+
+        removed = SimulationBackendHandler.purge_expired_sessions(now=111.0)
+
+        self.assertEqual(removed, {"practiceSessions": 1, "simulationSessions": 1})
+        self.assertEqual(practice_session.lifecycle_state, "expired")
+        self.assertNotIn(created["practiceSessionId"], SimulationBackendHandler.practice_sessions)
+        self.assertNotIn(created["simulationSessionId"], SimulationBackendHandler.sessions)
 
 
 if __name__ == "__main__":

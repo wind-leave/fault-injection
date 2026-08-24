@@ -341,6 +341,9 @@ export function applyScalarFault(value, options = {}) {
   }
 
   if (behavior === 'attenuation') {
+    if (Object.prototype.hasOwnProperty.call(params, 'scale')) {
+      return input * asNumber(params.scale, 1);
+    }
     const decibels = Math.max(0, asNumber(readParam(params, ['attenuation_db', 'attenuationDb', 'loss_db'], 0), 0));
     return input * Math.pow(10, -decibels / 20);
   }
@@ -844,7 +847,7 @@ function getCanEdgeModuleKeys(edge = {}) {
 }
 
 function canEdgeMatchesFaultTargets(edge, faultModel) {
-  if (edge?.lineType !== 'can') {
+  if (!edge?.id) {
     return false;
   }
 
@@ -993,12 +996,12 @@ export function findCompatibleFaultTarget(faultModel = {}, context = {}) {
   const layer = faultModel.layer ?? 'electrical';
 
   if (isProtocolFaultLayer(layer)) {
-    const selectedEdge = edges.find((edge) => edge.id === context.selectedEdgeId && edge.lineType === 'can');
+    const selectedEdge = edges.find((edge) => edge.id === context.selectedEdgeId);
     if (selectedEdge && targetAllowsFaultBySlot(selectedEdge, faultModel, context)) {
-      return { kind: 'edge', id: selectedEdge.id, reason: 'selected-can-edge' };
+      return { kind: 'edge', id: selectedEdge.id, reason: 'selected-edge' };
     }
 
-    const matchingSlotEdge = findTargetByAllowedSlot(edges.filter((edge) => edge.lineType === 'can'), faultModel, context);
+    const matchingSlotEdge = findTargetByAllowedSlot(edges, faultModel, context);
     if (matchingSlotEdge) {
       return matchingSlotEdge;
     }
@@ -1009,16 +1012,16 @@ export function findCompatibleFaultTarget(faultModel = {}, context = {}) {
     }
 
     if (selectedEdge && explicitTargetIdsForFault(faultModel, 'edge').length === 0) {
-      return { kind: 'edge', id: selectedEdge.id, reason: 'selected-can-edge' };
+      return { kind: 'edge', id: selectedEdge.id, reason: 'selected-edge' };
     }
 
-    const matchingCanEdge = edges.find((edge) => canEdgeMatchesFaultTargets(edge, faultModel));
-    if (matchingCanEdge) {
-      return { kind: 'edge', id: matchingCanEdge.id, reason: 'module-target-can-edge' };
+    const matchingEdge = edges.find((edge) => canEdgeMatchesFaultTargets(edge, faultModel));
+    if (matchingEdge) {
+      return { kind: 'edge', id: matchingEdge.id, reason: 'module-target-edge' };
     }
 
-    const firstCanEdge = edges.find((edge) => edge.lineType === 'can');
-    return firstCanEdge ? { kind: 'edge', id: firstCanEdge.id, reason: 'first-can-edge' } : null;
+    const firstEdge = edges[0];
+    return firstEdge ? { kind: 'edge', id: firstEdge.id, reason: 'first-edge' } : null;
   }
 
   const selectedNode = nodes.find((node) => node.id === context.selectedNodeId);
@@ -1075,6 +1078,8 @@ export function buildFaultPythonModuleSpec(faultModel = {}) {
     '    if KIND == "scale":',
     '        return value * _num(PARAMS.get("scale", 1.0), 1.0)',
     '    if KIND == "attenuation":',
+    '        if "scale" in PARAMS:',
+    '            return value * _num(PARAMS.get("scale", 1.0), 1.0)',
     '        import math',
     '        attenuation_db = max(0.0, _num(PARAMS.get("attenuation_db", PARAMS.get("attenuationDb", 0.0))))',
     '        return value * math.pow(10.0, -attenuation_db / 20.0)',

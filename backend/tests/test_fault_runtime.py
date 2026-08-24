@@ -48,6 +48,20 @@ class FaultRuntimeTests(unittest.TestCase):
 
         self.assertAlmostEqual(runtime.apply_node_output("rf-1", 1.0, 0.0), 10.0 ** (-6.0 / 20.0))
 
+    def test_protocol_edge_attenuation_uses_a_coefficient(self):
+        runtime = FaultRuntime([
+            {
+                "faultId": "fault-link-attenuation",
+                "faultType": "signal_attenuation",
+                "targetId": "edge-1",
+                "startTime": 2.0,
+                "parameters": {"scale": 0.25},
+            }
+        ])
+
+        self.assertEqual(runtime.apply_edge_value("edge-1", 8.0, 1.9), 8.0)
+        self.assertEqual(runtime.apply_edge_value("edge-1", 8.0, 2.0), 2.0)
+
     def test_signal_cutoff_sets_data_to_zero_from_its_start_time(self):
         runtime = FaultRuntime([
             {

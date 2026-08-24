@@ -681,20 +681,6 @@
       }
     },
     {
-      "moduleId": "11",
-      "importPath": "backend.builtin_modules.11",
-      "entryFunction": "process",
-      "inputs": [
-        "a",
-        "b"
-      ],
-      "outputs": [
-        "A",
-        "B"
-      ],
-      "parameters": {}
-    },
-    {
       "moduleId": "rf_limit_amplify_downconvert_split8",
       "importPath": "backend.builtin_modules.rf_limit_amplify_downconvert_split8",
       "entryFunction": "process",

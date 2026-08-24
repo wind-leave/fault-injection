@@ -1,10 +1,25 @@
 import copy
 import math
 import re
+import threading
+import time
 
 from backend.fault_runtime import FaultRuntime
 from backend.schemas import SimulationBackendError, ensure_number
 from backend.simulation_functions import deterministic_noise, first_numeric as _first_numeric, periodic_gate
+
+
+MAX_FULL_RUN_SAMPLES = 100_000
+DEFAULT_SIMULATION_SESSION_IDLE_TIMEOUT_SECONDS = 900.0
+
+
+def _validate_full_run_sample_count(sample_count):
+    if sample_count > MAX_FULL_RUN_SAMPLES:
+        raise SimulationBackendError(
+            "SIMULATION_LIMIT_EXCEEDED",
+            "simulationConfig.samples",
+            f"full simulation sample count exceeds the limit of {MAX_FULL_RUN_SAMPLES}",
+        )
 
 
 def _round_time(value):
@@ -561,9 +576,18 @@ def _evaluate_all_component_outputs(graph, mode, time, cache, fault_runtime, mod
 
 
 class SimulationSession:
-    def __init__(self, graph, run_id=""):
+    def __init__(
+        self,
+        graph,
+        run_id="",
+        idle_timeout_seconds=DEFAULT_SIMULATION_SESSION_IDLE_TIMEOUT_SECONDS,
+    ):
+        self.lock = threading.RLock()
         self.graph = graph
         self.run_id = run_id
+        self.created_at = time.time()
+        self.last_activity_at = self.created_at
+        self.idle_timeout_seconds = idle_timeout_seconds
         # Keep the timeline implicit. High-frequency simulations can have a
         # very large number of possible samples, while interactive sessions
         # request only a small batch at a time.
@@ -583,6 +607,15 @@ class SimulationSession:
             return _round_time(self.graph.duration)
         return _round_time(self.step_index * self.graph.step_size)
 
+    def touch(self, now=None):
+        self.last_activity_at = time.time() if now is None else float(now)
+
+    def is_expired(self, now=None):
+        if self.idle_timeout_seconds is None:
+            return False
+        checked_at = time.time() if now is None else float(now)
+        return checked_at - self.last_activity_at >= self.idle_timeout_seconds
+
     def restart(self):
         current_faults = self.fault_runtime.fault_instances
         self.step_index = 0
@@ -590,11 +623,48 @@ class SimulationSession:
         self.module_states = {"actual": {}, "reference": {}}
         self.previous_values = {}
 
+    def create_state_snapshot(self):
+        """Capture all mutable simulation state touched by a practice action."""
+        return {
+            "stepIndex": self.step_index,
+            "graphFaultInstances": copy.deepcopy(self.graph.fault_instances),
+            "faultRuntime": copy.deepcopy(self.fault_runtime),
+            "nodeParameters": {
+                node_id: copy.deepcopy(node.parameters)
+                for node_id, node in self.graph.nodes.items()
+            },
+            "moduleStates": copy.deepcopy(self.module_states),
+            "previousValues": copy.deepcopy(self.previous_values),
+        }
+
+    def restore_state_snapshot(self, snapshot):
+        """Restore a snapshot while preserving graph container identities."""
+        self.step_index = snapshot["stepIndex"]
+
+        for node_id, parameters in snapshot["nodeParameters"].items():
+            node = self.graph.nodes[node_id]
+            node.parameters.clear()
+            node.parameters.update(copy.deepcopy(parameters))
+
+        self.graph.fault_instances[:] = copy.deepcopy(snapshot["graphFaultInstances"])
+        restored_fault_runtime = copy.deepcopy(snapshot["faultRuntime"])
+        # FaultRuntime and the executable graph intentionally share fault
+        # dictionaries so that repairs are visible to subsequent reruns.
+        restored_fault_runtime.fault_instances = self.graph.fault_instances
+        self.fault_runtime = restored_fault_runtime
+
+        self.module_states.clear()
+        self.module_states.update(copy.deepcopy(snapshot["moduleStates"]))
+        self.previous_values.clear()
+        self.previous_values.update(copy.deepcopy(snapshot["previousValues"]))
+
     def run_from_zero(self):
+        _validate_full_run_sample_count(self.total_steps)
         self.restart()
         return self.step(self.total_steps)
 
     def step(self, steps=1):
+        self.touch()
         requested_steps = max(0, int(steps))
         remaining_steps = max(0, self.total_steps - self.step_index)
         sample_count = min(requested_steps, remaining_steps)
@@ -689,4 +759,4 @@ class SimulationSession:
 
 def run_simulation(graph, run_id=""):
     session = SimulationSession(graph, run_id=run_id)
-    return session.step(session.total_steps)
+    return session.run_from_zero()

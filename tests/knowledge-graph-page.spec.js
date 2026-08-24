@@ -52,11 +52,17 @@ describe('KnowledgeGraphPage', () => {
     expect(page?.querySelector('[data-knowledge-graph-visible-nodes]')?.textContent).toBe('3');
     expect(page?.querySelectorAll('[data-kg-node-key]')).toHaveLength(3);
     expect(page?.querySelectorAll('.knowledge-graph-relations path')).toHaveLength(2);
+    expect(page?.querySelector('.knowledge-graph-legend .is-fault.is-enabled')?.textContent).toContain('故障（已启用）');
+    expect(page?.querySelector('.knowledge-graph-legend .is-fault.is-disabled')?.textContent).toContain('故障（未启用）');
 
     page.querySelector('[data-kg-node-key="fault:fault-a"]').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await nextTick();
-    expect(page.textContent).toContain('关联关系（2）');
-    expect(page.textContent).toContain('设备 A 偏置 → 输出测点');
+    const detail = page.querySelector('.knowledge-graph-detail');
+    expect(detail?.querySelector('h2')?.textContent).toBe('设备 A 偏置');
+    expect(detail?.querySelector('code')?.textContent).toBe('fault-a');
+    expect(detail?.textContent).toContain('关联度');
+    expect(detail?.textContent).toContain('关联关系（2）');
+    expect(detail?.textContent).toContain('设备 A 偏置 → 输出测点');
 
     window.dispatchEvent(new CustomEvent('gz:knowledge-graph-updated', {
       detail: {

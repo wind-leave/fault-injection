@@ -67,18 +67,48 @@ describe('component registry', () => {
     });
 
     expect(component.defaults.parameterValues).toEqual({ gain: 2, bias: -0.5 });
+    expect(component.faultSlots).toEqual([
+      expect.objectContaining({
+        slotId: 'physical:parameter:gain',
+        targetField: 'params.gain',
+        parameterKey: 'gain',
+        layer: 'physical'
+      }),
+      expect.objectContaining({
+        slotId: 'physical:parameter:bias',
+        targetField: 'params.bias',
+        parameterKey: 'bias',
+        layer: 'physical'
+      })
+    ]);
+  });
+
+  it('initializes RF downconverter parameter slots for immediate physical fault injection', () => {
+    const component = COMPONENT_REGISTRY.rf_downconverter;
+
+    expect(component.faultSlots).toContainEqual(expect.objectContaining({
+      slotId: 'physical:parameter:lo_frequency_hz',
+      targetField: 'params.lo_frequency_hz',
+      parameterKey: 'lo_frequency_hz',
+      layer: 'physical',
+      unit: 'Hz'
+    }));
   });
 
   it('defines fixed-id electrical components with the requested AC/DC interfaces', () => {
     const acSource = COMPONENT_REGISTRY.electrical_ac_power_source;
+    const dcSource = COMPONENT_REGISTRY.electrical_dc_power_source;
     const dcBoost = COMPONENT_REGISTRY.electrical_dc_boost;
     const acDcMatching = COMPONENT_REGISTRY.electrical_ac_dc_matching;
 
-    expect([acSource, dcBoost, acDcMatching].every((component) => (
+    expect([acSource, dcSource, dcBoost, acDcMatching].every((component) => (
       component.group === 'electrical' && component.nodeType === 'simulation_block'
     ))).toBe(true);
     expect(acSource.templateId).toBe('electrical_ac_power_source');
     expect(acSource.ports.outputs.map((port) => port.varName)).toEqual(['ac_phase_a', 'ac_phase_b', 'ac_phase_c']);
+    expect(dcSource.templateId).toBe('electrical_dc_power_source');
+    expect(dcSource.ports.outputs).toEqual([expect.objectContaining({ varName: 'dc_output', unit: 'VDC' })]);
+    expect(dcSource.defaults.parameterValues).toMatchObject({ output_voltage: 28 });
     expect(dcBoost.templateId).toBe('electrical_dc_boost');
     expect(acDcMatching.templateId).toBe('electrical_ac_dc_matching');
     expect(dcBoost.ports.inputs).toEqual([expect.objectContaining({ varName: 'dc_input', unit: 'VDC' })]);

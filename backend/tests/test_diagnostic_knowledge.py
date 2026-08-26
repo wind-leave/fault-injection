@@ -86,6 +86,12 @@ class DiagnosticKnowledgeTests(unittest.TestCase):
         self.assertEqual(best["mode"], "multiple")
         self.assertEqual(best["contradictions"], 0)
 
+    def test_candidate_generation_uses_every_fault_combination_when_depth_is_omitted(self):
+        candidates = build_fault_candidates(sample_concrete_fault_matrix())
+
+        self.assertEqual(len(candidates), 7)
+        self.assertEqual(max(len(candidate["faultIds"]) for candidate in candidates), 3)
+
     def test_links_display_console_physical_inputs_to_the_console_component(self):
         matrix = sample_concrete_fault_matrix()
         matrix["points"][0].update({
@@ -136,7 +142,7 @@ class DiagnosticKnowledgeTests(unittest.TestCase):
             {(step["action"], step["targetId"]) for step in plan["steps"] if step["action"] != "measure"},
             {("replaceComponent", "node-a"), ("replaceWire", "edge-b")},
         )
-        self.assertEqual(plan["knowledgeGraph"]["summary"]["faultCount"], 3)
+        self.assertNotIn("knowledgeGraph", plan)
 
     def test_deduplicates_replacement_of_the_same_device(self):
         plan = build_multi_fault_troubleshooting_plan(
@@ -224,7 +230,7 @@ class DiagnosticKnowledgeTests(unittest.TestCase):
 
         self.assertEqual(plan["faultIds"], enabled_fault_ids)
         self.assertEqual(plan["mode"], "multiple")
-        self.assertIn(enabled_fault_ids, [candidate["faultIds"] for candidate in plan["candidateFaultSets"]])
+        self.assertNotIn("candidateFaultSets", plan)
         self.assertTrue({step["action"] for step in plan["steps"]}.issubset({"measure", "replaceWire", "replaceComponent"}))
 
     def test_detectability_relations_in_the_knowledge_graph_drive_candidate_isolation(self):
@@ -247,7 +253,9 @@ class DiagnosticKnowledgeTests(unittest.TestCase):
         self.assertIn(["fault-wire-b"], plan["remainingCandidateFaultSets"])
         self.assertIn(["fault-device-a", "fault-wire-b"], plan["remainingCandidateFaultSets"])
         self.assertTrue(all(step["action"] == "measure" for step in plan["steps"]))
-        self.assertEqual(plan["pathGeneration"]["engine"], "knowledge-graph")
+        self.assertNotIn("pathGeneration", plan)
+        self.assertNotIn("source", plan)
+        self.assertNotIn("isCustomized", plan)
 
     def test_repair_relations_in_the_knowledge_graph_drive_replacement_steps(self):
         graph = build_diagnostic_knowledge_graph(sample_concrete_fault_matrix())

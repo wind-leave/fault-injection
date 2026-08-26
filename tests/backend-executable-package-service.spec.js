@@ -316,7 +316,13 @@ describe('backendExecutablePackageService', () => {
         id: 'imu-source',
         type: 'signal_source',
         props: { value: [1, 2, 3, 4] },
-        outputs: [{ id: 'imu-vector', name: 'IMU 数据', type: '向量', vectorLength: 4 }]
+        outputs: [{
+          id: 'imu-vector',
+          name: 'IMU 数据',
+          type: '向量',
+          vectorLength: 4,
+          vectorElementNames: ['横滚', '俯仰', '偏航', '加速度']
+        }]
       }],
       modelEdges: []
     });
@@ -326,7 +332,8 @@ describe('backendExecutablePackageService', () => {
       id: 'imu-vector',
       name: 'IMU 数据',
       dataType: 'vector',
-      vectorLength: 4
+      vectorLength: 4,
+      vectorElementNames: ['横滚', '俯仰', '偏航', '加速度']
     }]);
   });
 

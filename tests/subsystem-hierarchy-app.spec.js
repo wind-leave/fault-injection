@@ -529,6 +529,45 @@ describe('subsystem hierarchy app integration', () => {
     expect(subsystemShell?.style.height).toBe('92px');
   });
 
+  it('keeps up to three top power interfaces compact and widens from the fourth', async () => {
+    mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.createNode('subsystem_block', 420, 320);
+    await flushRuntime();
+
+    const subsystemNode = window.__GZ_STATE__.canvases['canvas-root'].nodes[0];
+    subsystemNode.props.interface.inputs = Array.from({ length: 3 }, (_, index) => ({
+      id: `power-${index + 1}`,
+      name: `设备 ${index + 1} · 电源输入`,
+      type: '标量',
+      side: 'top',
+      order: index
+    }));
+    subsystemNode.props.interface.outputs = [];
+    window.renderModelNodes();
+    await flushRuntime();
+
+    expect(subsystemNode.w).toBe(180);
+    expect(subsystemNode.h).toBe(92);
+    const topPorts = [...document.querySelectorAll(`#b-${subsystemNode.id} .node-port--input.node-port--top`)];
+    expect(topPorts).toHaveLength(3);
+    expect(topPorts.map((port) => Number.parseFloat(port.style.left))).toEqual([45, 90, 135]);
+
+    subsystemNode.props.interface.inputs.push({
+      id: 'power-4',
+      name: '设备 4 · 电源输入',
+      type: '标量',
+      side: 'top',
+      order: 3
+    });
+    window.renderModelNodes();
+    await flushRuntime();
+
+    expect(subsystemNode.w).toBe(216);
+    expect(document.querySelectorAll(`#b-${subsystemNode.id} .node-port--input.node-port--top`)).toHaveLength(4);
+  });
+
   it('derives subsystem interfaces from every unconnected internal component port with source details', async () => {
     mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -933,6 +972,12 @@ describe('subsystem hierarchy app integration', () => {
     expect(subsystemNode.w).toBe(180);
     expect(subsystemNode.props.interface.inputs.length).toBeGreaterThanOrEqual(1);
     expect(subsystemNode.props.interface.outputs).toHaveLength(1);
+    const powerInput = subsystemNode.props.interface.inputs.find((item) => (
+      item.componentNodeId === simulationNode.id && item.side === 'top'
+    ));
+    expect(powerInput).toMatchObject({ componentNodeId: simulationNode.id, side: 'top' });
+    expect(powerInput.name).toContain('电源输入');
+    expect(document.querySelector(`#b-${subsystemNode.id} .node-port--input.node-port--top`)).not.toBeNull();
     expect(wrappedRootCanvas.nodes.map((node) => node.type)).toEqual(
       expect.arrayContaining(['signal_source', 'instrument_scope', 'subsystem_block'])
     );

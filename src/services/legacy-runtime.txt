@@ -106,6 +106,23 @@ function getInstrumentVectorLength(edge){
   return 0;
 }
 
+function getNamedVectorElementNames(port,length){
+  return Array.from({length},(_,index)=>String(port?.vectorElementNames?.[index]??'').trim()||`第 ${index+1} 路`);
+}
+
+function getVectorElementNames(edge,length=0){
+  const source=getNode(edge?.sourceNodeId);
+  const portIndex=Math.max(0,Number.parseInt(edge?.sourcePortIndex,10)||0);
+  const port=getNodePorts(source)?.outputs?.[portIndex]||{};
+  const candidates=[edge?.sourcePortMeta,edge?.sourcePort,port?.meta,port,source?.props?.outputs?.[portIndex],source?.outputs?.[portIndex]];
+  const resolvedLength=length||getInstrumentVectorLength(edge);
+  for(const candidate of candidates){
+    if(!Array.isArray(candidate?.vectorElementNames)){continue;}
+    return getNamedVectorElementNames(candidate,resolvedLength);
+  }
+  return Array.from({length:resolvedLength},(_,index)=>`第 ${index+1} 路`);
+}
+
 function normalizeInstrumentVectorChannel(value,length){
   const channel=Number.parseInt(value,10);
   if(!Number.isInteger(channel)||channel<1){return 1;}
@@ -122,7 +139,7 @@ function getInstrumentVectorMeasurements(node){
       const key=node.type==='instrument_scope'
         ?(targetPortIndex===1?'vectorChannelCh2':'vectorChannelCh1')
         :'vectorChannel';
-      return {targetPortIndex,length,key};
+      return {targetPortIndex,length,key,elementNames:getVectorElementNames(edge,length)};
     })
     .filter(Boolean);
 }
@@ -135,7 +152,7 @@ function renderInstrumentVectorMeasurementFields(node){
     const prefix=node.type==='instrument_scope'?`CH${item.targetPortIndex+1} `:'';
     const options=Array.from({length:item.length},(_,index)=>{
       const channel=index+1;
-      return `<option value="${channel}" ${channel===selected?'selected':''}>第 ${channel} 路</option>`;
+      return `<option value="${channel}" ${channel===selected?'selected':''}>${escapeHtml(item.elementNames[index])}</option>`;
     }).join('');
     return `<div class="props-field"><label>${prefix}测量数据路</label><select data-instrument-vector-channel="${item.key}">${options}</select></div>`;
   }).join('');
@@ -341,6 +358,19 @@ function applySimulationSchemaPropertyValues(node){
       ports.forEach((port,index)=>{
         const name=String(names[index]||'').trim();
         if(name){port.displayName=name;}
+      });
+    });
+  }
+  if(result.portVectorElementNames){
+    const binding=ensureFlowNodePythonBinding(node);
+    ['inputs','outputs'].forEach(kind=>{
+      const elementNames=Array.isArray(result.portVectorElementNames[kind])?result.portVectorElementNames[kind]:[];
+      const ports=Array.isArray(binding.portMapping?.[kind])?binding.portMapping[kind]:[];
+      ports.forEach((port,index)=>{
+        const names=Array.isArray(elementNames[index])
+          ?elementNames[index].map(name=>String(name??'').trim()).filter(Boolean)
+          :[];
+        if(names.length){port.vectorElementNames=names;}
       });
     });
   }
@@ -1137,14 +1167,24 @@ function getSimulationNodeSize(props){
 
 function getSubsystemNodeSize(props){
   const interfaceDef=ensureSubsystemInterface(props);
-  const verticalPortCount=Math.max(interfaceDef.inputs.length,interfaceDef.outputs.length,1);
+  const verticalInputCount=interfaceDef.inputs.filter(item=>item.side!=='top'&&item.side!=='bottom').length;
+  const verticalOutputCount=interfaceDef.outputs.filter(item=>item.side!=='top'&&item.side!=='bottom').length;
+  const verticalPortCount=Math.max(verticalInputCount,verticalOutputCount,1);
+  const topPortCount=interfaceDef.inputs.filter(item=>item.side==='top').length
+    +interfaceDef.outputs.filter(item=>item.side==='top').length;
+  const bottomPortCount=interfaceDef.inputs.filter(item=>item.side==='bottom').length
+    +interfaceDef.outputs.filter(item=>item.side==='bottom').length;
+  const horizontalPortCount=Math.max(topPortCount,bottomPortCount);
   const meta=COMPONENT_LIBRARY.subsystem_block;
   const minWidth=meta?.width||180;
   const minHeight=meta?.height||92;
   const portPitch=24;
   const bodyPadding=44;
+  // Keep the shell compact: extra top/bottom terminals increase its width
+  // only after the first three, while full names remain available by tooltip.
+  const horizontalPortWidthIncrement=36;
   return {
-    width:minWidth,
+    width:minWidth+Math.max(0,horizontalPortCount-3)*horizontalPortWidthIncrement,
     height:Math.max(minHeight,bodyPadding+verticalPortCount*portPitch)
   };
 }
@@ -1574,6 +1614,7 @@ function deriveSubsystemInterfaceFromInternalCanvas(node){
         id:previous?.id||makeSubsystemAutoInterfaceId('input',component.id,port,index),
         name:`${componentName} · ${componentPortName}`,
         type:getSubsystemDerivedPortType(port),
+        side:port?.side||'left',
         order:inputs.length,
         autoDerived:true,
         componentNodeId:component.id,
@@ -1593,6 +1634,7 @@ function deriveSubsystemInterfaceFromInternalCanvas(node){
         id:previous?.id||makeSubsystemAutoInterfaceId('output',component.id,port,index),
         name:`${componentName} · ${componentPortName}`,
         type:getSubsystemDerivedPortType(port),
+        side:port?.side||'right',
         order:outputs.length,
         autoDerived:true,
         componentNodeId:component.id,
@@ -6122,18 +6164,9 @@ function buildSpectrumAnalysis(values,options={}){
     ?fullBins.reduce((current,item)=>item.magnitude>(current?.magnitude??-1)?item:current,null)
     :null;
 
-  // 绘图可压缩为有限点数，但每个频段桶保留其中最强的 bin，确保真实峰值仍可见。
-  const requestedBins=clamp(Math.round(Number(options.binCount)||32),1,256);
-  const displayCount=Math.min(requestedBins,fullBins.length);
-  const bins=[];
-  for(let index=0;index<displayCount;index+=1){
-    const bucketStart=Math.floor(index*fullBins.length/displayCount);
-    const bucketEnd=Math.max(bucketStart,Math.floor((index+1)*fullBins.length/displayCount)-1);
-    const strongest=fullBins.slice(bucketStart,bucketEnd+1)
-      .reduce((current,item)=>item.magnitude>(current?.magnitude??-1)?item:current,null);
-    if(strongest){bins.push({...strongest});}
-  }
-  bins.forEach(item=>{item.normalized=maximum?item.magnitude/maximum:0;});
+  // 频谱窗口逐点显示所选频段内的全部 FFT bin；不再为曲线绘制做分桶压缩。
+  // 默认 1024 点 FFT 的完整单边谱包含 513 个点（DC 加 512 个正频率点）。
+  const bins=fullBins.map(item=>({...item}));
   return {bins,peak,fftSize,windowType,sampleCount,sampleRate,frequencyRange};
 }
 
@@ -10982,7 +11015,7 @@ getNodePorts = function(node){
         key:`subsystem-input-${item.id}`,
         label:item.name,
         kind:'input',
-        side:'left',
+        side:['left','right','top','bottom'].includes(item.side)?item.side:'left',
         meta:item,
         index
       })),
@@ -10990,7 +11023,7 @@ getNodePorts = function(node){
         key:`subsystem-output-${item.id}`,
         label:item.name,
         kind:'output',
-        side:'right',
+        side:['left','right','top','bottom'].includes(item.side)?item.side:'right',
         meta:item,
         index
       }))
@@ -16289,7 +16322,8 @@ Object.assign(window,{
     const length=getEdgeTestPointVectorLength(edge);
     if(length<2){return '';}
     const selected=normalizeEdgeTestPointVectorIndex(point?.vectorIndex,length);
-    return `<div class="props-field"><label>测量数据路</label><select data-edge-testpoint-vector-index>${Array.from({length},(_,index)=>`<option value="${index}" ${index===selected?'selected':''}>第 ${index+1} 路</option>`).join('')}</select></div>`;
+    const names=getVectorElementNames(edge,length);
+    return `<div class="props-field"><label>测量数据路</label><select data-edge-testpoint-vector-index>${Array.from({length},(_,index)=>`<option value="${index}" ${index===selected?'selected':''}>${escapeHtml(names[index])}</option>`).join('')}</select></div>`;
   }
 
   function findManualEdgeTestPoint(edge,pointId){
@@ -25605,10 +25639,27 @@ function decorateDataflowEdges(){
     return 0;
   }
 
+  function getTargetFaultVectorElementNames(target,slot,length){
+    const targetField=String(slot?.targetField||'').toLowerCase();
+    const match=targetField.match(/^(params|parameters|inputs|outputs|middlevars)\.(.+)$/);
+    const groupNames=match?.[1]==='params'||match?.[1]==='parameters'
+      ?['parameters','modelParameters','physicalParameters']
+      :match?.[1]==='middlevars' ? ['middleVars'] : match ? [match[1]] : ['parameters','modelParameters','physicalParameters','inputs','outputs','middleVars'];
+    const variable=String(slot?.bindingObject||slot?.targetVariable||'').toLowerCase();
+    for(const group of groupNames.flatMap(name=>[target?.[name],target?.props?.[name]])){
+      for(const item of Array.isArray(group)?group:[]){
+        const name=String(item?.name||item?.varName||item?.id||'').toLowerCase();
+        if((!match||name===match[2]||name===variable)&&Array.isArray(item?.vectorElementNames)) return getNamedVectorElementNames(item,length);
+      }
+    }
+    return getNamedVectorElementNames(null,length);
+  }
+
   function renderTargetFaultVectorInjectionControls(target,slot){
     const vectorLength=getTargetFaultVectorLength(target,slot);
     if(vectorLength<2) return '';
-    const checkboxes=Array.from({length:vectorLength},(_,index)=>`<label><input type="checkbox" data-fault-vector-item value="${index}">第 ${index+1} 路</label>`).join('');
+    const elementNames=getTargetFaultVectorElementNames(target,slot,vectorLength);
+    const checkboxes=Array.from({length:vectorLength},(_,index)=>`<label><input type="checkbox" data-fault-vector-item value="${index}">${escapeHtml(elementNames[index])}</label>`).join('');
     return `
       <div class="target-fault-vector-injection" data-fault-vector-injection>
         <div class="target-fault-param-row"><span>注入路数</span><div class="target-fault-vector-items">${checkboxes}</div></div>
@@ -27656,7 +27707,6 @@ function decorateDataflowEdges(){
       body:JSON.stringify({
         dMatrix,
         targetFaultIds:faultIds,
-        maxFaults:Math.max(2,faultIds.length),
         modelGraph:{modelNodes:getRuntimeNodes(),modelEdges:getRuntimeEdges()},
         maxSteps:Number.isFinite(options.maxSteps)?options.maxSteps:4
       })
@@ -30771,10 +30821,29 @@ function decorateDataflowEdges(){
     return 0;
   }
 
+  function getLayeredFaultVectorElementNames(target,slot,length){
+    if(getTargetKind(target)==='edge') return getNamedVectorElementNames(null,length);
+    const targetField=String(slot?.targetField||'').toLowerCase();
+    const fieldMatch=targetField.match(/^(inputs|outputs|middlevars)\.(.+)$/);
+    const role=fieldMatch?.[1]==='middlevars'?'middleVars':fieldMatch?.[1];
+    const groups=role
+      ?[target?.[role],target?.props?.[role],target?.ports?.[role],typeof getNodePorts==='function'?getNodePorts(target)?.[role]:null]
+      :[target?.outputs,target?.props?.outputs,target?.ports?.outputs,typeof getNodePorts==='function'?getNodePorts(target)?.outputs:null];
+    const binding=String(slot?.bindingObject||slot?.targetVariable||slot?.variableKey||'').toLowerCase();
+    for(const group of groups){
+      for(const item of arr(group)){
+        const name=String(item?.name||item?.varName||item?.key||item?.id||'').toLowerCase();
+        if((!fieldMatch||name===fieldMatch[2]||name===binding)&&Array.isArray(item?.vectorElementNames)) return getNamedVectorElementNames(item,length);
+      }
+    }
+    return getNamedVectorElementNames(null,length);
+  }
+
   function renderLayeredFaultVectorInjectionControls(target,slot){
     const vectorLength=getLayeredFaultVectorLength(target,slot);
     if(vectorLength<2) return '';
-    const items=Array.from({length:vectorLength},(_,index)=>`<label><input type="checkbox" data-layered-fault-vector-item value="${index}">第 ${index+1} 路</label>`).join('');
+    const elementNames=getLayeredFaultVectorElementNames(target,slot,vectorLength);
+    const items=Array.from({length:vectorLength},(_,index)=>`<label><input type="checkbox" data-layered-fault-vector-item value="${index}">${escapeHtml(elementNames[index])}</label>`).join('');
     return `
       <div class="layered-fault-dialog__vector" data-layered-fault-vector>
         <div class="layered-fault-dialog__field"><span>注入路数</span><div class="target-fault-vector-items">${items}</div></div>
@@ -32846,22 +32915,30 @@ function decorateDataflowEdges(){
     const result=previousRenderModelNodes.apply(this,arguments);
     document.querySelectorAll('.blk[id^="b-"]').forEach(element=>{
       const node=getNode(element.id.replace(/^b-/,''));
-      if(node?.type!=='simulation_block'){return;}
+      if(node?.type!=='simulation_block'&&node?.type!=='subsystem_block'){return;}
       const ports=window.getNodePorts(node);
       ports.inputs.forEach((port,index)=>{
         const portElement=element.querySelectorAll('.node-port--input')[index];
         if(portElement&&port.side==='top'){
-          portElement.classList.add('node-port--top','node-port--power');
+          portElement.classList.add('node-port--top');
+          if(port.kind==='powerInput'){
+            portElement.classList.add('node-port--power');
+          }
         }
       });
       ports.outputs.forEach((port,index)=>{
         const portElement=element.querySelectorAll('.node-port--output')[index];
         if(portElement&&port.side==='bottom'){
-          portElement.classList.add('node-port--bottom','node-port--power');
+          portElement.classList.add('node-port--bottom');
+          if(port.kind==='powerOutput'){
+            portElement.classList.add('node-port--power');
+          }
         }
       });
-      element.style.paddingTop='18px';
-      element.style.paddingBottom='18px';
+      if(node.type==='simulation_block'){
+        element.style.paddingTop='18px';
+        element.style.paddingBottom='18px';
+      }
     });
     return result;
   };
@@ -33020,7 +33097,7 @@ function decorateDataflowEdges(){
     if(candidates.some(value=>value==='DC'||value.includes('VDC'))){return 'DC';}
     const id=moduleId(node);
     if(id==='electrical_ac_power_source'){return 'AC';}
-    if(id==='electrical_ac_dc_matching'||id==='electrical_dc_boost'){return 'DC';}
+    if(id==='electrical_dc_power_source'||id==='electrical_ac_dc_matching'||id==='electrical_dc_boost'){return 'DC';}
     return '';
   }
 

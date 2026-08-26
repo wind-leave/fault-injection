@@ -1115,6 +1115,26 @@ describe('flightModelPackageService', () => {
     }));
   });
 
+  it('creates physical parameter slots for standard simulation props.parameters', () => {
+    const node = normalizeModelNode({
+      id: 'node-rf-source',
+      type: 'simulation_block',
+      props: {
+        parameters: [
+          { key: 'carrier_frequency_hz', name: 'Carrier frequency', default: 1_000_000_000, unit: 'Hz' }
+        ]
+      }
+    });
+
+    expect(node.faultSlots).toContainEqual(expect.objectContaining({
+      slotId: 'physical:parameter:carrier_frequency_hz',
+      layer: 'physical',
+      targetField: 'params.carrier_frequency_hz',
+      parameterKey: 'carrier_frequency_hz',
+      unit: 'Hz'
+    }));
+  });
+
   it('does not infer undeclared component variables once a layer declaration exists', () => {
     const node = normalizeModelNode({
       id: 'node-controller',

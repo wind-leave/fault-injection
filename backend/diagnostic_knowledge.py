@@ -484,12 +484,14 @@ def _build_candidate(combo, point_codes, row_signatures, row_names, manual_relat
     }
 
 
-def build_fault_candidates_from_knowledge_graph(knowledge_graph, observations=None, max_faults=2):
-    if isinstance(max_faults, bool) or not isinstance(max_faults, int) or not 1 <= max_faults <= 4:
-        raise SimulationBackendError("INVALID_SCHEMA", "maxFaults", "maxFaults must be an integer from 1 to 4")
+def build_fault_candidates_from_knowledge_graph(knowledge_graph, observations=None, max_faults=None):
     graph_data = _knowledge_graph_diagnostic_data(knowledge_graph)
     point_codes = graph_data["pointCodes"]
     rows = [graph_data["faults"][fault_id] for fault_id in graph_data["faultOrder"]]
+    if max_faults is None:
+        max_faults = len(rows)
+    if isinstance(max_faults, bool) or not isinstance(max_faults, int) or max_faults < 1:
+        raise SimulationBackendError("INVALID_SCHEMA", "maxFaults", "maxFaults must be a positive integer")
     row_signatures = graph_data["signatures"]
     row_names = {fault_id: _fault_name(row) for fault_id, row in graph_data["faults"].items()}
     manual_relations = graph_data["constraints"]
@@ -511,7 +513,7 @@ def build_fault_candidates_from_knowledge_graph(knowledge_graph, observations=No
     return candidates
 
 
-def build_fault_candidates(d_matrix, observations=None, max_faults=2):
+def build_fault_candidates(d_matrix, observations=None, max_faults=None):
     knowledge_graph = build_diagnostic_knowledge_graph(_validate_d_matrix(d_matrix))
     return build_fault_candidates_from_knowledge_graph(knowledge_graph, observations=observations, max_faults=max_faults)
 
@@ -620,7 +622,7 @@ def build_multi_fault_troubleshooting_plan(
     d_matrix,
     target_fault_ids,
     observations=None,
-    max_faults=2,
+    max_faults=None,
     max_steps=4,
     model_graph=None,
 ):
@@ -638,7 +640,7 @@ def build_multi_fault_troubleshooting_plan_from_knowledge_graph(
     knowledge_graph,
     target_fault_ids,
     observations=None,
-    max_faults=2,
+    max_faults=None,
     max_steps=4,
 ):
     graph_data = _knowledge_graph_diagnostic_data(knowledge_graph)
@@ -653,6 +655,8 @@ def build_multi_fault_troubleshooting_plan_from_knowledge_graph(
             normalized_target_ids.append(normalized)
     if isinstance(max_steps, bool) or not isinstance(max_steps, int) or not 0 <= max_steps <= 12:
         raise SimulationBackendError("INVALID_SCHEMA", "maxSteps", "maxSteps must be an integer from 0 to 12")
+    if max_faults is None:
+        max_faults = len(graph_data["faults"])
     if isinstance(max_faults, bool) or not isinstance(max_faults, int) or max_faults < 1:
         raise SimulationBackendError("INVALID_SCHEMA", "maxFaults", "maxFaults must be a positive integer")
     max_faults = max(max_faults, len(normalized_target_ids))
@@ -665,7 +669,7 @@ def build_multi_fault_troubleshooting_plan_from_knowledge_graph(
     manual_relations = graph_data["constraints"]
     if _is_mutex(normalized_target_ids, manual_relations):
         raise SimulationBackendError("INVALID_SCHEMA", "targetFaultIds", "the selected faults violate the manual fault constraints")
-    candidate_depth = min(4, max_faults, len(graph_data["faults"]))
+    candidate_depth = min(max_faults, len(graph_data["faults"]))
     candidates = build_fault_candidates_from_knowledge_graph(
         knowledge_graph,
         observations=observations,
@@ -781,10 +785,6 @@ def build_multi_fault_troubleshooting_plan_from_knowledge_graph(
     invalid_actions = [step.get("action") for step in steps if step.get("action") not in ALLOWED_ACTIONS]
     if invalid_actions:
         raise AssertionError(f"unsupported troubleshooting actions: {invalid_actions}")
-    reported_candidates = candidates[:32]
-    if not any(_candidate_key(candidate) == target_key for candidate in reported_candidates):
-        reported_candidates = [*reported_candidates[:31], target_candidate]
-
     return {
         "ok": True,
         "faultId": "+".join(normalized_target_ids),
@@ -826,13 +826,4 @@ def build_multi_fault_troubleshooting_plan_from_knowledge_graph(
             if isolated
             else f"当前测点不足以唯一隔离该{'单故障' if len(normalized_target_ids) == 1 else '多故障组合'}；路径停止在检测步骤，不给出未经唯一定位的更换动作。"
         ),
-        "candidateFaultSets": reported_candidates,
-        "knowledgeGraph": knowledge_graph,
-        "pathGeneration": {
-            "engine": "knowledge-graph",
-            "candidateSource": "fault-and-detectability-relations",
-            "repairSource": "resolved-by-replacing-relations",
-        },
-        "source": "backend-knowledge-graph",
-        "isCustomized": False,
     }

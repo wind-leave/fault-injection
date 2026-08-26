@@ -25,6 +25,47 @@ def _clone(value):
     return value
 
 
+def _without_redundant_step_fields(value):
+    """Remove report-only duplicates without changing the internal scoring data."""
+    if isinstance(value, list):
+        return [_without_redundant_step_fields(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {
+        key: _without_redundant_step_fields(item)
+        for key, item in value.items()
+        if key not in {
+            "virtualMeasurement",
+            "candidateFaultsAfterAction",
+            "timeCostSeconds",
+            "riskCost",
+            "candidateSupportRatio",
+            "supportingCombinationCount",
+            "candidateCombinationCount",
+        }
+    }
+    if "faultIds" in result or not result.get("faultId"):
+        result.pop("faultId", None)
+    return result
+
+
+def _compact_initial_optimal_path(path):
+    """Keep the authored path while omitting diagnostic implementation data."""
+    if not isinstance(path, dict):
+        return _clone(path)
+    return {
+        key: _clone(value)
+        for key, value in path.items()
+        if key not in {
+            "candidateFaultSets",
+            "knowledgeGraph",
+            "pathGeneration",
+            "source",
+            "isCustomized",
+        }
+    }
+
+
 def _arr(value):
     return value if isinstance(value, list) else []
 
@@ -68,20 +109,6 @@ def _student_rating(match_result):
         "label": RATING_LABELS.get(level, level),
         "score": _score(result.get("score")),
         "reason": reason,
-    }
-
-
-def _system_rating(action):
-    if not isinstance(action, dict):
-        return None
-    level = action.get("recommendationTier") or "acceptable"
-    return {
-        "level": level,
-        "label": RATING_LABELS.get(level, level),
-        "rank": action.get("rank"),
-        "priority": action.get("priority"),
-        "confidence": action.get("confidence"),
-        "reason": action.get("reason") or "",
     }
 
 
@@ -239,10 +266,6 @@ def _step_evaluations(actual_steps, dynamic_reference_history):
             "studentAction": student_action,
             "studentRating": _student_rating(match_result),
             "systemRecommendedAction": _clone(recommended_action),
-            "systemRecommendationRating": _system_rating(recommended_action),
-            "matchResult": _clone(match_result),
-            **candidate_change,
-            "informationGain": information_gain,
             "decisionScore": _score(decision_score),
             "bestAvailableDecisionScore": _score(best_available_score),
             "maxDecisionPoints": _score(step_max_points),
@@ -281,7 +304,7 @@ def _key_node_report(path_evaluation):
 def _deduction_reason(item, correct, path_evaluation, elapsed_seconds, scoring_rules):
     evaluation = path_evaluation if isinstance(path_evaluation, dict) else {}
     if item == "faultLocalization":
-        return "学生最终故障集合与目标故障集合不一致", "结合测点证据和候选故障组合重新核对漏报及多报故障。"
+        return "学生最终定位目标集合与正确组件、连线集合不一致", "结合测点证据重新核对漏报及多报的组件或连线。"
     if item == "diagnosticTreePath":
         missed = _arr((evaluation.get("keyNodeCoverage") or {}).get("missedNodeIds"))
         reason = "关键节点未完全覆盖或路径中存在无效、重复操作"
@@ -327,19 +350,15 @@ def build_practice_evaluation_report(
     score,
     grade,
     score_breakdown,
-    target_fault_id,
-    target_fault_name,
-    final_fault_id,
-    final_fault_name,
     correct,
-    target_faults,
-    final_faults,
+    expected_target_ids,
+    final_target_ids,
     set_accuracy,
     precision,
     recall,
-    matched_fault_ids,
-    missed_fault_ids,
-    extra_fault_ids,
+    matched_target_ids,
+    missed_target_ids,
+    extra_target_ids,
     initial_optimal_path,
     actual_steps,
     dynamic_reference_history,
@@ -362,27 +381,26 @@ def build_practice_evaluation_report(
             suggestions.append(suggestion)
     if not suggestions:
         suggestions.append("保持当前排故策略，并继续关注关键证据、操作安全和路径效率。")
-    return {
+    report = {
         "totalScore": _score(score),
         "grade": grade,
-        "faultConclusion": {
-            "target": {"faultId": target_fault_id, "faultName": target_fault_name},
-            "student": {"faultId": final_fault_id, "faultName": final_fault_name},
+        "targetConclusion": {
             "correct": bool(correct),
             "exactMatch": bool(correct),
-            "targetFaults": _clone(_arr(target_faults)),
-            "studentFaults": _clone(_arr(final_faults)),
+            "expectedTargetIds": _clone(_arr(expected_target_ids)),
+            "studentTargetIds": _clone(_arr(final_target_ids)),
             "setAccuracy": _score(set_accuracy),
             "precision": _score(precision),
             "recall": _score(recall),
-            "matchedFaultIds": _clone(_arr(matched_fault_ids)),
-            "missedFaultIds": _clone(_arr(missed_fault_ids)),
-            "extraFaultIds": _clone(_arr(extra_fault_ids)),
+            "matchedTargetIds": _clone(_arr(matched_target_ids)),
+            "missedTargetIds": _clone(_arr(missed_target_ids)),
+            "extraTargetIds": _clone(_arr(extra_target_ids)),
         },
         "scoreDetails": score_details,
-        "initialOptimalPath": _clone(initial_optimal_path),
+        "initialOptimalPath": _compact_initial_optimal_path(initial_optimal_path),
         "stepEvaluations": _step_evaluations(actual_steps, dynamic_reference_history),
         "keyNodeCoverage": _key_node_report(path_evaluation),
         "deductionAnalysis": deduction_analysis,
         "improvementSuggestions": suggestions,
     }
+    return _without_redundant_step_fields(report)

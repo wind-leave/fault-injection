@@ -24,6 +24,35 @@ function parameterDefaultValues(parameters = []) {
     .filter(([key, value]) => key && value !== undefined));
 }
 
+function defaultPhysicalParameterFaultSlots(parameters = []) {
+  return parameters.flatMap((parameter) => {
+    const key = String(parameter?.key ?? '').trim();
+    if (!key) return [];
+    return [{
+      slotId: `physical:parameter:${key}`,
+      slotName: String(parameter?.name ?? key),
+      layer: 'physical',
+      targetField: `params.${key}`,
+      bindingObject: key,
+      targetVariable: key,
+      parameterKey: key,
+      ...(parameter?.unit ? { unit: parameter.unit } : {})
+    }];
+  });
+}
+
+function mergeFaultSlots(defaultSlots = [], configuredSlots = []) {
+  const slotsByTarget = new Map();
+  [...defaultSlots, ...configuredSlots].forEach((slot) => {
+    if (!slot) return;
+    const key = `${slot.layer ?? ''}:${slot.targetField || slot.slotId || ''}`;
+    // Explicit component slots override the generated default for the same
+    // parameter while preserving intentionally distinct targets.
+    slotsByTarget.set(key, slot);
+  });
+  return [...slotsByTarget.values()];
+}
+
 const SIMULATION_COMPONENT_MIN_WIDTH = 196;
 const SIMULATION_COMPONENT_MIN_HEIGHT = 116;
 const SIMULATION_COMPONENT_MAX_WIDTH = 320;
@@ -118,12 +147,26 @@ export function createPythonSimulationComponent({
   powerOutputs = [];
   powerInputs = powerInputs.map((port) => ({ ...port, supplyType: port.supplyType === 'AC' ? 'AC' : 'DC' }));
   const dimensions = resolveSimulationComponentDimensions(inputs, outputs, width, height);
+  const resolvedFaultSlots = mergeFaultSlots(
+    defaultPhysicalParameterFaultSlots(parameters),
+    faultSlots
+  );
   const isVector = (item) => item.dataType === 'vector' || item.type === 'vector' || item.type === '向量';
   const signalType = (item) => item.type ?? (isVector(item) ? 'vector' : 'float');
   const displayType = (item) => item.displayType ?? (isVector(item) ? '向量' : '标量');
-  const vectorContract = (item) => (isVector(item) && Number.isInteger(item.vectorLength) && item.vectorLength > 0
-    ? { dataType: 'vector', vectorLength: item.vectorLength }
-    : {});
+  const vectorContract = (item) => {
+    if (!isVector(item) || !Number.isInteger(item.vectorLength) || item.vectorLength < 1) {
+      return {};
+    }
+    const vectorElementNames = Array.isArray(item.vectorElementNames)
+      ? item.vectorElementNames.map((name) => String(name ?? '').trim()).slice(0, item.vectorLength)
+      : [];
+    return {
+      dataType: 'vector',
+      vectorLength: item.vectorLength,
+      ...(vectorElementNames.length ? { vectorElementNames } : {})
+    };
+  };
   const makePort = (item, direction, index) => {
     const portId = String(item.portId ?? '').trim();
     if (!portId) {
@@ -150,6 +193,9 @@ export function createPythonSimulationComponent({
     type: port.type,
     ...(port.dataType ? { dataType: port.dataType } : {}),
     ...(port.vectorLength ? { vectorLength: port.vectorLength } : {}),
+    ...(Array.isArray(port.vectorElementNames) && port.vectorElementNames.length
+      ? { vectorElementNames: clone(port.vectorElementNames) }
+      : {}),
     ...(item.default === undefined ? {} : { default: item.default }),
     comment: item.name,
     ...(connected ? { connected: false } : {})
@@ -253,7 +299,10 @@ export function createPythonSimulationComponent({
         middleVars: []
       }
     },
-    faultSlots: clone(faultSlots)
+    // The legacy canvas copies template slots only when a node is created.
+    // Seed parameter slots here so a newly placed component can receive a
+    // physical-layer fault immediately, without an extra “save slots” action.
+    faultSlots: clone(resolvedFaultSlots)
   };
 }
 
@@ -357,6 +406,26 @@ export const COMPONENT_REGISTRY = {
     powerInputs: [],
     powerOutputs: [],
     ffunctionNote: '按设定有效值、频率和相位输出正弦交流电压。',
+    executionMode: 'backend'
+  }),
+  electrical_dc_power_source: createPythonSimulationComponent({
+    type: 'electrical_dc_power_source',
+    group: 'electrical',
+    label: '直流电源模块',
+    moduleType: '电气电源模型',
+    title: '输出可配置额定电压的稳定直流电压',
+    palette: { icon: 'DC', iconClass: 'electrical' },
+    description: '直流电源仿真组件，输出单路稳定直流电压。',
+    inputs: [],
+    outputs: [
+      { portId: 'output-0', name: '直流电输出', varName: 'dc_output', type: 'float', unit: 'VDC' }
+    ],
+    parameters: [
+      { key: 'output_voltage', name: '输出电压', default: 28, min: 0, max: 1000000, unit: 'V' }
+    ],
+    powerInputs: [],
+    powerOutputs: [],
+    ffunctionNote: '按设定输出稳定的直流电压。',
     executionMode: 'backend'
   }),
   electrical_dc_boost: createPythonSimulationComponent({
@@ -983,7 +1052,8 @@ export const COMPONENT_REGISTRY = {
       inputPortName: '观测输入',
       frequencyRange: '0-16kHz',
       tuningMode: 'startStop',
-      autoFrequencyRange: 'on',
+      // 默认展示所选频率范围内的完整单边频谱；需要时可手动开启峰值自动聚焦。
+      autoFrequencyRange: 'off',
       fftSize: '1024',
       windowFunction: 'Hann',
       amplitudeUnit: 'dB',

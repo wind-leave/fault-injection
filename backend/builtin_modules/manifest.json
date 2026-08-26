@@ -63,6 +63,23 @@
       }
     },
     {
+      "moduleId": "electrical_dc_power_source",
+      "importPath": "backend.builtin_modules.electrical_dc_power_source",
+      "entryFunction": "process",
+      "inputs": [],
+      "outputs": [
+        "dc_output"
+      ],
+      "parameters": {
+        "output_voltage": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000,
+          "default": 28
+        }
+      }
+    },
+    {
       "moduleId": "electrical_dc_boost",
       "importPath": "backend.builtin_modules.electrical_dc_boost",
       "entryFunction": "process",

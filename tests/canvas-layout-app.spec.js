@@ -1311,7 +1311,6 @@ describe('canvas layout cleanup', () => {
       expect(url).toBe('/api/troubleshooting/plan');
       expect(JSON.parse(request.body)).toMatchObject({
         targetFaultIds: ['manual-output-bias'],
-        maxFaults: 2,
         modelGraph: expect.objectContaining({ modelNodes: expect.any(Array), modelEdges: expect.any(Array) })
       });
       return {
@@ -1498,7 +1497,6 @@ describe('canvas layout cleanup', () => {
 
     expect(requestPayload).toMatchObject({
       targetFaultIds: ['fault-device-a', 'fault-wire-b'],
-      maxFaults: 2,
       dMatrix: matrix
     });
     const panel = document.querySelector('[data-troubleshooting-path-panel]');

@@ -1,8 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive } from 'vue';
 import { getPaletteGroups, getSimulationMenuSections } from '../../services/componentRegistry.js';
-import { removeAuthoredComponent, useAuthoredComponentCatalog } from '../../services/authoredComponentCatalogService.js';
-import { unregisterBackendSimulationComponents } from '../../services/backendComponentRegistrationClient.js';
+import { useAuthoredComponentCatalog } from '../../services/authoredComponentCatalogService.js';
 
 defineProps({
   collapsed: {
@@ -20,12 +19,6 @@ const groupOpen = reactive(Object.fromEntries(
 ));
 const consumedPaletteKeys = reactive(new Set());
 const simulationMenuOpen = reactive({});
-const simulationActions = reactive({ open: false, mode: 'idle', busy: false, message: '' });
-const selectedSimulationComponentTypes = reactive(new Set());
-
-const isSimulationEditing = computed(() => simulationActions.mode === 'editing');
-const isSimulationDeleting = computed(() => simulationActions.mode === 'deleting');
-const isSimulationSelecting = computed(() => simulationActions.mode !== 'idle');
 
 const simulationMenuSections = computed(() => {
   // 新建组件已注册到全局组件库；这里只借助目录的响应式变化重新读取组件库，
@@ -92,10 +85,7 @@ function componentClasses(component) {
     citem: true,
     'citem-draggable': true,
     'citem-fault': component.group === 'faults',
-    'citem-scope': component.type === 'instrument_scope',
-    'citem-edit-target': isSimulationEditing.value && isAuthoredSimulationComponent(component),
-    'citem-delete-target': isSimulationDeleting.value && isAuthoredSimulationComponent(component),
-    'citem-delete-selected': isSimulationDeleting.value && selectedSimulationComponentTypes.has(component.type)
+    'citem-scope': component.type === 'instrument_scope'
   };
 }
 
@@ -166,116 +156,6 @@ function toggleGroup(groupId) {
   groupOpen[groupId] = !groupOpen[groupId];
 }
 
-function openComponentAuthoring() {
-  simulationActions.open = false;
-  simulationActions.mode = 'idle';
-  simulationActions.message = '';
-  selectedSimulationComponentTypes.clear();
-  window.dispatchEvent(new CustomEvent('gz:open-component-authoring'));
-}
-
-function toggleSimulationActions() {
-  simulationActions.open = !simulationActions.open;
-  if (!simulationActions.open) {
-    simulationActions.mode = 'idle';
-    selectedSimulationComponentTypes.clear();
-    simulationActions.message = '';
-  }
-}
-
-function enterSimulationEditMode() {
-  simulationActions.open = true;
-  simulationActions.mode = 'editing';
-  selectedSimulationComponentTypes.clear();
-  simulationActions.message = '修改模式：点击左栏中由前端创建的仿真组件。';
-}
-
-function exitSimulationEditMode() {
-  simulationActions.mode = 'idle';
-  simulationActions.message = '';
-}
-
-function enterSimulationDeleteMode() {
-  simulationActions.open = true;
-  simulationActions.mode = 'deleting';
-  selectedSimulationComponentTypes.clear();
-  simulationActions.message = '删除模式：点击左栏选择要删除的自定义仿真组件。';
-}
-
-function exitSimulationDeleteMode() {
-  simulationActions.mode = 'idle';
-  selectedSimulationComponentTypes.clear();
-  simulationActions.message = '';
-}
-
-function isAuthoredSimulationComponent(component) {
-  return component?.group === 'simulation'
-    && authoredCatalog.components.some((item) => item.type === component.type);
-}
-
-function isSimulationComponentUsedOnCanvas(component) {
-  const state = window.__GZ_STATE__ ?? {};
-  const nodes = Array.isArray(state.modelNodes) ? state.modelNodes : (Array.isArray(state.nodes) ? state.nodes : []);
-  return nodes.some((node) => node.templateId === component.type
-    || node.type === component.type
-    || node.pythonBinding?.moduleId === component.pythonBinding?.moduleId);
-}
-
-async function handleSimulationComponentClick(event, component) {
-  if (!isSimulationSelecting.value) return;
-  event.preventDefault();
-  event.stopPropagation();
-  if (!isAuthoredSimulationComponent(component) || simulationActions.busy) {
-    simulationActions.message = isSimulationEditing.value
-      ? '内置仿真组件不能在此处修改。'
-      : '内置仿真组件不能在此处删除。';
-    return;
-  }
-  if (isSimulationEditing.value) {
-    const authoredComponent = authoredCatalog.components.find((item) => item.type === component.type);
-    simulationActions.open = false;
-    simulationActions.mode = 'idle';
-    simulationActions.message = '';
-    window.dispatchEvent(new CustomEvent('gz:open-component-authoring', { detail: { component: authoredComponent } }));
-    return;
-  }
-  if (isSimulationComponentUsedOnCanvas(component)) {
-    simulationActions.message = '该组件仍在当前画布中使用；请先删除画布节点后再删除组件模板。';
-    return;
-  }
-  if (selectedSimulationComponentTypes.has(component.type)) selectedSimulationComponentTypes.delete(component.type);
-  else selectedSimulationComponentTypes.add(component.type);
-  simulationActions.message = selectedSimulationComponentTypes.size
-    ? `已选择 ${selectedSimulationComponentTypes.size} 个组件；再次点击删除按钮确认批量删除。`
-    : '删除模式：点击左栏选择要删除的自定义仿真组件。';
-}
-
-async function deleteSelectedSimulationComponents() {
-  const targets = authoredCatalog.components.filter((component) => selectedSimulationComponentTypes.has(component.type));
-  const labels = targets.map((component) => `“${component.name}”`).join('、');
-  if (!window.confirm(`确认删除 ${targets.length} 个仿真组件：${labels}？此操作会同时注销其后端模块。`)) {
-    simulationActions.message = '已取消删除；已选组件仍保留，可继续调整选择。';
-    return;
-  }
-  try {
-    simulationActions.busy = true;
-    const moduleIds = targets
-      .filter((component) => component.executionMode === 'backend' && component.moduleId)
-      .map((component) => component.moduleId);
-    if (moduleIds.length) await unregisterBackendSimulationComponents(moduleIds);
-    targets.forEach((component) => {
-      removeAuthoredComponent(component.type);
-      consumedPaletteKeys.delete(paletteKey(component));
-    });
-    selectedSimulationComponentTypes.clear();
-    simulationActions.message = `已删除 ${targets.length} 个仿真组件；可继续选择其他组件。`;
-  } catch (error) {
-    simulationActions.message = error?.message ?? '删除组件失败，请稍后重试。';
-  } finally {
-    simulationActions.busy = false;
-  }
-}
-
 function isSimulationMenuOpen(section) {
   return simulationMenuOpen[section.id] ?? section.defaultOpen !== false;
 }
@@ -311,51 +191,12 @@ function handleLineToolClick(component) {
       <template v-for="group in paletteGroups" :key="group.id">
         <div
           class="lgroup-head"
-          :class="[groupHeadClass(group), { 'simulation-group-head': group.id === 'simulation' }]"
+          :class="groupHeadClass(group)"
           :data-palette-group="group.id"
           @click="toggleGroup(group.id)"
         >
           <span class="lgroup-icon">{{ group.icon }}</span>
           <span class="lgroup-label">{{ group.label }}</span>
-          <button
-            v-if="group.id === 'simulation'"
-            type="button"
-            class="lgroup-add lgroup-action-menu"
-            data-simulation-actions-menu
-            :class="{ active: simulationActions.open || isSimulationSelecting }"
-            aria-label="仿真组件菜单"
-            title="仿真组件菜单"
-            :aria-expanded="simulationActions.open"
-            @click.stop="toggleSimulationActions"
-          >⋮</button>
-          <div v-if="group.id === 'simulation' && simulationActions.open" class="simulation-floating-actions" @click.stop>
-            <button
-              type="button"
-              class="simulation-floating-actions__add"
-              data-open-component-authoring
-              aria-label="新增仿真组件"
-              title="新增仿真组件"
-              @click="openComponentAuthoring"
-            >＋</button>
-            <button
-              type="button"
-              class="simulation-floating-actions__edit"
-              :class="{ 'simulation-floating-actions__exit-edit': isSimulationEditing }"
-              data-enter-simulation-edit
-              :aria-label="isSimulationEditing ? '退出修改模式' : '修改仿真组件'"
-              :title="isSimulationEditing ? '退出修改模式' : '修改仿真组件'"
-              @click="isSimulationEditing ? exitSimulationEditMode() : enterSimulationEditMode()"
-            ><span aria-hidden="true">{{ isSimulationEditing ? '×' : '✎' }}</span></button>
-            <button
-              type="button"
-              class="simulation-floating-actions__delete"
-              :class="{ 'simulation-floating-actions__confirm-delete': isSimulationDeleting }"
-              data-enter-simulation-delete
-              :aria-label="isSimulationDeleting ? (selectedSimulationComponentTypes.size ? '删除已选仿真组件' : '退出删除模式') : '删除仿真组件'"
-              :title="isSimulationDeleting ? (selectedSimulationComponentTypes.size ? '删除已选仿真组件' : '退出删除模式') : '删除仿真组件'"
-              @click="isSimulationDeleting ? (selectedSimulationComponentTypes.size ? deleteSelectedSimulationComponents() : exitSimulationDeleteMode()) : enterSimulationDeleteMode()"
-            ><span aria-hidden="true">{{ isSimulationDeleting && !selectedSimulationComponentTypes.size ? '×' : '⌫' }}</span></button>
-          </div>
           <span
             class="lgroup-arrow"
             :class="{ open: groupOpen[group.id] }"
@@ -369,9 +210,6 @@ function handleLineToolClick(component) {
           :data-palette-body="group.id"
         >
           <template v-if="group.id === 'simulation'">
-            <div v-if="isSimulationSelecting || simulationActions.message" class="simulation-delete-status" :class="{ error: simulationActions.message.includes('不能') || simulationActions.message.includes('失败') }">
-              {{ simulationActions.busy ? '正在删除组件…' : simulationActions.message }}
-            </div>
             <section
               v-for="section in simulationMenuSections"
               :key="section.id"
@@ -394,11 +232,10 @@ function handleLineToolClick(component) {
                   <div
                     v-if="isPaletteComponentAvailable(component)"
                     :class="componentClasses(component)"
-                    :draggable="!isSimulationSelecting"
+                    draggable="true"
                     :data-component="component.type"
                     :data-palette-key="paletteKey(component)"
-                    :title="isSimulationEditing ? (isAuthoredSimulationComponent(component) ? '点击修改此自定义仿真组件' : '内置仿真组件不可修改') : (isSimulationDeleting ? (isAuthoredSimulationComponent(component) ? '点击删除此自定义仿真组件' : '内置仿真组件不可删除') : component.title)"
-                    @click="handleSimulationComponentClick($event, component)"
+                    :title="component.title"
                     @dragstart="handlePaletteDragStart($event, component)"
                     @dragend="handlePaletteDragEnd"
                   >

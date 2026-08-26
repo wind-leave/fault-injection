@@ -1315,6 +1315,13 @@ header{
   transform:translateX(-50%) translateY(-4px);
 }
 
+.canvas-wrap[data-view="canvas"] .b-subsystem .node-port--top .node-port__label,
+.canvas-wrap[data-view="canvas"] .b-subsystem .node-port--bottom .node-port__label{
+  max-width:68px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
 .canvas-wrap[data-view="canvas"] .blk:hover .node-port__label,
 .canvas-wrap[data-view="canvas"] .blk.sel .node-port__label,
 .canvas-wrap[data-view="canvas"] .blk.sel-multi .node-port__label{

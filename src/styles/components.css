@@ -63,21 +63,6 @@ main{flex:1;display:flex;overflow:hidden;}
 .lgroup-add:hover,.lgroup-add.active{border-color:#287fd3;background:#dff0ff;box-shadow:0 0 0 3px rgba(39,128,211,.12);}
 .lgroup-head .lgroup-add+.lgroup-arrow{margin-left:0;}
 .lgroup-head{position:relative;}
-.lgroup-action-menu{font-size:18px;line-height:.8;letter-spacing:-1px;}
-.simulation-group-head{position:relative!important;z-index:35;}
-.simulation-floating-actions{position:absolute;z-index:36;top:5px;right:20px;width:20px;height:20px;pointer-events:none;}
-.simulation-floating-actions button{position:absolute;top:0;left:0;display:inline-flex;align-items:center;justify-content:center;width:29px;height:29px;padding:0;border:1px solid;border-radius:50%;font-size:19px;font-weight:700;line-height:1;cursor:pointer;pointer-events:auto;box-shadow:0 5px 12px rgba(31,72,112,.2);transition:transform .18s ease,box-shadow .18s ease;}
-.simulation-floating-actions__add{border-color:#9cc9ef!important;background:#eef7ff;color:#146ab9;}
-.simulation-floating-actions__add{transform:translate(-38px,-35px);}
-.simulation-floating-actions__edit{transform:translate(-49px,0);border-color:#a9c8e8!important;background:#f2f8ff;color:#276fae;font-size:16px!important;}
-.simulation-floating-actions__delete{transform:translate(-38px,35px);border-color:#f0b5b5!important;background:#fff4f4;color:#bd3131;font-size:17px!important;}
-.simulation-floating-actions__confirm-delete{border-color:#e36d6d!important;background:#fff0f0!important;color:#bd3131!important;font-size:17px!important;}
-.simulation-floating-actions__confirm-delete:disabled{cursor:not-allowed;opacity:.45;box-shadow:none;}
-.simulation-floating-actions__exit-edit{border-color:#8ea2b5!important;background:#f2f5f8!important;color:#51657a!important;font-size:21px!important;}
-.simulation-floating-actions__add:hover{transform:translate(-40px,-37px) scale(1.08);background:#dcefff;}.simulation-floating-actions__edit:hover{transform:translate(-51px,0) scale(1.08);background:#e2f0ff;}.simulation-floating-actions__delete:hover{transform:translate(-40px,37px) scale(1.08);background:#ffe7e7;}
-.simulation-delete-status{margin:3px 2px 7px;padding:7px 8px;border:1px solid #9eccee;border-radius:6px;background:#f1f8ff;color:#236eae;font-size:11px;line-height:1.45;}
-.simulation-delete-status.error{border-color:#efb7b7;background:#fff4f4;color:#b53838;}
-.citem-edit-target{cursor:pointer;outline:1px dashed #4d91cb;outline-offset:-2px;background:#eef7ff;}
 .lgroup-body{padding:4px 8px 6px;}
 
 /* 仿真组件分组菜单 */
@@ -121,11 +106,6 @@ main{flex:1;display:flex;overflow:hidden;}
 .cdot{width:10px;height:10px;border-radius:3px;flex-shrink:0;box-shadow:0 0 0 3px rgba(255,255,255,0.86),0 4px 10px rgba(30,58,95,0.08);}
 .citem-icon-badge{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:7px;font-size:11px;line-height:1;flex-shrink:0;box-shadow:inset 0 0 0 1px rgba(168,196,222,0.58);}
 .citem-icon-badge__image{display:block;max-width:100%;max-height:100%;border-radius:inherit;object-fit:contain;}
-.citem-delete-target{cursor:pointer!important;border-color:#ef8c8c!important;background:#fff5f5!important;color:#a92929!important;animation:component-delete-target-pulse 1.2s ease-in-out infinite;}
-.citem-delete-target:hover{background:#ffe3e3!important;}
-.citem-delete-selected{border-color:#d83c3c!important;background:#ffe0e0!important;box-shadow:inset 0 0 0 1px rgba(216,60,60,.18),0 0 0 2px rgba(216,60,60,.14)!important;}
-.citem-delete-selected::after{content:'✓';display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:auto;border-radius:50%;background:#d83c3c;color:#fff;font-size:10px;font-weight:900;}
-@keyframes component-delete-target-pulse{50%{box-shadow:0 0 0 3px rgba(222,72,72,.15);}}
 .citem-icon-badge--source{background:#e8f1fb;color:#2a6dc9;}
 .citem-icon-badge--flow{background:#edf5ff;color:var(--blue);}
 .citem-icon-badge--gain{background:#fff4e5;color:#d97706;}
@@ -973,6 +953,11 @@ main{flex:1;display:flex;overflow:hidden;}
 .props-port-card__meta{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:10px;color:var(--textm);}
 .props-port-card--editable{gap:8px;}
 .props-port-card__kind{font-size:11px;font-weight:700;color:#355579;}
+.props-port-card__vector{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 8px;padding:8px;border-top:1px dashed rgba(151,180,213,.8);background:#f7fbff;}
+.props-port-card__vector-title{grid-column:1 / -1;color:#47698d;font-size:10px;font-weight:700;}
+.props-port-card__vector-field{gap:3px;margin:0;min-width:0;}
+.props-port-card__vector-field label{color:#69829c;font-size:10px;}
+.props-port-card__vector-field input{min-width:0;height:29px;padding:5px 7px;font-size:11px;}
 .sim-intf-toolbar{display:flex;flex-direction:column;gap:10px;}
 .sim-intf-counts{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
 .sim-intf-counts .props-field:last-child{grid-column:1 / -1;}

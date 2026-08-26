@@ -162,13 +162,21 @@ function normalizePorts(ports = []) {
       const dataType = normalizePortDataType(port?.dataType ?? port?.type);
       const shapeLength = Array.isArray(port?.shape) ? Number(port.shape[0]) : NaN;
       const vectorLength = Number(port?.vectorLength ?? port?.length ?? shapeLength);
+      const vectorElementNames = Array.isArray(port?.vectorElementNames)
+        ? port.vectorElementNames
+          .map((elementName) => String(elementName ?? '').trim())
+          .slice(0, vectorLength)
+        : [];
       return {
         name,
         id,
         dataType,
         ...(port?.unit ? { unit: String(port.unit) } : {}),
         ...(dataType === 'vector' && Number.isInteger(vectorLength) && vectorLength > 0
-          ? { vectorLength }
+          ? {
+            vectorLength,
+            ...(vectorElementNames.length ? { vectorElementNames } : {})
+          }
           : {})
       };
     }).filter((port) => port.name)
@@ -211,11 +219,17 @@ function alignScopeInputsWithConnectedSignals(nodes, edges) {
       ...current,
       dataType: sourcePort.dataType,
       ...(sourcePort.dataType === 'vector' && Number.isInteger(sourcePort.vectorLength)
-        ? { vectorLength: sourcePort.vectorLength }
+        ? {
+          vectorLength: sourcePort.vectorLength,
+          ...(Array.isArray(sourcePort.vectorElementNames) && sourcePort.vectorElementNames.length
+            ? { vectorElementNames: [...sourcePort.vectorElementNames] }
+            : {})
+        }
         : {})
     };
     if (sourcePort.dataType !== 'vector') {
       delete target.inputs[targetPortIndex].vectorLength;
+      delete target.inputs[targetPortIndex].vectorElementNames;
     }
   });
 }

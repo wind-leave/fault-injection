@@ -303,7 +303,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
             d_matrix,
             normalized_target_fault_ids,
             observations=payload.get("observations"),
-            max_faults=payload.get("maxFaults", max(2, len(normalized_target_fault_ids))),
+            max_faults=len((d_matrix or {}).get("rows") or []),
             max_steps=max_steps,
             model_graph=payload.get("modelGraph"),
         )
@@ -501,7 +501,6 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
                 target_fault_ids=target_fault_ids,
                 initial_point_states=payload.get("initialPointStates"),
                 initial_recommended_path=payload.get("initialRecommendedPath"),
-                key_nodes=payload.get("keyNodes"),
                 scoring_rules=payload.get("scoringRules"),
                 lifecycle=payload.get("lifecycle"),
                 action_rules=payload.get("actionRules"),

@@ -476,11 +476,11 @@ function createDefaultNodeFaultSlots(node = {}, options = {}) {
   const props = isPlainObject(node.props) ? node.props : {};
   const physicalItems = options.skipPhysical
     ? []
-    : [
-      ...arrayOrEmpty(props.modelParameters),
-      ...arrayOrEmpty(props.physicalParameters),
-      ...arrayOrEmpty(node.physicalParameters)
-    ];
+    // Use the same parameter discovery path as the property panel.  Standard
+    // Python simulation components keep their configurable parameters in
+    // props.parameters, so looking only at modelParameters/physicalParameters
+    // made them invisible to the physical-fault runtime.
+    : getComponentFaultVariables(node).filter((variable) => variable.role === 'parameter');
   const electricalItems = [
     ...arrayOrEmpty(props.inputs).map((item, index) => ({ role: 'input', item, index })),
     ...arrayOrEmpty(props.outputs).map((item, index) => ({ role: 'output', item, index })),

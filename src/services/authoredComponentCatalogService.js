@@ -50,6 +50,13 @@ function normalizeValue(value, type) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function normalizeVectorElementNames(value, vectorLength) {
+  if (!vectorLength || !Array.isArray(value)) return [];
+  return value
+    .slice(0, vectorLength)
+    .map((item) => String(item ?? '').trim());
+}
+
 function toPort(item, direction, index) {
   const type = normalizeType(item?.type);
   const name = String(item?.name ?? '').trim() || `${direction} ${index + 1}`;
@@ -57,13 +64,18 @@ function toPort(item, direction, index) {
   const vectorLength = type === 'number[]'
     ? normalizeArrayLength(item?.vectorLength) || undefined
     : undefined;
+  const vectorElementNames = normalizeVectorElementNames(item?.vectorElementNames, vectorLength);
 
   return {
     portId: `${direction}-${index}`,
     name,
     varName,
     type: type === 'number[]' ? 'vector' : 'float',
-    ...(type === 'number[]' ? { dataType: 'vector', ...(vectorLength ? { vectorLength } : {}) } : {}),
+    ...(type === 'number[]' ? {
+      dataType: 'vector',
+      ...(vectorLength ? { vectorLength } : {}),
+      ...(vectorElementNames.length ? { vectorElementNames } : {})
+    } : {}),
     ...(item?.unit ? { unit: String(item.unit).trim() } : {})
   };
 }

@@ -72,6 +72,31 @@ describe('authored component editing', () => {
     wrapper.unmount();
   });
 
+  it('exposes separately editable names for every fixed-length vector element', async () => {
+    const wrapper = mount(ComponentAuthoringDialog, { attachTo: document.body });
+    window.dispatchEvent(new CustomEvent('gz:open-component-authoring', {
+      detail: {
+        component: {
+          ...authoredComponent(),
+          inputs: [{
+            name: '姿态向量', varName: 'attitude', type: 'number[]', vectorLength: 3,
+            vectorElementNames: ['横滚', '俯仰', '偏航'], defaultValue: '[0,0,0]'
+          }],
+          outputs: [{
+            name: '控制向量', varName: 'control', type: 'number[]', vectorLength: 3,
+            vectorElementNames: ['副翼', '升降舵', '方向舵']
+          }]
+        }
+      }
+    }));
+    await nextTick();
+
+    expect(wrapper.findAll('[data-vector-element-name="input-0-0"]').at(0)?.element.value).toBe('横滚');
+    expect(wrapper.findAll('[data-vector-element-name="input-0-2"]').at(0)?.element.value).toBe('偏航');
+    expect(wrapper.findAll('[data-vector-element-name="output-0-1"]').at(0)?.element.value).toBe('升降舵');
+    wrapper.unmount();
+  });
+
   it('creates an unbound component without calling the backend registration API', async () => {
     const fetchImpl = vi.fn(() => { throw new Error('backend registration should not be called'); });
     vi.stubGlobal('fetch', fetchImpl);

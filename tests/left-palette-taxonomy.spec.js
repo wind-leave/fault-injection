@@ -89,6 +89,7 @@ describe('left palette taxonomy', () => {
     expect(wrapper.find('[data-palette-group="signal-ops"]').exists()).toBe(false);
     expect(groupComponents(wrapper, 'electrical')).toEqual([
       'electrical_ac_power_source',
+      'electrical_dc_power_source',
       'electrical_dc_boost',
       'electrical_ac_dc_matching'
     ]);

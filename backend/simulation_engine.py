@@ -303,8 +303,8 @@ def _source_supply_type(node, port):
     if declared:
         return declared
     module_id = getattr(node.module, "module_id", "")
-    if module_id in {"electrical_ac_dc_matching", "electrical_dc_boost"}:
-        return "DC"
+    if module_id in {"electrical_dc_power_source", "electrical_ac_dc_matching", "electrical_dc_boost"}:
+      return "DC"
     if module_id == "electrical_ac_power_source":
         return "AC"
     return ""

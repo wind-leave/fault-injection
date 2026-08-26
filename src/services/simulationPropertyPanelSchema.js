@@ -36,6 +36,19 @@ function textValue(value, fallback = '') {
   return text || fallback;
 }
 
+function vectorLength(item) {
+  const type = String(item?.dataType ?? item?.type ?? '').trim().toLowerCase();
+  const length = Number(item?.vectorLength ?? item?.length ?? item?.shape?.[0]);
+  return ['vector', '向量', 'number[]', 'array', 'list'].includes(type)
+    && Number.isInteger(length) && length > 0
+    ? length
+    : 0;
+}
+
+function vectorElementNames(item, length) {
+  return Array.from({ length }, (_, index) => textValue(item?.vectorElementNames?.[index], `元素 ${index + 1}`));
+}
+
 function clampInterfaceCount(value, limits = [0, 6]) {
   const parsed = Number.parseInt(value, 10);
   const fallback = Number.isFinite(Number(limits[0])) ? Number(limits[0]) : 0;
@@ -226,6 +239,19 @@ function renderPythonPortRows(binding, kind, helpers) {
     const status = kind === 'inputs'
       ? (item?.connected ? '<span class="pv pv-ok">已连接</span>' : '<span class="pv pv-fault">未连接</span>')
       : '<span class="pv pv-ok">已暴露</span>';
+    const length = vectorLength(item);
+    const elementNames = vectorElementNames(item, length);
+    const vectorFields = length
+      ? `
+        <div class="props-port-card__vector" data-python-port-vector-elements data-python-port-kind="${escape(kind)}" data-python-port-index="${index}">
+          <div class="props-port-card__vector-title">向量元素名称 · ${length} 项</div>
+          ${elementNames.map((elementName, elementIndex) => `
+            <div class="props-field props-port-card__vector-field">
+              <label>元素 ${elementIndex + 1}</label>
+              <input data-python-port-vector-element-name data-python-port-kind="${escape(kind)}" data-python-port-index="${index}" data-python-port-vector-element-index="${elementIndex}" value="${escape(elementName)}">
+            </div>`).join('')}
+        </div>`
+      : '';
     return `
       <div class="props-port-card props-port-card--editable">
         <div class="props-port-card__head">
@@ -237,6 +263,7 @@ function renderPythonPortRows(binding, kind, helpers) {
           <input data-python-port-display-name data-python-port-kind="${escape(kind)}" data-python-port-index="${index}" value="${escape(fallbackName)}">
         </div>
         <div class="props-port-card__meta"><span>${escape(item?.type || 'any')}</span></div>
+        ${vectorFields}
       </div>`;
   }).join('')}</div>`;
 }
@@ -427,6 +454,19 @@ export function readSimulationBlockValuesFromPanel(node, documentLike, helpers =
         .map((element, index) => textValue(element.value, list(binding?.portMapping?.[kind])[index]?.displayName || ''));
       return result;
     }, {});
+    const portVectorElementNames = ['inputs', 'outputs'].reduce((result, kind) => {
+      result[kind] = list(binding?.portMapping?.[kind]).map((port, portIndex) => {
+        const length = vectorLength(port);
+        if (!length) return [];
+        const currentNames = vectorElementNames(port, length);
+        return Array.from({ length }, (_, elementIndex) => textValue(
+          documentLike?.querySelector?.(`[data-python-port-vector-element-name][data-python-port-kind="${kind}"][data-python-port-index="${portIndex}"][data-python-port-vector-element-index="${elementIndex}"]`)?.value,
+          currentNames[elementIndex]
+        ));
+      });
+      return result;
+    }, {});
+    const hasVectorElementNames = Object.values(portVectorElementNames).some((ports) => ports.some((names) => names.length));
     return {
       values: {
         name: textValue(documentLike?.getElementById?.('prop-name')?.value, props.name || ''),
@@ -435,6 +475,7 @@ export function readSimulationBlockValuesFromPanel(node, documentLike, helpers =
         ...supplyValues
       },
       portDisplayNames,
+      ...(hasVectorElementNames ? { portVectorElementNames } : {}),
       shouldPruneInvalidEdges: false
     };
   }

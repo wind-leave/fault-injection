@@ -313,8 +313,8 @@ POST /api/practice/session
 | `simulationPackage` | object | 是 | `privateData.executableModel` |
 | `dMatrix` | object | 是 | `privateData.dMatrix` |
 | `targetFaultId` | string | 单故障兼容字段 | `privateData.targetFaultId`；未提供时后端使用 `targetFaultIds[0]` |
-| `targetFaultIds` | array | 是 | `privateData.targetFaultIds`；单故障为单元素数组，多故障为全部目标故障，候选组合允许包含的最大故障数由此确定 |
-| `initialRecommendedPath` | object | 否 | `privateData.initialRecommendedPath`；缺省时后端根据 D 矩阵生成 |
+| `targetFaultIds` | array | 是 | `privateData.targetFaultIds`；仅供后端根据 D 矩阵映射出正确的组件、连线 ID 集合并评分。诊断阶段会基于 D 矩阵中的全部故障同时考虑单故障与多故障组合。 |
+| `initialRecommendedPath` | object | 否 | `privateData.initialRecommendedPath`；其 `keySteps` 是关键评分步骤，后端会自动据此生成测点与维修动作的关键节点；缺省时后端根据 D 矩阵生成 |
 | `initialPointStates` | array | 是 | `privateData.initialPointStates`；后端直接读取各测点的 `observed` 作为初始诊断状态 |
 | `displayConsoleControls` | array | 有显控台控制时必填 | `privateData.displayConsoleControls`；用于约束实践动作可修改的组件及参数 |
 | `scoringRules` | object | 否 | 可选评分参数，例如 `fullEfficiencySeconds` |
@@ -551,21 +551,17 @@ POST /api/practice/session/{practiceSessionId}/submit
 
 ```json
 {
-  "finalFaultIds": ["fault-001", "fault-002"],
+  "finalTargetIds": ["imu-gyro-001", "edge-imu-controller"],
   "submittedAt": "2026-07-16T10:05:00+08:00"
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `finalFaultIds` | array | 多故障任务必填 | 学员最终选择的故障 ID 集合；自动去重且不考虑顺序 |
-| `finalFaultName` | string | 条件必填 | 学员最终判断的故障名称；与 `finalFaultId` 至少提供一个 |
-| `finalFaultId` | string | 单故障兼容字段 | 学员最终选择的单个故障 ID；后端按单元素集合处理 |
-| `faultName` | string | 否 | `finalFaultName` 的兼容别名 |
-| `faultId` | string | 否 | `finalFaultId` 的兼容别名 |
+| `finalTargetIds` | array | 是 | 学员最终判定的故障组件和连线 ID 集合；自动去重且不考虑顺序 |
 | `submittedAt` | string/number | 否 | 客户端提交时间 |
 
-正式实践中，`finalFaultIds`、`finalFaultId` 和 `finalFaultName` 必须来自学员最终选择，三维端不得使用后端私有 `targetFaultIds` 或 `targetFaultId` 替代学员答案。
+`finalTargetIds` 中的 ID 必须存在于当前模型的组件或连线中；同一模型内组件 ID 与连线 ID 必须全局唯一。真实 `targetFaultIds` 仅由后端用于生成正确目标集合和评分，客户端不得提交或读取它们。
 
 ### 6.3 成功响应
 
@@ -590,30 +586,17 @@ POST /api/practice/session/{practiceSessionId}/submit
 {
   "totalScore": 85,
   "grade": "良好",
-  "faultConclusion": {
-    "target": {
-      "faultId": "fault-001",
-      "faultName": "IMU 偏差"
-    },
-    "student": {
-      "faultId": "fault-001",
-      "faultName": "IMU 偏差"
-    },
+  "targetConclusion": {
     "correct": false,
     "exactMatch": false,
-    "targetFaults": [
-      {"faultId": "fault-001", "faultName": "IMU 偏差"},
-      {"faultId": "fault-002", "faultName": "线路断路"}
-    ],
-    "studentFaults": [
-      {"faultId": "fault-001", "faultName": "IMU 偏差"}
-    ],
+    "expectedTargetIds": ["imu-gyro-001", "edge-imu-controller"],
+    "studentTargetIds": ["imu-gyro-001"],
     "setAccuracy": 0.5,
     "precision": 1.0,
     "recall": 0.5,
-    "matchedFaultIds": ["fault-001"],
-    "missedFaultIds": ["fault-002"],
-    "extraFaultIds": []
+    "matchedTargetIds": ["imu-gyro-001"],
+    "missedTargetIds": ["edge-imu-controller"],
+    "extraTargetIds": []
   },
   "scoreDetails": [
     {
@@ -667,34 +650,12 @@ POST /api/practice/session/{practiceSessionId}/submit
         "confidence": 0.9,
         "reason": "virtual point can reduce remaining uncertainty"
       },
-      "systemRecommendationRating": {
-        "level": "optimal",
-        "label": "最优",
-        "rank": 1,
-        "priority": 90,
-        "confidence": 0.9,
-        "reason": "virtual point can reduce remaining uncertainty"
-      },
-      "candidateFaultCombinationsBefore": [["fault-001"], ["fault-002"]],
-      "candidateFaultCombinationsAfter": [["fault-001"]],
-      "candidateCountBefore": 2,
-      "candidateCountAfter": 1,
-      "removedCandidateCombinations": [["fault-002"]],
-      "addedCandidateCombinations": [],
-      "informationGain": {
-        "expectedInformationGain": 1.0,
-        "bestAvailableInformationGain": 1.0,
-        "candidateReductionCount": 1,
-        "candidateReductionRatio": 0.5,
-        "candidateSupportRatio": 0
-      },
       "decisionScore": 1.0,
       "bestAvailableDecisionScore": 1.0,
       "maxDecisionPoints": 15,
       "earnedDecisionPoints": 15,
       "deductedDecisionPoints": 0,
-      "deductionReasons": [],
-      "matchResult": {}
+      "deductionReasons": []
     }
   ],
   "keyNodeCoverage": {
@@ -752,12 +713,12 @@ POST /api/practice/session/{practiceSessionId}/submit
 多故障任务的 `faultLocalization` 按集合正确率计分：
 
 ```text
-setAccuracy = |targetFaultIds ∩ finalFaultIds| / |targetFaultIds ∪ finalFaultIds|
+setAccuracy = |expectedTargetIds ∩ finalTargetIds| / |expectedTargetIds ∪ finalTargetIds|
 faultLocalization = 30 × setAccuracy
 ```
 
-`exactMatch` 仅在两个故障集合完全相同时为 `true`。`precision` 表示学员所选故障中的正确比例，
-`recall` 表示真实故障被识别出的比例。单故障 `finalFaultId` 按单元素集合参与同一计算。
+`exactMatch` 仅在两个定位目标集合完全相同时为 `true`。`precision` 表示学员所选组件、连线中的正确比例，
+`recall` 表示真实故障目标被识别出的比例。
 
 ### 7.2 学生步骤评级
 

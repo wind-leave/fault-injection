@@ -711,7 +711,10 @@ describe('property panel interaction', () => {
     const scope = window.createNode('instrument_scope', 480, 180);
     const spectrum = window.createNode('instrument_spectrum', 480, 360);
     const state = window.__GZ_STATE__;
-    source.props.outputs = [{ name: 'Control vector', type: '向量', vectorLength: 3 }];
+    source.props.outputs = [{
+      name: 'Control vector', type: '向量', vectorLength: 3,
+      vectorElementNames: ['横滚指令', '俯仰指令', '偏航指令']
+    }];
     state.modelEdges.push({
       id: 'edge-vector-to-scope',
       sourceNodeId: source.id,
@@ -735,6 +738,7 @@ describe('property panel interaction', () => {
     const scopeSelector = document.querySelector('[data-instrument-vector-channel="vectorChannelCh1"]');
     expect(scopeSelector).not.toBeNull();
     expect(Array.from(scopeSelector.options).map((option) => option.value)).toEqual(['1', '2', '3']);
+    expect(Array.from(scopeSelector.options).map((option) => option.textContent)).toEqual(['横滚指令', '俯仰指令', '偏航指令']);
     scopeSelector.value = '3';
     document.querySelector('[data-property-save-node]').click();
     await flushRuntime();
@@ -771,8 +775,14 @@ describe('property panel interaction', () => {
       moduleName: 'controller',
       entryFunction: 'process',
       portMapping: {
-        inputs: [{ varName: 'error', displayName: '误差', type: 'float', connected: false }],
-        outputs: [{ varName: 'command', displayName: '控制指令', type: 'float' }],
+        inputs: [{
+          varName: 'error', displayName: '误差', type: 'vector', vectorLength: 3,
+          vectorElementNames: ['横滚误差', '俯仰误差', '偏航误差'], connected: false
+        }],
+        outputs: [{
+          varName: 'command', displayName: '控制指令', type: 'vector', vectorLength: 4,
+          vectorElementNames: ['副翼', '升降舵', '方向舵', '油门']
+        }],
         middleVars: [{ varName: 'integral', displayName: '积分量', type: 'float' }]
       }
     };
@@ -785,16 +795,22 @@ describe('property panel interaction', () => {
     expect(inputPortCard?.querySelector('.props-port-card__kind')?.textContent).toContain('输入端口 1');
     expect(inputPortCard?.querySelector('.props-port-card__name')).toBeNull();
     expect(inputPortCard?.querySelector('.props-port-card__var')).toBeNull();
+    expect(Array.from(inputPortCard?.querySelectorAll('[data-python-port-vector-element-name]') || []).map((element) => element.value)).toEqual(['横滚误差', '俯仰误差', '偏航误差']);
     setFieldValue('[data-python-port-display-name][data-python-port-kind="inputs"]', '姿态误差');
     setFieldValue('[data-python-port-display-name][data-python-port-kind="outputs"]', '执行器指令');
+    setFieldValue('[data-python-port-vector-element-name][data-python-port-kind="inputs"][data-python-port-vector-element-index="1"]', '俯仰角误差');
+    setFieldValue('[data-python-port-vector-element-name][data-python-port-kind="outputs"][data-python-port-vector-element-index="3"]', '发动机推力');
     document.querySelector('[data-property-save-node]').click();
     await flushRuntime();
 
     expect(block.pythonBinding.portMapping.inputs[0].displayName).toBe('姿态误差');
     expect(block.pythonBinding.portMapping.outputs[0].displayName).toBe('执行器指令');
+    expect(block.pythonBinding.portMapping.inputs[0].vectorElementNames).toEqual(['横滚误差', '俯仰角误差', '偏航误差']);
+    expect(block.pythonBinding.portMapping.outputs[0].vectorElementNames).toEqual(['副翼', '升降舵', '方向舵', '发动机推力']);
     expect(block.pythonBinding.portMapping.middleVars[0].displayName).toBe('积分量');
     expect(window.getNodePorts(block).inputs[0].label).toBe('姿态误差');
     expect(window.getNodePorts(block).outputs.map((port) => port.label)).toEqual(['执行器指令']);
+    expect(window.getNodePorts(block).outputs[0].meta.vectorElementNames).toEqual(['副翼', '升降舵', '方向舵', '发动机推力']);
 
     wrapper.unmount();
   });
@@ -2543,8 +2559,8 @@ describe('property panel interaction', () => {
     const frequencyRangeEnd = document.querySelector('[data-spectrum-config="frequencyRangeEnd"]');
     const frequencyRangeUnit = document.querySelector('[data-spectrum-config="frequencyRangeUnit"]');
     const autoFrequencyRange = document.querySelector('[data-spectrum-config="autoFrequencyRange"]');
-    expect(autoFrequencyRange?.value).toBe('on');
-    expect(frequencyRangeStart?.disabled).toBe(true);
+    expect(autoFrequencyRange?.value).toBe('off');
+    expect(frequencyRangeStart?.disabled).toBe(false);
     expect(Array.from(frequencyRangeUnit?.options ?? []).map((option) => option.value)).toContain('GHz');
     autoFrequencyRange.value = 'off';
     autoFrequencyRange.dispatchEvent(new Event('change', { bubbles: true }));
@@ -2650,10 +2666,10 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     const spectrumWindow = document.querySelector('[data-spectrum-window]');
-    expect(spectrumWindow?.querySelector('[data-spectrum-peak-frequency]')?.textContent).toContain('9.77');
+    expect(spectrumWindow?.querySelector('[data-spectrum-peak-frequency]')?.textContent).toContain('9.7656');
     const visibleFrequencies = Array.from(spectrumWindow?.querySelectorAll('[data-spectrum-bin]') ?? [])
       .map((bin) => Number(bin.getAttribute('data-spectrum-frequency')));
-    expect(visibleFrequencies).toHaveLength(128);
+    expect(visibleFrequencies).toHaveLength(513);
     expect(visibleFrequencies.some((frequency) => Math.abs(frequency - 9.765625) < 1e-6)).toBe(true);
     wrapper.unmount();
   });

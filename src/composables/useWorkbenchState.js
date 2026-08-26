@@ -67,6 +67,9 @@ export function createSimulationBlockPythonBinding(parsedInterface, options = {}
         ...(Number.isInteger(item.vectorLength) && item.vectorLength > 0
           ? { vectorLength: item.vectorLength }
           : {}),
+        ...(Array.isArray(item.vectorElementNames) && item.vectorElementNames.length
+          ? { vectorElementNames: [...item.vectorElementNames] }
+          : {}),
         default: item.default ?? null,
         comment: item.comment ?? '',
         connected: false
@@ -80,6 +83,9 @@ export function createSimulationBlockPythonBinding(parsedInterface, options = {}
         ...(Number.isInteger(item.vectorLength) && item.vectorLength > 0
           ? { vectorLength: item.vectorLength }
           : {}),
+        ...(Array.isArray(item.vectorElementNames) && item.vectorElementNames.length
+          ? { vectorElementNames: [...item.vectorElementNames] }
+          : {}),
         comment: item.comment ?? ''
       })),
       middleVars: (parsedInterface.middleVars ?? []).map((item, index) => ({
@@ -90,6 +96,9 @@ export function createSimulationBlockPythonBinding(parsedInterface, options = {}
         ...(item.dataType ? { dataType: item.dataType } : {}),
         ...(Number.isInteger(item.vectorLength) && item.vectorLength > 0
           ? { vectorLength: item.vectorLength }
+          : {}),
+        ...(Array.isArray(item.vectorElementNames) && item.vectorElementNames.length
+          ? { vectorElementNames: [...item.vectorElementNames] }
           : {}),
         comment: item.comment ?? ''
       }))

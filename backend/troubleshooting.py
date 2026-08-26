@@ -312,12 +312,7 @@ def build_troubleshooting_path(d_matrix, target_fault_id, remaining_rows=None, u
 
 
 def build_troubleshooting_plan(d_matrix, target_fault_id, max_steps=4):
-    path = build_troubleshooting_path(d_matrix, target_fault_id, max_steps=max_steps)
-    return {
-        **path,
-        "source": "backend-algorithm",
-        "isCustomized": False,
-    }
+    return build_troubleshooting_path(d_matrix, target_fault_id, max_steps=max_steps)
 
 
 class TroubleshootingSession:

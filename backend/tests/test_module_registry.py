@@ -48,13 +48,17 @@ class ModuleRegistryTests(unittest.TestCase):
 
         self.assertAlmostEqual(result["outputs"]["socket05"], 9.8, places=12)
 
-    def test_electrical_modules_generate_ac_boost_dc_and_match_rms_ac_to_dc(self):
+    def test_electrical_modules_generate_ac_and_dc_sources_boost_dc_and_match_rms_ac_to_dc(self):
         registry = ModuleRegistry.from_builtin_manifest()
 
         ac_source = registry.require("electrical_ac_power_source").call(
             {},
             {"voltage_rms": 10.0, "frequency_hz": 1.0, "phase_deg": 90.0},
             time=0.0,
+        )
+        dc_source = registry.require("electrical_dc_power_source").call(
+            {},
+            {"output_voltage": 28.0},
         )
         dc_boost = registry.require("electrical_dc_boost").call(
             {"dc_input": 12.0},
@@ -70,6 +74,7 @@ class ModuleRegistryTests(unittest.TestCase):
         self.assertAlmostEqual(ac_source["outputs"]["ac_phase_a"], 10.0 * (2.0 ** 0.5), places=12)
         self.assertAlmostEqual(ac_source["outputs"]["ac_phase_b"], -5.0 * (2.0 ** 0.5), places=12)
         self.assertAlmostEqual(ac_source["outputs"]["ac_phase_c"], -5.0 * (2.0 ** 0.5), places=12)
+        self.assertEqual(dc_source["outputs"]["dc_output"], 28.0)
         self.assertAlmostEqual(dc_boost["outputs"]["dc_output"], 21.6, places=12)
         self.assertAlmostEqual(ac_dc_matching["outputs"]["dc_output"], 9.6, places=12)
         self.assertEqual(ground["outputs"], {})

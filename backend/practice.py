@@ -51,6 +51,14 @@ def _fault_id(row):
     return _text(row.get("faultId") or row.get("faultTypeId") or row.get("caseId") or row.get("id"))
 
 
+def _fault_target_id(row):
+    """Return the canvas component or wire id on which a fault occurs."""
+    target_kind = _text(row.get("targetKind")).lower()
+    if target_kind in {"edge", "wire", "line", "connection"} or _text(row.get("targetEdgeId")):
+        return _text(row.get("targetEdgeId") or row.get("targetId"))
+    return _text(row.get("targetNodeId") or row.get("targetId"))
+
+
 def _point_code(point):
     return _text(point.get("shortName") or point.get("pointCode") or point.get("pointId"))
 
@@ -114,7 +122,6 @@ class PracticeSession:
         target_fault_ids=None,
         initial_point_states=None,
         initial_recommended_path=None,
-        key_nodes=None,
         scoring_rules=None,
         lifecycle=None,
         action_rules=None,
@@ -158,7 +165,7 @@ class PracticeSession:
                 f"targetFaultIds contains faults that are not present in dMatrix.rows: {', '.join(missing_target_fault_ids)}",
             )
         self.target_fault_ids = normalized_target_fault_ids or [primary_target_fault_id]
-        self.max_candidate_fault_count = max(1, len(self.target_fault_ids))
+        self.max_candidate_fault_count = len(matrix_fault_ids)
         self.diagnostic_knowledge_graph = build_diagnostic_knowledge_graph(
             self.troubleshooting.d_matrix,
             model_graph=model_graph,
@@ -193,17 +200,20 @@ class PracticeSession:
         self.latest_physical_measurement_snapshot = None
         self.initial_physical_measurement_snapshot = None
         generated_initial_path = self._build_initial_recommended_path(self.troubleshooting.initial_response()["currentPath"])
-        generated_key_nodes = self._build_fault_tree_key_nodes()
         self.initial_best_path = (
             _clone(initial_recommended_path)
             if isinstance(initial_recommended_path, dict)
             else generated_initial_path
         )
+        # `keySteps` is part of the authored initial path.  Derive scoring
+        # nodes from it instead of accepting a second, duplicative keyNodes
+        # payload from the client.  Older paths without usable keySteps retain
+        # the automatic fault-tree fallback.
         self.fault_tree_key_nodes = (
-            _clone(key_nodes)
-            if isinstance(key_nodes, list)
-            else generated_key_nodes
-        )
+            self._build_key_nodes_from_initial_path(self.initial_best_path)
+            if isinstance(initial_recommended_path, dict)
+            else []
+        ) or self._build_fault_tree_key_nodes()
         lifecycle_config = lifecycle if isinstance(lifecycle, dict) else {}
         self.max_lifetime_seconds = _lifecycle_seconds(
             lifecycle_config, "maxLifetimeSeconds", DEFAULT_MAX_LIFETIME_SECONDS
@@ -448,6 +458,74 @@ class PracticeSession:
         point = _point_by_code(self.troubleshooting.d_matrix, point_code)
         name = _text(point.get("name") or point.get("pointName") or point_code, point_code)
         return f"{prefix} {point_code} {name}".strip()
+
+    def _build_key_nodes_from_initial_path(self, initial_path):
+        """Convert authored initial-path key steps into scoring key nodes."""
+        if not isinstance(initial_path, dict):
+            return []
+
+        nodes = []
+        seen_node_ids = set()
+        for step in _arr(initial_path.get("keySteps")):
+            if not isinstance(step, dict):
+                continue
+
+            action = _text(step.get("actionType") or step.get("action"))
+            if action in {"measure", "measurePoint"}:
+                point_code = _text(step.get("pointCode"))
+                if (
+                    not point_code
+                    or point_type(self.troubleshooting.d_matrix, point_code) != "virtual"
+                ):
+                    continue
+                node_id = f"measure-{point_code}"
+                node = {
+                    "nodeId": node_id,
+                    "type": "measurePoint",
+                    "pointCode": point_code,
+                    "label": _text(step.get("text")) or self._key_node_label_for_point("测量虚拟测点", point_code),
+                    "score": 0,
+                }
+            elif action in {"replaceComponent", "replaceWire"}:
+                supplied_target = step.get("target") if isinstance(step.get("target"), dict) else {}
+                target_id = _text(supplied_target.get("id") or step.get("targetId"))
+                target_type = _text(supplied_target.get("type")) or (
+                    "wire" if action == "replaceWire" else "component"
+                )
+                if not target_id or target_type not in {"component", "wire"}:
+                    continue
+                node_id = f"repair-{target_type}-{target_id}"
+                node = {
+                    "nodeId": node_id,
+                    "type": "repairTarget",
+                    "target": {"type": target_type, "id": target_id},
+                    "faultIds": _clone(self.target_fault_ids),
+                    "label": _text(step.get("targetLabel") or step.get("text")) or (
+                        "更换故障线路" if target_type == "wire" else "更换故障组件"
+                    ),
+                    "score": 0,
+                }
+            else:
+                continue
+
+            if node_id not in seen_node_ids:
+                seen_node_ids.add(node_id)
+                nodes.append(node)
+
+        if not nodes:
+            return []
+
+        score_per_node = 12.0 / len(nodes)
+        allocated_score = 0.0
+        for index, node in enumerate(nodes):
+            node_score = (
+                12.0 - allocated_score
+                if index == len(nodes) - 1
+                else _round_score(score_per_node)
+            )
+            node["score"] = _round_score(node_score)
+            allocated_score += node["score"]
+        return nodes
 
     def _build_fault_tree_key_nodes(self):
         target_row = self.troubleshooting.target_row
@@ -1283,86 +1361,71 @@ class PracticeSession:
     def submit(self, payload):
         if not isinstance(payload, dict):
             raise SimulationBackendError("INVALID_SCHEMA", "submission", "submission must be an object")
-        final_fault_inputs = payload.get("finalFaultIds")
-        if final_fault_inputs is not None:
-            if not isinstance(final_fault_inputs, list) or not final_fault_inputs:
-                raise SimulationBackendError(
-                    "INVALID_SCHEMA",
-                    "finalFaultIds",
-                    "finalFaultIds must be a non-empty array",
-                )
-        else:
-            legacy_final_fault = _text(
-                payload.get("finalFaultName")
-                or payload.get("faultName")
-                or payload.get("finalFaultId")
-                or payload.get("faultId")
-            )
-            final_fault_inputs = [legacy_final_fault] if legacy_final_fault else []
-        normalized_final_fault_inputs = []
-        for value in final_fault_inputs:
-            normalized_value = _text(value)
-            if normalized_value and normalized_value not in normalized_final_fault_inputs:
-                normalized_final_fault_inputs.append(normalized_value)
-        if not normalized_final_fault_inputs:
+        final_target_inputs = payload.get("finalTargetIds")
+        if not isinstance(final_target_inputs, list) or not final_target_inputs:
             raise SimulationBackendError(
                 "INVALID_SCHEMA",
-                "finalFaultIds",
-                "finalFaultIds or finalFaultId is required",
+                "finalTargetIds",
+                "finalTargetIds must be a non-empty array",
             )
 
-        matrix_rows = _arr(self.troubleshooting.d_matrix.get("rows"))
-        final_faults = []
-        for final_fault_input in normalized_final_fault_inputs:
-            matched_row = next(
-                (
-                    row
-                    for row in matrix_rows
-                    if _fault_id(row) == final_fault_input
-                    or _text(row.get("faultName")) == final_fault_input
-                ),
-                None,
-            )
-            final_fault_id = _fault_id(matched_row) if matched_row else final_fault_input
-            if any(item["faultId"] == final_fault_id for item in final_faults):
-                continue
-            final_faults.append({
-                "faultId": final_fault_id,
-                "faultName": (
-                    _text(matched_row.get("faultName"), final_fault_id)
-                    if matched_row
-                    else final_fault_input
-                ),
-            })
+        final_target_ids = []
+        for value in final_target_inputs:
+            target_id = _text(value)
+            if not target_id:
+                raise SimulationBackendError(
+                    "INVALID_SCHEMA",
+                    "finalTargetIds",
+                    "each finalTargetIds item must be a non-empty string",
+                )
+            if target_id not in final_target_ids:
+                final_target_ids.append(target_id)
 
-        target_faults = []
+        graph_node_ids = set(self.simulation_session.graph.nodes)
+        graph_edge_ids = {edge.id for edge in self.simulation_session.graph.edges}
+        ambiguous_ids = [target_id for target_id in final_target_ids if target_id in graph_node_ids and target_id in graph_edge_ids]
+        if ambiguous_ids:
+            raise SimulationBackendError(
+                "INVALID_SCHEMA",
+                "finalTargetIds",
+                f"target ids must be globally unique across components and wires: {', '.join(ambiguous_ids)}",
+            )
+        unknown_ids = [target_id for target_id in final_target_ids if target_id not in graph_node_ids and target_id not in graph_edge_ids]
+        if unknown_ids:
+            raise SimulationBackendError(
+                "INVALID_SCHEMA",
+                "finalTargetIds",
+                f"target ids are not present in the simulation graph: {', '.join(unknown_ids)}",
+            )
+
+        rows_by_fault_id = {
+            _fault_id(row): row
+            for row in _arr(self.troubleshooting.d_matrix.get("rows"))
+            if _fault_id(row)
+        }
+        expected_target_ids = []
         for target_fault_id in self.target_fault_ids:
-            target_row = next((row for row in matrix_rows if _fault_id(row) == target_fault_id), None)
-            target_faults.append({
-                "faultId": target_fault_id,
-                "faultName": _text((target_row or {}).get("faultName"), target_fault_id),
-            })
+            target_id = _fault_target_id(rows_by_fault_id.get(target_fault_id, {}))
+            if not target_id:
+                raise SimulationBackendError(
+                    "INVALID_SCHEMA",
+                    "dMatrix.rows",
+                    f"target fault {target_fault_id} must declare targetNodeId or targetEdgeId for final target scoring",
+                )
+            if target_id not in expected_target_ids:
+                expected_target_ids.append(target_id)
 
-        target_fault_id_set = {item["faultId"] for item in target_faults}
-        final_fault_id_set = {item["faultId"] for item in final_faults}
-        matched_fault_ids = [
-            item["faultId"] for item in target_faults if item["faultId"] in final_fault_id_set
-        ]
-        missed_fault_ids = [
-            item["faultId"] for item in target_faults if item["faultId"] not in final_fault_id_set
-        ]
-        extra_fault_ids = [
-            item["faultId"] for item in final_faults if item["faultId"] not in target_fault_id_set
-        ]
-        intersection_count = len(target_fault_id_set & final_fault_id_set)
-        union_count = len(target_fault_id_set | final_fault_id_set)
+        expected_target_id_set = set(expected_target_ids)
+        final_target_id_set = set(final_target_ids)
+        matched_target_ids = [target_id for target_id in expected_target_ids if target_id in final_target_id_set]
+        missed_target_ids = [target_id for target_id in expected_target_ids if target_id not in final_target_id_set]
+        extra_target_ids = [target_id for target_id in final_target_ids if target_id not in expected_target_id_set]
+        intersection_count = len(expected_target_id_set & final_target_id_set)
+        union_count = len(expected_target_id_set | final_target_id_set)
         set_accuracy = intersection_count / union_count if union_count else 1.0
-        precision = intersection_count / len(final_fault_id_set) if final_fault_id_set else 0.0
-        recall = intersection_count / len(target_fault_id_set) if target_fault_id_set else 0.0
-        correct = target_fault_id_set == final_fault_id_set
-        target_fault_name = target_faults[0]["faultName"]
-        final_fault_id = final_faults[0]["faultId"]
-        final_fault_name = final_faults[0]["faultName"]
+        precision = intersection_count / len(final_target_id_set) if final_target_id_set else 0.0
+        recall = intersection_count / len(expected_target_id_set) if expected_target_id_set else 0.0
+        correct = expected_target_id_set == final_target_id_set
         self.submitted_at = time.time()
         self.close("submitted", now=self.submitted_at)
         elapsed_seconds = max(0.0, self.submitted_at - self.started_at)
@@ -1379,19 +1442,15 @@ class PracticeSession:
             score=scoring_result["score"],
             grade=scoring_result["grade"],
             score_breakdown=scoring_result["scoreBreakdown"],
-            target_fault_id=self.target_fault_id,
-            target_fault_name=target_fault_name,
-            final_fault_id=final_fault_id,
-            final_fault_name=final_fault_name,
             correct=correct,
-            target_faults=target_faults,
-            final_faults=final_faults,
+            expected_target_ids=expected_target_ids,
+            final_target_ids=final_target_ids,
             set_accuracy=set_accuracy,
             precision=precision,
             recall=recall,
-            matched_fault_ids=matched_fault_ids,
-            missed_fault_ids=missed_fault_ids,
-            extra_fault_ids=extra_fault_ids,
+            matched_target_ids=matched_target_ids,
+            missed_target_ids=missed_target_ids,
+            extra_target_ids=extra_target_ids,
             initial_optimal_path=self.initial_best_path,
             actual_steps=self.actual_troubleshooting_steps,
             dynamic_reference_history=self.dynamic_reference_history,

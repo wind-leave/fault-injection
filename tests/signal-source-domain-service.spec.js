@@ -5,7 +5,9 @@ import {
   formatRfVectorValues,
   getRfVectorValues,
   getSignalSourceScalarFallback,
+  isRfComplexEnvelopeOutput,
   isRfVectorOutput,
+  normalizeRfModulation,
   normalizeSignalSourceProps,
   summarizeSignalSource
 } from '../src/services/signalSourceDomainService.js';
@@ -99,6 +101,23 @@ describe('signalSourceDomainService', () => {
     });
   });
 
+  it('normalizes legacy RF modulation labels so pulse parameters remain editable', () => {
+    expect(normalizeRfModulation('脉冲调制')).toBe('pulse');
+    expect(normalizeRfModulation(' PULSE ')).toBe('pulse');
+    expect(normalizeSignalSourceProps({
+      signalDomain: 'rf',
+      modulation: '脉冲',
+      pulseWidth: '250us',
+      pulsePeriod: '1ms'
+    })).toMatchObject({
+      modulation: 'pulse',
+      pulseWidth: '250',
+      pulseWidthUnit: 'μs',
+      pulsePeriod: '1',
+      pulsePeriodUnit: 'ms'
+    });
+  });
+
   it('uses the default 0 dBm level for legacy RF sources with an empty power field', () => {
     expect(normalizeSignalSourceProps({ signalDomain: 'rf', power: '' }).power).toBe('0');
   });
@@ -141,5 +160,30 @@ describe('signalSourceDomainService', () => {
     expect(formatRfVectorValues([2, 1], 3)).toBe('2, 1, 1');
     expect(isRfVectorOutput(props)).toBe(true);
     expect(isRfVectorOutput({ signalDomain: 'rf', outputFormat: '标量' })).toBe(false);
+  });
+
+  it('recognizes the RF complex-envelope output format', () => {
+    const props = normalizeSignalSourceProps(createSignalSourceProps('rf', { outputFormat: '复数包络' }));
+
+    expect(isRfComplexEnvelopeOutput(props)).toBe(true);
+    expect(isRfComplexEnvelopeOutput({ signalDomain: 'rf', outputFormat: '标量' })).toBe(false);
+    expect(props).toMatchObject({ modulation: 'pulse' });
+    expect(props).not.toHaveProperty('riseTime');
+    expect(props).not.toHaveProperty('fallTime');
+    expect(props).not.toHaveProperty('impedanceOhm');
+  });
+
+  it('normalizes a centrally configured complex-envelope vector', () => {
+    const props = normalizeSignalSourceProps({
+      signalDomain: 'rf', outputFormat: '复数包络',
+      rfComplexEnvelopeMode: 'vector', rfVectorLength: '3'
+    });
+    expect(props).toMatchObject({
+      rfComplexEnvelopeMode: 'vector', rfVectorLength: 3, modulation: 'pulse'
+    });
+    expect(normalizeSignalSourceProps({
+      signalDomain: 'rf', outputFormat: '复数包络',
+      rfComplexEnvelopeMode: 'vector', rfVectorLength: 32
+    }).rfVectorLength).toBe(32);
   });
 });

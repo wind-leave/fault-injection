@@ -23,6 +23,7 @@ export function createDefaultPythonBinding() {
     parsedInterface: null,
     rawSource: '',
     executionMode: 'mock',
+    parameters: [],
     portMapping: {
       inputs: [],
       outputs: [],
@@ -32,6 +33,8 @@ export function createDefaultPythonBinding() {
 }
 
 export function createSimulationBlockPythonBinding(parsedInterface, options = {}) {
+  const inputItems = (parsedInterface.inputs ?? []).filter((item) => item?.parameter !== true);
+  const parameterItems = (parsedInterface.inputs ?? []).filter((item) => item?.parameter === true);
   const moduleId =
     options.moduleId ??
     parsedInterface.moduleName ??
@@ -53,8 +56,9 @@ export function createSimulationBlockPythonBinding(parsedInterface, options = {}
     parsedInterface,
     rawSource: parsedInterface.rawSource,
     executionMode: options.executionMode ?? 'mock',
+    parameters: (options.parameters ?? parameterItems).map((item) => ({ ...item })),
     portMapping: {
-      inputs: (parsedInterface.inputs ?? []).map((item, index) => ({
+      inputs: inputItems.map((item, index) => ({
         portId: `input-${index}`,
         varName: item.name,
         displayName: resolvePortDisplayName(item),
@@ -62,6 +66,9 @@ export function createSimulationBlockPythonBinding(parsedInterface, options = {}
         ...(item.dataType ? { dataType: item.dataType } : {}),
         ...(Number.isInteger(item.vectorLength) && item.vectorLength > 0
           ? { vectorLength: item.vectorLength }
+          : {}),
+        ...(Array.isArray(item.vectorElementNames) && item.vectorElementNames.length
+          ? { vectorElementNames: [...item.vectorElementNames] }
           : {}),
         default: item.default ?? null,
         comment: item.comment ?? '',
@@ -76,6 +83,9 @@ export function createSimulationBlockPythonBinding(parsedInterface, options = {}
         ...(Number.isInteger(item.vectorLength) && item.vectorLength > 0
           ? { vectorLength: item.vectorLength }
           : {}),
+        ...(Array.isArray(item.vectorElementNames) && item.vectorElementNames.length
+          ? { vectorElementNames: [...item.vectorElementNames] }
+          : {}),
         comment: item.comment ?? ''
       })),
       middleVars: (parsedInterface.middleVars ?? []).map((item, index) => ({
@@ -86,6 +96,9 @@ export function createSimulationBlockPythonBinding(parsedInterface, options = {}
         ...(item.dataType ? { dataType: item.dataType } : {}),
         ...(Number.isInteger(item.vectorLength) && item.vectorLength > 0
           ? { vectorLength: item.vectorLength }
+          : {}),
+        ...(Array.isArray(item.vectorElementNames) && item.vectorElementNames.length
+          ? { vectorElementNames: [...item.vectorElementNames] }
           : {}),
         comment: item.comment ?? ''
       }))

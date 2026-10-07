@@ -1,8 +1,8 @@
 const DEFAULT_MODULE_TYPES = ['一阶函数', '微分', '积分'];
 const DEFAULT_PORT_FORMATS = ['标量', '向量', '矩阵', '布尔', '事件'];
 const DEFAULT_INTERFACE_LIMITS = {
-  inputs: [1, 6],
-  outputs: [1, 6],
+  inputs: [1, 32],
+  outputs: [1, 64],
   middleVars: [0, 6]
 };
 
@@ -36,6 +36,34 @@ function textValue(value, fallback = '') {
   return text || fallback;
 }
 
+function sidePosition(value, fallback = 1) {
+  const numeric = Number.parseInt(value, 10);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : fallback;
+}
+
+function vectorLength(item) {
+  const type = String(item?.dataType ?? item?.type ?? '').trim().toLowerCase();
+  const length = Number(item?.vectorLength ?? item?.length ?? item?.shape?.[0]);
+  // A complex-envelope port retains its RF data type while declaring that it
+  // carries a vector. Treat that collection contract exactly like a regular
+  // vector so its individual routes can be displayed and named.
+  const isVector = item?.collectionKind === 'vector'
+    || ['vector', '向量', 'number[]', 'array', 'list'].includes(type);
+  return isVector
+    && Number.isInteger(length) && length > 0
+    ? length
+    : 0;
+}
+
+function vectorElementNames(item, length) {
+  return Array.from({ length }, (_, index) => textValue(item?.vectorElementNames?.[index], `元素 ${index + 1}`));
+}
+
+function scalarElementNames(item) {
+  const configured = Array.isArray(item?.elementNames) ? item.elementNames[0] : item?.elementName;
+  return [textValue(configured, '元素 1')];
+}
+
 function clampInterfaceCount(value, limits = [0, 6]) {
   const parsed = Number.parseInt(value, 10);
   const fallback = Number.isFinite(Number(limits[0])) ? Number(limits[0]) : 0;
@@ -47,15 +75,21 @@ function clampInterfaceCount(value, limits = [0, 6]) {
 }
 
 function normalizeSimulationInterfaceList(items, prefix, fallbackType = '标量', count = items.length) {
+  const defaultSide = prefix === '输出' ? 'right' : 'left';
   const base = list(items).map((item, index) => ({
     name: textValue(item?.name, `${prefix} ${index + 1}`),
-    type: textValue(item?.type, fallbackType)
+    type: textValue(item?.type, fallbackType),
+    ...(prefix === '中间变量' ? {} : {
+      side: item?.side === 'right' ? 'right' : (item?.side === 'left' ? 'left' : defaultSide),
+      sidePosition: sidePosition(item?.sidePosition, index + 1)
+    })
   }));
 
   while (base.length < count) {
     base.push({
       name: `${prefix} ${base.length + 1}`,
-      type: fallbackType
+      type: fallbackType,
+      ...(prefix === '中间变量' ? {} : { side: defaultSide, sidePosition: base.length + 1 })
     });
   }
 
@@ -69,7 +103,11 @@ function readSimulationInterfaceRows(documentLike, role, fallbackType = '标量'
 
   return [...documentLike.querySelectorAll(`.sim-intf-row[data-role="${role}"]`)].map((row, index) => ({
     name: textValue(row.querySelector('[data-sim-field="name"]')?.value, `${role} ${index + 1}`),
-    type: textValue(row.querySelector('[data-sim-field="type"]')?.value, fallbackType)
+    type: textValue(row.querySelector('[data-sim-field="type"]')?.value, fallbackType),
+    ...(role === '中间变量' ? {} : {
+      side: row.querySelector('[data-sim-field="side"]')?.value === 'right' ? 'right' : 'left',
+      sidePosition: sidePosition(row.querySelector('[data-sim-field="sidePosition"]')?.value, index + 1)
+    })
   }));
 }
 
@@ -77,6 +115,8 @@ function renderSimulationInterfaceRows(items, prefix, helpers = {}) {
   const escape = helpers.escapeHtml || escapeHtml;
   const portFormats = helpers.portFormats || DEFAULT_PORT_FORMATS;
 
+  const supportsSide = prefix !== '中间变量';
+  const defaultSide = prefix === '输出' ? 'right' : 'left';
   return list(items).map((item, index) => `
       <div class="sim-intf-row" data-role="${escape(prefix)}" data-index="${index}">
         <div class="props-field">
@@ -87,6 +127,13 @@ function renderSimulationInterfaceRows(items, prefix, helpers = {}) {
           <label>${escape(prefix)}类型</label>
           <select data-sim-field="type">${buildSelectOptions(portFormats, item?.type || '标量', helpers.buildSelectOptions)}</select>
         </div>
+        ${supportsSide ? `<div class="props-field">
+          <label>画布位置</label>
+          <select data-sim-field="side">${buildSelectOptions(['left', 'right'], item?.side || defaultSide, (options, selected) => options.map((side) => `<option value="${side}"${side === selected ? ' selected' : ''}>${side === 'left' ? '左侧' : '右侧'}</option>`).join(''))}</select>
+        </div><div class="props-field">
+          <label>侧内序号</label>
+          <input data-sim-field="sidePosition" type="number" min="1" step="1" value="${sidePosition(item?.sidePosition, index + 1)}">
+        </div>` : ''}
       </div>`).join('');
 }
 
@@ -150,6 +197,10 @@ function renderSupplyInterfaceGroup(props, helpers = {}) {
 }
 
 function shouldRenderSupplyInterface(node, helpers = {}) {
+  const powerOptionalTemplates = new Set(['DZDK_A', 'DZDK_B', 'DZDK_C', 'DZDK_D']);
+  if (node?.props?.requiresPower === false || powerOptionalTemplates.has(String(node?.templateId || ''))) {
+    return false;
+  }
   if (typeof helpers.isElectricalComponent === 'function') {
     return !helpers.isElectricalComponent(node);
   }
@@ -183,14 +234,14 @@ function renderUnboundSimulationFields(node, helpers = {}) {
       <div class="sim-intf-group">
         <div class="sim-intf-head">
           <div class="sim-intf-title">输入端口</div>
-          <div class="sim-intf-meta">${inputs.length} 个左侧端口</div>
+          <div class="sim-intf-meta">${inputs.length} 个端口，可设左侧或右侧</div>
         </div>
         <div class="sim-intf-list">${renderSimulationInterfaceRows(inputs, '输入', helpers)}</div>
       </div>
       <div class="sim-intf-group">
         <div class="sim-intf-head">
           <div class="sim-intf-title">输出端口</div>
-          <div class="sim-intf-meta">${outputs.length} 个右侧输出</div>
+          <div class="sim-intf-meta">${outputs.length} 个端口，可设左侧或右侧</div>
         </div>
         <div class="sim-intf-list">${renderSimulationInterfaceRows(outputs, '输出', helpers)}</div>
       </div>
@@ -226,6 +277,28 @@ function renderPythonPortRows(binding, kind, helpers) {
     const status = kind === 'inputs'
       ? (item?.connected ? '<span class="pv pv-ok">已连接</span>' : '<span class="pv pv-fault">未连接</span>')
       : '<span class="pv pv-ok">已暴露</span>';
+    const length = vectorLength(item);
+    const elementNames = vectorElementNames(item, length);
+    const elementFields = length
+      ? `
+        <div class="props-port-card__vector" data-python-port-vector-elements data-python-port-kind="${escape(kind)}" data-python-port-index="${index}">
+          <div class="props-port-card__vector-title">向量元素名称 · ${length} 项</div>
+          ${elementNames.map((elementName, elementIndex) => `
+            <div class="props-field props-port-card__vector-field">
+              <label>元素 ${elementIndex + 1}</label>
+              <input data-python-port-vector-element-name data-python-port-kind="${escape(kind)}" data-python-port-index="${index}" data-python-port-vector-element-index="${elementIndex}" value="${escape(elementName)}">
+            </div>`).join('')}
+        </div>`
+      : kind === 'inputs' || kind === 'outputs'
+        ? `
+          <div class="props-port-card__vector" data-python-port-scalar-elements data-python-port-kind="${escape(kind)}" data-python-port-index="${index}">
+            <div class="props-port-card__vector-title">元素名称 · 1 项</div>
+            <div class="props-field props-port-card__vector-field">
+              <label>元素 1</label>
+              <input data-python-port-scalar-element-name data-python-port-kind="${escape(kind)}" data-python-port-index="${index}" value="${escape(scalarElementNames(item)[0])}">
+            </div>
+          </div>`
+        : '';
     return `
       <div class="props-port-card props-port-card--editable">
         <div class="props-port-card__head">
@@ -237,6 +310,7 @@ function renderPythonPortRows(binding, kind, helpers) {
           <input data-python-port-display-name data-python-port-kind="${escape(kind)}" data-python-port-index="${index}" value="${escape(fallbackName)}">
         </div>
         <div class="props-port-card__meta"><span>${escape(item?.type || 'any')}</span></div>
+        ${elementFields}
       </div>`;
   }).join('')}</div>`;
 }
@@ -427,6 +501,31 @@ export function readSimulationBlockValuesFromPanel(node, documentLike, helpers =
         .map((element, index) => textValue(element.value, list(binding?.portMapping?.[kind])[index]?.displayName || ''));
       return result;
     }, {});
+    const portVectorElementNames = ['inputs', 'outputs'].reduce((result, kind) => {
+      result[kind] = list(binding?.portMapping?.[kind]).map((port, portIndex) => {
+        const length = vectorLength(port);
+        if (!length) return [];
+        const currentNames = vectorElementNames(port, length);
+        return Array.from({ length }, (_, elementIndex) => textValue(
+          documentLike?.querySelector?.(`[data-python-port-vector-element-name][data-python-port-kind="${kind}"][data-python-port-index="${portIndex}"][data-python-port-vector-element-index="${elementIndex}"]`)?.value,
+          currentNames[elementIndex]
+        ));
+      });
+      return result;
+    }, {});
+    const hasVectorElementNames = Object.values(portVectorElementNames).some((ports) => ports.some((names) => names.length));
+    const portScalarElementNames = ['inputs', 'outputs'].reduce((result, kind) => {
+      result[kind] = list(binding?.portMapping?.[kind]).map((port, portIndex) => {
+        if (vectorLength(port)) return [];
+        const currentName = scalarElementNames(port)[0];
+        return [textValue(
+          documentLike?.querySelector?.(`[data-python-port-scalar-element-name][data-python-port-kind="${kind}"][data-python-port-index="${portIndex}"]`)?.value,
+          currentName
+        )];
+      });
+      return result;
+    }, {});
+    const hasScalarElementNames = Object.values(portScalarElementNames).some((ports) => ports.some((names) => names.length));
     return {
       values: {
         name: textValue(documentLike?.getElementById?.('prop-name')?.value, props.name || ''),
@@ -435,6 +534,8 @@ export function readSimulationBlockValuesFromPanel(node, documentLike, helpers =
         ...supplyValues
       },
       portDisplayNames,
+      ...(hasVectorElementNames ? { portVectorElementNames } : {}),
+      ...(hasScalarElementNames ? { portScalarElementNames } : {}),
       shouldPruneInvalidEdges: false
     };
   }

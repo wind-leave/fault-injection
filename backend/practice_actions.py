@@ -40,7 +40,7 @@ class PracticeActionRuntime:
                 if _text(key)
             }
             if console_id and component_id and parameter_keys:
-                normalized[console_id] = {
+                normalized.setdefault(console_id, {})[component_id] = {
                     "displayConsoleId": console_id,
                     "targetComponentId": component_id,
                     "componentType": _text(control.get("componentType")),
@@ -125,25 +125,41 @@ class PracticeActionRuntime:
 
     def _adjust_display_console_parameters(self, action):
         console_id = self._require_target(action, "target.id")
-        control = self.display_console_controls.get(console_id)
-        if control is None:
+        controls = self.display_console_controls.get(console_id)
+        if controls is None:
             raise SimulationBackendError(
                 "TARGET_NOT_FOUND",
                 "target.id",
                 f"display console control not found: {console_id}",
             )
         component_id = _text(action.get("componentId") or action.get("targetComponentId"))
-        expected_component_id = control["targetComponentId"]
-        if component_id and component_id != expected_component_id:
+        if component_id:
+            control = controls.get(component_id)
+            if control is None:
+                raise SimulationBackendError(
+                    "INVALID_ACTION_SCHEMA",
+                    "componentId",
+                    f"componentId is not controlled by display console {console_id}: {component_id}",
+                )
+        elif len(controls) == 1:
+            control = next(iter(controls.values()))
+        else:
             raise SimulationBackendError(
                 "INVALID_ACTION_SCHEMA",
                 "componentId",
-                f"componentId must be {expected_component_id} for display console {console_id}",
+                f"componentId is required for display console {console_id}",
             )
+        expected_component_id = control["targetComponentId"]
         node = self._require_node(expected_component_id, "componentId")
         updates = action.get("parameters") if isinstance(action.get("parameters"), dict) else {}
         if not updates:
             raise SimulationBackendError("INVALID_ACTION_SCHEMA", "parameters", "parameters is required")
+        if len(updates) != 1:
+            raise SimulationBackendError(
+                "INVALID_ACTION_SCHEMA",
+                "parameters",
+                "only one display-console parameter may be adjusted per action",
+            )
 
         validated_updates = []
         for name, raw_value in updates.items():
@@ -183,14 +199,28 @@ class PracticeActionRuntime:
         return changes
 
     def _replace_wire(self, action):
-        edge_id = self._require_target(action, "targetId")
-        self._require_edge(edge_id, "target.id")
-        changes = self._disable_target_faults(edge_id)
-        self.simulation_session.fault_runtime.reconnect_edge(edge_id)
+        edge_ids = []
+        for candidate in action.get("targetIds") if isinstance(action.get("targetIds"), list) else []:
+            edge_id = _text(candidate)
+            if edge_id and edge_id not in edge_ids:
+                edge_ids.append(edge_id)
+        if not edge_ids:
+            edge_ids = [self._require_target(action, "targetId")]
+        for edge_id in edge_ids:
+            self._require_edge(edge_id, "target.id")
+        changes = []
+        for edge_id in edge_ids:
+            changes.extend(self._disable_target_faults(edge_id))
+            self.simulation_session.fault_runtime.reconnect_edge(edge_id)
+        cleared_fault_ids = [
+            change["faultId"] for change in changes
+            if change.get("type") == "fault_disabled"
+        ]
         changes.append({
             "type": "wire_replaced",
-            "wireId": edge_id,
-            "clearedFaultIds": [change["faultId"] for change in changes],
+            "wireId": edge_ids[0],
+            "wireIds": edge_ids,
+            "clearedFaultIds": cleared_fault_ids,
         })
         return changes
 

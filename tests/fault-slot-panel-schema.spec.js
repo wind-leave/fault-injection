@@ -25,8 +25,8 @@ describe('fault slot panel schema service', () => {
       ],
       declaration: {
         physical: ['gain'],
-        electrical: [],
-        protocol: ['input_1']
+        electrical: ['input_1'],
+        protocol: []
       },
       layers,
       layerLabels,
@@ -36,7 +36,7 @@ describe('fault slot panel schema service', () => {
     expect(html).toContain('data-fault-slot-editor');
     expect(html).toContain('data-fault-slot-variable="gain"');
     expect(html).toContain('data-fault-slot-layer="physical" data-fault-slot-var="gain" checked');
-    expect(html).toContain('data-fault-slot-layer="protocol" data-fault-slot-var="input_1" checked');
+    expect(html).toContain('data-fault-slot-layer="electrical" data-fault-slot-var="input_1" checked');
     expect(html).toContain('Gain &lt;K&gt;');
     expect(html).toContain('Parameter');
     expect(html).toContain('2 / 2');
@@ -69,10 +69,10 @@ describe('fault slot panel schema service', () => {
     expect(html).not.toContain('data-fault-slot-layer="protocol" data-fault-slot-var="gain"');
     expect(html).not.toContain('data-fault-slot-layer="physical" data-fault-slot-var="command"');
     expect(html).toContain('data-fault-slot-layer="electrical" data-fault-slot-var="command" checked');
-    expect(html).toContain('data-fault-slot-layer="protocol" data-fault-slot-var="command"');
+    expect(html).not.toContain('data-fault-slot-layer="protocol" data-fault-slot-var="command"');
     expect(html).not.toContain('data-fault-slot-layer="physical" data-fault-slot-var="torque"');
     expect(html).toContain('data-fault-slot-layer="electrical" data-fault-slot-var="torque" checked');
-    expect(html).toContain('data-fault-slot-layer="protocol" data-fault-slot-var="torque" checked');
+    expect(html).not.toContain('data-fault-slot-layer="protocol" data-fault-slot-var="torque"');
     expect(html).toContain('data-fault-slot-layer="physical" data-fault-slot-var="integral" checked');
     expect(html).toContain('4 / 4');
   });
@@ -122,7 +122,7 @@ describe('fault slot panel schema service', () => {
     ], layers)).toEqual({
       physical: ['gain', 'integral'],
       electrical: ['command', 'torque', 'integral'],
-      protocol: ['command', 'torque', 'integral']
+      protocol: ['integral']
     });
   });
 });

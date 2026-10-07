@@ -3,98 +3,46 @@ import { normalizeSignalSourceProps } from './signalSourceDomainService.js';
 export const FAULT_MATH_MODEL_DEFINITIONS = Object.freeze({
   physical: [
     {
-      id: 'bias',
-      name: '偏置模型',
-      formula: 'p_fault = p + bias',
-      defaultParameters: { bias: 0.1, start: 0, duration: '' }
-    },
-    {
-      id: 'drift',
-      name: '漂移模型',
-      formula: 'p_fault = p + rate * max(t - start, 0)',
-      defaultParameters: { rate: 0.006, start: 0, duration: '' }
-    },
-    {
-      id: 'step',
-      name: '突变模型',
-      formula: 'p_fault = p + step',
-      defaultParameters: { step: 0.1, start: 0, duration: '' }
-    },
-    {
       id: 'degradation',
       name: '衰减模型',
       formula: 'p_fault = p * scale(t)',
       defaultParameters: { scale: 0.85, start: 0, duration: '' }
-    },
-    {
-      id: 'freeze',
-      name: '卡死模型',
-      formula: 'p_fault = hold(p, start)',
-      defaultParameters: { start: 0 }
-    },
-    {
-      id: 'random',
-      name: '随机模型',
-      formula: 'p_fault = p + noise(seed, std)',
-      defaultParameters: { seed: 1, std: 0.08, start: 0, duration: '' }
     }
   ],
   electrical: [
     {
-      id: 'bias',
-      name: '信号偏置',
-      formula: 'y_fault = y + bias',
-      defaultParameters: { bias: 0.1, start: 0, duration: '' }
+      id: 'attenuation',
+      name: '信号衰减',
+      formula: 'y_fault = y * 10 ^ (-attenuation_db / 20)',
+      defaultParameters: { attenuation_db: 6, start: 0, duration: '' }
     },
     {
-      id: 'noise',
-      name: '随机噪声',
-      formula: 'y_fault = y + noise(seed, std)',
-      defaultParameters: { seed: 1, std: 0.08, start: 0, duration: '' }
-    },
-    {
-      id: 'freeze',
-      name: '信号卡死',
-      formula: 'y_fault = hold(y, start)',
+      id: 'data_cutoff',
+      name: '数据通断',
+      formula: 'y_fault = 0',
       defaultParameters: { start: 0, duration: '' }
-    },
-    {
-      id: 'intermittent',
-      name: '间歇异常',
-      formula: 'y_fault = f(y) when gate(t) else y',
-      defaultParameters: { period: 4, duty: 0.25, start: 0, duration: '' }
     }
   ],
   protocol: [
     {
-      id: 'delay',
-      name: '报文延迟',
-      formula: 'payload_fault[k] = payload[k - d]',
-      defaultParameters: { delay_steps: 3, start: 0, duration: '' }
+      id: 'attenuation',
+      name: '衰减模型',
+      formula: 'payload_fault = payload * scale',
+      defaultParameters: { scale: 0.5, start: 0, duration: '' }
     },
     {
-      id: 'dropout',
-      name: '报文丢失',
-      formula: 'payload_fault = previous(payload) when drop(seed, rate)',
-      defaultParameters: { drop_rate: 0.08, seed: 1, start: 0, duration: '' }
-    },
-    {
-      id: 'tamper',
-      name: '报文篡改',
-      formula: 'payload_fault = tamper(payload)',
-      defaultParameters: { bias: 0.1, scale: 1, start: 0, duration: '' }
-    },
-    {
-      id: 'stale',
-      name: '陈旧报文',
-      formula: 'payload_fault = hold(payload, start)',
+      id: 'data_cutoff',
+      name: '通断模型',
+      formula: 'payload_fault = 0',
       defaultParameters: { start: 0, duration: '' }
     }
   ]
 });
 
-const EDGE_ELECTRICAL_MODELS = Object.freeze(['bias', 'noise', 'freeze', 'intermittent']);
-const EDGE_PROTOCOL_MODELS = Object.freeze(['delay', 'dropout', 'tamper', 'stale']);
+const EDGE_ELECTRICAL_MODELS = Object.freeze(
+  FAULT_MATH_MODEL_DEFINITIONS.electrical.map((model) => model.id)
+);
+const EDGE_PROTOCOL_MODELS = Object.freeze(['attenuation', 'data_cutoff']);
 const FAULT_LAYERS = Object.freeze(['physical', 'electrical', 'protocol']);
 const NODE_LAYER_MODELS = Object.freeze({
   physical: FAULT_MATH_MODEL_DEFINITIONS.physical.map((model) => model.id),
@@ -178,22 +126,46 @@ function vectorLengthOf(item = {}) {
     .find((value) => Number.isInteger(value) && value > 1) ?? 0;
 }
 
+function isExplicitScalarType(value) {
+  return ['scalar', 'number', 'float', 'int', 'integer', 'boolean', 'bool', '标量', '数值', '浮点']
+    .includes(text(value).toLowerCase());
+}
+
 function vectorMetadataOf(item = {}) {
+  const dataType = text(item?.dataType ?? item?.type ?? item?.format);
+  // Saved interface declarations can retain an obsolete vectorLength after a
+  // port has been changed to scalar.  Its explicit type takes precedence.
+  if (isExplicitScalarType(dataType)) {
+    return { dataType };
+  }
   const vectorLength = vectorLengthOf(item);
+  const vectorElementNames = vectorLength > 0 && Array.isArray(item?.vectorElementNames)
+    ? item.vectorElementNames
+      .map((name) => text(name))
+      .slice(0, vectorLength)
+    : [];
   return vectorLength > 1
-    ? { dataType: text(item?.dataType ?? item?.type ?? item?.format, 'vector'), vectorLength }
+    ? {
+        dataType: dataType || 'vector',
+        vectorLength,
+        ...(vectorElementNames.length ? { vectorElementNames } : {})
+      }
     : {};
 }
 
 function createPortSlot(layer, role, item = {}, index = 0) {
-  const key = text(item.key ?? item.id ?? item.name ?? item.varName, `${role}_${index + 1}`)
+  const key = text(item.varName ?? item.key ?? item.id ?? item.name, `${role}_${index + 1}`)
     .replace(/\s+/g, '_');
+  const targetGroup = role === 'middle' ? 'middleVars' : `${role}s`;
+  const bindingObject = text(item.varName ?? item.key ?? item.id ?? item.name, key);
 
   return {
     slotId: `${layer}:${role}:${key}`,
     slotName: text(item.name ?? item.label ?? item.varName, `${role} ${index + 1}`),
     layer,
-    targetField: text(item.targetField, `${role}.${key}`),
+    targetField: text(item.targetField, `${targetGroup}.${key}`),
+    bindingObject,
+    targetVariable: bindingObject,
     allowedModels: layer === 'physical'
       ? FAULT_MATH_MODEL_DEFINITIONS.physical.map((model) => model.id)
       : EDGE_ELECTRICAL_MODELS.slice(),
@@ -254,7 +226,7 @@ function createComponentFaultVariable(role, item = {}, index = 0) {
     targetVariable: valueText(source.targetVariable, bindingObject),
     signalId: text(source.signalId),
     unit: text(source.unit),
-    type: text(source.type ?? source.format),
+    type: text(source.dataType ?? source.type ?? source.format),
     parameterKey: role === 'parameter' ? key : '',
     default: source.default,
     ...vectorMetadataOf(source)
@@ -472,43 +444,27 @@ export function isProtocolEdge(edge = {}) {
 }
 
 function createDefaultEdgeFaultSlots(edge = {}) {
-  const slots = [
-    {
-      slotId: 'electrical:signal_value',
-      slotName: text(edge.label ?? edge.signalName ?? edge.signalId, '信号值'),
-      layer: 'electrical',
-      targetField: 'signal.value',
-      allowedModels: EDGE_ELECTRICAL_MODELS.slice(),
-      signalId: text(edge.signalId),
-      lineType: text(edge.lineType ?? edge.type, 'normal')
-    }
-  ];
-
-  if (isProtocolEdge(edge)) {
-    slots.push({
-      slotId: 'protocol:can_message',
-      slotName: text(edge.messageId ?? edge.canMessageId ?? edge.channelId, 'CAN 报文'),
-      layer: 'protocol',
-      targetField: 'can.payload',
-      allowedModels: EDGE_PROTOCOL_MODELS.slice(),
-      signalId: text(edge.signalId),
-      channelId: text(edge.channelId),
-      messageId: text(edge.messageId ?? edge.canMessageId)
-    });
-  }
-
-  return slots;
+  return [{
+    slotId: 'protocol:message',
+    slotName: text(edge.messageId ?? edge.canMessageId ?? edge.channelId ?? edge.label ?? edge.signalName ?? edge.signalId, '连线消息'),
+    layer: 'protocol',
+    targetField: 'protocol.payload',
+    allowedModels: EDGE_PROTOCOL_MODELS.slice(),
+    signalId: text(edge.signalId),
+    channelId: text(edge.channelId),
+    messageId: text(edge.messageId ?? edge.canMessageId)
+  }];
 }
 
 function createDefaultNodeFaultSlots(node = {}, options = {}) {
   const props = isPlainObject(node.props) ? node.props : {};
   const physicalItems = options.skipPhysical
     ? []
-    : [
-      ...arrayOrEmpty(props.modelParameters),
-      ...arrayOrEmpty(props.physicalParameters),
-      ...arrayOrEmpty(node.physicalParameters)
-    ];
+    // Use the same parameter discovery path as the property panel.  Standard
+    // Python simulation components keep their configurable parameters in
+    // props.parameters, so looking only at modelParameters/physicalParameters
+    // made them invisible to the physical-fault runtime.
+    : getComponentFaultVariables(node).filter((variable) => variable.role === 'parameter');
   const electricalItems = [
     ...arrayOrEmpty(props.inputs).map((item, index) => ({ role: 'input', item, index })),
     ...arrayOrEmpty(props.outputs).map((item, index) => ({ role: 'output', item, index })),
@@ -545,6 +501,41 @@ function mergeFaultSlots(target = {}, defaults = []) {
   return merged;
 }
 
+function findComponentVariableForFaultSlot(variables = [], slot = {}) {
+  const role = text(slot.variableRole);
+  const keys = new Set([
+    slot.variableKey,
+    slot.parameterKey,
+    slot.bindingObject,
+    slot.targetVariable
+  ].map((value) => text(value)).filter(Boolean));
+  const targetField = text(slot.targetField);
+  return variables.find((variable) => (
+    (!role || variable.role === role)
+    && (keys.has(variable.key) || (targetField && variable.targetField === targetField))
+  )) ?? null;
+}
+
+function reconcileFaultSlotShapes(node = {}, slots = []) {
+  const variables = getComponentFaultVariables(node);
+  return slots.map((slot) => {
+    const variable = findComponentVariableForFaultSlot(variables, slot);
+    if (!variable) {
+      return slot;
+    }
+    const normalized = { ...slot, dataType: variable.type };
+    // A saved fault slot is derived metadata.  Do not allow an obsolete
+    // vector declaration to make a scalar component ask for injection paths.
+    delete normalized.vectorLength;
+    delete normalized.length;
+    delete normalized.shape;
+    delete normalized.vectorElementNames;
+    return isExplicitScalarType(variable.type)
+      ? normalized
+      : { ...normalized, ...vectorMetadataOf(variable) };
+  });
+}
+
 function capabilitySlotsForTarget(target = {}, targetKind = 'node', capabilityMap = []) {
   const entry = arrayOrEmpty(capabilityMap).find((item) => (
     item?.targetId === target.id && (item.targetKind || targetKind) === targetKind
@@ -559,16 +550,17 @@ export function normalizeModelNode(node = {}, { faultCapabilityMap = [] } = {}) 
   }
 
   if (hasComponentFaultDeclaration(safeNode)) {
+    const faultSlots = mergeDeclaredFaultSlotMetadata(
+      buildComponentFaultSlotsFromDeclaration(safeNode),
+      [
+        ...arrayOrEmpty(safeNode.faultSlots),
+        ...capabilitySlotsForTarget(safeNode, 'node', faultCapabilityMap)
+      ],
+      safeNode
+    );
     return {
       ...safeNode,
-      faultSlots: mergeDeclaredFaultSlotMetadata(
-        buildComponentFaultSlotsFromDeclaration(safeNode),
-        [
-          ...arrayOrEmpty(safeNode.faultSlots),
-          ...capabilitySlotsForTarget(safeNode, 'node', faultCapabilityMap)
-        ],
-        safeNode
-      )
+      faultSlots: reconcileFaultSlotShapes(safeNode, faultSlots)
     };
   }
 
@@ -579,46 +571,67 @@ export function normalizeModelNode(node = {}, { faultCapabilityMap = [] } = {}) 
     ...createDefaultNodeFaultSlots(safeNode, { skipPhysical: hasDeclaredPhysical })
   ];
 
+  const faultSlots = mergeFaultSlots(safeNode, defaults);
   return {
     ...safeNode,
-    faultSlots: mergeFaultSlots(safeNode, defaults)
+    faultSlots: reconcileFaultSlotShapes(safeNode, faultSlots)
   };
 }
 
 export function normalizeModelEdge(edge = {}, { faultCapabilityMap = [] } = {}) {
   const safeEdge = isPlainObject(edge) ? clone(edge) : {};
+  const normalizedEdge = {
+    ...safeEdge,
+    // A connection represents a protocol transport boundary only.  Signal
+    // faults belong on the connected component input or output instead.
+    faultSlots: arrayOrEmpty(safeEdge.faultSlots).filter((slot) => normalizeSlotLayer(slot) === 'protocol')
+  };
   const defaults = [
-    ...capabilitySlotsForTarget(safeEdge, 'edge', faultCapabilityMap),
+    ...capabilitySlotsForTarget(safeEdge, 'edge', faultCapabilityMap)
+      .filter((slot) => normalizeSlotLayer(slot) === 'protocol'),
     ...createDefaultEdgeFaultSlots(safeEdge)
   ];
 
   return {
-    ...safeEdge,
+    ...normalizedEdge,
     lineType: text(safeEdge.lineType ?? safeEdge.type, 'normal'),
-    faultSlots: mergeFaultSlots(safeEdge, defaults)
+    faultSlots: mergeFaultSlots(normalizedEdge, defaults)
   };
 }
 
 export function normalizeModelStoreSnapshot(snapshot = {}, options = {}) {
   const safeSnapshot = isPlainObject(snapshot) ? clone(snapshot) : {};
   const faultCapabilityMap = arrayOrEmpty(options.faultCapabilityMap);
+  const removedComponentTypes = new Set(['instrument_complex_envelope_spectrum']);
   const normalizeNodes = (nodes) => arrayOrEmpty(nodes)
     .map((node) => normalizeModelNode(node, { faultCapabilityMap }));
-  const normalizeEdges = (edges) => arrayOrEmpty(edges)
-    .map((edge) => normalizeModelEdge(edge, { faultCapabilityMap }));
+  const normalizeLayer = (nodes, edges) => {
+    const allNodes = normalizeNodes(nodes);
+    const removedNodeIds = new Set(allNodes
+      .filter((node) => removedComponentTypes.has(node.type))
+      .map((node) => node.id));
+    const activeNodes = allNodes.filter((node) => !removedComponentTypes.has(node.type));
+    return {
+      nodes: activeNodes,
+      edges: arrayOrEmpty(edges)
+        .map((edge) => normalizeModelEdge(edge, { faultCapabilityMap }))
+        .filter((edge) => !removedNodeIds.has(edge.sourceNodeId) && !removedNodeIds.has(edge.targetNodeId))
+    };
+  };
 
-  safeSnapshot.modelNodes = normalizeNodes(safeSnapshot.modelNodes);
-  safeSnapshot.modelEdges = normalizeEdges(safeSnapshot.modelEdges);
+  const rootLayer = normalizeLayer(safeSnapshot.modelNodes, safeSnapshot.modelEdges);
+  safeSnapshot.modelNodes = rootLayer.nodes;
+  safeSnapshot.modelEdges = rootLayer.edges;
 
   if (isPlainObject(safeSnapshot.canvases)) {
     Object.entries(safeSnapshot.canvases).forEach(([canvasId, canvas]) => {
       if (!isPlainObject(canvas)) {
         return;
       }
+      const layer = normalizeLayer(canvas.nodes, canvas.edges);
       safeSnapshot.canvases[canvasId] = {
         ...canvas,
-        nodes: normalizeNodes(canvas.nodes),
-        edges: normalizeEdges(canvas.edges)
+        ...layer
       };
     });
   }

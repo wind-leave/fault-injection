@@ -7,6 +7,633 @@
 import math
 
 
+def coerce_envelope(value):
+    """规范化一个 I/Q 复数包络。
+
+    参数：
+        value: 包络字典。I/Q 可使用 ``i/q`` 或 ``re/im`` 字段；可选字段为
+            ``referenceFrequencyHz``、``impedanceOhm`` 和 ``unit``。
+
+    返回：
+        新字典，固定包含 ``i``、``q``、``referenceFrequencyHz``、
+        ``impedanceOhm`` 和 ``unit``。数值字段转换为浮点数；缺省阻抗为
+        50 Ω，缺省单位为 ``"V"``，负参考频率被限制为 0 Hz。
+
+    异常：
+        ValueError: ``value`` 不是字典。
+        TypeError/ValueError: 字段值不能转换成所需的数字类型。
+    """
+    if not isinstance(value, dict):
+        raise ValueError("RF complex-envelope input must be a mapping")
+    i_value = float(value.get("i", value.get("re", 0.0)))
+    q_value = float(value.get("q", value.get("im", 0.0)))
+    reference_frequency = max(0.0, float(value.get("referenceFrequencyHz", 0.0)))
+    impedance = float(value.get("impedanceOhm", 50.0))
+    return {
+        "i": i_value,
+        "q": q_value,
+        "referenceFrequencyHz": reference_frequency,
+        "impedanceOhm": impedance if impedance > 0.0 else 50.0,
+        "unit": str(value.get("unit") or "V"),
+    }
+
+
+def is_envelope_collection(value):
+    """判断输入是否为多路包络列表；是列表返回 True，否则返回 False。"""
+    return isinstance(value, list)
+
+
+def coerce_envelope_collection(value):
+    """规范化单路或多路 I/Q 包络，并保持输入结构。
+
+    参数：
+        value: 单个包络字典，或由包络字典组成的非空列表。
+
+    返回：
+        输入为字典时返回一个规范化字典；输入为列表时返回同样长度的
+        规范化字典列表。
+
+    异常：
+        ValueError: 输入为空列表，或其中某一路不是包络字典。
+    """
+    if is_envelope_collection(value):
+        if not value:
+            raise ValueError("RF complex-envelope collection must not be empty")
+        return [coerce_envelope(item) for item in value]
+    return coerce_envelope(value)
+
+
+def coerce_envelope_vector(value, length=4):
+    """规范化指定长度的复数包络向量。
+
+    参数：
+        value: 由包络字典组成的非空列表；不接受单个包络字典。
+        length: 要求的通道路数，默认为 4，必须为正整数。
+
+    返回：
+        长度严格等于 ``length`` 的规范化包络列表。
+
+    异常：
+        ValueError: 长度无效、输入不是列表或实际路数不匹配。
+    """
+    expected_length = int(length)
+    if expected_length < 1:
+        raise ValueError("RF complex-envelope vector length must be positive")
+    if not is_envelope_collection(value):
+        raise ValueError(f"RF complex-envelope input must be a {expected_length}-route vector")
+    envelopes = coerce_envelope_collection(value)
+    if len(envelopes) != expected_length:
+        raise ValueError(
+            f"RF complex-envelope vector must contain exactly {expected_length} routes; got {len(envelopes)}"
+        )
+    return envelopes
+
+
+def map_envelopes(value, transform):
+    """对单路或任意路数的包络逐路执行变换，并保持输入结构。
+
+    参数：
+        value: 单个包络字典，或由包络字典组成的非空列表。
+        transform: 接收 ``(normalized_envelope, zero_based_index)`` 的函数。
+
+    返回：
+        单路输入返回一次 ``transform`` 的结果；列表输入返回同样长度的
+        变换结果列表。结果元素的具体类型由 ``transform`` 决定。
+    """
+    envelopes = coerce_envelope_collection(value)
+    if isinstance(envelopes, list):
+        return [transform(envelope, index) for index, envelope in enumerate(envelopes)]
+    return transform(envelopes, 0)
+
+
+def map_envelope_vector(value, transform, length=4):
+    """对指定长度的复数包络向量逐路执行变换。
+
+    参数：
+        value: 长度必须等于 ``length`` 的包络列表。
+        transform: 接收 ``(normalized_envelope, zero_based_index)`` 的函数。
+        length: 要求的通道路数，默认为 4。
+
+    返回：
+        包含各路变换结果的列表，长度始终等于 ``length``。
+    """
+    return [
+        transform(envelope, index)
+        for index, envelope in enumerate(coerce_envelope_vector(value, length))
+    ]
+
+
+def with_iq(envelope, i_value, q_value):
+    """复制并规范化一个包络，仅替换其 I、Q 分量。
+
+    参数：
+        envelope: 原始包络字典。
+        i_value: 新的同相分量，可转换为浮点数。
+        q_value: 新的正交分量，可转换为浮点数。
+
+    返回：
+        新包络字典；参考频率、阻抗和单位来自规范化后的原包络。
+    """
+    normalized = coerce_envelope(envelope)
+    normalized["i"] = float(i_value)
+    normalized["q"] = float(q_value)
+    return normalized
+
+
+def apply_envelope_gain(input_envelope, gain_db=0.0):
+    """对单路或任意路数的复数包络施加统一的电压增益。
+
+    参数：
+        input_envelope: 单个包络字典或非空包络列表。
+        gain_db: 电压增益，单位 dB；幅度倍率为 ``10 ** (gain_db / 20)``。
+
+    返回：
+        I、Q 同比例缩放后的包络；输入为单路时返回字典，输入为列表时
+        返回同样长度的列表。
+    """
+    scale = math.pow(10.0, float(gain_db) / 20.0)
+    return map_envelopes(
+        input_envelope,
+        lambda envelope, _index: with_iq(
+            envelope,
+            envelope["i"] * scale,
+            envelope["q"] * scale,
+        ),
+    )
+
+
+def apply_envelope_amplitude_phase_modulation(
+    input_envelope,
+    amplitude_scale=1.0,
+    phase_shift_deg=0.0,
+):
+    """对单路或任意路数的复数包络施加幅度缩放和相位旋转。
+
+    参数：
+        input_envelope: 单个包络字典或非空包络列表。
+        amplitude_scale: 非负线性幅度倍率；负值按 0 处理。
+        phase_shift_deg: I/Q 向量的逆时针旋转角度，单位为度。
+
+    返回：
+        调制后的包络；输入为单路时返回字典，输入为列表时返回同样长度
+        的列表。参考频率、阻抗和单位保持不变。
+    """
+    scale = max(0.0, float(amplitude_scale))
+    phase = math.radians(float(phase_shift_deg))
+
+    def modulate_one(envelope, _index):
+        output_i, output_q = rotate_iq(envelope["i"], envelope["q"], phase)
+        return with_iq(envelope, scale * output_i, scale * output_q)
+
+    return map_envelopes(input_envelope, modulate_one)
+
+
+def apply_envelope_upconversion(
+    input_envelope,
+    lo_frequency_hz=0.0,
+    lo_phase_deg=0.0,
+    conversion_gain=1.0,
+):
+    """对单路或任意路数的复数包络逐路上变频。
+
+    参数：
+        input_envelope: 单个包络字典或非空包络列表。
+        lo_frequency_hz: 本振频率，单位 Hz；负值按 0 处理。
+        lo_phase_deg: 本振相位，单位为度，用于逆时针旋转 I/Q。
+        conversion_gain: 非负线性转换增益；负值按 0 处理。
+
+    返回：
+        上变频后的包络，参考频率为输入参考频率与本振频率之和；单路输入
+        返回字典，列表输入返回同样长度的列表。
+    """
+    lo_frequency = max(0.0, float(lo_frequency_hz))
+    gain = max(0.0, float(conversion_gain))
+    phase = math.radians(float(lo_phase_deg))
+
+    def convert_one(envelope, _index):
+        output_i, output_q = rotate_iq(envelope["i"], envelope["q"], phase)
+        output = with_iq(envelope, gain * output_i, gain * output_q)
+        output["referenceFrequencyHz"] = (
+            envelope["referenceFrequencyHz"] + lo_frequency
+        )
+        return output
+
+    return map_envelopes(input_envelope, convert_one)
+
+
+def apply_envelope_downconversion(
+    input_envelope,
+    lo_frequency_hz=0.0,
+    lo_phase_deg=0.0,
+    conversion_gain=1.0,
+):
+    """对单路或任意路数的复数包络逐路下变频。
+
+    参数：
+        input_envelope: 单个包络字典或非空包络列表。
+        lo_frequency_hz: 本振频率，单位 Hz；负值按 0 处理。
+        lo_phase_deg: 本振相位，单位为度。
+        conversion_gain: 非负线性转换增益；负值按 0 处理。
+
+    返回：
+        下变频后的包络，输出参考频率为输入与本振频率之差的绝对值。
+        当差值为负时通过共轭 I/Q 表示低侧混频产生的频谱反转。单路输入
+        返回字典，列表输入返回同样长度的列表。
+    """
+    lo_frequency = max(0.0, float(lo_frequency_hz))
+    gain = max(0.0, float(conversion_gain))
+    phase = math.radians(float(lo_phase_deg))
+
+    def convert_one(envelope, _index):
+        frequency_difference = envelope["referenceFrequencyHz"] - lo_frequency
+        if frequency_difference >= 0.0:
+            output_i, output_q = rotate_iq(envelope["i"], envelope["q"], -phase)
+            output_frequency = frequency_difference
+        else:
+            output_i, output_q = rotate_iq(envelope["i"], -envelope["q"], phase)
+            output_frequency = -frequency_difference
+        output = with_iq(envelope, gain * output_i, gain * output_q)
+        output["referenceFrequencyHz"] = output_frequency
+        return output
+
+    return map_envelopes(input_envelope, convert_one)
+
+
+def apply_envelope_low_pass_filter(
+    input_envelope,
+    cutoff_frequency_hz=100_000.0,
+    dt=0.0,
+    state=None,
+):
+    """逐路低通滤波单路或任意路数的复数包络。
+
+    参数：
+        input_envelope: 单个包络字典或非空包络列表。
+        cutoff_frequency_hz: 复数包络的低通截止频率，单位 Hz。
+        dt: 本次与上次调用的时间间隔，单位秒。
+        state: 上次返回的 ``state`` 字典，格式为
+            ``{"lanes": [{"output_i": ..., "output_q": ...}, ...]}``。
+
+    返回：
+        包含两个字段的字典：
+
+        - ``outputs.filtered_envelope``：滤波后的复数包络列表。为兼容后端
+          仿真组件端口，即使输入为单个包络，也返回长度为 1 的列表。
+        - ``state.lanes``：各路当前 I/Q 输出状态，下一采样时刻应原样传回。
+
+        I、Q 分量分别使用一阶指数离散低通滤波，参考频率、阻抗和单位
+        保持不变。截止频率或步长小于等于 0 时保持上一输出；某一路参考
+        频率发生变化时清空该路历史，避免混合两个不同的射频参考系。
+    """
+    cutoff = max(0.0, float(cutoff_frequency_hz))
+    sample_period = max(0.0, float(dt))
+    previous = dict(state or {})
+    smoothing = (
+        1.0 - math.exp(-2.0 * math.pi * cutoff * sample_period)
+        if cutoff > 0.0 and sample_period > 0.0
+        else 0.0
+    )
+
+    def filter_one(envelope, lane_state):
+        same_reference = (
+            "referenceFrequencyHz" not in lane_state
+            or float(lane_state["referenceFrequencyHz"])
+            == envelope["referenceFrequencyHz"]
+        )
+        previous_i = float(lane_state.get("output_i", 0.0)) if same_reference else 0.0
+        previous_q = float(lane_state.get("output_q", 0.0)) if same_reference else 0.0
+        output_i = previous_i + smoothing * (envelope["i"] - previous_i)
+        output_q = previous_q + smoothing * (envelope["q"] - previous_q)
+        return (
+            with_iq(envelope, output_i, output_q),
+            {
+                "output_i": output_i,
+                "output_q": output_q,
+                "referenceFrequencyHz": envelope["referenceFrequencyHz"],
+            },
+        )
+
+    envelopes = coerce_envelope_collection(input_envelope)
+    if not isinstance(envelopes, list):
+        envelopes = [envelopes]
+    previous_lanes = list(previous.get("lanes") or [])
+    results = [
+        filter_one(
+            envelope,
+            previous_lanes[index] if index < len(previous_lanes) else {},
+        )
+        for index, envelope in enumerate(envelopes)
+    ]
+    return {
+        "outputs": {"filtered_envelope": [result[0] for result in results]},
+        "state": {"lanes": [result[1] for result in results]},
+    }
+
+
+def apply_envelope_band_pass_filter(
+    input_envelope,
+    center_frequency_hz=1_000_000.0,
+    bandwidth_hz=100_000.0,
+    dt=0.0,
+    state=None,
+):
+    """逐路带通滤波单路或任意路数的复数包络。
+
+    参数：
+        input_envelope: 单个包络字典或非空包络列表。每一路根据其
+            ``referenceFrequencyHz`` 独立判断是否处于通带。
+        center_frequency_hz: 射频通带中心频率，单位 Hz；负值按 0 处理。
+        bandwidth_hz: 射频通带总宽度，单位 Hz；负值按 0 处理。
+        dt: 本次与上次调用的时间间隔，单位秒；小于等于 0 时不做平滑。
+        state: 上次返回的 ``state`` 字典，格式为
+            ``{"lanes": [{"output_i": ..., "output_q": ...}, ...]}``。
+
+    返回：
+        包含两个字段的字典：
+
+        - ``outputs.filtered_envelope``：滤波后的包络列表。即使输入是单个
+          包络，这里也返回长度为 1 的列表。
+        - ``state.lanes``：各路本次 I/Q 输出状态，供下一采样时刻传回。
+
+        参考频率位于 ``中心频率 ± 带宽/2`` 内时，以带宽半宽作为一阶
+        低通截止频率处理包络；通带外则按相同时间常数衰减到零。
+    """
+    centre = max(0.0, float(center_frequency_hz))
+    bandwidth = max(0.0, float(bandwidth_hz))
+    sample_period = max(0.0, float(dt))
+    previous = dict(state or {})
+    cutoff = bandwidth / 2.0
+    alpha = (
+        math.exp(-2.0 * math.pi * cutoff * sample_period)
+        if cutoff > 0.0 and sample_period > 0.0
+        else 0.0
+    )
+
+    def filter_one(envelope, lane_state):
+        in_band = (
+            bandwidth > 0.0
+            and abs(envelope["referenceFrequencyHz"] - centre) <= bandwidth / 2.0
+        )
+        target_i = envelope["i"] if in_band else 0.0
+        target_q = envelope["q"] if in_band else 0.0
+        output_i = (
+            alpha * float(lane_state.get("output_i", 0.0))
+            + (1.0 - alpha) * target_i
+        )
+        output_q = (
+            alpha * float(lane_state.get("output_q", 0.0))
+            + (1.0 - alpha) * target_q
+        )
+        return (
+            with_iq(envelope, output_i, output_q),
+            {"output_i": output_i, "output_q": output_q},
+        )
+
+    envelopes = coerce_envelope_collection(input_envelope)
+    if not isinstance(envelopes, list):
+        envelopes = [envelopes]
+    previous_lanes = list(previous.get("lanes") or [])
+    results = [
+        filter_one(
+            envelope,
+            previous_lanes[index] if index < len(previous_lanes) else {},
+        )
+        for index, envelope in enumerate(envelopes)
+    ]
+    return {
+        "outputs": {"filtered_envelope": [result[0] for result in results]},
+        "state": {"lanes": [result[1] for result in results]},
+    }
+
+
+def apply_envelope_band_stop_filter(
+    input_envelope,
+    center_frequency_hz=1_000_000.0,
+    bandwidth_hz=100_000.0,
+    dt=0.0,
+    state=None,
+):
+    """逐路带阻滤波单路或任意路数的复数包络。
+
+    参数：
+        input_envelope: 单个包络字典或非空包络列表。每一路根据其
+            ``referenceFrequencyHz`` 独立判断是否处于阻带。
+        center_frequency_hz: 射频阻带中心频率，单位 Hz；负值按 0 处理。
+        bandwidth_hz: 射频阻带总宽度，单位 Hz；负值按 0 处理。
+        dt: 本次与上次调用的时间间隔，单位秒；小于等于 0 时不做平滑。
+        state: 上次返回的 ``state`` 字典，格式为
+            ``{"lanes": [{"output_i": ..., "output_q": ...}, ...]}``。
+
+    返回：
+        包含两个字段的字典：
+
+        - ``outputs.filtered_envelope``：滤波后的包络列表。即使输入是单个
+          包络，这里也返回长度为 1 的列表。
+        - ``state.lanes``：各路本次 I/Q 输出状态，供下一采样时刻传回。
+
+        参考频率位于 ``中心频率 ± 带宽/2`` 内时，I/Q 目标值为零；阻带
+        外保持原 I/Q。带宽半宽用作一阶过渡的时间常数，因而连续传入
+        ``state`` 时可避免阻带边界切换产生不连续跳变。
+    """
+    centre = max(0.0, float(center_frequency_hz))
+    bandwidth = max(0.0, float(bandwidth_hz))
+    sample_period = max(0.0, float(dt))
+    previous = dict(state or {})
+    cutoff = bandwidth / 2.0
+    alpha = (
+        math.exp(-2.0 * math.pi * cutoff * sample_period)
+        if cutoff > 0.0 and sample_period > 0.0
+        else 0.0
+    )
+
+    def filter_one(envelope, lane_state):
+        in_stop_band = (
+            bandwidth > 0.0
+            and abs(envelope["referenceFrequencyHz"] - centre) <= bandwidth / 2.0
+        )
+        target_i = 0.0 if in_stop_band else envelope["i"]
+        target_q = 0.0 if in_stop_band else envelope["q"]
+        output_i = (
+            alpha * float(lane_state.get("output_i", 0.0))
+            + (1.0 - alpha) * target_i
+        )
+        output_q = (
+            alpha * float(lane_state.get("output_q", 0.0))
+            + (1.0 - alpha) * target_q
+        )
+        return (
+            with_iq(envelope, output_i, output_q),
+            {"output_i": output_i, "output_q": output_q},
+        )
+
+    envelopes = coerce_envelope_collection(input_envelope)
+    if not isinstance(envelopes, list):
+        envelopes = [envelopes]
+    previous_lanes = list(previous.get("lanes") or [])
+    results = [
+        filter_one(
+            envelope,
+            previous_lanes[index] if index < len(previous_lanes) else {},
+        )
+        for index, envelope in enumerate(envelopes)
+    ]
+    return {
+        "outputs": {"filtered_envelope": [result[0] for result in results]},
+        "state": {"lanes": [result[1] for result in results]},
+    }
+
+
+def power_divide(input_envelope, output_count):
+    """将一个复数包络等功率分配为指定路数。
+
+    参数：
+        input_envelope: 单个包络字典，不接受多路列表。
+        output_count: 输出路数，必须是大于等于 1 的整数或整数值浮点数。
+
+    返回：
+        长度为 ``output_count`` 的包络列表。每路 I/Q 幅度均乘以
+        ``1 / sqrt(output_count)``，因此所有输出的总功率等于输入功率。
+
+    异常：
+        ValueError: 输出路数不是整数或小于 1。
+    """
+    count_number = float(output_count)
+    if not count_number.is_integer():
+        raise ValueError("RF complex-envelope power-divider output count must be an integer")
+
+    count = int(count_number)
+    if count < 1:
+        raise ValueError("RF complex-envelope power-divider output count must be positive")
+
+    envelope = coerce_envelope(input_envelope)
+    amplitude_scale = 1.0 / math.sqrt(count)
+    return [
+        with_iq(
+            envelope,
+            envelope["i"] * amplitude_scale,
+            envelope["q"] * amplitude_scale,
+        )
+        for _ in range(count)
+    ]
+
+
+def power_combine(input_envelopes):
+    """将任意正偶数路复数包络相干合成为一路。
+
+    参数：
+        input_envelopes: 由复数包络字典组成的列表，路数必须为大于等于 2
+            的偶数。各路必须使用相同的参考频率、阻抗和单位。
+
+    返回：
+        合路后的单个复数包络字典。I、Q 分量分别相干求和后乘以
+        ``1 / sqrt(route_count)``，与 :func:`power_divide` 的等功率模型
+        互易。相位相反的输入会相消；输出射频元数据取自第一路输入。
+
+    异常：
+        ValueError: 输入不是列表、路数小于 2、路数不是偶数，或各路射频
+            元数据不一致。
+    """
+    if not is_envelope_collection(input_envelopes):
+        raise ValueError("RF complex-envelope power-combiner input must be a route vector")
+
+    route_count = len(input_envelopes)
+    if route_count < 2 or route_count % 2 != 0:
+        raise ValueError(
+            "RF complex-envelope power-combiner route count must be a positive even number"
+        )
+
+    envelopes = coerce_envelope_collection(input_envelopes)
+    reference = envelopes[0]
+    for envelope in envelopes[1:]:
+        if not math.isclose(
+            envelope["referenceFrequencyHz"],
+            reference["referenceFrequencyHz"],
+            rel_tol=1e-12,
+            abs_tol=1e-9,
+        ):
+            raise ValueError(
+                "RF complex-envelope power-combiner inputs must share one reference frequency"
+            )
+        if not math.isclose(
+            envelope["impedanceOhm"],
+            reference["impedanceOhm"],
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        ):
+            raise ValueError(
+                "RF complex-envelope power-combiner inputs must share one impedance"
+            )
+        if envelope["unit"] != reference["unit"]:
+            raise ValueError(
+                "RF complex-envelope power-combiner inputs must share one unit"
+            )
+
+    amplitude_scale = 1.0 / math.sqrt(route_count)
+    return with_iq(
+        reference,
+        sum(envelope["i"] for envelope in envelopes) * amplitude_scale,
+        sum(envelope["q"] for envelope in envelopes) * amplitude_scale,
+    )
+
+
+def magnitude(envelope):
+    """计算单路 I/Q 复数包络的幅值。
+
+    参数：
+        envelope: 单个包络字典。
+
+    返回：
+        浮点数 ``sqrt(I² + Q²)``。
+    """
+    normalized = coerce_envelope(envelope)
+    return math.hypot(normalized["i"], normalized["q"])
+
+
+def limit_envelope_amplitude(input_envelope, limit_amplitude):
+    """限制单路或任意路数复数包络的最大幅值。
+
+    参数：
+        input_envelope: 单个包络字典或非空包络列表。
+        limit_amplitude: 非负线性幅度上限；负值按 0 处理。
+
+    返回：
+        幅值不超过上限的包络。超限时 I、Q 按相同比例缩小，因此相位保持
+        不变；未超限时数值不变。单路输入返回字典，列表输入返回同样长度
+        的列表。
+    """
+    limit = max(0.0, float(limit_amplitude))
+
+    def limit_one(envelope, _index):
+        input_magnitude = magnitude(envelope)
+        scale = min(1.0, limit / input_magnitude) if input_magnitude > 0.0 else 1.0
+        return with_iq(
+            envelope,
+            envelope["i"] * scale,
+            envelope["q"] * scale,
+        )
+
+    return map_envelopes(input_envelope, limit_one)
+
+
+def rotate_iq(i_value, q_value, phase_rad):
+    """将一个 I/Q 向量逆时针旋转。
+
+    参数：
+        i_value: 输入同相分量，可转换为浮点数。
+        q_value: 输入正交分量，可转换为浮点数。
+        phase_rad: 旋转角度，单位为弧度；正值表示逆时针旋转。
+
+    返回：
+        二元组 ``(rotated_i, rotated_q)``，两个元素均为浮点数。
+    """
+    cosine = math.cos(float(phase_rad))
+    sine = math.sin(float(phase_rad))
+    return (
+        float(i_value) * cosine - float(q_value) * sine,
+        float(i_value) * sine + float(q_value) * cosine,
+    )
+
+
 def as_float(value, default=0.0):
     """将输入安全转换为有限浮点数。
 
@@ -103,6 +730,170 @@ def fft_radix2(values):
     return result
 
 
+def _estimate_envelope_baseband_frequency(samples, sample_period):
+    """估计复数包络样本中最强的带符号基带频率。"""
+    count = len(samples)
+    step = max(0.0, float(sample_period))
+    if count < 4 or step <= 0.0 or count & (count - 1):
+        return 0.0
+    windowed = [
+        complex(sample)
+        * (0.5 - 0.5 * math.cos(2.0 * math.pi * index / (count - 1)))
+        for index, sample in enumerate(samples)
+    ]
+    spectrum = fft_radix2(windowed)
+    peak_bin = max(range(count), key=lambda index: abs(spectrum[index]))
+    signed_bin = peak_bin if peak_bin <= count // 2 else peak_bin - count
+    return signed_bin / (count * step)
+
+
+def extract_complex_envelope_pulse_features(
+    input_envelope,
+    fft_size=1024.0,
+    adc_full_scale=1.0,
+    envelope_threshold_adc=12.0,
+    envelope_smoothing=1.0,
+    time=0.0,
+    dt=0.0,
+    state=None,
+):
+    """从复数包络中提取中心频率、重周、脉宽、幅度和脉冲个数。
+
+    参数：
+        input_envelope: 单个复数包络字典，或由包络字典组成的非空列表。
+            列表输入按顺序选择第一路 I、Q 不同时为零的包络；全部为零时
+            使用最后一路，以保留其参考频率等射频上下文。
+        fft_size: 基带频率估计使用的 FFT 点数；向下取为不小于 4 的 2 次幂。
+        adc_full_scale: 对应 ADC 码 255 的复包络幅度满量程。
+        envelope_threshold_adc: 脉冲有效判定门限，范围限制为 0 到 255。
+        envelope_smoothing: 包络平滑系数，范围限制为 0 到 1；默认 1 保留边沿。
+        time: 当前仿真时刻，单位秒。
+        dt: 仿真步长，单位秒，用于 FFT 频率刻度。
+        state: 上一次调用返回的 ``state``；首次调用可传 ``None``。
+
+    返回：
+        ``{"outputs": ..., "state": ...}``。``outputs`` 包含：
+
+        - ``center_frequency_hz``：参考频率加带符号基带 FFT 峰值；
+        - ``pulse_period_seconds``：相邻脉冲上升沿间隔；
+        - ``pulse_width_seconds``：最近一次完整脉冲的宽度；
+        - ``pulse_amplitude_adc``：当前或最近脉冲峰值，整数 0 到 255；
+        - ``pulse_count``：累计检测到的脉冲上升沿数量。
+
+        脉冲时序和幅度在每个采样时刻更新。中心频率在收满 FFT 窗口后
+        首次估计，此后每新增至多 128 个样本估计一次；较短窗口按窗口
+        长度的八分之一设置更新间隔。两次估计之间沿用上次的基带频率。
+        下一采样时刻应把返回的 ``state`` 原样传回本函数。
+    """
+    envelopes = coerce_envelope_collection(input_envelope)
+    if not isinstance(envelopes, list):
+        envelopes = [envelopes]
+    envelope = next(
+        (item for item in envelopes if item["i"] != 0.0 or item["q"] != 0.0),
+        envelopes[-1],
+    )
+
+    previous = dict(state or {})
+    reference_frequency = envelope["referenceFrequencyHz"]
+    full_scale = max(1e-12, abs(float(adc_full_scale)))
+    size = floor_power_of_two(max(4, int(round(float(fft_size)))))
+    sample_period = max(0.0, float(dt))
+    smoothing = min(1.0, max(0.0, float(envelope_smoothing)))
+
+    same_sampling_context = (
+        previous.get("reference_frequency_hz") == reference_frequency
+        and previous.get("fft_size", size) == size
+        and previous.get("sample_period", sample_period) == sample_period
+    )
+    # Copy once so callers can retain an earlier state for rollback. Once the
+    # window is full, write_index identifies its oldest sample.
+    samples = list(previous.get("samples") or []) if same_sampling_context else []
+    write_index = int(previous.get("sample_write_index", 0)) if same_sampling_context else 0
+    since_fft = int(previous.get("samples_since_fft", 0)) if same_sampling_context else 0
+    baseband_frequency = float(previous.get("baseband_frequency_hz", 0.0)) if same_sampling_context else 0.0
+    hop = min(128, max(1, size // 8))
+    new_sample = complex(envelope["i"], envelope["q"])
+    if len(samples) < size:
+        samples.append(new_sample)
+        write_index = 0
+        should_estimate = len(samples) == size
+    else:
+        write_index %= size
+        samples[write_index] = new_sample
+        write_index = (write_index + 1) % size
+        since_fft += 1
+        should_estimate = since_fft >= hop
+    if should_estimate and sample_period > 0.0:
+        window = samples[write_index:] + samples[:write_index] if write_index else samples
+        baseband_frequency = _estimate_envelope_baseband_frequency(window, sample_period)
+        since_fft = 0
+    center_frequency = reference_frequency + baseband_frequency
+
+    sample_magnitude = min(
+        255.0,
+        math.hypot(envelope["i"], envelope["q"]) / full_scale * 255.0,
+    )
+    previous_envelope = float(previous.get("envelope", 0.0))
+    detected_envelope = previous_envelope + smoothing * (
+        sample_magnitude - previous_envelope
+    )
+    threshold = clamp(float(envelope_threshold_adc), 0.0, 255.0)
+    active = detected_envelope >= threshold
+    was_active = bool(previous.get("active", False))
+    rising_time = previous.get("rising_time")
+    previous_rising_time = previous.get("previous_rising_time")
+    pulse_period = float(previous.get("pulse_period_seconds", 0.0))
+    pulse_width = float(previous.get("pulse_width_seconds", 0.0))
+    pulse_peak = int(previous.get("pulse_peak", 0))
+    amplitude = int(previous.get("pulse_amplitude_adc", 0))
+    pulse_count = max(0, int(previous.get("pulse_count", 0)))
+    now = float(time)
+
+    if active and not was_active:
+        pulse_count += 1
+        previous_rising_time = rising_time
+        rising_time = now
+        if previous_rising_time is not None:
+            pulse_period = max(0.0, now - float(previous_rising_time))
+        pulse_peak = int(round(sample_magnitude))
+    elif active:
+        pulse_peak = max(pulse_peak, int(round(sample_magnitude)))
+    elif was_active:
+        if rising_time is not None:
+            pulse_width = max(0.0, now - float(rising_time))
+        amplitude = int(clamp(pulse_peak, 0, 255))
+        pulse_peak = 0
+
+    reported_amplitude = pulse_peak if active else amplitude
+    return {
+        "outputs": {
+            "center_frequency_hz": center_frequency,
+            "pulse_period_seconds": pulse_period,
+            "pulse_width_seconds": pulse_width,
+            "pulse_amplitude_adc": int(clamp(reported_amplitude, 0, 255)),
+            "pulse_count": pulse_count,
+        },
+        "state": {
+            "samples": samples,
+            "sample_write_index": write_index,
+            "samples_since_fft": since_fft,
+            "fft_size": size,
+            "sample_period": sample_period,
+            "reference_frequency_hz": reference_frequency,
+            "baseband_frequency_hz": baseband_frequency,
+            "envelope": detected_envelope,
+            "active": active,
+            "rising_time": rising_time,
+            "previous_rising_time": previous_rising_time,
+            "pulse_period_seconds": pulse_period,
+            "pulse_width_seconds": pulse_width,
+            "pulse_peak": pulse_peak,
+            "pulse_amplitude_adc": amplitude,
+            "pulse_count": pulse_count,
+        },
+    }
+
+
 def quantize_bipolar_sample(sample, full_scale_amplitude=1.0, maximum_code=255):
     """将双极性模拟采样值量化为无符号 ADC 码。
 
@@ -163,6 +954,38 @@ def estimate_fft_peak_frequency(samples, sample_period, window="hann"):
     else:
         windowed = [
             as_float(sample) * (0.5 - 0.5 * math.cos(2.0 * math.pi * index / (count - 1)))
+            for index, sample in enumerate(samples)
+        ]
+    spectrum = fft_radix2(windowed)
+    half = count // 2
+    if half <= 1:
+        return 0.0
+    peak_bin = max(range(1, half), key=lambda index: abs(spectrum[index]))
+    return peak_bin / (count * step)
+
+
+def estimate_complex_fft_positive_peak_frequency(samples, sample_period, window="hann"):
+    """Estimate the strongest strictly positive-frequency component of I/Q samples.
+
+    ``samples`` contains complex values formed as ``I + jQ``.  Unlike the
+    real-signal estimator above, its FFT has independent positive and negative
+    frequency bins.  Searching only bins ``1 .. N/2 - 1`` therefore rejects
+    the negative-frequency mixer image while retaining the desired difference
+    product.
+    """
+    count = len(samples)
+    step = as_float(sample_period)
+    if count < 4 or step <= 0.0:
+        return 0.0
+    if count & (count - 1):
+        raise ValueError("复数中心频率估计的样本长度必须是 2 的整数次幂")
+
+    kind = str(window or "hann").strip().lower()
+    if kind == "rectangular":
+        windowed = [complex(sample) for sample in samples]
+    else:
+        windowed = [
+            complex(sample) * (0.5 - 0.5 * math.cos(2.0 * math.pi * index / (count - 1)))
             for index, sample in enumerate(samples)
         ]
     spectrum = fft_radix2(windowed)
@@ -690,6 +1513,118 @@ def band_pass_rf_filter(
     return high_pass_output, band_pass_output
 
 
+def band_pass_fir_filter(
+    sample,
+    center_frequency_hz,
+    bandwidth_hz,
+    dt,
+    state=None,
+    tap_count=129,
+):
+    """对单个射频采样执行有状态 FIR 带通滤波。
+
+    参数：
+        sample：当前输入采样值。
+        center_frequency_hz：通带中心频率，单位 Hz。
+        bandwidth_hz：通带带宽，单位 Hz。
+        dt：仿真步长，单位秒。
+        state：上次调用返回的状态字典；配置变化时自动清空历史。
+        tap_count：FIR 抽头数，必须为不小于 3 的奇数；无效时使用 129。
+
+    返回：
+        ``(filtered_sample, next_state, metadata)``。``next_state`` 应在下一
+        仿真步原样传回；``metadata`` 含实际下、上截止频率和群时延采样数。
+
+    实现采用 Blackman 窗线性相位 FIR，并在通带中心频率处归一化增益。
+    通带会自动限制在仿真采样率的奈奎斯特频率以内；步长或通带无效时输出 0
+    且返回空状态。
+    """
+    step = as_float(dt)
+    requested_tap_count = int(as_float(tap_count, 129))
+    taps_count = requested_tap_count if requested_tap_count >= 3 and requested_tap_count % 2 else 129
+    if step <= 0.0:
+        return 0.0, {}, {
+            "low_cutoff_hz": 0.0,
+            "high_cutoff_hz": 0.0,
+            "group_delay_samples": 0.0,
+        }
+
+    sample_rate_hz = 1.0 / step
+    nyquist_hz = sample_rate_hz / 2.0
+    center_hz = max(0.0, as_float(center_frequency_hz))
+    bandwidth = max(1.0, as_float(bandwidth_hz))
+    low_cutoff_hz = max(0.0, center_hz - bandwidth / 2.0)
+    high_cutoff_hz = min(nyquist_hz, center_hz + bandwidth / 2.0)
+    if high_cutoff_hz <= low_cutoff_hz:
+        return 0.0, {}, {
+            "low_cutoff_hz": 0.0,
+            "high_cutoff_hz": 0.0,
+            "group_delay_samples": 0.0,
+        }
+
+    configuration = (sample_rate_hz, low_cutoff_hz, high_cutoff_hz, taps_count)
+    previous = state if isinstance(state, dict) else {}
+    if tuple(previous.get("configuration", ())) != configuration:
+        midpoint = (taps_count - 1) / 2.0
+        taps = []
+        for index in range(taps_count):
+            offset = index - midpoint
+            if offset == 0.0:
+                ideal = 2.0 * (high_cutoff_hz - low_cutoff_hz) / sample_rate_hz
+            else:
+                ideal = (
+                    math.sin(2.0 * math.pi * high_cutoff_hz * offset / sample_rate_hz)
+                    - math.sin(2.0 * math.pi * low_cutoff_hz * offset / sample_rate_hz)
+                ) / (math.pi * offset)
+            window = (
+                0.42
+                - 0.5 * math.cos(2.0 * math.pi * index / (taps_count - 1))
+                + 0.08 * math.cos(4.0 * math.pi * index / (taps_count - 1))
+            )
+            taps.append(ideal * window)
+
+        actual_center_hz = (low_cutoff_hz + high_cutoff_hz) / 2.0
+        gain = math.hypot(
+            sum(coefficient * math.cos(2.0 * math.pi * actual_center_hz * index / sample_rate_hz)
+                for index, coefficient in enumerate(taps)),
+            sum(coefficient * math.sin(2.0 * math.pi * actual_center_hz * index / sample_rate_hz)
+                for index, coefficient in enumerate(taps)),
+        )
+        if gain > 1e-12:
+            taps = [coefficient / gain for coefficient in taps]
+        history = []
+    else:
+        saved_taps = previous.get("taps")
+        taps = (
+            [as_float(value) for value in saved_taps]
+            if isinstance(saved_taps, list) and len(saved_taps) == taps_count
+            else []
+        )
+        if not taps:
+            return band_pass_fir_filter(
+                sample,
+                center_frequency_hz,
+                bandwidth_hz,
+                dt,
+                state={},
+                tap_count=taps_count,
+            )
+        history = [as_float(value) for value in previous.get("input_history", ())][-(taps_count - 1):]
+
+    history.append(as_float(sample))
+    padded_history = [0.0] * max(0, taps_count - len(history)) + history
+    filtered_sample = sum(coefficient * value for coefficient, value in zip(taps, reversed(padded_history)))
+    return filtered_sample, {
+        "configuration": list(configuration),
+        "input_history": history[-(taps_count - 1):],
+        "taps": taps,
+    }, {
+        "low_cutoff_hz": low_cutoff_hz,
+        "high_cutoff_hz": high_cutoff_hz,
+        "group_delay_samples": (taps_count - 1) / 2.0,
+    }
+
+
 def band_stop_rf_filter(
     sample,
     previous_input,
@@ -1118,20 +2053,37 @@ def deterministic_noise(seed, step_index=0, time=0.0):
     raw = math.sin(phase) * 43758.5453
     return (raw - math.floor(raw)) * 2.0 - 1.0
 
+
+def deterministic_gaussian_noise(seed, step_index=0, time=0.0):
+    """Return a reproducible, zero-mean unit-variance Gaussian noise sample.
+
+    RF source noise is evaluated once for every simulation sample.  Converting
+    two independent deterministic uniform values with Box-Muller keeps runs
+    repeatable while producing the broadband noise floor expected by the
+    spectrum analyzer.
+    """
+    uniform_a = (deterministic_noise(seed, step_index, time) + 1.0) * 0.5
+    uniform_b = (deterministic_noise(seed + 104729, step_index + 13007, time + 0.61803398875) + 1.0) * 0.5
+    uniform_a = min(max(uniform_a, 1e-12), 1.0 - 1e-12)
+    return math.sqrt(-2.0 * math.log(uniform_a)) * math.cos(2.0 * math.pi * uniform_b)
+
 def select_rf_switch_n(inputs, number=0, mode=1):
     """射频多选N"""
     mode = max(1, int(mode))
     return inputs[(mode-1)*number:number*mode]
 
 __all__ = [
+    "apply_envelope_band_stop_filter",
+    "apply_envelope_low_pass_filter",
     "as_float",
     "adc_convert_rf",
     "adc_codes_to_normalized_iq",
     "amplify_rf_excitation",
-    "amplify_rf_final_power_16",
+    "amplify_rf_final_power_2",
     "amplify_rf_power",
     "amplify_rf_relay",
     "amplify_rf_signal",
+    "band_pass_fir_filter",
     "band_pass_rf_filter",
     "band_stop_rf_filter",
     "clamp",
@@ -1142,7 +2094,9 @@ __all__ = [
     "dac_convert_rf",
     "dbf_form_baseband_signal",
     "deterministic_noise",
+    "deterministic_gaussian_noise",
     "downconvert_rf_signal",
+    "extract_complex_envelope_pulse_features",
     "first_numeric",
     "first_order_response",
     "high_pass_rf_filter",
@@ -1151,6 +2105,7 @@ __all__ = [
     "multiplex_wavelength_division",
     "normalized_iq_to_dac_codes",
     "periodic_gate",
+    "power_combine",
     "pulse_train",
     "process_rf_frontend",
     "rate_limit",

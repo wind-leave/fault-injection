@@ -5,6 +5,8 @@ import {
   getPythonBindingDefaultValue
 } from './pythonFlowBindingRuntime.js';
 import {
+  applyComplexEnvelopeFault,
+  applyComplexEnvelopeFaultBindings,
   applyScalarFault,
   applyScalarFaultBindings,
   appendFaultBinding,
@@ -27,7 +29,10 @@ import {
   isFaultCompatibleWithModel,
   isFaultLibraryCompatibleWithModel
 } from './modelFaultCompatibilityService.js';
-import { buildBackendExecutablePackage } from './backendExecutablePackageService.js';
+import {
+  buildBackendExecutablePackage,
+  remapSubsystemBoundaryReferences
+} from './backendExecutablePackageService.js';
 import {
   createBackendSimulationSession,
   deleteBackendSimulationSession,
@@ -58,12 +63,15 @@ export function createSimulationRuntimeFacade() {
     getPythonBindingDefaultValue,
     backend: {
       buildExecutablePackage: buildBackendExecutablePackage,
+      remapSubsystemBoundaryReferences,
       runSimulation: runBackendSimulation,
       createSession: createBackendSimulationSession,
       stepSession: stepBackendSimulationSession,
       deleteSession: deleteBackendSimulationSession
     },
     faultInjection: {
+      applyComplexEnvelopeFault,
+      applyComplexEnvelopeFaultBindings,
       applyScalarFault,
       applyScalarFaultBindings,
       appendFaultBinding,
@@ -97,6 +105,8 @@ if (typeof window !== 'undefined') {
     getPythonBindingDefaultValue
   };
   window.__GZ_FAULT_INJECTION_RUNTIME__ = {
+    applyComplexEnvelopeFault,
+    applyComplexEnvelopeFaultBindings,
     applyScalarFault,
     applyScalarFaultBindings,
     appendFaultBinding,
@@ -121,6 +131,7 @@ if (typeof window !== 'undefined') {
   };
   window.__GZ_BACKEND_SIMULATION__ = {
     buildExecutablePackage: buildBackendExecutablePackage,
+    remapSubsystemBoundaryReferences,
     runSimulation: runBackendSimulation,
     createSession: createBackendSimulationSession,
     stepSession: stepBackendSimulationSession,

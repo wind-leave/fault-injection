@@ -35,6 +35,8 @@ def sample_d_matrix():
                 "faultId": "target-fault",
                 "faultName": "Target fault",
                 "targetLabel": "IMU",
+                "targetKind": "node",
+                "targetNodeId": "sim-1",
                 "layer": "physical",
                 "detectableCount": 2,
                 "cells": [
@@ -46,6 +48,8 @@ def sample_d_matrix():
             {
                 "faultId": "controller-fault",
                 "faultName": "Controller fault",
+                "targetKind": "edge",
+                "targetEdgeId": "edge-sim-scope",
                 "detectableCount": 2,
                 "cells": [
                     {"pointId": "tp-residual", "pointCode": "M1", "pointName": "residual diagnostic point", "detectable": True, "value": 1},
@@ -56,6 +60,8 @@ def sample_d_matrix():
             {
                 "faultId": "motor-fault",
                 "faultName": "Motor fault",
+                "targetKind": "node",
+                "targetNodeId": "source-1",
                 "detectableCount": 1,
                 "cells": [
                     {"pointId": "tp-residual", "pointCode": "M1", "pointName": "residual diagnostic point", "detectable": False, "value": 0},
@@ -81,13 +87,13 @@ class TroubleshootingAlgorithmTests(unittest.TestCase):
     def test_builds_path_and_key_steps_with_the_backend_algorithm(self):
         plan = build_troubleshooting_plan(sample_d_matrix(), "target-fault")
 
-        self.assertEqual(plan["source"], "backend-algorithm")
-        self.assertFalse(plan["isCustomized"])
+        self.assertNotIn("source", plan)
+        self.assertNotIn("isCustomized", plan)
         self.assertEqual(plan["keySteps"][0]["action"], "measure")
         self.assertIn("M1", plan["keySteps"][0]["text"])
         self.assertEqual(plan["keySteps"][-1]["action"], "replaceComponent")
         self.assertEqual(plan["keySteps"][-1]["targetLabel"], "IMU")
-        self.assertIn("更换组件", plan["keySteps"][-1]["text"])
+        self.assertIn("更换设备", plan["keySteps"][-1]["text"])
         self.assertIn("IMU", plan["keySteps"][-1]["text"])
         self.assertEqual(plan["steps"][-1]["action"], "replaceComponent")
         self.assertEqual(plan["steps"][-1]["targetLabel"], "IMU")
@@ -105,7 +111,7 @@ class TroubleshootingAlgorithmTests(unittest.TestCase):
 
         self.assertEqual(plan["keySteps"][-1]["action"], "replaceWire")
         self.assertEqual(plan["keySteps"][-1]["targetId"], "edge-command-controller")
-        self.assertIn("更换关键连线", plan["keySteps"][-1]["text"])
+        self.assertIn("更换连线", plan["keySteps"][-1]["text"])
 
     def test_generates_both_wire_and_device_replacement_for_combined_repair_targets(self):
         matrix = sample_d_matrix()

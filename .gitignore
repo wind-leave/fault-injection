@@ -6,3 +6,6 @@ dist/
 *.err.log
 __pycache__/
 *.pyc
+component-data/
+/tmp/
+/student-practice-result-body-*.json

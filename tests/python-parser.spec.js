@@ -98,6 +98,43 @@ def run(signal: float, gain: float = 2.0):
     expect(result.outputs).toEqual([{ name: 'output_0', displayName: 'output_0', type: 'float', comment: '' }]);
   });
 
+  it('keeps defaulted function arguments as inputs and reads named outputs from an outputs mapping', () => {
+    const result = parsePythonBindingSource({
+      fileName: 'cabinet01.py',
+      source: `
+def process(socket02=0.0):
+    return {
+        "outputs": {
+            "socket03": float(socket02),
+        },
+    }
+`
+    });
+
+    expect(result.inputs).toEqual([
+      { name: 'socket02', displayName: 'socket02', type: 'any', default: '0.0', comment: '' }
+    ]);
+    expect(result.outputs).toEqual([
+      { name: 'socket03', displayName: 'socket03', type: 'float', comment: '' }
+    ]);
+  });
+
+  it('recognizes explicit parameter markers without treating every default as a parameter', () => {
+    const result = parsePythonBindingSource({
+      fileName: 'parameter_marker.py',
+      source: `
+def process(
+    signal,
+    gain=1.0, # @parameter: gain
+):
+    return signal * gain
+`
+    });
+
+    expect(result.inputs[0].parameter).toBeUndefined();
+    expect(result.inputs[1]).toMatchObject({ name: 'gain', default: '1.0', parameter: true });
+  });
+
   it('throws a structured parse error when no entry function exists', () => {
     expect(() =>
       parsePythonBindingSource({

@@ -192,6 +192,26 @@ describe('fault binding runtime service', () => {
     });
   });
 
+  it('does not treat scalar slots with stale length metadata as vectors', () => {
+    const scalarSlot = {
+      ...slot,
+      dataType: 'scalar',
+      vectorLength: 4
+    };
+    const plan = createFaultInstancePlan({
+      target,
+      model,
+      slot: scalarSlot,
+      existingInstances: [],
+      vectorInjectionScope: 'items',
+      vectorIndices: [0, 2],
+      instanceId: 'fault-inst-scalar-stale-length'
+    });
+
+    expect(getFaultSlotVectorLength(scalarSlot)).toBe(0);
+    expect(plan.instance).not.toHaveProperty('vectorInjectionScope');
+  });
+
   it('selects compatible fault options from target capability slots', () => {
     const capabilityMap = [{
       targetId: 'node-imu',

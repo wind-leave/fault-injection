@@ -100,7 +100,6 @@ describe('property panel schema service', () => {
       type: 'instrument_spectrum',
       props: { vectorChannel: 4 }
     }, getComponentPropertySchema('instrument_spectrum'));
-
     expect(scopeHtml).not.toContain('id="prop-vectorChannelCh1"');
     expect(scopeHtml).not.toContain('id="prop-vectorChannelCh2"');
     expect(spectrumHtml).not.toContain('id="prop-vectorChannel"');
@@ -182,25 +181,51 @@ describe('property panel schema service', () => {
       type: 'signal_source',
       props: { signalDomain: 'rf', modulation: 'pulse' }
     }, schema);
+    const complexPulseHtml = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'rf', modulation: 'am', outputFormat: '复数包络' }
+    }, schema);
+    const legacyPulseHtml = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'rf', modulation: '脉冲调制' }
+    }, schema);
     const digitalHtml = renderPropertyFieldsFromSchema({
       type: 'signal_source',
       props: { signalDomain: 'rf', modulation: 'digital' }
+    }, schema);
+    const noisyAmHtml = renderPropertyFieldsFromSchema({
+      type: 'signal_source',
+      props: { signalDomain: 'rf', modulation: 'am', noiseEnabled: 'on' }
     }, schema);
 
     expect(cwHtml).toContain('id="prop-centerFrequency"');
     expect(cwHtml).toContain('id="prop-centerFrequencyUnit"');
     expect(cwHtml).not.toContain('id="prop-rfOutputEnabled"');
     expect(cwHtml).not.toContain('id="prop-bandwidth"');
+    expect(cwHtml).toContain('id="prop-noiseEnabled"');
+    expect(cwHtml).not.toContain('id="prop-noiseSnr"');
     expect(cwHtml).not.toContain('id="prop-pulseWidth"');
     expect(pulseHtml).toContain('id="prop-pulseWidth"');
     expect(pulseHtml).toContain('id="prop-pulseWidthUnit"');
     expect(pulseHtml).toContain('id="prop-pulsePeriod"');
     expect(pulseHtml).toContain('id="prop-pulsePeriodUnit"');
     expect(pulseHtml).toContain('重周');
+    expect(pulseHtml).not.toContain('id="prop-bandwidth"');
+    expect(complexPulseHtml).not.toContain('id="prop-riseTime"');
+    expect(complexPulseHtml).not.toContain('id="prop-fallTime"');
+    expect(complexPulseHtml).not.toContain('id="prop-modulation"');
+    expect(complexPulseHtml).not.toContain('id="prop-bandwidth"');
+    expect(complexPulseHtml).not.toContain('id="prop-impedanceOhm"');
     expect(pulseHtml).not.toContain('id="prop-snr"');
+    expect(legacyPulseHtml).toContain('id="prop-pulseWidth"');
+    expect(legacyPulseHtml).toContain('id="prop-pulsePeriod"');
     expect(digitalHtml).toContain('id="prop-bandwidth"');
     expect(digitalHtml).toContain('id="prop-sampleRate"');
     expect(digitalHtml).not.toContain('id="prop-pulseWidth"');
+    expect(noisyAmHtml).toContain('id="prop-noiseSnr"');
+    expect(noisyAmHtml).toContain('id="prop-noiseBandwidth"');
+    expect(noisyAmHtml).toContain('id="prop-noiseBandwidthUnit"');
+    expect(noisyAmHtml).not.toContain('噪声/干扰');
   });
 
   it('does not render signal definition as editable signal source parameter fields', () => {
@@ -439,6 +464,7 @@ describe('property panel schema service', () => {
     expect(scalarHtml).not.toContain('id="prop-rfVectorLength"');
     expect(batchHtml).toContain('id="prop-rfVectorLength"');
     expect(batchHtml).toContain('id="prop-rfVectorValues"');
+
     expect(itemHtml.match(/data-rf-vector-value/g)).toHaveLength(3);
 
     document.body.innerHTML = itemHtml;

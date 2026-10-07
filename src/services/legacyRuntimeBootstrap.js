@@ -3,6 +3,7 @@ import * as canvasGraph from './canvasGraph.js';
 import * as canvasRender from './canvasRenderService.js';
 import * as canvasSelection from './canvasSelectionService.js';
 import * as canvasState from './canvasStateService.js';
+import * as diagnosticDetectability from './diagnosticDetectabilityService.js';
 import * as faultBindingRuntimeService from './faultBindingRuntimeService.js';
 import * as faultCatalogRender from './faultCatalogRenderService.js';
 import * as faultTemplateRender from './faultTemplateRenderService.js';
@@ -14,10 +15,14 @@ import * as simulationPropertyPanelSchema from './simulationPropertyPanelSchema.
 import * as simulationInterfaceLockService from './simulationInterfaceLockService.js';
 import * as signalComponentRuntime from './signalComponentRuntime.js';
 import * as signalSourceDomainService from './signalSourceDomainService.js';
+import * as signalSourceIdentityService from './signalSourceIdentityService.js';
 import * as multimeterMeasurementService from './multimeterMeasurementService.js';
 import * as displayConsoleConfig from '../constants/displayConsoleConfig.js';
 import * as subsystemPropertyPanelSchema from './subsystemPropertyPanelSchema.js';
 import * as practiceTaskPackageService from './practiceTaskPackageService.js';
+import { fftComplexForward } from './complexSpectrumFft.js';
+import { reconstructRealRfSample } from './rfComplexEnvelopeWaveform.js';
+import { diagnoseDMatrixFaultCombinations } from './dMatrixFaultLocalization.js';
 import { installBackendStepSimulationRuntime } from './backendStepSimulationRuntime.js';
 import {
   COMPONENT_GROUPS,
@@ -36,8 +41,61 @@ import {
 import faultTypeCatalog from '../../fault-types/fault-type-catalog.json';
 
 let mounted = false;
+let persistOnPageHide = null;
 const DEFAULT_FLIGHT_MODEL_PACKAGE_PATH = 'model-packages/evtol-small-flight-control-fault-display.json';
 const WORKBENCH_STORAGE_KEY = 'gz-workbench-system-model';
+
+export function persistWorkbenchSnapshot() {
+  const state = window.__GZ_STATE__;
+  if (!state?.sysLoaded || !state.canvases) {
+    return false;
+  }
+  try {
+    window.localStorage?.setItem(WORKBENCH_STORAGE_KEY, JSON.stringify(createWorkbenchSnapshot(state)));
+    return true;
+  } catch (error) {
+    console.warn('Failed to persist workbench on page exit', error);
+    return false;
+  }
+}
+
+export function restoreStoredWorkbench() {
+  if (typeof window.restoreSystemModelSnapshot !== 'function') {
+    return false;
+  }
+  try {
+    const raw = window.localStorage?.getItem(WORKBENCH_STORAGE_KEY);
+    if (!raw) {
+      return false;
+    }
+    const snapshot = JSON.parse(raw);
+    if (!snapshot || typeof snapshot !== 'object' || (!snapshot.canvases && !snapshot.modelNodes)) {
+      return false;
+    }
+    window.restoreSystemModelSnapshot(snapshot);
+    const state = window.__GZ_STATE__;
+    state.sysLoaded = true;
+    state.systemSaved = true;
+    state.step = Object.values(state.canvases ?? {}).some((canvas) => canvas.nodes?.length) ? 2 : 1;
+    state.faultLoaded = Boolean(state.importedFaultModels?.length);
+    state.faultModels = state.importedFaultModels?.length ?? 0;
+    window.buildDiagnosticTestPointModel?.({ includeAllCanvases: true });
+    window.dispatchEvent(new CustomEvent('gz:palette-components-reset'));
+    const consumed = new Set(Object.values(state.canvases ?? {})
+      .flatMap((canvas) => canvas.nodes ?? [])
+      .map((node) => node.paletteKey || node.templateId)
+      .filter((key) => ['simulation', 'electrical', 'display-control']
+        .includes(COMPONENT_REGISTRY[key]?.group)));
+    consumed.forEach((paletteKey) => {
+      window.dispatchEvent(new CustomEvent('gz:palette-component-created', { detail: { paletteKey } }));
+    });
+    window.updateUI?.();
+    return true;
+  } catch (error) {
+    console.warn('Failed to restore saved workbench', error);
+    return false;
+  }
+}
 
 function normalizeBaseUrl(baseUrl = './') {
   return baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
@@ -59,29 +117,6 @@ function getAppPublicBaseUrl() {
 
 function getDefaultFlightModelPackageUrl() {
   return new URL(DEFAULT_FLIGHT_MODEL_PACKAGE_PATH, getAppPublicBaseUrl()).toString();
-}
-
-function isPublicDemoDeployment() {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  const { hostname, pathname, search } = window.location;
-  const params = new URLSearchParams(search);
-
-  return params.get('demo') === '1'
-    || (
-      hostname === 'blank1cheng.github.io'
-      && pathname.replace(/\/+$/, '').endsWith('/uav-fault-platform')
-    );
-}
-
-function getDefaultFlightModelLoadOptions() {
-  return {
-    force: true,
-    resetStoredWorkbench: true,
-    publicDemo: isPublicDemoDeployment()
-  };
 }
 
 function resetStoredWorkbenchIfRequested(options = {}) {
@@ -206,6 +241,10 @@ function createExportSnapshot(state = {}) {
   };
 }
 
+export function openDefaultBlankWorkspace() {
+  window.doCreateBlankWorkspace?.({ silent: true, preserveStoredWorkbench: true });
+}
+
 export function mountLegacyRuntime() {
   if (mounted || window.__GZ_LEGACY_RUNTIME_BOOTED__) {
     return;
@@ -220,6 +259,7 @@ export function mountLegacyRuntime() {
   window.__GZ_CANVAS_RENDER__ = canvasRender;
   window.__GZ_CANVAS_SELECTION__ = canvasSelection;
   window.__GZ_CANVAS_STATE__ = canvasState;
+  window.__GZ_DIAGNOSTIC_DETECTABILITY__ = diagnosticDetectability;
   window.__GZ_FAULT_BINDING_RUNTIME__ = faultBindingRuntimeService;
   window.__GZ_FAULT_CATALOG_RENDER__ = faultCatalogRender;
   window.__GZ_FAULT_TEMPLATE_RENDER__ = faultTemplateRender;
@@ -236,6 +276,7 @@ export function mountLegacyRuntime() {
   window.__GZ_SUBSYSTEM_PROPERTY_PANEL_SCHEMA__ = subsystemPropertyPanelSchema;
   window.__GZ_SIGNAL_COMPONENT_RUNTIME__ = signalComponentRuntime;
   window.__GZ_SIGNAL_SOURCE_DOMAIN__ = signalSourceDomainService;
+  window.__GZ_SIGNAL_SOURCE_IDENTITY__ = signalSourceIdentityService;
   window.__GZ_MULTIMETER_MEASUREMENT__ = multimeterMeasurementService;
   window.__GZ_DISPLAY_CONSOLE_CONFIG__ = displayConsoleConfig;
   window.__GZ_PRACTICE_TASK_PACKAGE__ = practiceTaskPackageService;
@@ -268,13 +309,24 @@ export function mountLegacyRuntime() {
       const state = window.__GZ_STATE__ ?? {};
 
       return exportFlightModelPackage({
-        meta: createExportMeta(state),
+        meta: {
+          ...createExportMeta(state),
+          diagnosticModel: {
+            ...(state.diagnosticModel && typeof state.diagnosticModel === 'object' ? state.diagnosticModel : {}),
+            testPoints: Array.isArray(state.diagnosticTestPoints) && state.diagnosticTestPoints.length
+              ? state.diagnosticTestPoints
+              : (Array.isArray(state.testPoints) ? state.testPoints : [])
+          }
+        },
         state: createExportSnapshot(state),
         faultLibrary: state.availableFaultModels ?? []
       });
     }
   };
   window.__GZ_LOAD_DEFAULT_FLIGHT_MODEL__ = loadDefaultFlightModelPackage;
+  window.__GZ_COMPLEX_SPECTRUM_FFT__ = fftComplexForward;
+  window.__GZ_RECONSTRUCT_REAL_RF_SAMPLE__ = reconstructRealRfSample;
+  window.__GZ_DIAGNOSE_D_MATRIX_FAULTS__ = diagnoseDMatrixFaultCombinations;
   window.eval(`${runtimeSource}\n//# sourceURL=gz-legacy-runtime.js`);
   installBackendStepSimulationRuntime(window, {
     enabled: import.meta.env.MODE !== 'test',
@@ -283,25 +335,25 @@ export function mountLegacyRuntime() {
     }
   });
 
-  queueMicrotask(() => {
-    const options = getDefaultFlightModelLoadOptions();
-    loadDefaultFlightModelPackage(options).catch((error) => {
-      window.__GZ_DEFAULT_FLIGHT_MODEL_STATE__ = {
-        loaded: false,
-        modelId: null,
-        modelName: null,
-        source: getDefaultFlightModelPackageUrl(),
-        publicDemo: Boolean(options.publicDemo),
-        errors: [error instanceof Error ? error.message : 'Failed to load default flight model package.']
-      };
-    });
-  });
+  if (import.meta.env.MODE !== 'test') {
+    openDefaultBlankWorkspace();
+    restoreStoredWorkbench();
+  }
+
+  persistOnPageHide = () => persistWorkbenchSnapshot();
+  window.addEventListener('pagehide', persistOnPageHide);
+  window.addEventListener('beforeunload', persistOnPageHide);
 
   window.__GZ_LEGACY_RUNTIME_BOOTED__ = true;
   mounted = true;
 }
 
 export function __resetLegacyRuntimeForTests() {
+  if (persistOnPageHide) {
+    window.removeEventListener('pagehide', persistOnPageHide);
+    window.removeEventListener('beforeunload', persistOnPageHide);
+    persistOnPageHide = null;
+  }
   const runtimeListeners = window.__GZ_RUNTIME_LISTENERS__;
   if (runtimeListeners) {
     if (runtimeListeners.canvasWindowKeydown) {
@@ -383,6 +435,9 @@ export function __resetLegacyRuntimeForTests() {
   delete window.__GZ_CANVAS_RENDER__;
   delete window.__GZ_CANVAS_SELECTION__;
   delete window.__GZ_CANVAS_STATE__;
+  delete window.__GZ_DIAGNOSTIC_DETECTABILITY__;
+  delete window.__GZ_RESOLVE_TEST_POINT_DETECTS__;
+  delete window.__GZ_INIT_TEST_POINT_DETECTABILITY__;
   delete window.__GZ_FAULT_BINDING_RUNTIME__;
   delete window.__GZ_FAULT_CATALOG_RENDER__;
   delete window.__GZ_FAULT_TEMPLATE_RENDER__;

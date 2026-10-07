@@ -87,8 +87,11 @@ describe('left palette taxonomy', () => {
       'signal_source_rf'
     ]);
     expect(wrapper.find('[data-palette-group="signal-ops"]').exists()).toBe(false);
+    expect(groupBody(wrapper, 'electrical').find('[data-electrical-menu-section="power-source"]').text()).toContain('电源模块');
+    expect(groupBody(wrapper, 'electrical').find('[data-electrical-menu-section="power-conversion"]').text()).toContain('电能变换');
     expect(groupComponents(wrapper, 'electrical')).toEqual([
       'electrical_ac_power_source',
+      'electrical_dc_power_source',
       'electrical_dc_boost',
       'electrical_ac_dc_matching'
     ]);
@@ -98,7 +101,12 @@ describe('left palette taxonomy', () => {
     ]);
     expect(groupBody(wrapper, 'simulation').text()).toContain('空速传感器');
     expect(groupBody(wrapper, 'simulation').find('[data-open-component-authoring]').exists()).toBe(false);
-    expect(groupComponents(wrapper, 'subsystem')).toEqual(['subsystem_block']);
+    expect(groupComponents(wrapper, 'subsystem')).toEqual([
+      'subsystem_block',
+      'subsystem_block_2',
+      'subsystem_block_3',
+      'subsystem_block_4'
+    ]);
     expect(groupComponents(wrapper, 'faults')).toEqual([
       'physical_fault_injector',
       'electrical_fault_injector',
@@ -114,10 +122,18 @@ describe('left palette taxonomy', () => {
     ]);
     expect(groupBody(wrapper, 'instruments').text()).not.toContain('数据记录仪');
     expect(groupBody(wrapper, 'instruments').text()).toContain('数字万用表');
-    expect(groupComponents(wrapper, 'display-control')).toEqual(['display_console_1', 'display_console_2']);
+    expect(groupComponents(wrapper, 'display-control')).toEqual([
+      'display_console_1',
+      'display_console_2',
+      'display_console_3',
+      'display_console_4',
+      'display_console_5',
+      'display_console_6',
+      'display_console_7'
+    ]);
     expect(groupBody(wrapper, 'can-lines').find('[data-line-type="normal"]').exists()).toBe(true);
     expect(groupBody(wrapper, 'can-lines').find('[data-line-type="power"]').exists()).toBe(false);
-    expect(groupBody(wrapper, 'can-lines').find('[data-line-type="can"]').exists()).toBe(true);
+    expect(groupBody(wrapper, 'can-lines').find('[data-line-type="can"]').exists()).toBe(false);
 
     wrapper.unmount();
   });
@@ -140,26 +156,46 @@ describe('left palette taxonomy', () => {
     expect(wrapper.find('[data-component="display_console_1"] .citem-icon-badge').classes()).toContain(
       'citem-icon-badge--display-control'
     );
+    expect(wrapper.find('[data-component="display_console_7"] .citem-icon-badge').text()).toBe('显7');
 
     wrapper.unmount();
   });
 
-  it('offers normal and CAN lines without a power-line tool', () => {
+  it('drags each new blank subsystem entry as a subsystem block', () => {
+    const wrapper = mountPalette();
+    const entries = groupBody(wrapper, 'subsystem').findAll('.citem-draggable');
+
+    expect(entries.map((entry) => entry.find('.citem-label').text())).toEqual([
+      '子系统块', '子系统块 2', '子系统块 3', '子系统块 4'
+    ]);
+    entries.slice(1).forEach((entry, index) => {
+      const dataTransfer = createDragDataTransfer();
+      const dragStart = new Event('dragstart', { bubbles: true, cancelable: true });
+      Object.defineProperty(dragStart, 'dataTransfer', { value: dataTransfer });
+      entry.element.dispatchEvent(dragStart);
+      expect(dataTransfer.getData('text/plain')).toBe(`subsystem_block_${index + 2}`);
+      expect(dataTransfer.getData('application/x-gz-palette-key')).toBe(`subsystem_block_${index + 2}`);
+    });
+
+    wrapper.unmount();
+  });
+
+  it('offers only the normal line tool in the connection group', () => {
     const wrapper = mountPalette();
     const lineTools = groupBody(wrapper, 'can-lines');
 
     expect(lineTools.find('[data-line-type="normal"]').exists()).toBe(true);
     expect(lineTools.find('[data-line-type="power"]').exists()).toBe(false);
-    expect(lineTools.find('[data-line-type="can"]').exists()).toBe(true);
+    expect(lineTools.find('[data-line-type="can"]').exists()).toBe(false);
 
     wrapper.unmount();
   });
 
-  it('shows the protocol-layer injector together with the restored CAN tool', () => {
+  it('keeps the protocol-layer injector while hiding the CAN line tool', () => {
     const wrapper = mountPalette();
 
     expect(wrapper.find('[data-component="protocol_fault_injector"]').exists()).toBe(true);
-    expect(groupBody(wrapper, 'can-lines').find('[data-line-type="can"]').exists()).toBe(true);
+    expect(groupBody(wrapper, 'can-lines').find('[data-line-type="can"]').exists()).toBe(false);
     expect(groupBody(wrapper, 'can-lines').find('[data-line-type="power"]').exists()).toBe(false);
 
     wrapper.unmount();
@@ -172,13 +208,28 @@ describe('left palette taxonomy', () => {
       detail: { paletteKey: 'display_console_1' }
     }));
     await wrapper.vm.$nextTick();
-    expect(groupComponents(wrapper, 'display-control')).toEqual(['display_console_2']);
+    expect(groupComponents(wrapper, 'display-control')).toEqual([
+      'display_console_2',
+      'display_console_3',
+      'display_console_4',
+      'display_console_5',
+      'display_console_6',
+      'display_console_7'
+    ]);
 
     window.dispatchEvent(new CustomEvent('gz:palette-component-deleted', {
       detail: { paletteKey: 'display_console_1' }
     }));
     await wrapper.vm.$nextTick();
-    expect(groupComponents(wrapper, 'display-control')).toEqual(['display_console_1', 'display_console_2']);
+    expect(groupComponents(wrapper, 'display-control')).toEqual([
+      'display_console_1',
+      'display_console_2',
+      'display_console_3',
+      'display_console_4',
+      'display_console_5',
+      'display_console_6',
+      'display_console_7'
+    ]);
 
     wrapper.unmount();
   });

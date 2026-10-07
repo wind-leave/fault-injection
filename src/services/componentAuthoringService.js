@@ -29,6 +29,11 @@ function resolveDisplayName(item, fallbackName) {
   return text(item?.displayName, text(item?.comment, text(item?.name, fallbackName)));
 }
 
+function resolveSidePosition(item) {
+  const numeric = Number.parseInt(item?.sidePosition, 10);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : undefined;
+}
+
 function mapPortList(items, direction, moduleName) {
   return arrayOrEmpty(items).map((item, index) => {
     const signalId = resolveSignalId(moduleName, item, index);
@@ -48,7 +53,11 @@ function mapPortList(items, direction, moduleName) {
         ? Number(item.vectorLength ?? item.length)
         : undefined,
       comment: text(item.comment),
-      direction
+      direction,
+      side: item?.side === 'left' || item?.side === 'right'
+        ? item.side
+        : (direction === 'input' ? 'left' : 'right'),
+      ...(resolveSidePosition(item) ? { sidePosition: resolveSidePosition(item) } : {})
     };
   });
 }
@@ -115,7 +124,7 @@ function enrichBindingSignalIds(binding, ports, stateVariables) {
   return nextBinding;
 }
 
-function mapPropsPorts(items) {
+function mapPropsPorts(items, defaultSide) {
   return arrayOrEmpty(items).map((item) => ({
     signalId: item.signalId,
     varName: item.varName,
@@ -124,7 +133,11 @@ function mapPropsPorts(items) {
     type: item.type,
     dataType: item.dataType,
     vectorLength: item.vectorLength,
-    comment: item.comment
+    comment: item.comment,
+    side: item?.side === 'left' || item?.side === 'right'
+      ? item.side
+      : defaultSide,
+    ...(resolveSidePosition(item) ? { sidePosition: resolveSidePosition(item) } : {})
   }));
 }
 
@@ -214,8 +227,8 @@ export function createNodeFromComponentTemplate(template, { id, x = 0, y = 0 } =
       moduleType: safeTemplate.category ?? '仿真模块',
       geometry: safeTemplate.geometry ?? 'rect',
       parameters: arrayOrEmpty(safeTemplate.parameters),
-      inputs: mapPropsPorts(safeTemplate.ports?.inputs),
-      outputs: mapPropsPorts(safeTemplate.ports?.outputs),
+      inputs: mapPropsPorts(safeTemplate.ports?.inputs, 'left'),
+      outputs: mapPropsPorts(safeTemplate.ports?.outputs, 'right'),
       middleVars: mapPropsPorts(safeTemplate.stateVariables)
     },
     ports: clone(safeTemplate.ports),

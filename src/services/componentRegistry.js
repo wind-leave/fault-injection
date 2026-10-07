@@ -11,14 +11,52 @@ function clone(value) {
 
 function parameterDefaultValues(parameters = []) {
   return Object.fromEntries(parameters
-    .map((parameter) => [String(parameter?.key ?? '').trim(), Number(parameter?.default)])
-    .filter(([key, value]) => key && Number.isFinite(value)));
+    .map((parameter) => {
+      const key = String(parameter?.key ?? '').trim();
+      const rawValue = parameter?.default;
+      if (Array.isArray(rawValue)) {
+        const value = rawValue.map(Number);
+        return [key, value.every(Number.isFinite) ? value : undefined];
+      }
+      const value = Number(rawValue);
+      return [key, Number.isFinite(value) ? value : undefined];
+    })
+    .filter(([key, value]) => key && value !== undefined));
+}
+
+function defaultPhysicalParameterFaultSlots(parameters = []) {
+  return parameters.flatMap((parameter) => {
+    const key = String(parameter?.key ?? '').trim();
+    if (!key) return [];
+    return [{
+      slotId: `physical:parameter:${key}`,
+      slotName: String(parameter?.name ?? key),
+      layer: 'physical',
+      targetField: `params.${key}`,
+      bindingObject: key,
+      targetVariable: key,
+      parameterKey: key,
+      ...(parameter?.unit ? { unit: parameter.unit } : {})
+    }];
+  });
+}
+
+function mergeFaultSlots(defaultSlots = [], configuredSlots = []) {
+  const slotsByTarget = new Map();
+  [...defaultSlots, ...configuredSlots].forEach((slot) => {
+    if (!slot) return;
+    const key = `${slot.layer ?? ''}:${slot.targetField || slot.slotId || ''}`;
+    // Explicit component slots override the generated default for the same
+    // parameter while preserving intentionally distinct targets.
+    slotsByTarget.set(key, slot);
+  });
+  return [...slotsByTarget.values()];
 }
 
 const SIMULATION_COMPONENT_MIN_WIDTH = 196;
 const SIMULATION_COMPONENT_MIN_HEIGHT = 116;
 const SIMULATION_COMPONENT_MAX_WIDTH = 320;
-const SIMULATION_COMPONENT_MAX_HEIGHT = 360;
+const SIMULATION_COMPONENT_MAX_HEIGHT = 2400;
 
 function positiveDimension(value) {
   const dimension = Number(value);
@@ -33,7 +71,7 @@ function resolveSimulationComponentDimensions(inputs, outputs, width, height) {
   );
   const automaticHeight = Math.min(
     SIMULATION_COMPONENT_MAX_HEIGHT,
-    Math.max(SIMULATION_COMPONENT_MIN_HEIGHT, 76 + portCount * 28)
+    Math.max(SIMULATION_COMPONENT_MIN_HEIGHT, 76 + portCount * 32)
   );
   return {
     width: positiveDimension(width) ?? automaticWidth,
@@ -44,6 +82,7 @@ function resolveSimulationComponentDimensions(inputs, outputs, width, height) {
 function createDisplayConsoleTemplates() {
   return Object.fromEntries(Object.entries(DISPLAY_CONSOLE_PRESETS).map(([templateId, preset]) => {
     const displayConfig = createDisplayConsoleConfig(preset);
+    const consoleNumber = templateId.match(/_(\d+)$/)?.[1] ?? '';
     return [templateId, {
       type: templateId,
       nodeType: 'display_console',
@@ -55,7 +94,7 @@ function createDisplayConsoleTemplates() {
       width: 196,
       height: 118,
       palette: {
-        icon: '显',
+        icon: consoleNumber ? `显${consoleNumber}` : '显',
         iconClass: 'display-control'
       },
       defaults: {
@@ -80,6 +119,9 @@ export function createPythonSimulationComponent({
   type,
   group = 'simulation',
   simulationMenu,
+  simulationMenuLabel,
+  paletteMenu,
+  paletteMenuLabel,
   label,
   moduleType,
   inputs = [],
@@ -89,6 +131,9 @@ export function createPythonSimulationComponent({
   description = `${label}模型`,
   entryFunction = 'process',
   executionMode = 'mock',
+  sourceKind = 'builtin',
+  moduleId = type,
+  fileName = `${moduleId}.py`,
   badge = '仿真',
   className = 'b-sim',
   width,
@@ -97,21 +142,63 @@ export function createPythonSimulationComponent({
   palette = { icon: '仿', iconClass: 'simulation' },
   powerInputs = [{ name: '电源输入', type: '电源', voltage: '28V' }],
   powerOutputs = [{ name: '电源地', type: '电源', voltage: '0V' }],
+  requiresPower = true,
   ffunctionNote = '',
   faultSlots = []
 }) {
   // Simulation components use a supply terminal only; ground terminals are
   // no longer part of their public interface.
   powerOutputs = [];
+  if (!requiresPower) powerInputs = [];
   powerInputs = powerInputs.map((port) => ({ ...port, supplyType: port.supplyType === 'AC' ? 'AC' : 'DC' }));
   const dimensions = resolveSimulationComponentDimensions(inputs, outputs, width, height);
-  const fileName = `${type}.py`;
-  const isVector = (item) => item.dataType === 'vector' || item.type === 'vector' || item.type === '向量';
+  const resolvedFaultSlots = mergeFaultSlots(
+    defaultPhysicalParameterFaultSlots(parameters),
+    faultSlots
+  );
+  const isVector = (item) => item.collectionKind === 'vector'
+    || item.dataType === 'vector' || item.type === 'vector' || item.type === '向量';
+  const isComplexEnvelope = (item) => {
+    const typeName = String(item?.dataType ?? item?.type ?? '').trim().toLowerCase();
+    return ['rf_complex_envelope', 'rf-complex-envelope', 'rfcomplexenvelope', '复数包络', '射频复数包络'].includes(typeName);
+  };
   const signalType = (item) => item.type ?? (isVector(item) ? 'vector' : 'float');
   const displayType = (item) => item.displayType ?? (isVector(item) ? '向量' : '标量');
-  const vectorContract = (item) => (isVector(item) && Number.isInteger(item.vectorLength) && item.vectorLength > 0
-    ? { dataType: 'vector', vectorLength: item.vectorLength }
-    : {});
+  const sidePosition = (item) => {
+    const numeric = Number.parseInt(item?.sidePosition, 10);
+    return Number.isInteger(numeric) && numeric > 0 ? numeric : undefined;
+  };
+  const vectorContract = (item) => {
+    if (!isVector(item) || !Number.isInteger(item.vectorLength) || item.vectorLength < 1) {
+      return {};
+    }
+    const vectorElementNames = Array.isArray(item.vectorElementNames)
+      ? item.vectorElementNames.map((name) => String(name ?? '').trim()).slice(0, item.vectorLength)
+      : [];
+    return {
+      ...(isComplexEnvelope(item) ? {} : { dataType: 'vector' }),
+      vectorLength: item.vectorLength,
+      ...(vectorElementNames.length ? { vectorElementNames } : {})
+    };
+  };
+  const scalarElementContract = (item) => {
+    if (isVector(item)) {
+      return {};
+    }
+    const elementName = String(
+      (Array.isArray(item.elementNames) ? item.elementNames[0] : item.elementName) ?? ''
+    ).trim();
+    return elementName ? { elementNames: [elementName] } : {};
+  };
+  const complexEnvelopeContract = (item) => {
+    if (!isComplexEnvelope(item)) {
+      return {};
+    }
+    return {
+      dataType: 'rf_complex_envelope',
+      ...(item.collectionKind === 'vector' ? { collectionKind: 'vector' } : {})
+    };
+  };
   const makePort = (item, direction, index) => {
     const portId = String(item.portId ?? '').trim();
     if (!portId) {
@@ -126,6 +213,13 @@ export function createPythonSimulationComponent({
       displayName: item.name,
       type: signalType(item),
       ...vectorContract(item),
+      ...scalarElementContract(item),
+      ...complexEnvelopeContract(item),
+      ...(item.allowsVector ? { allowsVector: true } : {}),
+      side: item.side === 'left' || item.side === 'right'
+        ? item.side
+        : (direction === 'input' ? 'left' : 'right'),
+      ...(sidePosition(item) ? { sidePosition: sidePosition(item) } : {}),
       ...(item.unit ? { unit: item.unit } : {}),
       direction
     };
@@ -137,7 +231,17 @@ export function createPythonSimulationComponent({
     displayName: port.displayName,
     type: port.type,
     ...(port.dataType ? { dataType: port.dataType } : {}),
+    ...(port.collectionKind ? { collectionKind: port.collectionKind } : {}),
+    ...(port.allowsVector ? { allowsVector: true } : {}),
     ...(port.vectorLength ? { vectorLength: port.vectorLength } : {}),
+    ...(port.side ? { side: port.side } : {}),
+    ...(port.sidePosition ? { sidePosition: port.sidePosition } : {}),
+    ...(Array.isArray(port.vectorElementNames) && port.vectorElementNames.length
+      ? { vectorElementNames: clone(port.vectorElementNames) }
+      : {}),
+    ...(Array.isArray(port.elementNames) && port.elementNames.length
+      ? { elementNames: clone(port.elementNames.slice(0, 1)) }
+      : {}),
     ...(item.default === undefined ? {} : { default: item.default }),
     comment: item.name,
     ...(connected ? { connected: false } : {})
@@ -148,7 +252,7 @@ export function createPythonSimulationComponent({
   };
   const parsedInterface = {
     fileName,
-    moduleName: type,
+    moduleName: moduleId,
     description,
     entryFunction,
     inputs: [
@@ -157,7 +261,11 @@ export function createPythonSimulationComponent({
         displayName: item.name,
         type: signalType(item),
         ...vectorContract(item),
+        ...scalarElementContract(item),
+        ...complexEnvelopeContract(item),
         comment: item.name,
+        ...(item.side ? { side: item.side } : {}),
+        ...(sidePosition(item) ? { sidePosition: sidePosition(item) } : {}),
         default: null
       })),
       ...parameters.map((item) => ({
@@ -165,15 +273,20 @@ export function createPythonSimulationComponent({
         displayName: item.name,
         type: signalType(item),
         comment: item.name,
-        default: item.default
+        default: item.default,
+        parameter: true
       }))
     ],
     outputs: outputs.map((item) => ({
       name: item.varName,
       displayName: item.name,
-      type: signalType(item),
-      ...vectorContract(item),
-      comment: item.name
+        type: signalType(item),
+        ...vectorContract(item),
+        ...scalarElementContract(item),
+        ...complexEnvelopeContract(item),
+        comment: item.name,
+        ...(item.side ? { side: item.side } : {}),
+        ...(sidePosition(item) ? { sidePosition: sidePosition(item) } : {})
     })),
     middleVars: [],
     ...(rawSource ? { rawSource } : {})
@@ -185,6 +298,9 @@ export function createPythonSimulationComponent({
     templateId: type,
     group,
     ...(simulationMenu ? { simulationMenu } : {}),
+    ...(simulationMenuLabel ? { simulationMenuLabel } : {}),
+    ...(paletteMenu ? { paletteMenu } : {}),
+    ...(paletteMenuLabel ? { paletteMenuLabel } : {}),
     label,
     badge,
     className,
@@ -199,17 +315,26 @@ export function createPythonSimulationComponent({
         name: item.name,
         type: displayType(item),
         ...vectorContract(item),
+        ...scalarElementContract(item),
+        ...complexEnvelopeContract(item),
         varName: item.varName,
+        side: item.side === 'left' || item.side === 'right' ? item.side : 'left',
+        ...(sidePosition(item) ? { sidePosition: sidePosition(item) } : {}),
         ...(item.unit ? { unit: item.unit } : {})
       })),
       outputs: outputs.map((item) => ({
         name: item.name,
         type: displayType(item),
         ...vectorContract(item),
+        ...scalarElementContract(item),
+        ...complexEnvelopeContract(item),
         varName: item.varName,
+        side: item.side === 'left' || item.side === 'right' ? item.side : 'right',
+        ...(sidePosition(item) ? { sidePosition: sidePosition(item) } : {}),
         ...(item.unit ? { unit: item.unit } : {})
       })),
       middleVars: [],
+      requiresPower,
       powerInputs: clone(powerInputs),
       powerOutputs: clone(powerOutputs),
       parameters: clone(parameters),
@@ -223,10 +348,10 @@ export function createPythonSimulationComponent({
       // deliberately do not carry a copy of their Python source in every
       // workbench node.  Mark them explicitly to keep save/import from
       // mistaking the binding for an incomplete custom module.
-      sourceKind: 'builtin',
-      moduleId: type,
+      sourceKind,
+      moduleId,
       fileName,
-      moduleName: type,
+      moduleName: moduleId,
       moduleCategory: moduleType,
       description,
       entryFunction,
@@ -239,7 +364,10 @@ export function createPythonSimulationComponent({
         middleVars: []
       }
     },
-    faultSlots: clone(faultSlots)
+    // The legacy canvas copies template slots only when a node is created.
+    // Seed parameter slots here so a newly placed component can receive a
+    // physical-layer fault immediately, without an extra “save slots” action.
+    faultSlots: clone(resolvedFaultSlots)
   };
 }
 
@@ -260,6 +388,29 @@ export const SIMULATION_MENU_SECTIONS = [
   { id: 'signal-processing', label: '信号处理模型', icon: '信', defaultOpen: true },
   { id: 'rf-signal', label: '射频信号模型', icon: 'RF', defaultOpen: true }
 ];
+
+// 电气组件使用与仿真组件相同的折叠二级菜单机制。新增电气模板时，
+// 设置 `paletteMenu` 即可归入对应类别。
+export const ELECTRICAL_MENU_SECTIONS = [
+  { id: 'power-source', label: '电源模块', icon: '源', defaultOpen: true },
+  { id: 'power-conversion', label: '电能变换', icon: '变', defaultOpen: true }
+];
+
+function createBlankSubsystemTemplate(templateId, name, subsystemId) {
+  return {
+    type: templateId,
+    nodeType: 'subsystem_block',
+    templateId,
+    group: 'subsystem',
+    label: name,
+    badge: '子系统',
+    className: 'b-subsystem',
+    width: 180,
+    height: 92,
+    palette: { icon: '子', iconClass: 'subsystem' },
+    defaults: { name, subsystemId, description: '', targetCanvasId: '' }
+  };
+}
 
 export const COMPONENT_REGISTRY = {
   signal_source: {
@@ -326,6 +477,7 @@ export const COMPONENT_REGISTRY = {
   electrical_ac_power_source: createPythonSimulationComponent({
     type: 'electrical_ac_power_source',
     group: 'electrical',
+    paletteMenu: 'power-source',
     label: '交流电源模块',
     moduleType: '电气电源模型',
     title: '输出可配置幅值与频率的交流电压',
@@ -345,9 +497,31 @@ export const COMPONENT_REGISTRY = {
     ffunctionNote: '按设定有效值、频率和相位输出正弦交流电压。',
     executionMode: 'backend'
   }),
+  electrical_dc_power_source: createPythonSimulationComponent({
+    type: 'electrical_dc_power_source',
+    group: 'electrical',
+    paletteMenu: 'power-source',
+    label: '直流电源模块',
+    moduleType: '电气电源模型',
+    title: '输出可配置额定电压的稳定直流电压',
+    palette: { icon: 'DC', iconClass: 'electrical' },
+    description: '直流电源仿真组件，输出单路稳定直流电压。',
+    inputs: [],
+    outputs: [
+      { portId: 'output-0', name: '直流电输出', varName: 'dc_output', type: 'float', unit: 'VDC' }
+    ],
+    parameters: [
+      { key: 'output_voltage', name: '输出电压', default: 28, min: 0, max: 1000000, unit: 'V' }
+    ],
+    powerInputs: [],
+    powerOutputs: [],
+    ffunctionNote: '按设定输出稳定的直流电压。',
+    executionMode: 'backend'
+  }),
   electrical_dc_boost: createPythonSimulationComponent({
     type: 'electrical_dc_boost',
     group: 'electrical',
+    paletteMenu: 'power-conversion',
     label: '直流升压模块',
     moduleType: '电气变换模型',
     title: '单路直流电压输入，经升压后输出单路直流电压',
@@ -371,6 +545,7 @@ export const COMPONENT_REGISTRY = {
   electrical_ac_dc_matching: createPythonSimulationComponent({
     type: 'electrical_ac_dc_matching',
     group: 'electrical',
+    paletteMenu: 'power-conversion',
     label: '直流匹配模块',
     moduleType: '电气变换模型',
     title: '单路交流电输入，经整流匹配后输出单路直流电压',
@@ -588,6 +763,385 @@ export const COMPONENT_REGISTRY = {
     ffunctionNote: '将标量输入值复制到四维输出向量的四个分量。',
     executionMode: 'backend'
   }),
+  rf_complex_envelope_scalar_source: createPythonSimulationComponent({
+    type: 'rf_complex_envelope_scalar_source',
+    simulationMenu: 'rf-signal',
+    label: '复数包络标量源',
+    moduleType: '射频复数包络模型',
+    title: '无输入，输出可配置的单路脉冲复数包络标量',
+    palette: { icon: 'CE', iconClass: 'simulation' },
+    description: '根据脉宽、重周、中心频率和功率输出单路矩形脉冲复数包络。',
+    inputs: [],
+    outputs: [
+      {
+        portId: 'output-0',
+        name: '复数包络输出',
+        varName: 'output_envelope',
+        dataType: 'rf_complex_envelope',
+        unit: 'V'
+      }
+    ],
+    parameters: [
+      { key: 'pulse_width_seconds', name: '脉宽', default: 0.001, min: 0, max: 1000000, unit: 's' },
+      { key: 'pulse_period_seconds', name: '重周', default: 0.01, min: 0, max: 1000000, unit: 's' },
+      { key: 'center_frequency_hz', name: '中心频率', default: 10, min: 0, max: 1000000000000, unit: 'Hz' },
+      { key: 'power_dbm', name: '功率', default: 0, min: -300, max: 100, unit: 'dBm' }
+    ],
+    requiresPower: false,
+    ffunctionNote: '按脉宽和重周生成矩形脉冲；功率以 dBm 配置并按 50 Ω 换算为峰值电压。脉冲内 I 为峰值电压、Q 为 0，脉冲外 I/Q 均为 0；输出是单个复数包络对象。',
+    executionMode: 'backend'
+  }),
+  rf_complex_envelope_to_vector4: createPythonSimulationComponent({
+    type: 'rf_complex_envelope_to_vector4',
+    simulationMenu: 'rf-signal',
+    label: '复数包络标量转四维向量',
+    moduleType: '射频复数包络模型',
+    title: '将单路复数包络复制为四路复数包络向量',
+    palette: { icon: 'CE4', iconClass: 'simulation' },
+    description: '将单路 I/Q 复数包络复制为固定长度为 4 的独立向量',
+    inputs: [
+      {
+        portId: 'input-0',
+        name: '复数包络输入',
+        varName: 'input_envelope',
+        dataType: 'rf_complex_envelope',
+        unit: 'V'
+      }
+    ],
+    outputs: [
+      {
+        portId: 'output-0',
+        name: '四路复数包络输出',
+        varName: 'envelope_vector',
+        dataType: 'rf_complex_envelope',
+        collectionKind: 'vector',
+        vectorLength: 4,
+        unit: 'V'
+      }
+    ],
+    ffunctionNote: '将单路 I/Q 复数包络规范化后复制为四个彼此独立的输出分量。',
+    executionMode: 'backend'
+  }),
+  rf_complex_envelope_vector4_power_divider: createPythonSimulationComponent({
+    type: 'rf_complex_envelope_vector4_power_divider',
+    simulationMenu: 'rf-signal',
+    label: '复数包络功分组件',
+    moduleType: '射频复数包络模型',
+    title: '将单路复数包络等功率分配为固定四路输出',
+    palette: { icon: 'P4', iconClass: 'simulation' },
+    description: '单路复数包络输入、长度为 4 的复数包络向量输出。四个输出端均按四路等功率分配进行幅度缩放。',
+    inputs: [
+      {
+        portId: 'input-0',
+        name: '复数包络输入',
+        varName: 'input_envelope',
+        dataType: 'rf_complex_envelope',
+        unit: 'V'
+      }
+    ],
+    outputs: [
+      {
+        portId: 'output-0',
+        name: '四路功分复数包络输出',
+        varName: 'output_envelope_vector',
+        dataType: 'rf_complex_envelope',
+        collectionKind: 'vector',
+        vectorLength: 4,
+        unit: 'V'
+      }
+    ],
+    ffunctionNote: '将单路复数包络复制到固定四路输出，并对每个输出的 I/Q 分量应用 1/2 的幅度系数，实现四路等功率分配。',
+    executionMode: 'backend'
+  }),
+  DZDK_A: createPythonSimulationComponent({
+    type: 'DZDK_A',
+    moduleId: 'DZDK_A',
+    fileName: 'dzdk_a_filter.py',
+    simulationMenu: 'signal-processing',
+    label: '滤波组件',
+    moduleType: '信号处理模型',
+    title: '一阶低通滤波组件',
+    palette: { icon: 'LPF', iconClass: 'simulation' },
+    description: '对标量输入执行一阶低通滤波',
+    inputs: [{ portId: 'socket01', name: '输入信号', varName: 'socket01' }],
+    outputs: [{ portId: 'socket02', name: '滤波输出', varName: 'socket02' }],
+    parameters: [{ key: 'cutoff_frequency_hz', name: '截止频率', default: 1000, min: 0, unit: 'Hz' }],
+    requiresPower: false,
+    ffunctionNote: '使用截止频率控制的一阶低通滤波器；截止频率为 0 时直接输出输入信号。',
+    executionMode: 'backend'
+  }),
+  DZDK_B: createPythonSimulationComponent({
+    type: 'DZDK_B',
+    moduleId: 'DZDK_B',
+    fileName: 'dzdk_b_limiter.py',
+    simulationMenu: 'signal-processing',
+    label: '限幅组件',
+    moduleType: '信号处理模型',
+    title: '对标量信号执行上下限约束',
+    palette: { icon: 'LIM', iconClass: 'simulation' },
+    description: '将输入信号限制在设定的上下限内',
+    inputs: [{ portId: 'socket01', name: '输入信号', varName: 'socket01' }],
+    outputs: [{ portId: 'socket02', name: '限幅输出', varName: 'socket02' }],
+    parameters: [
+      { key: 'lower_limit', name: '下限', default: -1 },
+      { key: 'upper_limit', name: '上限', default: 1 }
+    ],
+    requiresPower: false,
+    ffunctionNote: '输入低于下限时输出下限，高于上限时输出上限；上下限配置颠倒时自动按数值大小修正。',
+    executionMode: 'backend'
+  }),
+  DZDK_C: createPythonSimulationComponent({
+    type: 'DZDK_C',
+    moduleId: 'DZDK_C',
+    fileName: 'dzdk_c_downconverter.py',
+    simulationMenu: 'rf-signal',
+    label: '下变频组件',
+    moduleType: '射频处理模型',
+    title: '将射频输入下变频为 I/Q 两路中频输出',
+    palette: { icon: '↓RF', iconClass: 'simulation' },
+    description: '单路射频下变频仿真组件',
+    inputs: [{ portId: 'socket01', name: '射频输入', varName: 'socket01', unit: 'V' }],
+    outputs: [
+      { portId: 'socket02', name: '中频 I 输出', varName: 'socket02', unit: 'V' },
+      { portId: 'socket03', name: '中频 Q 输出', varName: 'socket03', unit: 'V' }
+    ],
+    parameters: [
+      { key: 'lo_frequency_hz', name: '本振频率', default: 990000000, min: 0, unit: 'Hz' },
+      { key: 'lo_phase_deg', name: '本振相位', default: 0, min: -360, max: 360, unit: '°' },
+      { key: 'conversion_gain', name: '变频增益', default: 1, min: 0 },
+      { key: 'low_pass_cutoff_hz', name: '低通截止频率', default: 20000000, min: 0, unit: 'Hz' }
+    ],
+    requiresPower: false,
+    ffunctionNote: '射频输入与本振正交混频并低通滤波，分别从 socket02、socket03 输出 I/Q 中频信号。',
+    executionMode: 'backend'
+  }),
+  DZDK_D: createPythonSimulationComponent({
+    type: 'DZDK_D',
+    moduleId: 'DZDK_D',
+    fileName: 'dzdk_d_feature_extractor.py',
+    simulationMenu: 'signal-processing',
+    label: '特征提取组件',
+    moduleType: '信号处理模型',
+    title: '提取滑动窗口的均值、RMS 和峰值特征',
+    palette: { icon: 'FFT', iconClass: 'simulation' },
+    description: '标量信号滑动窗口特征提取组件',
+    inputs: [{ portId: 'socket01', name: '输入信号', varName: 'socket01' }],
+    outputs: [
+      { portId: 'socket02', name: '均值特征', varName: 'socket02' },
+      { portId: 'socket03', name: 'RMS 特征', varName: 'socket03' },
+      { portId: 'socket04', name: '峰值特征', varName: 'socket04' }
+    ],
+    parameters: [{ key: 'window_size', name: '特征窗口长度', default: 32, min: 1, max: 4096, step: 1 }],
+    requiresPower: false,
+    ffunctionNote: '对最近窗口内的输入信号计算均值、均方根和绝对峰值。',
+    executionMode: 'backend'
+  }),
+  rf_band_pass_filter: createPythonSimulationComponent({
+    type: 'rf_band_pass_filter',
+    simulationMenu: 'rf-signal',
+    label: '带通滤波组件',
+    moduleType: '射频处理模型',
+    title: '按中心频率和带宽高抑制滤除通带外的射频信号',
+    palette: { icon: 'BPF', iconClass: 'simulation' },
+    description: '129 抽头 FIR 标量射频带通滤波器，通带外具有高阻带抑制',
+    inputs: [{ portId: 'input-0', name: '射频输入', varName: 'rf_input', unit: 'V' }],
+    outputs: [{ portId: 'output-0', name: '滤波输出', varName: 'filtered_signal', unit: 'V' }],
+    parameters: [
+      { key: 'center_frequency_hz', name: '中心频率', default: 1000000, min: 0, max: 1000000000000, unit: 'Hz' },
+      { key: 'bandwidth_hz', name: '带宽', default: 100000, min: 1, max: 1000000000000, unit: 'Hz' }
+    ],
+    requiresPower: false,
+    ffunctionNote: '使用中心频率和带宽确定通带下、上截止频率；采用 129 抽头 FIR，约有 64 个仿真步的群时延，重置或改参后需约 129 个步长稳定。',
+    executionMode: 'backend'
+  }),
+  rf_complex_envelope_selector: createPythonSimulationComponent({
+    type: 'rf_complex_envelope_selector',
+    simulationMenu: 'rf-signal',
+    label: '复数包络选择器',
+    moduleType: '射频复数包络模型',
+    title: '在两路复数包络信号之间选择一路输出',
+    palette: { icon: 'SEL', iconClass: 'simulation' },
+    description: '保持 I/Q、参考频率和阻抗元数据不变地路由所选输入。',
+    inputs: [
+      { portId: 'input-0', name: '四路复数包络输入 1', varName: 'input_1', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4, unit: 'V' },
+      { portId: 'input-0', name: '四路复数包络输入 2', varName: 'input_2', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4, unit: 'V' }
+    ],
+    outputs: [{ portId: 'output-0', name: '四路复数包络输出', varName: 'selected_envelope', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4, unit: 'V' }],
+    parameters: [{ key: 'selected_input', name: '选择输入', default: 1, min: 1, max: 2, step: 1 }],
+    requiresPower: false,
+    ffunctionNote: '选择输入 1 或输入 2；输出完整保留所选信号的 I、Q 和参考频率。',
+    executionMode: 'backend'
+  }),
+  rf_complex_envelope_vector4_dual_output_receiver: createPythonSimulationComponent({
+    type: 'rf_complex_envelope_vector4_dual_output_receiver',
+    simulationMenu: 'rf-signal',
+    label: '四路复数包络双输出接收器',
+    moduleType: '射频复数包络模型',
+    title: '接收四路复数包络向量并输出两组独立的四路复数包络向量',
+    palette: { icon: 'RX2', iconClass: 'simulation' },
+    description: '一个长度为 4 的复数包络向量输入端口，两个长度为 4 的复数包络向量输出端口。',
+    inputs: [{
+      portId: 'input-0',
+      name: '四路复数包络输入',
+      varName: 'input_envelope_vector',
+      dataType: 'rf_complex_envelope',
+      collectionKind: 'vector',
+      vectorLength: 4,
+      unit: 'V'
+    }],
+    outputs: [
+      {
+        portId: 'output-0',
+        name: '四路复数包络输出 1',
+        varName: 'output_envelope_vector_1',
+        dataType: 'rf_complex_envelope',
+        collectionKind: 'vector',
+        vectorLength: 4,
+        unit: 'V'
+      },
+      {
+        portId: 'output-1',
+        name: '四路复数包络输出 2',
+        varName: 'output_envelope_vector_2',
+        dataType: 'rf_complex_envelope',
+        collectionKind: 'vector',
+        vectorLength: 4,
+        unit: 'V'
+      }
+    ],
+    requiresPower: false,
+    ffunctionNote: '严格接收长度为 4 的复数包络向量；两个输出均完整保留每一路的 I、Q、参考频率、阻抗和单位，且使用相互独立的数据副本。',
+    executionMode: 'backend'
+  }),
+  rf_complex_envelope_gain: createPythonSimulationComponent({
+    type: 'rf_complex_envelope_gain',
+    simulationMenu: 'rf-signal',
+    label: '复数包络增益/衰减',
+    moduleType: '射频复数包络模型',
+    title: '以 dB 同步放大或衰减 I/Q',
+    palette: { icon: 'dB', iconClass: 'simulation' },
+    description: '正增益放大，负增益衰减，且不改变参考频率或相位。',
+    inputs: [{ portId: 'input-0', name: '复数包络输入', varName: 'input_envelope', dataType: 'rf_complex_envelope', unit: 'V' }],
+    outputs: [{ portId: 'output-0', name: '复数包络输出', varName: 'output_envelope', dataType: 'rf_complex_envelope', unit: 'V' }],
+    parameters: [{ key: 'gain_db', name: '增益', default: 0, min: -200, max: 200, unit: 'dB' }],
+    requiresPower: false,
+    ffunctionNote: 'I、Q 同时乘以 10^(增益/20)；负 dB 即衰减。',
+    executionMode: 'backend'
+  }),
+  rf_complex_envelope_limiter: createPythonSimulationComponent({
+    type: 'rf_complex_envelope_limiter',
+    simulationMenu: 'rf-signal',
+    label: '复数包络限幅器',
+    moduleType: '射频复数包络模型',
+    title: '限制复数包络模值并保留相位',
+    palette: { icon: 'LIM', iconClass: 'simulation' },
+    description: '当 I/Q 合成幅度超过限幅值时，按相同比例压缩 I、Q。',
+    inputs: [{ portId: 'input-0', name: '四路复数包络输入', varName: 'input_envelope', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4, unit: 'V' }],
+    outputs: [{ portId: 'output-0', name: '四路复数包络输出', varName: 'output_envelope', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4, unit: 'V' }],
+    parameters: [{ key: 'limit_amplitude', name: '限幅值', default: 1, min: 0, max: 1000000, unit: 'V' }],
+    requiresPower: false,
+    ffunctionNote: '限制 sqrt(I²+Q²)，不会分别裁剪 I、Q，因此保持瞬时相位。',
+    executionMode: 'backend'
+  }),
+  rf_complex_envelope_band_pass_filter: createPythonSimulationComponent({
+    type: 'rf_complex_envelope_band_pass_filter',
+    simulationMenu: 'rf-signal',
+    label: '复数包络带通滤波器',
+    moduleType: '射频复数包络模型',
+    title: '按绝对射频中心频率和带宽过滤复数包络',
+    palette: { icon: 'BPF', iconClass: 'simulation' },
+    description: '以参考频率判定射频通带，在包络域平滑脉冲边沿和调制分量。',
+    inputs: [{ portId: 'input-0', name: '四路复数包络输入', varName: 'input_envelope', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4, unit: 'V' }],
+    outputs: [{ portId: 'output-0', name: '四路滤波复数包络输出', varName: 'filtered_envelope', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4, unit: 'V' }],
+    parameters: [
+      { key: 'center_frequency_hz', name: '中心频率', default: 1000000, min: 0, max: 1000000000000, unit: 'Hz' },
+      { key: 'bandwidth_hz', name: '带宽', default: 100000, min: 1, max: 1000000000000, unit: 'Hz' }
+    ],
+    requiresPower: false,
+    ffunctionNote: '参考频率落在中心频率 ± 带宽/2 内时通过；带宽同时作为包络平滑的等效通带。',
+    executionMode: 'backend'
+  }),
+  rf_complex_envelope_amplitude_phase_modulator: createPythonSimulationComponent({
+    type: 'rf_complex_envelope_amplitude_phase_modulator',
+    simulationMenu: 'rf-signal',
+    label: '复数包络幅相调制器',
+    moduleType: '射频复数包络模型',
+    title: '对单路复数包络进行幅度缩放和相位旋转',
+    palette: { icon: 'AMφ', iconClass: 'simulation' },
+    description: '在 I/Q 平面中执行幅度缩放与相位旋转。',
+    inputs: [{ portId: 'input-0', name: '四路复数包络输入', varName: 'input_envelope', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4, unit: 'V' }],
+    outputs: [{ portId: 'output-0', name: '四路复数包络输出', varName: 'output_envelope', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4, unit: 'V' }],
+    parameters: [
+      { key: 'amplitude_scale', name: '幅度系数', default: 1, min: 0, max: 1000000 },
+      { key: 'phase_shift_deg', name: '相位偏移', default: 0, min: -360, max: 360, unit: '°' }
+    ],
+    requiresPower: false,
+    ffunctionNote: '输出包络为幅度系数 × 输入包络，并在 I/Q 平面旋转设定相位。',
+    executionMode: 'backend'
+  }),
+  rf_complex_envelope_downconverter: createPythonSimulationComponent({
+    type: 'rf_complex_envelope_downconverter',
+    simulationMenu: 'rf-signal',
+    label: '复数包络下变频器',
+    moduleType: '射频复数包络模型',
+    title: '使用本振将复数包络下变频',
+    palette: { icon: '↓RF', iconClass: 'simulation' },
+    description: '从参考频率减去本振频率，并按照本振相位旋转 I/Q。',
+    inputs: [{ portId: 'input-0', name: '四路复数包络输入', varName: 'input_envelope', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4, unit: 'V' }],
+    outputs: [{ portId: 'output-0', name: '四路复数包络输出', varName: 'output_envelope', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4, unit: 'V' }],
+    parameters: [
+      { key: 'lo_frequency_hz', name: '本振频率', default: 0, min: 0, max: 1000000000000, unit: 'Hz' },
+      { key: 'lo_phase_deg', name: '本振相位', default: 0, min: -360, max: 360, unit: '°' },
+      { key: 'conversion_gain', name: '变频增益', default: 1, min: 0, max: 1000000 }
+    ],
+    requiresPower: false,
+    ffunctionNote: '输出参考频率为 |输入参考频率 − 本振频率|。输入频率低于本振时会自动完成 I/Q 共轭，正确表示频谱反转。',
+    executionMode: 'backend'
+  }),
+  rf_complex_envelope_upconverter: createPythonSimulationComponent({
+    type: 'rf_complex_envelope_upconverter',
+    simulationMenu: 'rf-signal',
+    label: '复数包络上变频器',
+    moduleType: '射频复数包络模型',
+    title: '使用本振将复数包络上变频',
+    palette: { icon: '↑RF', iconClass: 'simulation' },
+    description: '将本振频率加到参考频率，并按照本振相位旋转 I/Q。',
+    inputs: [{ portId: 'input-0', name: '四路复数包络输入', varName: 'input_envelope', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4, unit: 'V' }],
+    outputs: [{ portId: 'output-0', name: '四路复数包络输出', varName: 'output_envelope', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4, unit: 'V' }],
+    parameters: [
+      { key: 'lo_frequency_hz', name: '本振频率', default: 0, min: 0, max: 1000000000000, unit: 'Hz' },
+      { key: 'lo_phase_deg', name: '本振相位', default: 0, min: -360, max: 360, unit: '°' },
+      { key: 'conversion_gain', name: '变频增益', default: 1, min: 0, max: 1000000 }
+    ],
+    requiresPower: false,
+    ffunctionNote: '输出参考频率为输入参考频率 + 本振频率；本振相位在 I/Q 平面中同步旋转。',
+    executionMode: 'backend'
+  }),
+  rf_amplitude_phase_modulator: createPythonSimulationComponent({
+    type: 'rf_amplitude_phase_modulator',
+    simulationMenu: 'rf-signal',
+    label: '幅相调制组件',
+    moduleType: '射频处理模型',
+    title: '对 I/Q 信号执行幅度缩放和相位旋转',
+    palette: { icon: 'AMφ', iconClass: 'simulation' },
+    description: '双路 I/Q 射频信号的幅度和相位调制组件',
+    inputs: [
+      { portId: 'input-0', name: 'I 路输入', varName: 'input_i', unit: 'V' },
+      { portId: 'input-1', name: 'Q 路输入', varName: 'input_q', unit: 'V' }
+    ],
+    outputs: [
+      { portId: 'output-0', name: 'I 路输出', varName: 'output_i', unit: 'V' },
+      { portId: 'output-1', name: 'Q 路输出', varName: 'output_q', unit: 'V' }
+    ],
+    parameters: [
+      { key: 'amplitude_scale', name: '幅度系数', default: 1, min: 0, max: 1000000 },
+      { key: 'phase_shift_deg', name: '相位偏移', default: 0, min: -360, max: 360, unit: '°' },
+      { key: 'output_filter_cutoff_hz', name: '输出滤波截止频率', default: 0, min: 0, max: 1000000000, unit: 'Hz' }
+    ],
+    requiresPower: false,
+    ffunctionNote: '在 I/Q 平面上作真实相位旋转；截止频率为 0 时不启用输出滤波。',
+    executionMode: 'backend'
+  }),
   rf_four_channel_source: createPythonSimulationComponent({
     type: 'rf_four_channel_source',
     simulationMenu: 'rf-signal',
@@ -653,20 +1207,48 @@ export const COMPONENT_REGISTRY = {
     simulationMenu: 'rf-signal',
     label: '四接口上下变频器',
     moduleType: '射频处理模型',
-    title: '前两路输入下变频、后两路输入上变频的四输入四输出变频组件',
+    title: '双路向量输入、双路向量输出的上下变频组件',
     palette: { icon: '↕RF', iconClass: 'simulation' },
-    description: '两路射频下变频与两路标量基带上变频的四接口组件',
+    description: '下变频射频与上变频基带各使用一个二维向量端口的四接口组件',
     inputs: [
-      { portId: 'input-0', name: '下变频射频输入 1', varName: 'downconvert_rf_input_1', unit: 'V' },
-      { portId: 'input-1', name: '下变频射频输入 2', varName: 'downconvert_rf_input_2', unit: 'V' },
-      { portId: 'input-2', name: '上变频基带输入 1（I）', varName: 'upconvert_baseband_input_1', unit: 'V' },
-      { portId: 'input-3', name: '上变频基带输入 2（I）', varName: 'upconvert_baseband_input_2', unit: 'V' }
+      {
+        portId: 'input-0',
+        name: '下变频射频输入（2 路）',
+        varName: 'downconvert_rf_inputs',
+        type: 'vector',
+        vectorLength: 2,
+        vectorElementNames: ['下变频射频输入 1', '下变频射频输入 2'],
+        unit: 'V'
+      },
+      {
+        portId: 'input-1',
+        name: '上变频基带输入（2 路）',
+        varName: 'upconvert_baseband_inputs',
+        type: 'vector',
+        vectorLength: 2,
+        vectorElementNames: ['上变频基带输入 1（I）', '上变频基带输入 2（I）'],
+        unit: 'V'
+      }
     ],
     outputs: [
-      { portId: 'output-0', name: '下变频输出 1（I）', varName: 'downconverted_output_1', unit: 'V' },
-      { portId: 'output-1', name: '下变频输出 2（I）', varName: 'downconverted_output_2', unit: 'V' },
-      { portId: 'output-2', name: '上变频射频输出 1', varName: 'upconverted_output_1', unit: 'V' },
-      { portId: 'output-3', name: '上变频射频输出 2', varName: 'upconverted_output_2', unit: 'V' }
+      {
+        portId: 'output-0',
+        name: '下变频基带输出（2 路）',
+        varName: 'downconverted_baseband_outputs',
+        type: 'vector',
+        vectorLength: 2,
+        vectorElementNames: ['下变频基带输出 1（I）', '下变频基带输出 2（I）'],
+        unit: 'V'
+      },
+      {
+        portId: 'output-1',
+        name: '上变频射频输出（2 路）',
+        varName: 'upconverted_rf_outputs',
+        type: 'vector',
+        vectorLength: 2,
+        vectorElementNames: ['上变频射频输出 1', '上变频射频输出 2'],
+        unit: 'V'
+      }
     ],
     parameters: [
       { key: 'downconvert_lo_frequency_hz', name: '下变频本振频率', default: 100, unit: 'Hz' },
@@ -676,7 +1258,7 @@ export const COMPONENT_REGISTRY = {
       { key: 'upconversion_gain', name: '上变频增益', default: 1 },
       { key: 'downconvert_low_pass_cutoff_hz', name: '下变频低通截止频率', default: 20, unit: 'Hz' }
     ],
-    ffunctionNote: '输入 1、2 分别下变频并输出 I 路基带；输入 3、4 作为 I 路基带信号上变频，Q 路固定为 0。',
+    ffunctionNote: '下变频射频输入向量的两个元素分别下变频并组成 I 路基带输出向量；上变频基带输入向量的两个元素分别上变频，Q 路固定为 0。',
     executionMode: 'backend'
   }),
   rf_pulse_feature_extractor: createPythonSimulationComponent({
@@ -684,24 +1266,53 @@ export const COMPONENT_REGISTRY = {
     simulationMenu: 'rf-signal',
     label: '射频脉冲特征提取',
     moduleType: '射频信号处理模型',
-    title: '对 A/D 采样后的标量射频信号进行 FFT 与脉冲包络分析，输出四项脉冲参数',
+    title: '对下变频 I、Q 两路信号进行正频率 FFT 与复数包络分析，输出脉冲数量及四项脉冲参数',
     palette: { icon: 'FFT', iconClass: 'simulation' },
-    description: '射频脉冲中心频率、重复周期、脉宽和 8 位幅度提取组件',
+    description: '对独立的 I、Q 输入进行正频率选峰和复数选频包络的脉冲参数提取组件',
     inputs: [
-      { portId: 'input-0', name: '射频信号', varName: 'rf_signal', unit: 'V' }
+      { portId: 'input-0', name: '中频 I', varName: 'if_i', unit: 'V' },
+      { portId: 'input-1', name: '中频 Q', varName: 'if_q', unit: 'V' }
     ],
     outputs: [
       { portId: 'output-0', name: '中心频率', varName: 'center_frequency_hz', unit: 'Hz' },
       { portId: 'output-1', name: '重复周期', varName: 'pulse_period_seconds', unit: 's' },
       { portId: 'output-2', name: '脉宽', varName: 'pulse_width_seconds', unit: 's' },
-      { portId: 'output-3', name: '脉冲幅度', varName: 'pulse_amplitude_adc', unit: 'ADC(0-255)' }
+      { portId: 'output-3', name: '脉冲幅度', varName: 'pulse_amplitude_adc', unit: 'ADC(0-255)' },
+      { portId: 'output-4', name: '脉冲个数', varName: 'pulse_count', unit: '个' }
     ],
     parameters: [
       { key: 'fft_size', name: 'FFT 点数', default: 1024 },
       { key: 'adc_full_scale', name: 'A/D 满量程', default: 1, unit: 'V' },
-      { key: 'envelope_threshold_adc', name: '包络门限', default: 12, unit: 'ADC' }
+      { key: 'envelope_threshold_adc', name: '包络门限', default: 12, unit: 'ADC' },
+      { key: 'complex_filter_bandwidth_hz', name: '复数包络滤波带宽', default: 2000000000, unit: 'Hz' }
     ],
-    ffunctionNote: '输入按 A/D 8 位量化后进入滑动 FFT，主频谱峰值给出中心频率；对整流包络作门限检测，以上升沿间隔计算重复周期、以高电平持续时间计算脉宽；脉冲幅度输出为 0–255 的整数。',
+    ffunctionNote: '中频 I、Q 两路输入分别进行 A/D 8 位量化并组成复数信号；滑动复数 FFT 仅搜索正频率主峰给出差频中心频率。该分量下移至直流并经复数低通后取模，包络门限检测上升沿以累计脉冲个数、计算重复周期和脉宽；脉冲幅度输出为 0–255 的整数。',
+    executionMode: 'backend'
+  }),
+  rf_complex_envelope_pulse_feature_extractor: createPythonSimulationComponent({
+    type: 'rf_complex_envelope_pulse_feature_extractor',
+    simulationMenu: 'rf-signal',
+    label: '复数包络脉冲特征提取',
+    moduleType: '射频复数包络模型',
+    title: '直接从复数包络提取绝对中心频率、重周、脉宽和幅度',
+    palette: { icon: 'FFT', iconClass: 'simulation' },
+    description: '以固定四路复数包络向量输入的 I/Q 模值检测脉冲；按第 1 至第 4 路顺序选取首个非零复包络，并利用其参考频率输出绝对射频中心频率。',
+    inputs: [{ portId: 'input-0', name: '四路复数包络输入', varName: 'input_envelope_vector', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4, unit: 'V' }],
+    outputs: [
+      { portId: 'output-0', name: '中心频率', varName: 'center_frequency_hz', unit: 'Hz', allowsVector: true },
+      { portId: 'output-1', name: '重复周期', varName: 'pulse_period_seconds', unit: 's', allowsVector: true },
+      { portId: 'output-2', name: '脉宽', varName: 'pulse_width_seconds', unit: 's', allowsVector: true },
+      { portId: 'output-3', name: '脉冲幅度', varName: 'pulse_amplitude_adc', unit: 'ADC(0-255)', allowsVector: true },
+      { portId: 'output-4', name: '脉冲个数', varName: 'pulse_count', unit: '个', allowsVector: true }
+    ],
+    parameters: [
+      { key: 'fft_size', name: 'FFT 点数', default: 1024, min: 4, max: 4096 },
+      { key: 'adc_full_scale', name: 'A/D 满量程', default: 1, min: 1e-9, unit: 'V' },
+      { key: 'envelope_threshold_adc', name: '包络门限', default: 12, min: 0, max: 255, unit: 'ADC' },
+      { key: 'envelope_smoothing', name: '包络平滑系数', default: 1, min: 0, max: 1 }
+    ],
+    requiresPower: false,
+    ffunctionNote: '按 1→4 路顺序选取首个 I、Q 不同时为 0 的复包络；再对其 sqrt(I²+Q²) 检测脉冲上升沿。中心频率为 referenceFrequencyHz 加上带符号基带 FFT 峰值。默认平滑系数为 1，以保留脉冲边沿时间。',
     executionMode: 'backend'
   }),
   rf_downconverter: createPythonSimulationComponent({
@@ -718,7 +1329,16 @@ export const COMPONENT_REGISTRY = {
     ],
     outputs: [
       { portId: 'output-0', name: '中频 I', varName: 'if_i', unit: 'V' },
-      { portId: 'output-1', name: '中频 Q', varName: 'if_q', unit: 'V' }
+      { portId: 'output-1', name: '中频 Q', varName: 'if_q', unit: 'V' },
+      {
+        portId: 'output-2',
+        name: '中频 I/Q（2 路）',
+        varName: 'if_iq',
+        type: 'vector',
+        vectorLength: 2,
+        vectorElementNames: ['中频 I', '中频 Q'],
+        unit: 'V'
+      }
     ],
     parameters: [
       {
@@ -729,6 +1349,7 @@ export const COMPONENT_REGISTRY = {
         max: 2,
         step: 1,
         control: 'stepper',
+        diagnosticCondition: true,
         options: [
           { value: 1, label: '模式 1：第一路输入' },
           { value: 2, label: '模式 2：第二路输入' }
@@ -772,7 +1393,8 @@ export const COMPONENT_REGISTRY = {
         name: '射频数据（四组）',
         varName: 'A',
         type: 'vector',
-        vectorLength: 4
+        vectorLength: 4,
+        vectorElementNames: ['横滚', '俯仰', '偏航', '偏航']
       },
       {
         portId: 'output-1',
@@ -837,10 +1459,14 @@ export const COMPONENT_REGISTRY = {
     },
     defaults: {
       name: '子系统块',
+      subsystemId: 'subsystem-block-1',
       description: '',
       targetCanvasId: ''
     }
   },
+  subsystem_block_2: createBlankSubsystemTemplate('subsystem_block_2', '子系统块 2', 'subsystem-block-2'),
+  subsystem_block_3: createBlankSubsystemTemplate('subsystem_block_3', '子系统块 3', 'subsystem-block-3'),
+  subsystem_block_4: createBlankSubsystemTemplate('subsystem_block_4', '子系统块 4', 'subsystem-block-4'),
   subsystem_in_port: {
     type: 'subsystem_in_port',
     group: 'subsystem',
@@ -949,6 +1575,34 @@ export const COMPONENT_REGISTRY = {
       inputPortNameCh2: 'CH2'
     }
   },
+  XHFSQ: {
+    type: 'XHFSQ',
+    nodeType: 'signal_source',
+    templateId: 'XHFSQ',
+    group: 'instruments',
+    label: '信号发生器',
+    badge: '发生器',
+    className: 'b-inst',
+    width: 196,
+    height: 116,
+    palette: {
+      icon: 'RF',
+      iconClass: 'scope'
+    },
+    defaults: createSignalSourceProps('rf', {
+      name: '信号发生器',
+      outputPortName: '复数包络输出',
+      outputPortId: 'XHFSQ_X1',
+      outputFormat: '复数包络',
+      rfComplexEnvelopeMode: 'scalar',
+      centerFrequency: '10',
+      centerFrequencyUnit: 'GHz',
+      pulseWidth: '1',
+      pulseWidthUnit: 'ms',
+      pulsePeriod: '10',
+      pulsePeriodUnit: 'ms'
+    })
+  },
   instrument_spectrum: {
     type: 'instrument_spectrum',
     group: 'instruments',
@@ -964,21 +1618,18 @@ export const COMPONENT_REGISTRY = {
     defaults: {
       name: '频谱分析仪',
       instrumentType: '频谱分析',
-      sampleRate: '32kHz',
       signal: '仿真块输出',
       inputPortName: '观测输入',
       frequencyRange: '0-16kHz',
       tuningMode: 'startStop',
-      autoFrequencyRange: 'on',
+      // 默认展示所选频率范围内的完整单边频谱；需要时可手动开启峰值自动聚焦。
+      autoFrequencyRange: 'off',
       fftSize: '1024',
       windowFunction: 'Hann',
       amplitudeUnit: 'dB',
       referenceLevel: '10',
       autoRange: 'off',
       dynamicRange: '80',
-      rbw: '0.1',
-      vbw: '0.1',
-      sweepTime: '100',
       detector: 'Sample',
       traceMode: 'Clear/Write',
       markerFrequency: ''
@@ -1141,7 +1792,7 @@ export const COMPONENT_REGISTRY = {
 Object.assign(COMPONENT_REGISTRY, DISPLAY_CONSOLE_TEMPLATES);
 Object.assign(COMPONENT_REGISTRY.link_can, {
   label: 'CAN 总线',
-  palette: { icon: 'CAN', iconClass: 'link' },
+  palette: { icon: 'CAN', iconClass: 'link', visible: false },
   defaults: {
     name: 'CAN 总线',
     linkType: 'CAN 总线',
@@ -1222,25 +1873,35 @@ export function getPaletteGroups(groups = COMPONENT_GROUPS, registry = COMPONENT
   }));
 }
 
-export function getSimulationMenuSections(
-  components = [],
-  sections = SIMULATION_MENU_SECTIONS
-) {
+export function getPaletteMenuSections(components = [], sections = []) {
   const sectionById = new Map(sections.map((section) => [section.id, section]));
   const categorized = new Map();
+  const dynamicSections = new Map();
 
   components.forEach((component) => {
-    const sectionId = sectionById.has(component.simulationMenu)
-      ? component.simulationMenu
-      : 'uncategorized';
+    // `simulationMenu` remains supported for saved and authored simulation
+    // components. New palette groups use the neutral `paletteMenu` field.
+    const requestedSectionId = component.paletteMenu ?? component.simulationMenu;
+    const sectionId = sectionById.has(requestedSectionId)
+      ? requestedSectionId
+      : requestedSectionId || 'uncategorized';
+    if (!sectionById.has(sectionId) && !dynamicSections.has(sectionId)) {
+      dynamicSections.set(sectionId, {
+        id: sectionId,
+        label: component.paletteMenuLabel || component.simulationMenuLabel || component.moduleType || '未分类模型',
+        icon: component.palette?.icon || '仿',
+        defaultOpen: true
+      });
+    }
     const items = categorized.get(sectionId) ?? [];
     items.push(component);
     categorized.set(sectionId, items);
   });
 
-  const resolvedSections = categorized.has('uncategorized')
-    ? [...sections, { id: 'uncategorized', label: '未分类模型', icon: '其', defaultOpen: true }]
-    : sections;
+  const resolvedSections = [
+    ...sections,
+    ...[...dynamicSections.values()].filter((section) => !sectionById.has(section.id))
+  ];
 
   return resolvedSections
     .filter((section) => categorized.has(section.id))
@@ -1248,4 +1909,18 @@ export function getSimulationMenuSections(
       ...clone(section),
       components: categorized.get(section.id)
     }));
+}
+
+export function getSimulationMenuSections(
+  components = [],
+  sections = SIMULATION_MENU_SECTIONS
+) {
+  return getPaletteMenuSections(components, sections);
+}
+
+export function getElectricalMenuSections(
+  components = [],
+  sections = ELECTRICAL_MENU_SECTIONS
+) {
+  return getPaletteMenuSections(components, sections);
 }

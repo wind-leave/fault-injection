@@ -28,6 +28,17 @@ describe('diagnostic testpoint workbench contract', () => {
     expect(returnIndex).toBeGreaterThan(defaultIndex);
   });
 
+  it('uses all subsystem canvases for global diagnostic views while keeping canvas markers scoped', () => {
+    const runtime = readWorkspaceFile('src/services/legacy-runtime.txt');
+
+    expect(runtime).toContain('function getConfiguredPoints(options={})');
+    expect(runtime).toContain("const includeAllCanvases=options.includeAllCanvases===true;");
+    expect(runtime).toContain('if(!includeAllCanvases){');
+    expect(runtime).toContain('points=points.filter(point=>diagnosticPointBelongsToActiveCanvas(point,runtimeEdges,runtimeNodes));');
+    expect(runtime).toContain('const pointModel=window.buildDiagnosticTestPointModel({includeAllCanvases:true});');
+    expect(runtime).toContain('function findDataflowNode(nodeId)');
+  });
+
   it('renders installed diagnostic points back onto the canvas edge layer', () => {
     const runtime = readWorkspaceFile('src/services/legacy-runtime.txt');
 
@@ -114,6 +125,39 @@ describe('diagnostic testpoint workbench contract', () => {
     expect(consoleStart).toBeGreaterThanOrEqual(0);
     expect(helperIndex).toBeGreaterThan(consoleStart);
     expect(firstUseIndex).toBeGreaterThan(helperIndex);
+  });
+
+  it('uses a silent physical-point observation to add only the display-console condition action to a troubleshooting path', () => {
+    const runtime = readWorkspaceFile('src/services/legacy-runtime.txt');
+
+    expect(runtime).toContain('function buildPhysicalConditionAction(matrix,faultIds)');
+    expect(runtime).toContain("action:'setCondition'");
+    expect(runtime).toContain("actionType:'displayConsoleParameter'");
+    expect(runtime).toContain("text:`显控台：切换至${changes.map(change=>change.valueLabel).join('、')}。`");
+    expect(runtime).toContain('function getScenarioPointDetectability(point,faultId,when={})');
+    expect(runtime).toContain('function getDisplayConsoleConditionController(condition)');
+    expect(runtime).toContain('function buildConditionRepairSteps(matrix,faultIds,startIndex=0)');
+    expect(runtime).not.toContain('<b>物理测点已知条件</b>');
+  });
+
+  it('shows testpoint identity metadata and renders the fault chain as alternating snake rows', () => {
+    const runtime = readWorkspaceFile('src/services/legacy-runtime.txt');
+    const css = readWorkspaceFile('src/styles/components.css');
+
+    expect(runtime).toContain('pointTypeLabelZh:diagnosticPointTypeLabel(point.pointType)');
+    expect(runtime).toContain('testpoint-diagnosis-summary__point');
+    expect(runtime).toContain("const rowSize=4;");
+    expect(runtime).toContain("rowIndex%2===1");
+    expect(runtime).toContain("direction==='reverse'?'←':'→'");
+    expect(runtime).toContain('故障—测点信号链路');
+    expect(runtime).toContain('const downstreamQueue=upstreamCandidates.map');
+    expect(runtime).toContain('pointNodeId:targetNodeId');
+    expect(runtime).toContain("const isFeedback=/反馈|feedback/i.test(edgeRole)");
+    expect(runtime).toContain("startsWith('instrument_')");
+    expect(runtime).toContain('继续追踪至下游末端');
+    expect(css).toContain('.testpoint-fault-chain__row');
+    expect(css).toContain('.testpoint-fault-chain__turn.is-right');
+    expect(css).toContain('.testpoint-fault-chain__turn.is-left');
   });
 
 });

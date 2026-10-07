@@ -39,12 +39,41 @@ describe('simulation property panel schema service', () => {
     expect(html).toContain('data-role="输入"');
     expect(html).toContain('data-role="输出"');
     expect(html).toContain('data-role="中间变量"');
+    expect(html).toContain('data-sim-field="side"');
+    expect(html).toContain('data-sim-field="sidePosition"');
     expect(html).toContain('电源接口');
     expect(html).toContain('只有接入类型和额定电压均匹配的电源，仿真组件才能运行。');
     expect(html).not.toContain('电源地');
     expect(html).toContain('控制 &lt;A&gt;');
     expect(html).toContain('note &lt;x&gt;');
     expect(html).toContain('<option value="积分" selected>积分</option>');
+  });
+
+  it('reads independently selected left and right positions for input and output ports', () => {
+    const node = {
+      type: 'simulation_block',
+      props: {
+        name: '反向接口组件',
+        moduleType: '积分',
+        inputs: [{ name: '反馈输入', type: '标量', side: 'right', sidePosition: 3 }],
+        outputs: [{ name: '控制输出', type: '标量', side: 'left', sidePosition: 3 }],
+        middleVars: []
+      }
+    };
+    document.body.innerHTML = renderSimulationBlockFieldsFromSchema(node, {
+      moduleTypes,
+      portFormats,
+      interfaceLimits
+    });
+
+    expect(document.querySelector('.sim-intf-row[data-role="输入"] [data-sim-field="side"]')?.value).toBe('right');
+    expect(document.querySelector('.sim-intf-row[data-role="输出"] [data-sim-field="side"]')?.value).toBe('left');
+    expect(document.querySelector('.sim-intf-row[data-role="输入"] [data-sim-field="sidePosition"]')?.value).toBe('3');
+    expect(document.querySelector('.sim-intf-row[data-role="输出"] [data-sim-field="sidePosition"]')?.value).toBe('3');
+
+    const values = readSimulationBlockValuesFromPanel(node, document, { interfaceLimits }).values;
+    expect(values.inputs).toEqual([{ name: '反馈输入', type: '标量', side: 'right', sidePosition: 3 }]);
+    expect(values.outputs).toEqual([{ name: '控制输出', type: '标量', side: 'left', sidePosition: 3 }]);
   });
 
   it('renders readonly Python binding fields without editable interface counts', () => {
@@ -94,6 +123,64 @@ describe('simulation property panel schema service', () => {
     expect(html).not.toContain('error -&gt; command');
     expect(html).not.toContain('id="sim-input-count"');
     expect(html).not.toContain('id="prop-moduleType"');
+  });
+
+  it('renders and saves four independently named routes for a complex-envelope vector port', () => {
+    const node = { type: 'simulation_block', props: { name: '复数包络下变频器', parameters: [] } };
+    const binding = {
+      bound: true,
+      portMapping: {
+        inputs: [{
+          varName: 'input_envelope',
+          displayName: '四路复数包络输入',
+          type: 'vector',
+          dataType: 'rf_complex_envelope',
+          collectionKind: 'vector',
+          vectorLength: 4
+        }],
+        outputs: [],
+        middleVars: []
+      }
+    };
+
+    document.body.innerHTML = renderSimulationBlockFieldsFromSchema(node, { binding });
+    const fields = [...document.querySelectorAll('[data-python-port-vector-element-name][data-python-port-kind="inputs"]')];
+    expect(fields).toHaveLength(4);
+    expect(fields.map((field) => field.value)).toEqual(['元素 1', '元素 2', '元素 3', '元素 4']);
+
+    fields.forEach((field, index) => {
+      field.value = `接收通道 ${index + 1}`;
+    });
+    expect(readSimulationBlockValuesFromPanel(node, document, { binding }).portVectorElementNames.inputs[0])
+      .toEqual(['接收通道 1', '接收通道 2', '接收通道 3', '接收通道 4']);
+    document.body.innerHTML = '';
+  });
+
+  it('renders and saves one element name for each scalar input and output port', () => {
+    const node = { type: 'simulation_block', props: { name: '标量处理器', parameters: [] } };
+    const binding = {
+      bound: true,
+      portMapping: {
+        inputs: [{ varName: 'voltage_in', displayName: '电压输入', type: 'float', elementNames: ['输入电压'] }],
+        outputs: [{ varName: 'voltage_out', displayName: '电压输出', type: 'float', elementNames: ['输出电压'] }],
+        middleVars: []
+      }
+    };
+
+    document.body.innerHTML = renderSimulationBlockFieldsFromSchema(node, { binding });
+    const input = document.querySelector('[data-python-port-scalar-element-name][data-python-port-kind="inputs"]');
+    const output = document.querySelector('[data-python-port-scalar-element-name][data-python-port-kind="outputs"]');
+    expect(input?.value).toBe('输入电压');
+    expect(output?.value).toBe('输出电压');
+
+    input.value = '母线电压';
+    output.value = '滤波电压';
+    const result = readSimulationBlockValuesFromPanel(node, document, { binding });
+    expect(result.portScalarElementNames).toEqual({
+      inputs: [['母线电压']],
+      outputs: [['滤波电压']]
+    });
+    document.body.innerHTML = '';
   });
 
   it('renders current model parameter values as editable numeric fields and reads their changes', () => {
@@ -262,6 +349,19 @@ describe('simulation property panel schema service', () => {
       },
       shouldPruneInvalidEdges: true
     });
+  });
+
+  it('does not render or save a supply interface for power-optional signal-processing components', () => {
+    const node = {
+      type: 'simulation_block',
+      templateId: 'DZDK_A',
+      props: { powerInputs: [{ name: '旧电源输入', voltage: '28V', supplyType: 'DC' }], parameters: [] }
+    };
+    const binding = { bound: true, portMapping: { inputs: [], outputs: [], middleVars: [] } };
+    const html = renderSimulationBlockFieldsFromSchema(node, { binding });
+
+    expect(html).not.toContain('电源接口');
+    expect(readSimulationBlockValuesFromPanel(node, document, { binding }).values).not.toHaveProperty('powerInputs');
   });
 
   it.skip('reads only the editable name when a simulation block is Python-bound', () => {

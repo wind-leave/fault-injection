@@ -4,8 +4,19 @@ import {
   normalizeMultimeterBinding,
   evaluateMultimeterLeads
 } from './multimeterMeasurementService.js';
+import { reconstructRealRfSample } from './rfComplexEnvelopeWaveform.js';
 
-const DEFAULT_SAMPLE_LIMIT = 720;
+const DEFAULT_SAMPLE_LIMIT = 1000;
+const MAX_BACKEND_STEP_BATCH = 100000;
+const BACKEND_VIEW_REFRESH_INTERVAL_MS = 100;
+
+function getRequestedBackendStepBatch(sim, state = {}) {
+  const requested = Number.parseInt(sim?.requestSteps ?? state?.simulationRequestSteps, 10);
+  if (!Number.isFinite(requested)) {
+    return 1;
+  }
+  return Math.min(MAX_BACKEND_STEP_BATCH, Math.max(1, requested));
+}
 
 function getBackendApi(target) {
   return target.__GZ_BACKEND_SIMULATION__;
@@ -19,6 +30,27 @@ function getWorkbenchState(target) {
   return target.__GZ_STATE__ ?? {};
 }
 
+function observationSignature(state = {}) {
+  const pointLists = [
+    state.manualDiagnosticTestPoints,
+    state.diagnosticTestPoints,
+    state.testPoints,
+    state.diagnosticModel?.testPoints,
+    state.activeModelPackage?.diagnosticModel?.testPoints
+  ];
+  const points = pointLists
+    .flatMap((items) => Array.isArray(items) ? items : [])
+    .map((point) => ({
+      id: String(point?.pointId ?? point?.id ?? ''),
+      edgeId: String(point?.edgeId ?? point?.edgeID ?? point?.targetEdgeId ?? point?.targetId ?? ''),
+      sourceNodeId: String(point?.measurementSourceNodeId ?? point?.sourceNodeId ?? point?.nodeId ?? ''),
+      sourcePortIndex: Number(point?.measurementSourcePortIndex ?? point?.sourcePortIndex ?? 0) || 0
+    }))
+    .filter((point) => point.id || point.edgeId || point.sourceNodeId)
+    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  return JSON.stringify(points);
+}
+
 function pushLimitedSample(list, sample, limit = DEFAULT_SAMPLE_LIMIT) {
   list.push(sample);
   if (list.length > limit) {
@@ -26,42 +58,28 @@ function pushLimitedSample(list, sample, limit = DEFAULT_SAMPLE_LIMIT) {
   }
 }
 
-function parseSpectrumSampleRateHz(value, fallback = 10) {
-  const text = String(value ?? '').trim();
-  const amount = Number.parseFloat(text);
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return fallback;
+function pushComplexSpectrumSample(list, sample, limit) {
+  if (list.length < limit) {
+    list.push(sample);
+    return;
   }
-  if (/ghz$/i.test(text)) return amount * 1e9;
-  if (/mhz$/i.test(text)) return amount * 1e6;
-  if (/khz$/i.test(text)) return amount * 1e3;
-  return amount;
-}
-
-function shouldCaptureSpectrumSample(sim, instrumentId, configuredRate, time) {
-  sim.spectrumSampling ??= {};
-  const sampleState = sim.spectrumSampling[instrumentId] ?? { lastTime: null };
-  const sampleInterval = 1 / parseSpectrumSampleRateHz(configuredRate);
-  if (
-    sampleState.lastTime !== null
-    && time >= sampleState.lastTime
-    && time - sampleState.lastTime < sampleInterval * (1 - 1e-9)
-  ) {
-    return false;
-  }
-  sampleState.lastTime = time;
-  sim.spectrumSampling[instrumentId] = sampleState;
-  return true;
+  const start = Number.isInteger(list.__gzComplexSpectrumRingStart)
+    ? list.__gzComplexSpectrumRingStart
+    : 0;
+  list[start] = sample;
+  Object.defineProperty(list, '__gzComplexSpectrumRingStart', {
+    value: (start + 1) % limit,
+    writable: true,
+    configurable: true,
+    enumerable: false
+  });
 }
 
 function spectrumAnalysisSampleLimit(node) {
   const requested = Math.round(Number(node?.props?.fftSize));
-  const capped = Math.min(Math.max(Number.isFinite(requested) ? requested : 1024, 16), 4096);
-  let size = 16;
-  while (size < capped && size < 4096) {
-    size *= 2;
-  }
-  return size;
+  // The spectrum analyzer keeps one FFT-sized ring capture.  This preserves
+  // the original simulation timebase without allowing an unbounded history.
+  return Math.min(Math.max(Number.isFinite(requested) ? requested : 1024, 16), 1048576);
 }
 
 function workbenchItems(state, key) {
@@ -149,35 +167,33 @@ function syncBackendRuntimeState(target, componentSteps) {
   const edges = workbenchItems(state, 'modelEdges');
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
 
-  ['actual', 'reference'].forEach((mode) => {
-    const runtimeBucket = sim[mode] ??= {};
-    runtimeBucket.nodeStates ??= {};
-    runtimeBucket.edgeStates ??= {};
-    const stepOutputs = latestStep?.[mode];
-    if (!stepOutputs || typeof stepOutputs !== 'object') {
+  const runtimeBucket = sim.actual ??= {};
+  runtimeBucket.nodeStates ??= {};
+  runtimeBucket.edgeStates ??= {};
+  const stepOutputs = latestStep?.actual;
+  if (!stepOutputs || typeof stepOutputs !== 'object') {
+    return;
+  }
+
+  Object.entries(stepOutputs).forEach(([nodeId, outputs]) => {
+    const orderedOutputs = orderedBackendNodeOutputs(outputs, nodesById.get(nodeId));
+    if (!orderedOutputs.length) {
       return;
     }
+    const nodeState = runtimeBucket.nodeStates[nodeId] ??= {};
+    nodeState.lastOutputs = orderedOutputs.map(cloneRuntimeSignal);
+    nodeState.lastOutput = cloneRuntimeSignal(orderedOutputs[0]);
+  });
 
-    Object.entries(stepOutputs).forEach(([nodeId, outputs]) => {
-      const orderedOutputs = orderedBackendNodeOutputs(outputs, nodesById.get(nodeId));
-      if (!orderedOutputs.length) {
-        return;
-      }
-      const nodeState = runtimeBucket.nodeStates[nodeId] ??= {};
-      nodeState.lastOutputs = orderedOutputs.map(cloneRuntimeSignal);
-      nodeState.lastOutput = cloneRuntimeSignal(orderedOutputs[0]);
-    });
-
-    edges.forEach((edge) => {
-      const sourceState = runtimeBucket.nodeStates[edge.sourceNodeId];
-      const portIndex = Math.max(0, Math.trunc(Number(edge.sourcePortIndex) || 0));
-      const value = sourceState?.lastOutputs?.[portIndex];
-      if (value === undefined) {
-        return;
-      }
-      const edgeState = runtimeBucket.edgeStates[edge.id] ??= {};
-      edgeState.lastOutput = cloneRuntimeSignal(value);
-    });
+  edges.forEach((edge) => {
+    const sourceState = runtimeBucket.nodeStates[edge.sourceNodeId];
+    const portIndex = Math.max(0, Math.trunc(Number(edge.sourcePortIndex) || 0));
+    const value = sourceState?.lastOutputs?.[portIndex];
+    if (value === undefined) {
+      return;
+    }
+    const edgeState = runtimeBucket.edgeStates[edge.id] ??= {};
+    edgeState.lastOutput = cloneRuntimeSignal(value);
   });
 }
 
@@ -190,9 +206,57 @@ function outputValueForPort(outputs, node, portIndex = 0, vectorIndex = null) {
   return Number.isFinite(value) ? value : NaN;
 }
 
+function complexEnvelopeValueForPort(outputs, node, portIndex = 0, vectorIndex = 0) {
+  const signal = outputSignalForPort(outputs, node, portIndex);
+  return Array.isArray(signal)
+    ? signal[Math.min(Math.max(0, Math.trunc(Number(vectorIndex) || 0)), Math.max(0, signal.length - 1))]
+    : signal;
+}
+
 function selectedInstrumentVectorIndex(node) {
   const selectedChannel = Math.trunc(Number(node?.props?.vectorChannel));
   return Number.isFinite(selectedChannel) && selectedChannel > 0 ? selectedChannel - 1 : 0;
+}
+
+function resolveInstrumentOutputSource(edge, state, nodesById) {
+  let nodeId = String(edge?.sourceNodeId ?? '');
+  let portIndex = Math.max(0, Math.trunc(Number(edge?.sourcePortIndex) || 0));
+  const visited = new Set();
+
+  // The backend executes the components inside a subsystem, not the visual
+  // subsystem shell. Follow its output-interface mapping to the executable
+  // component whose output is present in componentOutputs.
+  while (nodeId && !visited.has(`${nodeId}:${portIndex}`)) {
+    visited.add(`${nodeId}:${portIndex}`);
+    const node = nodesById.get(nodeId);
+    if (node?.type !== 'subsystem_block') {
+      return { nodeId, node, portIndex };
+    }
+
+    const output = node?.props?.interface?.outputs?.[portIndex];
+    if (output?.componentNodeId) {
+      nodeId = String(output.componentNodeId);
+      portIndex = Math.max(0, Math.trunc(Number(output.componentPortIndex) || 0));
+      continue;
+    }
+
+    const childCanvas = state?.canvases?.[node.targetCanvasId];
+    const boundary = (childCanvas?.nodes ?? []).find((item) => (
+      item?.type === 'subsystem_out_port'
+      && (
+        String(item?.props?.interfacePortId ?? '') === String(output?.id ?? '')
+        || Number(item?.props?.order) === Number(output?.order ?? portIndex)
+      )
+    ));
+    const mapping = boundary && (childCanvas?.edges ?? []).find((item) => item?.targetNodeId === boundary.id);
+    if (!mapping?.sourceNodeId) {
+      return { nodeId, node, portIndex };
+    }
+    nodeId = String(mapping.sourceNodeId);
+    portIndex = Math.max(0, Math.trunc(Number(mapping.sourcePortIndex) || 0));
+  }
+
+  return { nodeId, node: nodesById.get(nodeId), portIndex };
 }
 
 function multimeterTargetFor(node, nodesById, edgesById) {
@@ -203,7 +267,7 @@ function multimeterTargetFor(node, nodesById, edgesById) {
     : nodesById.get(binding.measurementTargetId) ?? null;
 }
 
-function multimeterNodeReading(stepOutputs, node, mode, incomingEdges = [], nodesById) {
+function multimeterNodeReading(stepOutputs, node, mode, incomingEdges = [], nodesById, state) {
   const kind = getMultimeterMeasurementKind(mode);
   if (kind === 'resistance' || kind === 'continuity') {
     return 1;
@@ -212,10 +276,11 @@ function multimeterNodeReading(stepOutputs, node, mode, incomingEdges = [], node
     .filter((edge) => edge.targetNodeId === node?.id)
     .sort((left, right) => (left.targetPortIndex ?? 0) - (right.targetPortIndex ?? 0))[0];
   if (!incoming) return NaN;
+  const source = resolveInstrumentOutputSource(incoming, state, nodesById);
   return outputValueForPort(
-    stepOutputs?.[incoming.sourceNodeId],
-    nodesById.get(incoming.sourceNodeId),
-    incoming.sourcePortIndex
+    stepOutputs?.[source.nodeId],
+    source.node,
+    source.portIndex
   );
 }
 
@@ -226,13 +291,14 @@ function multimeterLeadPairFor(node, nodes, edges) {
   }, nodes, edges);
 }
 
-function multimeterLeadReading(stepOutputs, pair, mode, nodesById, edges) {
+function multimeterLeadReading(stepOutputs, pair, mode, nodesById, edges, state) {
   if (!pair?.valid) return NaN;
   const kind = getMultimeterMeasurementKind(mode);
   if (kind === 'current') {
     if (pair.targetKind !== 'edge') return NaN;
     const edge = edges.find((item) => item.id === pair.edgeId);
-    const value = outputValueForPort(stepOutputs?.[edge?.sourceNodeId], nodesById.get(edge?.sourceNodeId), edge?.sourcePortIndex);
+    const source = resolveInstrumentOutputSource(edge, state, nodesById);
+    const value = outputValueForPort(stepOutputs?.[source.nodeId], source.node, source.portIndex);
     return Number.isFinite(value) ? value * pair.polarity : NaN;
   }
   if (pair.targetKind !== 'component') return NaN;
@@ -241,7 +307,8 @@ function multimeterLeadReading(stepOutputs, pair, mode, nodesById, edges) {
     .filter((edge) => edge.targetNodeId === pair.componentNodeId && Number(edge.targetPortIndex ?? 0) === pair.inputPortIndex)
     .sort((left, right) => (left.id || '').localeCompare(right.id || ''))[0];
   if (!incoming) return NaN;
-  const value = outputValueForPort(stepOutputs?.[incoming.sourceNodeId], nodesById.get(incoming.sourceNodeId), incoming.sourcePortIndex);
+  const source = resolveInstrumentOutputSource(incoming, state, nodesById);
+  const value = outputValueForPort(stepOutputs?.[source.nodeId], source.node, source.portIndex);
   return Number.isFinite(value) ? value * pair.polarity : NaN;
 }
 
@@ -277,20 +344,12 @@ function appendBackendInstrumentSamples(target, componentSteps, componentTimes, 
   }
 
   sim.actual.instrumentSamples ??= {};
-  sim.reference.instrumentSamples ??= {};
 
   instruments.forEach(({ node, incoming: incomingEdges, target }) => {
     const incoming = incomingEdges[0];
-    const sourceNode = incoming ? nodesById.get(incoming.sourceNodeId) : null;
+    const source = resolveInstrumentOutputSource(incoming, state, nodesById);
     const actualSamples = sim.actual.instrumentSamples[node.id] ??= [];
     const spectrumOnly = node.type === 'instrument_spectrum';
-    const referenceSamples = spectrumOnly
-      ? null
-      : (sim.reference.instrumentSamples[node.id] ??= []);
-
-    if (spectrumOnly) {
-      delete sim.reference.instrumentSamples[node.id];
-    }
 
     componentSteps.forEach((step, index) => {
       const time = Number.isFinite(Number(step?.time))
@@ -307,53 +366,49 @@ function appendBackendInstrumentSamples(target, componentSteps, componentTimes, 
       if (node.type === 'instrument_multimeter') {
         const hasStandardConnection = incomingEdges.some((edge) => nodesById.has(edge.sourceNodeId));
         const actual = hasStandardConnection
-          ? multimeterNodeReading(step?.actual, node, node.props?.measurementMode, incomingEdges, nodesById)
-          : multimeterLeadReading(step?.actual, target, node.props?.measurementMode, nodesById, edges);
-        const reference = hasStandardConnection
-          ? multimeterNodeReading(step?.reference, node, node.props?.measurementMode, incomingEdges, nodesById)
-          : multimeterLeadReading(step?.reference, target, node.props?.measurementMode, nodesById, edges);
+          ? multimeterNodeReading(step?.actual, node, node.props?.measurementMode, incomingEdges, nodesById, state)
+          : multimeterLeadReading(step?.actual, target, node.props?.measurementMode, nodesById, edges, state);
         if (!Number.isFinite(actual)) return;
-        pushLimitedSample(actualSamples, Number.isFinite(reference)
-          ? { t: time, actual, reference }
-          : { t: time, actual }, sampleLimit);
-        if (Number.isFinite(reference)) {
-          pushLimitedSample(referenceSamples, { t: time, actual: reference, reference }, sampleLimit);
-        }
+        pushLimitedSample(actualSamples, { t: time, actual }, sampleLimit);
         return;
       }
 
       const vectorIndex = spectrumOnly ? selectedInstrumentVectorIndex(node) : null;
-      const actual = outputValueForPort(
-        step?.actual?.[incoming.sourceNodeId],
-        sourceNode,
-        incoming.sourcePortIndex,
-        vectorIndex
-      );
-      if (!Number.isFinite(actual)) {
+      const rawActual = spectrumOnly
+        ? complexEnvelopeValueForPort(
+          step?.actual?.[source.nodeId],
+          source.node,
+          source.portIndex,
+          vectorIndex
+        )
+        : undefined;
+      const validComplexEnvelope = rawActual
+        && typeof rawActual === 'object'
+        && Number.isFinite(Number(rawActual.i))
+        && Number.isFinite(Number(rawActual.q))
+        && Number.isFinite(Number(rawActual.referenceFrequencyHz));
+      const actual = validComplexEnvelope
+        ? rawActual
+        : outputValueForPort(
+          step?.actual?.[source.nodeId],
+          source.node,
+          source.portIndex,
+          vectorIndex
+        );
+      if (!validComplexEnvelope && !Number.isFinite(actual)) {
         return;
       }
 
       if (spectrumOnly) {
-        if (!shouldCaptureSpectrumSample(sim, node.id, node.props?.sampleRate, time)) {
-          return;
-        }
-        // 频谱分析只需保留最近一个 FFT 窗口；分析时样本数即 min(已采集样本数, FFT 点数)。
-        pushLimitedSample(actualSamples, { t: time, actual }, spectrumAnalysisSampleLimit(node));
+        const sample = { t: time, actual };
+        const sampleLimit = spectrumAnalysisSampleLimit(node);
+        // Every spectrum analyzer captures every simulation step and derives
+        // its Fs from that timebase.  The ring retains one coherent FFT window.
+        pushComplexSpectrumSample(actualSamples, sample, sampleLimit);
         return;
       }
 
-      const reference = outputValueForPort(
-        step?.reference?.[incoming.sourceNodeId],
-        sourceNode,
-        incoming.sourcePortIndex,
-        vectorIndex
-      );
-      pushLimitedSample(actualSamples, Number.isFinite(reference)
-        ? { t: time, actual, reference }
-        : { t: time, actual }, sampleLimit);
-      if (Number.isFinite(reference)) {
-        pushLimitedSample(referenceSamples, { t: time, actual: reference, reference }, sampleLimit);
-      }
+      pushLimitedSample(actualSamples, { t: time, actual }, sampleLimit);
     });
   });
 }
@@ -361,8 +416,7 @@ function appendBackendInstrumentSamples(target, componentSteps, componentTimes, 
 function cloneComponentOutputStep(step) {
   return {
     time: Number(step?.time ?? 0),
-    actual: JSON.parse(JSON.stringify(step?.actual ?? {})),
-    reference: JSON.parse(JSON.stringify(step?.reference ?? {}))
+    actual: JSON.parse(JSON.stringify(step?.actual ?? {}))
   };
 }
 
@@ -394,11 +448,10 @@ function ensureScopeChannelBucket(runtimeBucket, scopeId) {
 }
 
 function parseChannelKey(key) {
-  const mode = key.endsWith('.actual') ? 'actual' : key.endsWith('.reference') ? 'reference' : '';
-  if (!mode) {
+  if (!key.endsWith('.actual')) {
     return null;
   }
-  const measurementId = key.slice(0, -(mode.length + 1));
+  const measurementId = key.slice(0, -'.actual'.length);
   const separatorIndex = measurementId.lastIndexOf('.');
   if (separatorIndex < 0) {
     return null;
@@ -408,7 +461,7 @@ function parseChannelKey(key) {
   if (!scopeId || !['ch1', 'ch2'].includes(channel)) {
     return null;
   }
-  return { scopeId, channel, mode };
+  return { scopeId, channel };
 }
 
 function refreshRuntimeViews(target, status = 'stepped') {
@@ -538,11 +591,11 @@ export function appendBackendSimulationChunk(target, chunk, { sampleLimit = DEFA
     if (!parsed || !Array.isArray(values)) {
       return;
     }
-    const runtimeBucket = parsed.mode === 'reference' ? sim.reference : sim.actual;
-    const scopeBucket = ensureScopeChannelBucket(runtimeBucket, parsed.scopeId);
+    const scopeBucket = ensureScopeChannelBucket(sim.actual, parsed.scopeId);
     values.forEach((value, index) => {
       const time = Number.isFinite(Number(times[index])) ? Number(times[index]) : Number(sim.time || 0);
-      pushLimitedSample(scopeBucket[parsed.channel], { t: time, actual: Number(value) }, sampleLimit);
+      const waveformValue = reconstructRealRfSample(value, time);
+      pushLimitedSample(scopeBucket[parsed.channel], { t: time, actual: Number(waveformValue) }, sampleLimit);
     });
   });
 
@@ -626,6 +679,17 @@ async function ensureBackendSession(target, legacy, options = {}) {
 
   await waitForBackendSessionCleanup(sim);
 
+  const nextObservationSignature = observationSignature(state);
+  if (sim.backendSessionId && sim.backendObservationSignature !== nextObservationSignature) {
+    // A test point can be created after initialization without changing the
+    // executable topology.  Its source was absent from the existing response
+    // filter, so start a fresh session and sample it from time zero.
+    await discardBackendSession(sim, api, options);
+    beginBackendRunGeneration(sim);
+    legacy.simInit?.(true);
+    resetBackendRuntimeSamples(sim);
+  }
+
   if (!sim.inited) {
     // A topology or parameter edit marks the legacy simulation as uninitialized.
     // Its backend session is otherwise still alive and would keep the old
@@ -651,20 +715,28 @@ async function ensureBackendSession(target, legacy, options = {}) {
   }
   sim.backendSessionId = created.sessionId;
   sim.backendRunId = created.runId || '';
+  sim.backendObservationSignature = nextObservationSignature;
   return sim.backendSessionId;
 }
 
 function clearBackendTimer(target, sim) {
-  if (sim?.timer) {
+  if (sim?.timer != null) {
     target.clearInterval?.(sim.timer);
     sim.timer = null;
   }
+  if (sim?.backendViewTimer != null) {
+    target.clearInterval?.(sim.backendViewTimer);
+    sim.backendViewTimer = null;
+  }
+  if (sim) {
+    sim.backendViewsDirty = false;
+  }
 }
 
-async function runBackendStep(target, legacy, steps = 1, options = {}) {
+async function runBackendStep(target, legacy, steps = 1, options = {}, autoRun = false) {
   const sim = getSimulationState(target);
   if (!sim) {
-    return callLegacy(options, () => legacy.simStep?.());
+    return autoRun ? { fallback: true } : callLegacy(options, () => legacy.simStep?.());
   }
   if (sim.time >= sim.duration) {
     return { completed: true };
@@ -676,12 +748,12 @@ async function runBackendStep(target, legacy, steps = 1, options = {}) {
     if (requestedGeneration !== Number(sim.backendRunGeneration || 0)) {
       return { completed: false, stale: true };
     }
-    return callLegacy(options, () => legacy.simStep?.());
+    return autoRun ? { fallback: true } : callLegacy(options, () => legacy.simStep?.());
   }
 
   const generation = Number(sim.backendRunGeneration || 0);
   const api = getBackendApi(target);
-  const chunk = await api.stepSession(sessionId, { steps });
+  const chunk = await api.stepSession(sessionId, { steps, actualOnly: true });
   if (
     generation !== Number(sim.backendRunGeneration || 0)
     || sim.backendSessionId !== sessionId
@@ -689,8 +761,71 @@ async function runBackendStep(target, legacy, steps = 1, options = {}) {
     return { completed: false, stale: true, chunk };
   }
   appendBackendSimulationChunk(target, chunk);
-  refreshRuntimeViews(target, chunk?.metrics?.done ? 'completed' : 'stepped');
+  if (!autoRun) {
+    refreshRuntimeViews(target, chunk?.metrics?.done ? 'completed' : 'stepped');
+  }
   return { completed: Boolean(chunk?.metrics?.done), chunk };
+}
+
+async function runBackendBatches(target, legacy, sim, generation, options) {
+  if (sim.backendStepPending) {
+    return;
+  }
+  sim.backendStepPending = true;
+  try {
+    while (generation === Number(sim.backendRunGeneration || 0) && sim.running && !sim.paused) {
+      const result = await runBackendStep(
+        target,
+        legacy,
+        getRequestedBackendStepBatch(sim, getWorkbenchState(target)),
+        options,
+        true
+      );
+      if (generation !== Number(sim.backendRunGeneration || 0) || !sim.running || result?.stale) {
+        return;
+      }
+      if (result?.fallback) {
+        clearBackendTimer(target, sim);
+        callLegacy(options, () => legacy.simRun?.());
+        return;
+      }
+      if (result?.completed) {
+        await target.simStop?.('completed');
+        return;
+      }
+      sim.backendViewsDirty = true;
+    }
+    if (generation === Number(sim.backendRunGeneration || 0) && sim.paused && sim.backendViewsDirty) {
+      sim.backendViewsDirty = false;
+      refreshRuntimeViews(target, 'paused');
+    }
+  } catch (error) {
+    if (generation !== Number(sim.backendRunGeneration || 0)) {
+      return;
+    }
+    options.onError?.(error);
+    clearBackendTimer(target, sim);
+    callLegacy(options, () => legacy.simRun?.());
+  } finally {
+    if (generation === Number(sim.backendRunGeneration || 0)) {
+      sim.backendStepPending = false;
+    }
+  }
+}
+
+function startBackendViewTimer(target, sim, generation) {
+  sim.backendViewTimer = target.setInterval?.(() => {
+    if (
+      generation !== Number(sim.backendRunGeneration || 0)
+      || !sim.running
+      || sim.paused
+      || !sim.backendViewsDirty
+    ) {
+      return;
+    }
+    sim.backendViewsDirty = false;
+    refreshRuntimeViews(target, 'stepped');
+  }, BACKEND_VIEW_REFRESH_INTERVAL_MS);
 }
 
 export function installBackendStepSimulationRuntime(target = globalThis, options = {}) {
@@ -748,6 +883,9 @@ export function installBackendStepSimulationRuntime(target = globalThis, options
     if (!isBackendRuntimeAvailable(target) || !sim) {
       return callLegacy(options, () => legacy.simRun?.());
     }
+    if (sim.running && !sim.paused && sim.backendViewTimer != null) {
+      return undefined;
+    }
     if (!sim.running) {
       target.__GZ_STATUS_BAR__?.beginLiveStatus?.({
         key: 'simulation-starting',
@@ -771,32 +909,9 @@ export function installBackendStepSimulationRuntime(target = globalThis, options
     sim.running = true;
     sim.paused = false;
     clearBackendTimer(target, sim);
-    sim.timer = target.setInterval?.(async () => {
-      if (
-        runGeneration !== Number(sim.backendRunGeneration || 0)
-        || !sim.running
-        || sim.paused
-        || sim.backendStepPending
-      ) {
-        return;
-      }
-      sim.backendStepPending = true;
-      try {
-        const result = await runBackendStep(target, legacy, 1, options);
-        if (result?.completed) {
-          await target.simStop?.('completed');
-        }
-      } catch (error) {
-        options.onError?.(error);
-        clearBackendTimer(target, sim);
-        callLegacy(options, () => legacy.simRun?.());
-      } finally {
-        if (runGeneration === Number(sim.backendRunGeneration || 0)) {
-          sim.backendStepPending = false;
-        }
-      }
-    }, Math.max(Math.round(Number(sim.stepSize || 0.1) * 1000), 80));
+    startBackendViewTimer(target, sim, runGeneration);
     refreshRuntimeViews(target, 'running');
+    void runBackendBatches(target, legacy, sim, runGeneration, options);
     return undefined;
   };
 

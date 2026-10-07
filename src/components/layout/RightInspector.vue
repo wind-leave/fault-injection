@@ -9,11 +9,21 @@ defineProps({
 });
 
 const emit = defineEmits(['toggle-collapse']);
+
+function openTestPointAuthoring(event) {
+  const entry = event.target?.closest?.('[data-open-edge-testpoint-page]');
+  if (!entry) return;
+  event.preventDefault();
+  const edgeId = entry.dataset.edgeTestpointPageEdgeId || window.__GZ_STATE__?.selEdge || '';
+  window.dispatchEvent(new CustomEvent('gz:open-testpoint-authoring', {
+    detail: { edgeId, pointId: '' }
+  }));
+}
 </script>
 
 <template>
   <div class="right-inspector-shell" :class="{ 'is-collapsed': collapsed }" data-testid="right-inspector">
-    <div class="right-inspector-content" v-html="markup"></div>
+    <div class="right-inspector-content" v-html="markup" @click="openTestPointAuthoring"></div>
     <div class="right-panel-control">
       <button
         type="button"

@@ -27,9 +27,15 @@ def process(
     selected_mode = 2 if int(float(input_mode)) == 2 else 1
     state_prefix = "input_2" if selected_mode == 2 else "input_1"
     selected_input = rf_input_2 if selected_mode == 2 else rf_input
+    # ``i``/``q`` were the only state fields in an early version of this
+    # component.  Use them for a one-time legacy restore only; once a mode is
+    # recorded, each RF input must start from and retain its own I/Q filter
+    # history.  Otherwise a pulse sampled on input 2 contaminates input 1 the
+    # first time the operator switches channels.
+    legacy_state = "selected_mode" not in previous
     previous_output_iq = (
-        previous.get(f"{state_prefix}_i", previous.get("i", 0.0) if selected_mode == 1 else 0.0),
-        previous.get(f"{state_prefix}_q", previous.get("q", 0.0) if selected_mode == 1 else 0.0),
+        previous.get(f"{state_prefix}_i", previous.get("i", 0.0) if legacy_state and selected_mode == 1 else 0.0),
+        previous.get(f"{state_prefix}_q", previous.get("q", 0.0) if legacy_state and selected_mode == 1 else 0.0),
     )
     rf_descriptor = previous.get("rf_input_descriptor")
     if isinstance(rf_descriptor, dict):
@@ -64,6 +70,7 @@ def process(
         "outputs": {
             "if_i": output_i,
             "if_q": output_q,
+            "if_iq": [output_i, output_q],
         },
         "state": {
             **previous,

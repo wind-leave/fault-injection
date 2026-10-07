@@ -618,6 +618,27 @@ header{
   min-width:132px;
 }
 
+.canvas-sim-dock .sim-field--request-steps{
+  min-width:172px;
+}
+
+.sim-request-steps-control{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+.sim-request-steps-control .sim-field-inp{
+  width:56px;
+  text-align:right;
+}
+
+.sim-request-steps-unit{
+  color:var(--textm);
+  font-size:11px;
+  white-space:nowrap;
+}
+
 .sim-field-lbl,
 .simbar-rt-lbl{
   flex:0 0 auto;
@@ -1129,13 +1150,17 @@ header{
 
 /* Canvas visual language refresh */
 .canvas-wrap[data-view="canvas"]{
-  background:#f8fafc;
+  background:#e9eef4;
+}
+
+.canvas-wrap[data-view="canvas"] .canvas-grid{
+  background:linear-gradient(180deg,#eef2f6 0%,#e9eef4 100%);
 }
 
 .canvas-wrap[data-view="canvas"] .canvas-stage-grid{
   background-image:
-    linear-gradient(rgba(30,41,59,0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(30,41,59,0.035) 1px, transparent 1px);
+    linear-gradient(rgba(58,76,100,0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(58,76,100,0.055) 1px, transparent 1px);
   background-size:24px 24px,24px 24px;
   opacity:1;
 }
@@ -1197,8 +1222,8 @@ header{
   z-index:0;
   background:linear-gradient(180deg,var(--node-fill) 0%,var(--node-tint) 100%);
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb,var(--node-accent) 54%,#d7e0ec),
-    0 10px 22px rgba(30,41,59,0.08);
+    inset 0 0 0 1.5px color-mix(in srgb,var(--node-accent) 68%,#aebdce),
+    0 8px 18px rgba(30,41,59,0.15);
   transition:box-shadow 0.16s ease,transform 0.16s ease,background 0.16s ease;
 }
 
@@ -1276,6 +1301,44 @@ header{
   box-shadow:0 0 0 2px rgba(255,255,255,0.94);
 }
 
+/* Signal directions use both color and shape: blue square inputs receive
+   data, while green diamond outputs emit it. Power terminals deliberately
+   keep their own established treatment. */
+.canvas-wrap[data-view="canvas"] .node-port--input:not(.node-port--power){
+  color:#3f73a8 !important;
+}
+
+.canvas-wrap[data-view="canvas"] .node-port--input:not(.node-port--power) .node-port__inner{
+  width:9px;
+  height:9px;
+  border:2px solid currentColor;
+  border-radius:2px;
+  background:#ffffff;
+  box-shadow:0 0 0 2px rgba(63,115,168,0.12);
+}
+
+.canvas-wrap[data-view="canvas"] .node-port--output:not(.node-port--power){
+  color:#3f8864 !important;
+}
+
+.canvas-wrap[data-view="canvas"] .node-port--output:not(.node-port--power) .node-port__inner{
+  width:8px;
+  height:8px;
+  border:2px solid currentColor;
+  border-radius:1px;
+  background:#ffffff;
+  box-shadow:0 0 0 2px rgba(63,136,100,0.12);
+  transform:rotate(45deg);
+}
+
+.canvas-wrap[data-view="canvas"] .node-port--input:not(.node-port--power).is-connected .node-port__inner{
+  background:#4f83b8;
+}
+
+.canvas-wrap[data-view="canvas"] .node-port--output:not(.node-port--power).is-connected .node-port__inner{
+  background:#4f986f;
+}
+
 .canvas-wrap[data-view="canvas"] .node-port__label{
   position:absolute;
   top:50%;
@@ -1298,6 +1361,27 @@ header{
 .canvas-wrap[data-view="canvas"] .node-port--input .node-port__label{
   right:18px;
   left:auto;
+  border-color:rgba(63,115,168,0.3);
+  background:#eff6fc;
+  color:#2f6093;
+  transform:translateY(-50%) translateX(-4px);
+}
+
+.canvas-wrap[data-view="canvas"] .node-port--output .node-port__label{
+  border-color:rgba(63,136,100,0.3);
+  background:#eff8f2;
+  color:#357554;
+}
+
+.canvas-wrap[data-view="canvas"] .node-port--right .node-port__label{
+  left:18px;
+  right:auto;
+  transform:translateY(-50%) translateX(4px);
+}
+
+.canvas-wrap[data-view="canvas"] .node-port--left .node-port__label{
+  right:18px;
+  left:auto;
   transform:translateY(-50%) translateX(-4px);
 }
 
@@ -1315,6 +1399,34 @@ header{
   transform:translateX(-50%) translateY(-4px);
 }
 
+/* Position labels by the terminal's actual side, not its input/output role.
+   This keeps a left-side output aligned with left-side inputs, and the
+   mirrored combination aligned on the right. */
+.canvas-wrap[data-view="canvas"] .node-port--input:not(.node-port--right):not(.node-port--top) .node-port__label,
+.canvas-wrap[data-view="canvas"] .node-port--output.node-port--left .node-port__label{
+  right:20px;
+  left:auto;
+  margin-right:0 !important;
+  margin-left:0 !important;
+  transform:translateY(-50%);
+}
+
+.canvas-wrap[data-view="canvas"] .node-port--input.node-port--right .node-port__label,
+.canvas-wrap[data-view="canvas"] .node-port--output:not(.node-port--left):not(.node-port--top):not(.node-port--bottom) .node-port__label{
+  right:auto;
+  left:20px;
+  margin-right:0 !important;
+  margin-left:0 !important;
+  transform:translateY(-50%);
+}
+
+.canvas-wrap[data-view="canvas"] .b-subsystem .node-port--top .node-port__label,
+.canvas-wrap[data-view="canvas"] .b-subsystem .node-port--bottom .node-port__label{
+  max-width:68px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
 .canvas-wrap[data-view="canvas"] .blk:hover .node-port__label,
 .canvas-wrap[data-view="canvas"] .blk.sel .node-port__label,
 .canvas-wrap[data-view="canvas"] .blk.sel-multi .node-port__label{
@@ -1325,6 +1437,32 @@ header{
 .canvas-wrap[data-view="canvas"] .blk:hover .node-port--input .node-port__label,
 .canvas-wrap[data-view="canvas"] .blk.sel .node-port--input .node-port__label,
 .canvas-wrap[data-view="canvas"] .blk.sel-multi .node-port--input .node-port__label{
+  transform:translateY(-50%);
+}
+
+.canvas-wrap[data-view="canvas"] .blk:hover .node-port--input:not(.node-port--right):not(.node-port--top) .node-port__label,
+.canvas-wrap[data-view="canvas"] .blk.sel .node-port--input:not(.node-port--right):not(.node-port--top) .node-port__label,
+.canvas-wrap[data-view="canvas"] .blk.sel-multi .node-port--input:not(.node-port--right):not(.node-port--top) .node-port__label,
+.canvas-wrap[data-view="canvas"] .blk:hover .node-port--output.node-port--left .node-port__label,
+.canvas-wrap[data-view="canvas"] .blk.sel .node-port--output.node-port--left .node-port__label,
+.canvas-wrap[data-view="canvas"] .blk.sel-multi .node-port--output.node-port--left .node-port__label{
+  right:20px;
+  left:auto;
+  margin-right:0 !important;
+  margin-left:0 !important;
+  transform:translateY(-50%);
+}
+
+.canvas-wrap[data-view="canvas"] .blk:hover .node-port--input.node-port--right .node-port__label,
+.canvas-wrap[data-view="canvas"] .blk.sel .node-port--input.node-port--right .node-port__label,
+.canvas-wrap[data-view="canvas"] .blk.sel-multi .node-port--input.node-port--right .node-port__label,
+.canvas-wrap[data-view="canvas"] .blk:hover .node-port--output:not(.node-port--left):not(.node-port--top):not(.node-port--bottom) .node-port__label,
+.canvas-wrap[data-view="canvas"] .blk.sel .node-port--output:not(.node-port--left):not(.node-port--top):not(.node-port--bottom) .node-port__label,
+.canvas-wrap[data-view="canvas"] .blk.sel-multi .node-port--output:not(.node-port--left):not(.node-port--top):not(.node-port--bottom) .node-port__label{
+  right:auto;
+  left:20px;
+  margin-right:0 !important;
+  margin-left:0 !important;
   transform:translateY(-50%);
 }
 
@@ -1462,6 +1600,51 @@ header{
     0 10px 22px rgba(30,41,59,0.08);
 }
 
+/* 子系统以“可展开容器”呈现：端口仍在边界，卡片本身展示层级与接口摘要。 */
+.canvas-wrap[data-view="canvas"] .b-subsystem.subsystem-card{
+  --node-accent:#4f46a5;
+  --node-fill:#ffffff;
+  --node-tint:#f6f5ff;
+  padding:8px 30px!important;
+}
+
+.canvas-wrap[data-view="canvas"] .b-subsystem.subsystem-card::before{
+  border-radius:10px 3px 10px 3px;
+  background:
+    linear-gradient(135deg,rgba(99,102,241,0.12) 0 14px,transparent 14px),
+    linear-gradient(180deg,var(--node-fill) 0%,var(--node-tint) 100%);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(79,70,165,0.70),
+    inset 7px 0 0 rgba(99,102,241,0.20),
+    0 12px 25px rgba(67,56,202,0.14);
+}
+
+.canvas-wrap[data-view="canvas"] .b-subsystem.subsystem-card::after{
+  content:"";
+  position:absolute;
+  z-index:-1;
+  top:5px;
+  right:-5px;
+  bottom:-5px;
+  left:5px;
+  border:1px solid rgba(99,102,241,0.32);
+  border-radius:10px 3px 10px 3px;
+  background:rgba(238,242,255,0.72);
+}
+
+.canvas-wrap[data-view="canvas"] .b-subsystem.subsystem-card .blk-kicker{
+  color:#4338ca;
+  background:#eef2ff;
+}
+
+.canvas-wrap[data-view="canvas"] .b-subsystem.subsystem-card .blk-sub{
+  color:#59647f;
+  display:block;
+  overflow:hidden;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+}
+
 .canvas-wrap[data-view="canvas"] .canvas-node--fault,
 .canvas-wrap[data-view="canvas"] .blk.faulted{
   --node-accent:#da1e28;
@@ -1531,7 +1714,8 @@ header{
 }
 
 .canvas-wrap[data-view="canvas"] .b-sim{
-  --node-tint:#f8fbff;
+  --node-fill:#dff1f7;
+  --node-tint:#c9e6f1;
 }
 
 .canvas-wrap[data-view="canvas"] .canvas-node--sum{
@@ -2129,6 +2313,12 @@ header{
   font-size:13px;
   font-weight:600;
 }
+.edge-testpoint-condition-group{border-top:1px solid var(--border);padding-top:10px}
+.edge-testpoint-condition-selectors,.edge-testpoint-condition-faults{display:flex;flex-wrap:wrap;gap:6px}
+.edge-testpoint-condition-rules{display:grid;gap:7px;margin-top:8px}
+.edge-testpoint-condition-scenario{padding:6px;border:1px solid var(--border);border-radius:5px;background:var(--bg-card)}
+.edge-testpoint-condition-scenario summary{cursor:pointer;color:var(--text);font-size:12px}
+.edge-testpoint-condition-faults{margin-top:7px}
 
 .props-fault-card--name-only{
   display:flex;
@@ -3072,6 +3262,20 @@ header{
   border-radius:0;
   background:#ffffff;
   box-shadow:none;
+}
+
+.display-console-vector-map{
+  margin-top:12px;
+  border-top:1px solid var(--border);
+}
+
+.display-console-vector-map__title{
+  padding:10px 12px;
+  background:#f8fbff;
+  color:var(--text2);
+  font-size:11px;
+  font-weight:600;
+  line-height:1.4;
 }
 
 .props-panel-shell--component .pglbl,
@@ -5195,4 +5399,94 @@ header .toolbar .tbtn-imp-flt{
   max-height:none;
   min-height:0;
   padding:4px 8px;
+}
+
+/* The canvas can be narrow even when the browser window is wide because of the side panels. */
+.canvas-tabs,
+.canvas-tools{
+  min-width:0;
+  overflow-x:auto;
+  overflow-y:hidden;
+  overscroll-behavior-inline:contain;
+  scrollbar-width:thin;
+}
+
+.canvas-tab,
+.canvas-tool,
+.canvas-tools__divider,
+.canvas-tools__zoom,
+.canvas-testpoint-tools{
+  flex-shrink:0;
+}
+
+.canvas-wrap.is-compact-toolbar:not([data-view="dmatrix"]) .canvas-chrome{
+  grid-template-columns:minmax(0,1fr);
+  grid-template-rows:auto 48px 48px;
+}
+
+.canvas-wrap.is-compact-toolbar:not([data-view="dmatrix"]) .canvas-tabs{
+  grid-column:1;
+  grid-row:2;
+}
+
+.canvas-wrap.is-compact-toolbar:not([data-view="dmatrix"]) .canvas-tools{
+  grid-column:1;
+  grid-row:3;
+  border-left:0;
+  border-top:1px solid var(--border);
+}
+
+.canvas-wrap.is-compact-toolbar .canvas-sim-dock .simbar{
+  height:auto;
+  min-height:0;
+  flex-wrap:wrap;
+  overflow:visible;
+  white-space:normal;
+}
+
+.canvas-wrap.is-compact-toolbar .canvas-sim-dock .simbar-title{
+  flex:1 1 112px;
+  height:46px;
+}
+
+.canvas-wrap.is-compact-toolbar .canvas-sim-dock .simbar-params{
+  flex:1 1 440px;
+  min-width:0;
+  height:46px;
+  overflow-x:auto;
+  justify-content:flex-start;
+}
+
+.canvas-wrap.is-compact-toolbar .canvas-sim-dock .simbar-btns{
+  flex:1 1 100%;
+  width:100%;
+  height:46px;
+  margin-left:0;
+  overflow-x:auto;
+}
+
+.canvas-wrap.is-compact-toolbar[data-view="components"] .canvas-chrome{
+  grid-template-rows:auto 48px;
+}
+
+.gz-app:not(.is-canvas-top-chrome-collapsed) .canvas-viewport,
+.gz-app:not(.is-canvas-top-chrome-collapsed) .simulation-panel,
+.gz-app:not(.is-canvas-top-chrome-collapsed) .dataflow-panel{
+  top:var(--canvas-toolbar-height,118px);
+}
+
+.gz-app:not(.is-canvas-top-chrome-collapsed) .canvas-breadcrumbs{
+  top:calc(var(--canvas-toolbar-height,118px) + 12px);
+}
+
+.gz-app:not(.is-canvas-top-chrome-collapsed) .empty-state{
+  padding-top:var(--canvas-toolbar-height,118px);
+}
+
+.gz-app:not(.is-canvas-top-chrome-collapsed) .diagram-placeholder{
+  top:var(--canvas-toolbar-height,118px);
+}
+
+.gz-app:not(.is-canvas-top-chrome-collapsed) .canvas-top-toggle{
+  top:calc(var(--canvas-toolbar-height,118px) + 8px);
 }

@@ -242,7 +242,7 @@ def build_troubleshooting_path(d_matrix, target_fault_id, remaining_rows=None, u
             "action": "replaceWire",
             "targetId": target["id"],
             "targetLabel": target["label"],
-            "text": f"更换线路：{target['label']}。",
+            "text": f"更换连线：{target['label']}。",
         }
         for index, target in enumerate(
             (target for target in repair_targets if target["kind"] == "edge"),
@@ -255,7 +255,7 @@ def build_troubleshooting_path(d_matrix, target_fault_id, remaining_rows=None, u
             "action": "replaceComponent",
             "targetId": target["id"],
             "targetLabel": target["label"],
-            "text": f"更换组件：{target['label']}。",
+            "text": f"更换设备：{target['label']}。",
         }
         for target in repair_targets
         if target["kind"] == "node"
@@ -291,7 +291,7 @@ def build_troubleshooting_path(d_matrix, target_fault_id, remaining_rows=None, u
                 "action": "replaceWire",
                 "targetId": target["id"],
                 "targetLabel": target["label"],
-                "text": f"更换关键连线：{target['label']}。",
+                "text": f"更换连线：{target['label']}。",
             }
             for target in repair_targets
             if target["kind"] == "edge"
@@ -302,7 +302,7 @@ def build_troubleshooting_path(d_matrix, target_fault_id, remaining_rows=None, u
                 "action": "replaceComponent",
                 "targetId": target["id"],
                 "targetLabel": target["label"],
-                "text": f"更换组件：{target['label']}。",
+                "text": f"更换设备：{target['label']}。",
             }
             for target in repair_targets
             if target["kind"] == "node"
@@ -312,12 +312,7 @@ def build_troubleshooting_path(d_matrix, target_fault_id, remaining_rows=None, u
 
 
 def build_troubleshooting_plan(d_matrix, target_fault_id, max_steps=4):
-    path = build_troubleshooting_path(d_matrix, target_fault_id, max_steps=max_steps)
-    return {
-        **path,
-        "source": "backend-algorithm",
-        "isCustomized": False,
-    }
+    return build_troubleshooting_path(d_matrix, target_fault_id, max_steps=max_steps)
 
 
 class TroubleshootingSession:

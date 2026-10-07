@@ -308,6 +308,112 @@ export function isFaultActive(params = {}, time = 0) {
   return time <= start + asNumber(duration, Number.POSITIVE_INFINITY);
 }
 
+// A complex-envelope sample is transported as one signal frame.  Keep its
+// metadata intact whenever a signal fault changes I/Q.
+export function isComplexEnvelopeSample(value) {
+  return Boolean(value)
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && Number.isFinite(Number(value.i))
+    && Number.isFinite(Number(value.q))
+    && Number.isFinite(Number(value.referenceFrequencyHz));
+}
+
+export function isComplexEnvelopeVector(value) {
+  return Array.isArray(value) && value.length > 0 && value.every(isComplexEnvelopeSample);
+}
+
+export function isComplexEnvelopeValue(value) {
+  return isComplexEnvelopeSample(value) || isComplexEnvelopeVector(value);
+}
+
+function cloneComplexEnvelopeSample(value) {
+  return {
+    ...value,
+    i: Number(value.i),
+    q: Number(value.q),
+    referenceFrequencyHz: Number(value.referenceFrequencyHz)
+  };
+}
+
+function complexEnvelopeAttenuationScale(params = {}) {
+  if (Object.prototype.hasOwnProperty.call(params, 'scale')) {
+    return asNumber(params.scale, 1);
+  }
+  const decibels = Math.max(0, asNumber(
+    readParam(params, ['attenuation_db', 'attenuationDb', 'loss_db'], 0),
+    0
+  ));
+  return Math.pow(10, -decibels / 20);
+}
+
+/**
+ * Applies the frontend layered-fault subset to a complete I/Q frame.
+ * Supported behaviours intentionally match the layered injectors:
+ * attenuation, data_cutoff and freeze.  Other scalar-only behaviours are
+ * left untouched so a future fault cannot silently corrupt an I/Q frame.
+ */
+export function applyComplexEnvelopeFault(value, options = {}) {
+  if (isComplexEnvelopeVector(value)) {
+    const state = options.state ?? {};
+    state.lanes = Array.isArray(state.lanes) ? state.lanes : [];
+    return value.map((envelope, index) => {
+      state.lanes[index] = isPlainObject(state.lanes[index]) ? state.lanes[index] : {};
+      return applyComplexEnvelopeFault(envelope, { ...options, state: state.lanes[index] });
+    });
+  }
+  if (!isComplexEnvelopeSample(value)) {
+    return value;
+  }
+
+  const faultModel = options.faultModel ?? {};
+  const injectedFault = options.injectedFault ?? {};
+  const params = options.params ?? resolveFaultParameters(faultModel, injectedFault);
+  const behavior = normalizeRuntimeBehavior(
+    options.behavior || getFaultRuntimeBehavior(faultModel) || getFaultRuntimeBehavior(injectedFault)
+  );
+  const state = options.state ?? {};
+  const input = cloneComplexEnvelopeSample(value);
+  const time = asNumber(options.time, 0);
+
+  state.lastDropout = false;
+  state.lastFaultGap = false;
+
+  if (!behavior || !isFaultActive(params, time)) {
+    state.previousComplexEnvelope = cloneComplexEnvelopeSample(input);
+    state.holdComplexEnvelope = cloneComplexEnvelopeSample(input);
+    state.hasComplexHoldValue = false;
+    return input;
+  }
+
+  if (behavior === 'attenuation') {
+    const scale = complexEnvelopeAttenuationScale(params);
+    return { ...input, i: input.i * scale, q: input.q * scale };
+  }
+
+  if (behavior === 'data_cutoff') {
+    state.lastDropout = true;
+    state.lastFaultGap = true;
+    return { ...input, i: 0, q: 0 };
+  }
+
+  if (behavior === 'freeze') {
+    const freezeMode = normalizeKey(readParam(params, 'mode', 'hold'));
+    if (freezeMode === 'zero') {
+      state.lastDropout = true;
+      state.lastFaultGap = true;
+      return { ...input, i: 0, q: 0 };
+    }
+    if (!state.hasComplexHoldValue) {
+      state.holdComplexEnvelope = cloneComplexEnvelopeSample(state.previousComplexEnvelope ?? input);
+      state.hasComplexHoldValue = true;
+    }
+    return cloneComplexEnvelopeSample(state.holdComplexEnvelope);
+  }
+
+  return input;
+}
+
 export function applyScalarFault(value, options = {}) {
   const faultModel = options.faultModel ?? {};
   const injectedFault = options.injectedFault ?? {};
@@ -341,6 +447,9 @@ export function applyScalarFault(value, options = {}) {
   }
 
   if (behavior === 'attenuation') {
+    if (Object.prototype.hasOwnProperty.call(params, 'scale')) {
+      return input * asNumber(params.scale, 1);
+    }
     const decibels = Math.max(0, asNumber(readParam(params, ['attenuation_db', 'attenuationDb', 'loss_db'], 0), 0));
     return input * Math.pow(10, -decibels / 20);
   }
@@ -360,7 +469,7 @@ export function applyScalarFault(value, options = {}) {
   }
 
   if (behavior === 'parameter_step') {
-    return input + asNumber(readParam(params, ['step_value', 'step', 'jump'], 0), 0);
+    return asNumber(readParam(params, ['targetValue', 'target_value', 'value', 'stepValue', 'step_value', 'step', 'jump'], input), input);
   }
 
   if (behavior === 'lock') {
@@ -724,6 +833,31 @@ export function hasActiveFaultBinding(target = {}) {
   return getFaultBindings(target, { activeOnly: true }).length > 0;
 }
 
+function bindingTargetsVectorItem(binding = {}, vectorIndex) {
+  if (!Number.isInteger(vectorIndex)) {
+    return true;
+  }
+
+  const payload = binding.injectedFault ?? {};
+  const layer = String(binding.layer ?? payload.layer ?? '').trim().toLowerCase();
+  const injectionForm = String(binding.injectionForm ?? payload.injectionForm ?? '').trim().toLowerCase();
+  // Protocol faults operate on a complete message.  A vector transported by
+  // the message is therefore faulted as a whole rather than channel by
+  // channel, even when loading a legacy record with vector selection fields.
+  if (layer === 'protocol' || injectionForm === 'protocol-bus') {
+    return true;
+  }
+  const scope = String(binding.vectorInjectionScope ?? payload.vectorInjectionScope ?? '').trim().toLowerCase();
+  if (scope === 'item') {
+    return Math.trunc(asNumber(binding.vectorIndex ?? payload.vectorIndex, 0)) === vectorIndex;
+  }
+  if (scope === 'items' || scope === 'selected' || scope === 'partial') {
+    const indices = binding.vectorIndices ?? payload.vectorIndices ?? [];
+    return Array.isArray(indices) && indices.some((item) => Math.trunc(asNumber(item, -1)) === vectorIndex);
+  }
+  return true;
+}
+
 export function applyScalarFaultBindings(value, options = {}) {
   const target = options.target ?? {};
   const bindings = getFaultBindings(target, { activeOnly: true });
@@ -740,6 +874,9 @@ export function applyScalarFaultBindings(value, options = {}) {
     : null;
 
   return bindings.reduce((currentValue, binding, index) => {
+    if (!bindingTargetsVectorItem(binding, options.vectorIndex)) {
+      return currentValue;
+    }
     const resolvedModel = resolveFaultModel?.(binding) ?? binding.injectedFault ?? binding;
     const behavior = binding.runtimeBehavior
       || getFaultRuntimeBehavior(resolvedModel)
@@ -772,6 +909,62 @@ export function applyScalarFaultBindings(value, options = {}) {
 
     return nextValue;
   }, value);
+}
+
+// Protocol faults operate on the entire message, and an I/Q frame is one
+// message.  Consequently this deliberately does not expose vector-index
+// selection: each active binding receives the complete envelope object.
+export function applyComplexEnvelopeFaultBindings(value, options = {}) {
+  if (!isComplexEnvelopeValue(value)) {
+    return value;
+  }
+
+  const target = options.target ?? {};
+  const bindings = getFaultBindings(target, { activeOnly: true });
+  if (bindings.length === 0) {
+    return isComplexEnvelopeVector(value)
+      ? value.map(cloneComplexEnvelopeSample)
+      : cloneComplexEnvelopeSample(value);
+  }
+
+  const bucket = options.stateBucket ?? options.state ?? {};
+  bucket.bindingStates = isPlainObject(bucket.bindingStates) ? bucket.bindingStates : {};
+  bucket.lastDropout = false;
+  bucket.lastFaultGap = false;
+  const resolveFaultModel = typeof options.resolveFaultModel === 'function'
+    ? options.resolveFaultModel
+    : null;
+
+  return bindings.reduce((currentValue, binding, index) => {
+    const resolvedModel = resolveFaultModel?.(binding) ?? binding.injectedFault ?? binding;
+    const behavior = binding.runtimeBehavior
+      || getFaultRuntimeBehavior(resolvedModel)
+      || getFaultRuntimeBehavior(binding.injectedFault);
+    if (!behavior) {
+      return currentValue;
+    }
+
+    const stateKey = binding.bindingId || binding.faultModelId || `fault-${index}`;
+    bucket.bindingStates[stateKey] = isPlainObject(bucket.bindingStates[stateKey])
+      ? bucket.bindingStates[stateKey]
+      : {};
+    const nextValue = applyComplexEnvelopeFault(currentValue, {
+      faultModel: resolvedModel,
+      injectedFault: binding.injectedFault ?? binding,
+      params: binding.parameters,
+      behavior,
+      state: bucket.bindingStates[stateKey],
+      time: options.time
+    });
+
+    if (bucket.bindingStates[stateKey].lastDropout) {
+      bucket.lastDropout = true;
+      bucket.lastFaultGap = true;
+    }
+    return nextValue;
+  }, isComplexEnvelopeVector(value)
+    ? value.map(cloneComplexEnvelopeSample)
+    : cloneComplexEnvelopeSample(value));
 }
 
 function getNodeModuleKeys(node = {}) {
@@ -844,7 +1037,7 @@ function getCanEdgeModuleKeys(edge = {}) {
 }
 
 function canEdgeMatchesFaultTargets(edge, faultModel) {
-  if (edge?.lineType !== 'can') {
+  if (!edge?.id) {
     return false;
   }
 
@@ -993,12 +1186,12 @@ export function findCompatibleFaultTarget(faultModel = {}, context = {}) {
   const layer = faultModel.layer ?? 'electrical';
 
   if (isProtocolFaultLayer(layer)) {
-    const selectedEdge = edges.find((edge) => edge.id === context.selectedEdgeId && edge.lineType === 'can');
+    const selectedEdge = edges.find((edge) => edge.id === context.selectedEdgeId);
     if (selectedEdge && targetAllowsFaultBySlot(selectedEdge, faultModel, context)) {
-      return { kind: 'edge', id: selectedEdge.id, reason: 'selected-can-edge' };
+      return { kind: 'edge', id: selectedEdge.id, reason: 'selected-edge' };
     }
 
-    const matchingSlotEdge = findTargetByAllowedSlot(edges.filter((edge) => edge.lineType === 'can'), faultModel, context);
+    const matchingSlotEdge = findTargetByAllowedSlot(edges, faultModel, context);
     if (matchingSlotEdge) {
       return matchingSlotEdge;
     }
@@ -1009,16 +1202,16 @@ export function findCompatibleFaultTarget(faultModel = {}, context = {}) {
     }
 
     if (selectedEdge && explicitTargetIdsForFault(faultModel, 'edge').length === 0) {
-      return { kind: 'edge', id: selectedEdge.id, reason: 'selected-can-edge' };
+      return { kind: 'edge', id: selectedEdge.id, reason: 'selected-edge' };
     }
 
-    const matchingCanEdge = edges.find((edge) => canEdgeMatchesFaultTargets(edge, faultModel));
-    if (matchingCanEdge) {
-      return { kind: 'edge', id: matchingCanEdge.id, reason: 'module-target-can-edge' };
+    const matchingEdge = edges.find((edge) => canEdgeMatchesFaultTargets(edge, faultModel));
+    if (matchingEdge) {
+      return { kind: 'edge', id: matchingEdge.id, reason: 'module-target-edge' };
     }
 
-    const firstCanEdge = edges.find((edge) => edge.lineType === 'can');
-    return firstCanEdge ? { kind: 'edge', id: firstCanEdge.id, reason: 'first-can-edge' } : null;
+    const firstEdge = edges[0];
+    return firstEdge ? { kind: 'edge', id: firstEdge.id, reason: 'first-edge' } : null;
   }
 
   const selectedNode = nodes.find((node) => node.id === context.selectedNodeId);
@@ -1075,6 +1268,8 @@ export function buildFaultPythonModuleSpec(faultModel = {}) {
     '    if KIND == "scale":',
     '        return value * _num(PARAMS.get("scale", 1.0), 1.0)',
     '    if KIND == "attenuation":',
+    '        if "scale" in PARAMS:',
+    '            return value * _num(PARAMS.get("scale", 1.0), 1.0)',
     '        import math',
     '        attenuation_db = max(0.0, _num(PARAMS.get("attenuation_db", PARAMS.get("attenuationDb", 0.0))))',
     '        return value * math.pow(10.0, -attenuation_db / 20.0)',
@@ -1083,7 +1278,7 @@ export function buildFaultPythonModuleSpec(faultModel = {}) {
     '    if KIND == "drift":',
     '        return value + max(time - start, 0.0) * _num(PARAMS.get("rate", 0.0))',
     '    if KIND == "step":',
-    '        return value + _num(PARAMS.get("step_value", PARAMS.get("jump", 0.0)))',
+    '        return _num(PARAMS.get("targetValue", PARAMS.get("target_value", PARAMS.get("value", PARAMS.get("stepValue", PARAMS.get("step_value", PARAMS.get("step", value)))))), value)',
     '    if KIND == "lock":',
     '        return _num(PARAMS.get("lock_value", 0.0))',
     '    if KIND == "saturation":',

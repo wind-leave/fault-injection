@@ -15,6 +15,7 @@ export const faultInjectionComponents = [
 ];
 
 export const instrumentComponents = [
+  { type: 'XHFSQ', label: '信号发生器' },
   { type: 'instrument_scope', label: '示波器' },
   { type: 'instrument_spectrum', label: '频谱分析仪' },
   { type: 'instrument_logger', label: '数据记录仪' }

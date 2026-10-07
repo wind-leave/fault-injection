@@ -3,6 +3,9 @@ import { initializeSimulationInterfaceLock } from './simulationInterfaceLockServ
 
 const ROOT_CANVAS_ID = 'canvas-root';
 const ROOT_CANVAS_NAME = '顶层';
+// This analyzer was superseded by the ordinary spectrum analyzer.  Keep only
+// this import-time compatibility marker so an old workspace cannot revive it.
+const REMOVED_COMPONENT_TYPES = new Set(['instrument_complex_envelope_spectrum']);
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -14,6 +17,24 @@ function isPlainObject(value) {
 
 function toSafeArray(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function normalizeSimulationConfig(value) {
+  const config = isPlainObject(value) ? value : {};
+  const duration = Number(config.duration);
+  const stepSize = Number(config.stepSize);
+  return {
+    duration: Number.isFinite(duration) && duration >= 0 ? duration : 10,
+    stepSize: Number.isFinite(stepSize) && stepSize > 0 ? stepSize : 0.1
+  };
+}
+
+function normalizeSimulationRequestSteps(value) {
+  const requested = Number.parseInt(value, 10);
+  if (!Number.isFinite(requested)) {
+    return 1000;
+  }
+  return Math.min(100000, Math.max(1, requested));
 }
 
 function normalizePortMapping(bindingPortMapping) {
@@ -83,6 +104,15 @@ function normalizeNode(node) {
       : safeNode.pythonBinding ?? null
   };
 
+  if (normalizedNode.type === 'subsystem_block') {
+    const props = isPlainObject(normalizedNode.props) ? normalizedNode.props : {};
+    normalizedNode.props = {
+      ...props,
+      subsystemId: String(props.subsystemId ?? normalizedNode.subsystemId ?? normalizedNode.id ?? '').trim()
+    };
+    delete normalizedNode.subsystemId;
+  }
+
   return normalizedNode.type === 'simulation_block'
     ? initializeSimulationInterfaceLock(normalizedNode)
     : normalizedNode;
@@ -90,6 +120,22 @@ function normalizeNode(node) {
 
 function normalizeEdge(edge) {
   return isPlainObject(edge) ? clone(edge) : {};
+}
+
+function normalizeCanvasItems(nodes, edges) {
+  const allNodes = toSafeArray(nodes).map(normalizeNode);
+  const removedNodeIds = new Set(allNodes
+    .filter((node) => REMOVED_COMPONENT_TYPES.has(node.type))
+    .map((node) => node.id));
+  const normalizedNodes = allNodes
+    .filter((node) => !REMOVED_COMPONENT_TYPES.has(node.type));
+
+  return {
+    nodes: normalizedNodes,
+    edges: toSafeArray(edges)
+      .map(normalizeEdge)
+      .filter((edge) => !removedNodeIds.has(edge.sourceNodeId) && !removedNodeIds.has(edge.targetNodeId))
+  };
 }
 
 function createEmptyCanvas(id = ROOT_CANVAS_ID, name = ROOT_CANVAS_NAME) {
@@ -105,6 +151,7 @@ function createEmptyCanvas(id = ROOT_CANVAS_ID, name = ROOT_CANVAS_NAME) {
 
 function normalizeCanvas(canvas, fallbackId = ROOT_CANVAS_ID) {
   const safeCanvas = isPlainObject(canvas) ? clone(canvas) : {};
+  const items = normalizeCanvasItems(safeCanvas.nodes, safeCanvas.edges);
 
   return {
     id: safeCanvas.id ?? fallbackId,
@@ -115,8 +162,7 @@ function normalizeCanvas(canvas, fallbackId = ROOT_CANVAS_ID) {
       offsetX: safeCanvas.viewport?.offsetX ?? 0,
       offsetY: safeCanvas.viewport?.offsetY ?? 0
     },
-    nodes: toSafeArray(safeCanvas.nodes).map(normalizeNode),
-    edges: toSafeArray(safeCanvas.edges).map(normalizeEdge)
+    ...items
   };
 }
 
@@ -126,8 +172,7 @@ function buildLayeredSnapshotFields(source) {
 
   if (!safeCanvases) {
     const rootCanvas = createEmptyCanvas();
-    rootCanvas.nodes = toSafeArray(safeSource.modelNodes).map(normalizeNode);
-    rootCanvas.edges = toSafeArray(safeSource.modelEdges).map(normalizeEdge);
+    Object.assign(rootCanvas, normalizeCanvasItems(safeSource.modelNodes, safeSource.modelEdges));
 
     return {
       rootCanvasId: ROOT_CANVAS_ID,
@@ -200,11 +245,14 @@ export function createWorkbenchSnapshot(state) {
     activeLineType: safeState.activeLineType ?? 'normal',
     taskName: typeof safeState.taskName === 'string' ? safeState.taskName : '',
     workspaceSource: typeof safeState.workspaceSource === 'string' ? safeState.workspaceSource : '',
+    simulationConfig: normalizeSimulationConfig(safeState.simulationConfig),
+    simulationRequestSteps: normalizeSimulationRequestSteps(safeState.simulationRequestSteps),
     faultedBlks: toSafeArray(safeState.faultedBlks),
     importedFaultModels: toSafeArray(safeState.importedFaultModels),
     faultInstances: toSafeArray(safeState.faultInstances),
     faultTags: toSafeArray(safeState.faultTags),
     faultInjectionLinks: toSafeArray(safeState.faultInjectionLinks),
+    diagnosticModel: isPlainObject(safeState.diagnosticModel) ? clone(safeState.diagnosticModel) : null,
     diagnosticTestPoints: toSafeArray(safeState.diagnosticTestPoints),
     testPoints: toSafeArray(safeState.testPoints),
     manualDiagnosticTestPoints: toSafeArray(safeState.manualDiagnosticTestPoints),
@@ -236,11 +284,14 @@ export function restoreWorkbenchSnapshot(snapshot) {
     activeLineType: safeSnapshot.activeLineType ?? 'normal',
     taskName: typeof safeSnapshot.taskName === 'string' ? safeSnapshot.taskName : '',
     workspaceSource: typeof safeSnapshot.workspaceSource === 'string' ? safeSnapshot.workspaceSource : '',
+    simulationConfig: normalizeSimulationConfig(safeSnapshot.simulationConfig),
+    simulationRequestSteps: normalizeSimulationRequestSteps(safeSnapshot.simulationRequestSteps),
     faultedBlks: toSafeArray(safeSnapshot.faultedBlks),
     importedFaultModels: toSafeArray(safeSnapshot.importedFaultModels),
     faultInstances: toSafeArray(safeSnapshot.faultInstances),
     faultTags: toSafeArray(safeSnapshot.faultTags),
     faultInjectionLinks: toSafeArray(safeSnapshot.faultInjectionLinks),
+    diagnosticModel: isPlainObject(safeSnapshot.diagnosticModel) ? clone(safeSnapshot.diagnosticModel) : null,
     diagnosticTestPoints: toSafeArray(safeSnapshot.diagnosticTestPoints),
     testPoints: toSafeArray(safeSnapshot.testPoints),
     manualDiagnosticTestPoints: toSafeArray(safeSnapshot.manualDiagnosticTestPoints),

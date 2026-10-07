@@ -64,13 +64,18 @@ export async function createBackendSimulationSession(
 
 export async function stepBackendSimulationSession(
   sessionId,
-  { steps = 1, endpointBase = '/api/simulations/session', fetchImpl = globalThis.fetch } = {}
+  {
+    steps = 1,
+    actualOnly = true,
+    endpointBase = '/api/simulations/session',
+    fetchImpl = globalThis.fetch
+  } = {}
 ) {
   return requestBackendJson(
     `${endpointBase}/${encodeURIComponent(sessionId)}/step`,
     {
       method: 'POST',
-      body: JSON.stringify({ steps })
+      body: JSON.stringify({ steps, actualOnly })
     },
     fetchImpl
   );

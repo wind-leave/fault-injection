@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from backend.schemas import SimulationBackendError, normalize_port_data_type, validate_executable_package
 
@@ -16,6 +16,25 @@ class ExecutableNode:
     power_output_ports: tuple
     requires_power: bool
     module: object = None
+    prepared_call: object = None
+    component_id: str = ""
+    output_names: tuple = field(init=False)
+    module_input_bindings: tuple = field(init=False)
+    module_output_bindings: tuple = field(init=False)
+
+    def __post_init__(self):
+        output_names = (
+            tuple(port["name"] for port in self.input_ports)
+            if self.type == "display_console" and self.input_ports
+            else tuple(self.outputs or ("output",))
+        )
+        module_outputs = tuple(self.module.outputs or ()) if self.module is not None else ()
+        object.__setattr__(self, "output_names", output_names)
+        object.__setattr__(self, "module_input_bindings", tuple(enumerate(self.module.inputs)) if self.module is not None else ())
+        object.__setattr__(self, "module_output_bindings", tuple(
+            (index, name, module_outputs[index] if index < len(module_outputs) else name)
+            for index, name in enumerate(output_names)
+        ))
 
 
 @dataclass(frozen=True)
@@ -26,6 +45,8 @@ class ExecutableEdge:
     target_node_id: str
     target_port_index: int
     is_power: bool
+    source_output_name: str = "output"
+    source_output_validated: bool = False
 
 
 @dataclass(frozen=True)
@@ -35,6 +56,7 @@ class MeasurementBinding:
     channel: str
     target_port_index: int
     vector_index: int = 0
+    source_edge: object = None
 
 
 @dataclass(frozen=True)
@@ -43,9 +65,32 @@ class ExecutableGraph:
     edges: list
     incoming: dict
     measurements: list
+    reported_node_ids: frozenset
     fault_instances: list
     duration: float
     step_size: float
+    input_plans: dict = field(init=False, repr=False)
+    recorded_node_ids: frozenset = field(init=False)
+
+    def __post_init__(self):
+        # Cache topology only; parameters and fault state remain live at each step.
+        plans = {}
+        selected = set(self.reported_node_ids)
+        for node_id, node in self.nodes.items():
+            incoming = tuple(self.incoming.get(node_id, ()))
+            connected = {edge.target_port_index for edge in incoming}
+            count = max(len(node.input_ports), max(connected, default=-1) + 1)
+            missing = tuple(index for index in range(count) if index not in connected)
+            plans[node_id] = (incoming, count, missing)
+            if node.type == "display_console":
+                selected.add(node_id)
+        for edge in self.edges:
+            if not edge.is_power and self.nodes[edge.target_node_id].type in {
+                "instrument_scope", "instrument_spectrum", "instrument_logger", "instrument_multimeter",
+            }:
+                selected.add(edge.source_node_id)
+        object.__setattr__(self, "input_plans", plans)
+        object.__setattr__(self, "recorded_node_ids", frozenset(selected))
 
 
 def _edge_port(edge, key):
@@ -86,7 +131,11 @@ def _port_definition(port, index, direction):
         "name": name,
         "dataType": normalize_port_data_type(port.get("dataType", port.get("type", "scalar"))),
         "vectorLength": port.get("vectorLength", port.get("length")),
+        "collectionKind": str(port.get("collectionKind", "")),
+        "allowsVector": bool(port.get("allowsVector", False)),
         "unit": str(port.get("unit", "")),
+        "referenceFrequencyHz": port.get("referenceFrequencyHz"),
+        "impedanceOhm": port.get("impedanceOhm"),
         "voltage": port.get("voltage"),
         "supplyType": str(port.get("supplyType", "")).upper(),
     }
@@ -130,6 +179,8 @@ def compile_graph(package, registry):
             power_output_ports=power_output_ports,
             requires_power=bool(raw_power_inputs),
             module=module,
+            prepared_call=module.prepare() if module is not None else None,
+            component_id=str(node.get("componentId") or ""),
         )
 
     edges = []
@@ -187,11 +238,27 @@ def compile_graph(package, registry):
             target_node_id=target_id,
             target_port_index=target_port_index,
             is_power=is_power,
+            source_output_name=source_node.output_names[
+                source_port_index if source_port_index < len(source_node.output_names) else 0
+            ],
+            source_output_validated=source_port_index < len(source_node.output_ports),
         )
         edges.append(compiled)
         if not is_power:
             incoming.setdefault(target_id, []).append(compiled)
 
+    for node in nodes.values():
+        if node.prepared_call is not None:
+            node.prepared_call.trusted_inputs = all(
+                edge.source_port_index < len(nodes[edge.source_node_id].output_ports)
+                and edge.target_port_index < len(node.input_ports)
+                for edge in incoming.get(node.id, ())
+            )
+
+    incoming_by_port = {
+        (edge.target_node_id, edge.target_port_index): edge
+        for edge in edges if not edge.is_power
+    }
     measurements = []
     for index, point in enumerate(package.get("measurementPoints", [])):
         scope_node_id = point.get("scopeNodeId")
@@ -203,6 +270,7 @@ def compile_graph(package, registry):
             channel=point.get("channel", "ch1"),
             target_port_index=_measurement_port(point),
             vector_index=_measurement_vector_index(point),
+            source_edge=incoming_by_port.get((scope_node_id, _measurement_port(point))),
         ))
 
     config = package["simulationConfig"]
@@ -211,6 +279,11 @@ def compile_graph(package, registry):
         edges=edges,
         incoming=incoming,
         measurements=measurements,
+        reported_node_ids=frozenset(
+            node_id
+            for node_id in package.get("reportedNodeIds", [])
+            if node_id in nodes
+        ),
         fault_instances=list(package.get("faultInstances", [])),
         duration=float(config["duration"]),
         step_size=float(config["stepSize"]),

@@ -48,6 +48,19 @@ class PracticeScoringTests(unittest.TestCase):
         self.assertEqual(result["scoreBreakdown"]["faultLocalization"], 0)
         self.assertEqual(result["deductions"][0]["points"], -30)
 
+    def test_fault_localization_uses_fault_set_accuracy_for_partial_credit(self):
+        result = evaluate_practice_submission_score(
+            correct=False,
+            elapsed_seconds=120,
+            scoring_rules={},
+            student_actions=[],
+            path_evaluation={"routeQualityScore": 50},
+            fault_set_accuracy=1 / 3,
+        )
+
+        self.assertEqual(result["scoreBreakdown"]["faultLocalization"], 10)
+        self.assertEqual(result["deductions"][0]["points"], -20)
+
     def test_efficiency_uses_current_five_point_weight(self):
         result = evaluate_practice_submission_score(
             correct=True,
@@ -87,6 +100,17 @@ class PracticeScoringTests(unittest.TestCase):
 
         self.assertEqual(result["score"], 0)
         self.assertEqual(result["stepCount"], 0)
+
+    def test_empty_troubleshooting_path_has_zero_path_efficiency(self):
+        result = evaluate_path_quality(
+            actual_troubleshooting_steps=[],
+            student_actions=[],
+            dynamic_reference_history=[],
+            initial_physical_measurement_snapshot={"abnormalPointCodes": ["M1"]},
+        )
+
+        self.assertEqual(result["diagnosticTreePathBreakdown"]["pathEfficiency"], 0)
+        self.assertEqual(result["diagnosticTreePathScore"], 0)
 
     def test_evaluates_existing_path_quality_breakdown(self):
         actual_steps = [

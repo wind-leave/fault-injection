@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive } from 'vue';
-import { getPaletteGroups, getSimulationMenuSections } from '../../services/componentRegistry.js';
+import { getElectricalMenuSections, getPaletteGroups, getSimulationMenuSections } from '../../services/componentRegistry.js';
+import { useAuthoredComponentCatalog } from '../../services/authoredComponentCatalogService.js';
 
 defineProps({
   collapsed: {
@@ -12,15 +13,23 @@ defineProps({
 const emit = defineEmits(['toggle-collapse']);
 
 const paletteGroups = getPaletteGroups();
+const authoredCatalog = useAuthoredComponentCatalog();
 const groupOpen = reactive(Object.fromEntries(
   paletteGroups.map((group) => [group.id, group.defaultOpen !== false])
 ));
 const consumedPaletteKeys = reactive(new Set());
-const simulationMenuOpen = reactive({});
+const paletteMenuOpen = reactive({});
 
-const simulationMenuSections = computed(() => {
-  const simulationGroup = paletteGroups.find((group) => group.id === 'simulation');
-  return getSimulationMenuSections(simulationGroup?.components ?? []);
+const paletteMenuSections = computed(() => {
+  // 新建组件已注册到全局组件库；这里只借助目录的响应式变化重新读取组件库，
+  // 不能再把 authoredCatalog.components 追加一次，否则会在左栏出现两份。
+  void authoredCatalog.components.length;
+  const groups = getPaletteGroups();
+  const groupComponents = (groupId) => groups.find((group) => group.id === groupId)?.components ?? [];
+  return {
+    electrical: getElectricalMenuSections(groupComponents('electrical')),
+    simulation: getSimulationMenuSections(groupComponents('simulation'))
+  };
 });
 
 function paletteKey(component) {
@@ -29,10 +38,14 @@ function paletteKey(component) {
 
 function isPaletteComponentAvailable(component) {
   const isOneShotTemplate = ['simulation', 'electrical', 'display-control'].includes(component.group);
-  return !isOneShotTemplate || !consumedPaletteKeys.has(paletteKey(component));
+  return component.palette?.repeatable === true || !isOneShotTemplate || !consumedPaletteKeys.has(paletteKey(component));
 }
 
-function availableSimulationMenuCount(section) {
+function paletteMenuSectionsFor(group) {
+  return paletteMenuSections.value[group.id] ?? [];
+}
+
+function availablePaletteMenuCount(section) {
   return section.components.filter(isPaletteComponentAvailable).length;
 }
 
@@ -95,6 +108,16 @@ function badgeIcon(component) {
   return component.palette?.icon || component.badge?.slice(0, 1) || component.label?.slice(0, 1) || '?';
 }
 
+function hasUploadedBadgeIcon(component) {
+  return Boolean(component.palette?.iconImage);
+}
+
+function badgeStyle(component) {
+  return component.palette?.iconColor
+    ? { backgroundColor: component.palette.iconColor, color: '#fff', boxShadow: 'none' }
+    : undefined;
+}
+
 function handlePaletteDragStart(event, component) {
   const componentPaletteKey = paletteKey(component);
   event.currentTarget?.classList.add('citem-dragging');
@@ -141,12 +164,18 @@ function toggleGroup(groupId) {
   groupOpen[groupId] = !groupOpen[groupId];
 }
 
-function isSimulationMenuOpen(section) {
-  return simulationMenuOpen[section.id] ?? section.defaultOpen !== false;
+function paletteMenuKey(group, section) {
+  return `${group.id}:${section.id}`;
 }
 
-function toggleSimulationMenu(section) {
-  simulationMenuOpen[section.id] = !isSimulationMenuOpen(section);
+function isPaletteMenuOpen(group, section) {
+  const key = paletteMenuKey(group, section);
+  return paletteMenuOpen[key] ?? section.defaultOpen !== false;
+}
+
+function togglePaletteMenu(group, section) {
+  const key = paletteMenuKey(group, section);
+  paletteMenuOpen[key] = !isPaletteMenuOpen(group, section);
 }
 
 function handleLineToolClick(component) {
@@ -194,25 +223,26 @@ function handleLineToolClick(component) {
           :id="groupDomId(group.id)"
           :data-palette-body="group.id"
         >
-          <template v-if="group.id === 'simulation'">
+          <template v-if="group.id === 'simulation' || group.id === 'electrical'">
             <section
-              v-for="section in simulationMenuSections"
+              v-for="section in paletteMenuSectionsFor(group)"
               :key="section.id"
               class="simulation-menu-section"
-              :data-simulation-menu-section="section.id"
+              :data-simulation-menu-section="group.id === 'simulation' ? section.id : null"
+              :data-electrical-menu-section="group.id === 'electrical' ? section.id : null"
             >
               <button
                 type="button"
                 class="simulation-menu-section__head"
-                :aria-expanded="isSimulationMenuOpen(section)"
-                @click="toggleSimulationMenu(section)"
+                :aria-expanded="isPaletteMenuOpen(group, section)"
+                @click="togglePaletteMenu(group, section)"
               >
                 <span class="simulation-menu-section__icon">{{ section.icon }}</span>
                 <span>{{ section.label }}</span>
-                <span class="simulation-menu-section__count">{{ availableSimulationMenuCount(section) }}</span>
-                <span class="simulation-menu-section__arrow" :class="{ open: isSimulationMenuOpen(section) }">&#9654;</span>
+                <span class="simulation-menu-section__count">{{ availablePaletteMenuCount(section) }}</span>
+                <span class="simulation-menu-section__arrow" :class="{ open: isPaletteMenuOpen(group, section) }">&#9654;</span>
               </button>
-              <div v-show="isSimulationMenuOpen(section)" class="simulation-menu-section__body">
+              <div v-show="isPaletteMenuOpen(group, section)" class="simulation-menu-section__body">
                 <template v-for="component in section.components" :key="paletteKey(component)">
                   <div
                     v-if="isPaletteComponentAvailable(component)"
@@ -224,7 +254,7 @@ function handleLineToolClick(component) {
                     @dragstart="handlePaletteDragStart($event, component)"
                     @dragend="handlePaletteDragEnd"
                   >
-                    <span :class="badgeClass(component)">{{ badgeIcon(component) }}</span>
+                    <span :class="badgeClass(component)" :style="badgeStyle(component)"><img v-if="hasUploadedBadgeIcon(component)" class="citem-icon-badge__image" :src="component.palette.iconImage" alt=""><template v-else>{{ badgeIcon(component) }}</template></span>
                     <span class="citem-label">{{ component.label }}</span>
                   </div>
                 </template>
@@ -251,7 +281,7 @@ function handleLineToolClick(component) {
               @dragstart="handlePaletteDragStart($event, component)"
               @dragend="handlePaletteDragEnd"
             >
-              <span :class="badgeClass(component)">{{ badgeIcon(component) }}</span>
+              <span :class="badgeClass(component)" :style="badgeStyle(component)"><img v-if="hasUploadedBadgeIcon(component)" class="citem-icon-badge__image" :src="component.palette.iconImage" alt=""><template v-else>{{ badgeIcon(component) }}</template></span>
               <span class="citem-label">{{ component.label }}</span>
             </div>
           </template>

@@ -11,6 +11,140 @@ import {
 import { DISPLAY_CONSOLE_PRESETS } from '../src/constants/displayConsoleConfig.js';
 
 describe('component registry', () => {
+  it('registers independent RF complex-envelope processing components', () => {
+    const componentIds = [
+      'rf_complex_envelope_selector',
+      'rf_complex_envelope_gain',
+      'rf_complex_envelope_limiter',
+      'rf_complex_envelope_band_pass_filter',
+      'rf_complex_envelope_amplitude_phase_modulator',
+      'rf_complex_envelope_downconverter',
+      'rf_complex_envelope_vector4_dual_output_receiver',
+      'rf_complex_envelope_upconverter'
+    ];
+
+    componentIds.forEach((componentId) => {
+      const component = COMPONENT_REGISTRY[componentId];
+      expect(component).toBeDefined();
+      expect(component.ports.inputs.every((port) => port.dataType === 'rf_complex_envelope')).toBe(true);
+      expect(component.ports.outputs.every((port) => port.dataType === 'rf_complex_envelope')).toBe(true);
+      expect(component.pythonBinding.moduleId).toBe(componentId);
+    });
+    expect(COMPONENT_REGISTRY.rf_complex_envelope_selector.ports.inputs).toHaveLength(2);
+
+    [
+      'rf_complex_envelope_selector',
+      'rf_complex_envelope_limiter',
+      'rf_complex_envelope_band_pass_filter',
+      'rf_complex_envelope_amplitude_phase_modulator',
+      'rf_complex_envelope_downconverter',
+      'rf_complex_envelope_vector4_dual_output_receiver',
+      'rf_complex_envelope_upconverter'
+    ].forEach((componentId) => {
+      const component = COMPONENT_REGISTRY[componentId];
+      [...component.ports.inputs, ...component.ports.outputs].forEach((port) => {
+        expect(port).toMatchObject({
+          dataType: 'rf_complex_envelope',
+          collectionKind: 'vector',
+          vectorLength: 4
+        });
+      });
+    });
+  });
+
+  it('defines the four-route complex-envelope receiver with two four-route outputs', () => {
+    const component = COMPONENT_REGISTRY.rf_complex_envelope_vector4_dual_output_receiver;
+
+    expect(component.ports.inputs).toEqual([
+      expect.objectContaining({
+        portId: 'input-0',
+        varName: 'input_envelope_vector',
+        dataType: 'rf_complex_envelope',
+        collectionKind: 'vector',
+        vectorLength: 4
+      })
+    ]);
+    expect(component.ports.outputs).toEqual([
+      expect.objectContaining({
+        portId: 'output-0',
+        varName: 'output_envelope_vector_1',
+        dataType: 'rf_complex_envelope',
+        collectionKind: 'vector',
+        vectorLength: 4
+      }),
+      expect.objectContaining({
+        portId: 'output-1',
+        varName: 'output_envelope_vector_2',
+        dataType: 'rf_complex_envelope',
+        collectionKind: 'vector',
+        vectorLength: 4
+      })
+    ]);
+  });
+
+  it('defines a separate complex-envelope pulse feature extractor', () => {
+    const component = COMPONENT_REGISTRY.rf_complex_envelope_pulse_feature_extractor;
+
+    expect(component).toMatchObject({
+      nodeType: 'simulation_block',
+      simulationMenu: 'rf-signal',
+      pythonBinding: {
+        moduleId: 'rf_complex_envelope_pulse_feature_extractor',
+        executionMode: 'backend'
+      }
+    });
+    expect(component.defaults.inputs).toEqual([
+      expect.objectContaining({
+        name: '四路复数包络输入',
+        varName: 'input_envelope_vector'
+      })
+    ]);
+    expect(component.ports.inputs).toEqual([
+      expect.objectContaining({
+        varName: 'input_envelope_vector',
+        dataType: 'rf_complex_envelope',
+        collectionKind: 'vector',
+        vectorLength: 4,
+        unit: 'V'
+      })
+    ]);
+    expect(component.ports.outputs).toHaveLength(5);
+    expect(component.ports.outputs.every((port) => port.type === 'float')).toBe(true);
+  });
+
+  it('defines the four-port up/down converter as named two-element vector ports', () => {
+    const component = COMPONENT_REGISTRY.rf_four_port_up_down_converter;
+
+    expect(component.ports.inputs).toEqual([
+      expect.objectContaining({
+        varName: 'downconvert_rf_inputs',
+        dataType: 'vector',
+        vectorLength: 2,
+        vectorElementNames: ['下变频射频输入 1', '下变频射频输入 2']
+      }),
+      expect.objectContaining({
+        varName: 'upconvert_baseband_inputs',
+        dataType: 'vector',
+        vectorLength: 2,
+        vectorElementNames: ['上变频基带输入 1（I）', '上变频基带输入 2（I）']
+      })
+    ]);
+    expect(component.ports.outputs).toEqual([
+      expect.objectContaining({
+        varName: 'downconverted_baseband_outputs',
+        dataType: 'vector',
+        vectorLength: 2,
+        vectorElementNames: ['下变频基带输出 1（I）', '下变频基带输出 2（I）']
+      }),
+      expect.objectContaining({
+        varName: 'upconverted_rf_outputs',
+        dataType: 'vector',
+        vectorLength: 2,
+        vectorElementNames: ['上变频射频输出 1', '上变频射频输出 2']
+      })
+    ]);
+  });
+
   it('does not expose sensor models in the simulation component palette', () => {
     const simulationTypes = getPaletteGroups()
       .find((group) => group.id === 'simulation')
@@ -48,9 +182,61 @@ describe('component registry', () => {
     });
 
     expect(automatic.width).toBe(228);
-    expect(automatic.height).toBe(188);
+    expect(automatic.height).toBe(204);
     expect(explicit.width).toBe(240);
     expect(explicit.height).toBe(180);
+  });
+
+  it('preserves independently configured left and right positions for inputs and outputs', () => {
+    const component = createPythonSimulationComponent({
+      type: 'reversed-port-positions',
+      label: '反向端口组件',
+      moduleType: '测试模型',
+      inputs: [{ portId: 'input-0', varName: 'feedback', name: '反馈输入', side: 'right', sidePosition: 3 }],
+      outputs: [{ portId: 'output-0', varName: 'command', name: '控制输出', side: 'left', sidePosition: 3 }]
+    });
+
+    expect(component.ports.inputs[0].side).toBe('right');
+    expect(component.ports.outputs[0].side).toBe('left');
+    expect(component.defaults.inputs[0].side).toBe('right');
+    expect(component.defaults.outputs[0].side).toBe('left');
+    expect(component.pythonBinding.portMapping.inputs[0].side).toBe('right');
+    expect(component.pythonBinding.portMapping.outputs[0].side).toBe('left');
+    expect(component.ports.inputs[0].sidePosition).toBe(3);
+    expect(component.ports.outputs[0].sidePosition).toBe(3);
+    expect(component.defaults.inputs[0].sidePosition).toBe(3);
+    expect(component.defaults.outputs[0].sidePosition).toBe(3);
+    expect(component.pythonBinding.portMapping.inputs[0].sidePosition).toBe(3);
+    expect(component.pythonBinding.portMapping.outputs[0].sidePosition).toBe(3);
+  });
+
+  it('preserves configured scalar element names throughout the generated component contract', () => {
+    const component = createPythonSimulationComponent({
+      type: 'named-scalar-elements',
+      label: '标量元素命名测试',
+      moduleType: '测试模型',
+      inputs: [{
+        portId: 'input-0',
+        varName: 'frequency_in',
+        name: '频率输入',
+        elementNames: ['输入频率']
+      }],
+      outputs: [{
+        portId: 'output-0',
+        varName: 'frequency_out',
+        name: '频率输出',
+        elementName: '输出频率'
+      }]
+    });
+
+    expect(component.ports.inputs[0].elementNames).toEqual(['输入频率']);
+    expect(component.ports.outputs[0].elementNames).toEqual(['输出频率']);
+    expect(component.defaults.inputs[0].elementNames).toEqual(['输入频率']);
+    expect(component.defaults.outputs[0].elementNames).toEqual(['输出频率']);
+    expect(component.pythonBinding.parsedInterface.inputs[0].elementNames).toEqual(['输入频率']);
+    expect(component.pythonBinding.parsedInterface.outputs[0].elementNames).toEqual(['输出频率']);
+    expect(component.pythonBinding.portMapping.inputs[0].elementNames).toEqual(['输入频率']);
+    expect(component.pythonBinding.portMapping.outputs[0].elementNames).toEqual(['输出频率']);
   });
 
   it('initializes editable simulation parameter values from the component defaults', () => {
@@ -67,18 +253,48 @@ describe('component registry', () => {
     });
 
     expect(component.defaults.parameterValues).toEqual({ gain: 2, bias: -0.5 });
+    expect(component.faultSlots).toEqual([
+      expect.objectContaining({
+        slotId: 'physical:parameter:gain',
+        targetField: 'params.gain',
+        parameterKey: 'gain',
+        layer: 'physical'
+      }),
+      expect.objectContaining({
+        slotId: 'physical:parameter:bias',
+        targetField: 'params.bias',
+        parameterKey: 'bias',
+        layer: 'physical'
+      })
+    ]);
+  });
+
+  it('initializes RF downconverter parameter slots for immediate physical fault injection', () => {
+    const component = COMPONENT_REGISTRY.rf_downconverter;
+
+    expect(component.faultSlots).toContainEqual(expect.objectContaining({
+      slotId: 'physical:parameter:lo_frequency_hz',
+      targetField: 'params.lo_frequency_hz',
+      parameterKey: 'lo_frequency_hz',
+      layer: 'physical',
+      unit: 'Hz'
+    }));
   });
 
   it('defines fixed-id electrical components with the requested AC/DC interfaces', () => {
     const acSource = COMPONENT_REGISTRY.electrical_ac_power_source;
+    const dcSource = COMPONENT_REGISTRY.electrical_dc_power_source;
     const dcBoost = COMPONENT_REGISTRY.electrical_dc_boost;
     const acDcMatching = COMPONENT_REGISTRY.electrical_ac_dc_matching;
 
-    expect([acSource, dcBoost, acDcMatching].every((component) => (
+    expect([acSource, dcSource, dcBoost, acDcMatching].every((component) => (
       component.group === 'electrical' && component.nodeType === 'simulation_block'
     ))).toBe(true);
     expect(acSource.templateId).toBe('electrical_ac_power_source');
     expect(acSource.ports.outputs.map((port) => port.varName)).toEqual(['ac_phase_a', 'ac_phase_b', 'ac_phase_c']);
+    expect(dcSource.templateId).toBe('electrical_dc_power_source');
+    expect(dcSource.ports.outputs).toEqual([expect.objectContaining({ varName: 'dc_output', unit: 'VDC' })]);
+    expect(dcSource.defaults.parameterValues).toMatchObject({ output_voltage: 28 });
     expect(dcBoost.templateId).toBe('electrical_dc_boost');
     expect(acDcMatching.templateId).toBe('electrical_ac_dc_matching');
     expect(dcBoost.ports.inputs).toEqual([expect.objectContaining({ varName: 'dc_input', unit: 'VDC' })]);
@@ -108,10 +324,24 @@ describe('component registry', () => {
 
   it('registers the existing draggable component types', () => {
     expect(Object.keys(COMPONENT_REGISTRY).sort()).toEqual([
-      'Test',
+      '11',
+      'DZDK_A',
+      'DZDK_B',
+      'DZDK_C',
+      'DZDK_D',
+      'XHFSQ',
       'display_console',
       'display_console_1',
       'display_console_2',
+      'display_console_3',
+      'display_console_4',
+      'display_console_5',
+      'display_console_6',
+      'display_console_7',
+      'electrical_ac_dc_matching',
+      'electrical_ac_power_source',
+      'electrical_dc_boost',
+      'electrical_dc_power_source',
       'electrical_fault_injector',
       'flow_block',
       'gain_block',
@@ -119,12 +349,26 @@ describe('component registry', () => {
       'instrument_multimeter',
       'instrument_scope',
       'instrument_spectrum',
-      'link_normal',
       'link_can',
+      'link_normal',
       'middle_var_assign',
       'mux_block',
       'physical_fault_injector',
       'protocol_fault_injector',
+      'rf_amplitude_phase_modulator',
+      'rf_band_pass_filter',
+      'rf_complex_envelope_amplitude_phase_modulator',
+      'rf_complex_envelope_band_pass_filter',
+      'rf_complex_envelope_downconverter',
+      'rf_complex_envelope_gain',
+      'rf_complex_envelope_limiter',
+      'rf_complex_envelope_pulse_feature_extractor',
+      'rf_complex_envelope_scalar_source',
+      'rf_complex_envelope_selector',
+      'rf_complex_envelope_to_vector4',
+      'rf_complex_envelope_upconverter',
+      'rf_complex_envelope_vector4_dual_output_receiver',
+      'rf_complex_envelope_vector4_power_divider',
       'rf_downconverter',
       'rf_four_channel_source',
       'rf_four_output_source',
@@ -138,10 +382,27 @@ describe('component registry', () => {
       'signal_source_rf',
       'simulation_block',
       'subsystem_block',
+      'subsystem_block_2',
+      'subsystem_block_3',
+      'subsystem_block_4',
       'subsystem_in_port',
       'subsystem_out_port',
       'sum_block',
       'vector2_passthrough'
+    ]);
+  });
+
+  it('keeps the four subsystem names and ids separately configurable', () => {
+    const ids = ['subsystem_block', 'subsystem_block_2', 'subsystem_block_3', 'subsystem_block_4'];
+    expect(ids.map((id) => [
+      COMPONENT_REGISTRY[id].label,
+      COMPONENT_REGISTRY[id].defaults.name,
+      COMPONENT_REGISTRY[id].defaults.subsystemId
+    ])).toEqual([
+      ['子系统块', '子系统块', 'subsystem-block-1'],
+      ['子系统块 2', '子系统块 2', 'subsystem-block-2'],
+      ['子系统块 3', '子系统块 3', 'subsystem-block-3'],
+      ['子系统块 4', '子系统块 4', 'subsystem-block-4']
     ]);
   });
 
@@ -168,6 +429,37 @@ describe('component registry', () => {
     });
   });
 
+  it('defines the four DZDK signal-processing components with sequential socket port ids', () => {
+    expect(COMPONENT_REGISTRY.DZDK_A.ports.inputs.map((port) => port.portId)).toEqual(['socket01']);
+    expect(COMPONENT_REGISTRY.DZDK_A.ports.outputs.map((port) => port.portId)).toEqual(['socket02']);
+    expect(COMPONENT_REGISTRY.DZDK_B.ports.inputs.map((port) => port.portId)).toEqual(['socket01']);
+    expect(COMPONENT_REGISTRY.DZDK_B.ports.outputs.map((port) => port.portId)).toEqual(['socket02']);
+    expect(COMPONENT_REGISTRY.DZDK_C.ports.inputs.map((port) => port.portId)).toEqual(['socket01']);
+    expect(COMPONENT_REGISTRY.DZDK_C.ports.outputs.map((port) => port.portId)).toEqual(['socket02', 'socket03']);
+    expect(COMPONENT_REGISTRY.DZDK_D.ports.inputs.map((port) => port.portId)).toEqual(['socket01']);
+    expect(COMPONENT_REGISTRY.DZDK_D.ports.outputs.map((port) => port.portId)).toEqual(['socket02', 'socket03', 'socket04']);
+    expect(['DZDK_A', 'DZDK_B', 'DZDK_C', 'DZDK_D'].every((type) => COMPONENT_REGISTRY[type].defaults.powerInputs.length === 0)).toBe(true);
+    expect(Object.values(COMPONENT_REGISTRY).filter((component) => /^DZDK_[A-D]$/.test(component.type))
+      .every((component) => component.pythonBinding.executionMode === 'backend')).toBe(true);
+  });
+
+  it('defines backend-executable RF band-pass and I/Q amplitude-phase components', () => {
+    expect(COMPONENT_REGISTRY.rf_band_pass_filter).toMatchObject({
+      pythonBinding: { moduleId: 'rf_band_pass_filter', executionMode: 'backend' },
+      ports: {
+        inputs: [{ varName: 'rf_input' }],
+        outputs: [{ varName: 'filtered_signal' }]
+      }
+    });
+    expect(COMPONENT_REGISTRY.rf_amplitude_phase_modulator).toMatchObject({
+      pythonBinding: { moduleId: 'rf_amplitude_phase_modulator', executionMode: 'backend' },
+      ports: {
+        inputs: [{ varName: 'input_i' }, { varName: 'input_q' }],
+        outputs: [{ varName: 'output_i' }, { varName: 'output_q' }]
+      }
+    });
+  });
+
   it('defines a scalar input to four-value vector simulation component', () => {
     expect(COMPONENT_REGISTRY.scalar_to_vector4).toMatchObject({
       nodeType: 'simulation_block',
@@ -184,6 +476,94 @@ describe('component registry', () => {
     });
   });
 
+  it('defines a complex-envelope scalar to four-route vector simulation component', () => {
+    const component = COMPONENT_REGISTRY.rf_complex_envelope_to_vector4;
+    expect(component).toMatchObject({
+      nodeType: 'simulation_block',
+      templateId: 'rf_complex_envelope_to_vector4',
+      simulationMenu: 'rf-signal',
+      ports: {
+        inputs: [{ varName: 'input_envelope', dataType: 'rf_complex_envelope' }],
+        outputs: [{
+          varName: 'envelope_vector',
+          dataType: 'rf_complex_envelope',
+          collectionKind: 'vector',
+          vectorLength: 4
+        }]
+      },
+      pythonBinding: {
+        moduleId: 'rf_complex_envelope_to_vector4',
+        executionMode: 'backend'
+      }
+    });
+    expect(component.ports.inputs[0]).not.toHaveProperty('collectionKind');
+  });
+
+  it('defines a no-input scalar complex-envelope source', () => {
+    const component = COMPONENT_REGISTRY.rf_complex_envelope_scalar_source;
+    expect(component).toMatchObject({
+      nodeType: 'simulation_block',
+      templateId: 'rf_complex_envelope_scalar_source',
+      simulationMenu: 'rf-signal',
+      ports: {
+        inputs: [],
+        outputs: [{
+          varName: 'output_envelope',
+          dataType: 'rf_complex_envelope',
+          unit: 'V'
+        }]
+      },
+      defaults: {
+        inputs: [],
+        powerInputs: [],
+        parameterValues: {
+          pulse_width_seconds: 0.001,
+          pulse_period_seconds: 0.01,
+          center_frequency_hz: 10,
+          power_dbm: 0
+        }
+      },
+      pythonBinding: {
+        moduleId: 'rf_complex_envelope_scalar_source',
+        executionMode: 'backend'
+      }
+    });
+    expect(component.ports.outputs[0]).not.toHaveProperty('collectionKind');
+    expect(component.ports.outputs[0]).not.toHaveProperty('vectorLength');
+    expect(component.defaults.parameters.map((parameter) => parameter.name)).toEqual([
+      '脉宽',
+      '重周',
+      '中心频率',
+      '功率'
+    ]);
+  });
+
+  it('defines a four-route complex-envelope power-divider simulation component', () => {
+    const component = COMPONENT_REGISTRY.rf_complex_envelope_vector4_power_divider;
+    expect(component).toMatchObject({
+      nodeType: 'simulation_block',
+      templateId: 'rf_complex_envelope_vector4_power_divider',
+      simulationMenu: 'rf-signal',
+      ports: {
+        inputs: [{
+          varName: 'input_envelope',
+          dataType: 'rf_complex_envelope'
+        }],
+        outputs: [{
+          varName: 'output_envelope_vector',
+          dataType: 'rf_complex_envelope',
+          collectionKind: 'vector',
+          vectorLength: 4
+        }]
+      },
+      pythonBinding: {
+        moduleId: 'rf_complex_envelope_vector4_power_divider',
+        executionMode: 'backend'
+      }
+    });
+    expect(component.ports.inputs[0]).not.toHaveProperty('collectionKind');
+  });
+
   it('derives display-console templates from the editable presets', () => {
     expect(COMPONENT_REGISTRY.display_console_1).toMatchObject({
       type: 'display_console_1',
@@ -193,15 +573,34 @@ describe('component registry', () => {
       label: '显控台 1',
       defaults: {
         consoleType: '射频参数显控',
-        inputPortNames: ['中心频率（MHz）', '重复周期（μs）', '脉宽（μs）', '幅度']
+        inputPortNames: [
+          '中心频率（MHz）',
+          '重复周期（μs）',
+          '脉宽（μs）',
+          '幅度',
+          '频段编码',
+          '波形编码',
+          '调制方式编码'
+        ]
       }
     });
     expect(COMPONENT_REGISTRY.display_console_2).toMatchObject({
       type: 'display_console_2',
       nodeType: 'display_console',
       templateId: 'display_console_2',
-      label: '显控台 2'
+      label: '显控台 2',
+      defaults: { displayConfig: { ports: [
+        expect.objectContaining({ id: 'console-input', name: '通道 A' }),
+        expect.objectContaining({ id: 'console-input-2', name: '通道 B' })
+      ] } }
     });
+    expect(COMPONENT_REGISTRY.display_console_7).toMatchObject({
+      type: 'display_console_7',
+      nodeType: 'display_console',
+      templateId: 'display_console_7',
+      label: '显控台 7'
+    });
+    expect(COMPONENT_REGISTRY.display_console_7.palette.icon).toBe('显7');
     const configuredTemplates = Object.keys(DISPLAY_CONSOLE_PRESETS);
     expect(getPaletteGroups().find((group) => group.id === 'display-control')?.components.map((item) => item.type))
       .toEqual(configuredTemplates);
@@ -255,7 +654,7 @@ describe('component registry', () => {
     });
   });
 
-  it('defines an RF pulse feature extractor with one scalar input and four scalar outputs', () => {
+  it('defines an RF pulse feature extractor with separate I/Q inputs and five scalar outputs', () => {
     const component = COMPONENT_REGISTRY.rf_pulse_feature_extractor;
 
     expect(component).toMatchObject({
@@ -267,16 +666,21 @@ describe('component registry', () => {
       }
     });
     expect(component.defaults.inputs).toEqual([
-      expect.objectContaining({ name: '射频信号', varName: 'rf_signal', type: '标量' })
+      expect.objectContaining({ name: '中频 I', varName: 'if_i', type: '标量' }),
+      expect.objectContaining({ name: '中频 Q', varName: 'if_q', type: '标量' })
     ]);
     expect(component.defaults.outputs).toEqual([
       expect.objectContaining({ name: '中心频率', varName: 'center_frequency_hz', type: '标量' }),
       expect.objectContaining({ name: '重复周期', varName: 'pulse_period_seconds', type: '标量' }),
       expect.objectContaining({ name: '脉宽', varName: 'pulse_width_seconds', type: '标量' }),
-      expect.objectContaining({ name: '脉冲幅度', varName: 'pulse_amplitude_adc', type: '标量', unit: 'ADC(0-255)' })
+      expect.objectContaining({ name: '脉冲幅度', varName: 'pulse_amplitude_adc', type: '标量', unit: 'ADC(0-255)' }),
+      expect.objectContaining({ name: '脉冲个数', varName: 'pulse_count', type: '标量', unit: '个' })
     ]);
-    expect(component.ports.inputs).toHaveLength(1);
-    expect(component.ports.outputs).toHaveLength(4);
+    expect(component.ports.inputs).toEqual([
+      expect.objectContaining({ varName: 'if_i', type: 'float' }),
+      expect.objectContaining({ varName: 'if_q', type: 'float' })
+    ]);
+    expect(component.ports.outputs).toHaveLength(5);
     expect(component.ports.outputs.every((port) => port.type === 'float' && !port.dataType)).toBe(true);
   });
 
@@ -297,7 +701,13 @@ describe('component registry', () => {
     ]);
     expect(component.ports.outputs).toEqual([
       expect.objectContaining({ varName: 'if_i', type: 'float' }),
-      expect.objectContaining({ varName: 'if_q', type: 'float' })
+      expect.objectContaining({ varName: 'if_q', type: 'float' }),
+      expect.objectContaining({
+        varName: 'if_iq',
+        dataType: 'vector',
+        vectorLength: 2,
+        vectorElementNames: ['中频 I', '中频 Q']
+      })
     ]);
     expect(component.defaults.parameters).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -323,10 +733,17 @@ describe('component registry', () => {
       'Test'
     ]));
     expect(sections.find((section) => section.id === 'signal-processing')?.components)
-      .toEqual([expect.objectContaining({ type: 'scalar_to_vector4' })]);
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'scalar_to_vector4' }),
+        expect.objectContaining({ type: 'DZDK_A' }),
+        expect.objectContaining({ type: 'DZDK_B' }),
+        expect.objectContaining({ type: 'DZDK_D' })
+      ]));
     expect(sections.find((section) => section.id === 'rf-signal')?.components)
       .toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'rf_complex_envelope_to_vector4' }),
         expect.objectContaining({ type: 'rf_downconverter' }),
+        expect.objectContaining({ type: 'DZDK_C' }),
         expect.objectContaining({ type: 'rf_pulse_feature_extractor' }),
         expect.objectContaining({ type: 'rf_limit_amplify_downconvert_split8' })
       ]));
@@ -477,7 +894,6 @@ describe('component registry', () => {
       defaults: {
         name: '频谱分析仪',
         instrumentType: '频谱分析',
-        sampleRate: '32kHz',
         frequencyRange: '0-16kHz',
         fftSize: '1024',
         windowFunction: 'Hann',
@@ -536,16 +952,40 @@ describe('component registry', () => {
     expect(COMPONENT_REGISTRY.middle_var_assign.palette?.visible).toBe(false);
     expect(paletteGroups.find((group) => group.id === 'signal-ops')).toBeUndefined();
     expect(simulation.components.map((item) => item.type)).toEqual([
+      '11',
       'scalar_to_vector4',
+      'rf_complex_envelope_scalar_source',
+      'rf_complex_envelope_to_vector4',
+      'rf_complex_envelope_vector4_power_divider',
+      'DZDK_A',
+      'DZDK_B',
+      'DZDK_C',
+      'DZDK_D',
+      'rf_band_pass_filter',
+      'rf_complex_envelope_selector',
+      'rf_complex_envelope_vector4_dual_output_receiver',
+      'rf_complex_envelope_gain',
+      'rf_complex_envelope_limiter',
+      'rf_complex_envelope_band_pass_filter',
+      'rf_complex_envelope_amplitude_phase_modulator',
+      'rf_complex_envelope_downconverter',
+      'rf_complex_envelope_upconverter',
+      'rf_amplitude_phase_modulator',
       'rf_four_output_source',
       'rf_four_port_up_down_converter',
       'rf_pulse_feature_extractor',
+      'rf_complex_envelope_pulse_feature_extractor',
       'rf_downconverter',
       'rf_limit_amplify_downconvert_split8'
     ]);
     expect(paletteGroups.find((group) => group.id === 'display-control').components.map((item) => item.type)).toEqual([
       'display_console_1',
-      'display_console_2'
+      'display_console_2',
+      'display_console_3',
+      'display_console_4',
+      'display_console_5',
+      'display_console_6',
+      'display_console_7'
     ]);
     expect(faults.components.map((item) => item.type)).toEqual([
       'physical_fault_injector',
@@ -555,15 +995,21 @@ describe('component registry', () => {
     expect(COMPONENT_REGISTRY.protocol_fault_injector.palette?.visible).not.toBe(false);
     expect(paletteGroups.find((group) => group.id === 'instruments').components.map((item) => item.type)).toEqual([
       'instrument_scope',
+      'XHFSQ',
       'instrument_spectrum',
       'instrument_multimeter'
     ]);
     expect(COMPONENT_REGISTRY.instrument_logger.palette?.visible).toBe(false);
-    expect(electrical.components).toEqual([]);
-    expect(canLines.components.map((item) => item.type)).toEqual([
-      'link_normal',
-      'link_can'
+    expect(electrical.components.map((item) => item.type)).toEqual([
+      'electrical_ac_power_source',
+      'electrical_dc_power_source',
+      'electrical_dc_boost',
+      'electrical_ac_dc_matching'
     ]);
+    expect(canLines.components.map((item) => item.type)).toEqual([
+      'link_normal'
+    ]);
+    expect(COMPONENT_REGISTRY.link_can.palette.visible).toBe(false);
     expect(simulation.components[0]).not.toBe(COMPONENT_REGISTRY.rf_pulse_feature_extractor);
     expect(faults.components[0]).not.toBe(COMPONENT_REGISTRY.physical_fault_injector);
     expect(canLines.components[0]).not.toBe(COMPONENT_REGISTRY.link_normal);

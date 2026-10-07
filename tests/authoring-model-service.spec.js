@@ -24,6 +24,7 @@ describe('authoringModelService', () => {
     expect(pkg.faultInstances).toEqual([]);
     expect(pkg.diagnosticModel.testPoints).toEqual([]);
     expect(pkg.diagnosticModel.detectabilityMatrix).toEqual([]);
+    expect(pkg.diagnosticModel.diagnosticConditions).toEqual([]);
     expect(pkg.pythonModules).toEqual([]);
   });
 
@@ -54,6 +55,24 @@ describe('authoringModelService', () => {
     expect(pkg.diagnosticModel.testPoints[0].testPointId).toBe('M1');
     expect(pkg.diagnosticModel.detectabilityMatrix[0].detectable).toBe(true);
     expect(pkg.pythonModules[0].moduleId).toBe('controller');
+  });
+
+  it('preserves enum diagnostic conditions with their current operating values', () => {
+    const pkg = normalizeAuthoringPackage({
+      diagnosticModel: {
+        diagnosticConditions: [{
+          key: 'input_mode',
+          label: '输入选择模式',
+          options: ['mode_1', 'mode_2'],
+          currentValue: 'mode_2'
+        }]
+      }
+    });
+
+    expect(pkg.diagnosticModel.diagnosticConditions).toEqual([expect.objectContaining({
+      key: 'input_mode',
+      currentValue: 'mode_2'
+    })]);
   });
 
   it('upserts records by id without mutating the original list', () => {

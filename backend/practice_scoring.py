@@ -81,6 +81,23 @@ def _covers_repair_target(node, steps):
     return False
 
 
+def _covers_display_console_parameter(node, steps):
+    expected_component_id = _text(node.get("componentId"))
+    expected_parameter = _text(node.get("parameter"))
+    expected_value = node.get("value")
+    for step in steps:
+        if step.get("actionType") != "adjustDisplayConsoleParameter":
+            continue
+        if _text(step.get("componentId")) != expected_component_id:
+            continue
+        parameters = step.get("parameters") if isinstance(step.get("parameters"), dict) else {}
+        if expected_parameter not in parameters:
+            continue
+        if expected_value is None or parameters.get(expected_parameter) == expected_value:
+            return True
+    return False
+
+
 def _evaluate_key_node_coverage(fault_tree_key_nodes, steps, initial_physical_measurement_snapshot):
     nodes = _arr(fault_tree_key_nodes)
     covered_node_ids = []
@@ -98,6 +115,8 @@ def _evaluate_key_node_coverage(fault_tree_key_nodes, steps, initial_physical_me
             covered = _covers_measure_point(node, steps)
         elif node_type == "repairTarget":
             covered = _covers_repair_target(node, steps)
+        elif node_type == "displayConsoleParameter":
+            covered = _covers_display_console_parameter(node, steps)
         else:
             covered = False
         if covered:
@@ -274,10 +293,14 @@ def evaluate_path_quality(
         initial_physical_measurement_snapshot,
     )
     information_gain = calculate_information_gain_score(dynamic_history)
-    path_efficiency = _path_efficiency_score(
-        ineffective_repairs,
-        repairs,
-        dynamic_quality_counts["unmatched"],
+    path_efficiency = (
+        _path_efficiency_score(
+            ineffective_repairs,
+            repairs,
+            dynamic_quality_counts["unmatched"],
+        )
+        if steps
+        else 0
     )
     diagnostic_tree_path_breakdown = {
         "keyNodeCoverage": key_node_coverage["score"],
@@ -348,6 +371,7 @@ def evaluate_practice_submission_score(
     scoring_rules,
     student_actions,
     path_evaluation,
+    fault_set_accuracy=None,
 ):
     scoring_config = scoring_rules if isinstance(scoring_rules, dict) else {}
     safe_path_evaluation = path_evaluation if isinstance(path_evaluation, dict) else {}
@@ -361,7 +385,15 @@ def evaluate_practice_submission_score(
     safety_violations = sum(1 for action in _arr(student_actions) if action.get("safetyViolation"))
     safety = max(0, SAFETY_SCORE - (safety_violations * 5))
     efficiency = EFFICIENCY_SCORE if elapsed_seconds <= float(scoring_config.get("fullEfficiencySeconds", 600)) else EFFICIENCY_SCORE / 2
-    fault_detection = FAULT_DETECTION_SCORE if correct else 0
+    if fault_set_accuracy is None:
+        normalized_fault_set_accuracy = 1.0 if correct else 0.0
+    else:
+        try:
+            normalized_fault_set_accuracy = float(fault_set_accuracy)
+        except (TypeError, ValueError):
+            normalized_fault_set_accuracy = 0.0
+        normalized_fault_set_accuracy = max(0.0, min(1.0, normalized_fault_set_accuracy))
+    fault_detection = _round_score(FAULT_DETECTION_SCORE * normalized_fault_set_accuracy)
     score_breakdown = {
         "faultLocalization": fault_detection,
         "diagnosticTreePath": _round_score(diagnostic_tree_path),
@@ -372,7 +404,10 @@ def evaluate_practice_submission_score(
     score = sum(score_breakdown.values())
     deductions = []
     if not correct:
-        deductions.append({"reason": "最终故障判断错误", "points": -FAULT_DETECTION_SCORE})
+        deductions.append({
+            "reason": "最终故障集合未完全匹配",
+            "points": _round_score(-(FAULT_DETECTION_SCORE - fault_detection)),
+        })
     if safety_violations:
         deductions.append({"reason": "存在安全违规操作", "points": -(SAFETY_SCORE - safety)})
     return {

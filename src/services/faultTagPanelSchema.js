@@ -104,16 +104,22 @@ export function getFaultTagTargetParameter(tag = {}) {
 export function getFaultTagInjectedChannels(tag = {}) {
   const source = tag.injectedFault ?? tag;
   const scope = String(tag.vectorInjectionScope ?? source.vectorInjectionScope ?? '').toLowerCase();
+  const vectorElementNames = tag.vectorElementNames ?? source.vectorElementNames;
+  const hasNamedElements = Array.isArray(vectorElementNames) && vectorElementNames.some((name) => String(name ?? '').trim());
+  const labelForIndex = (index) => String(vectorElementNames?.[index] ?? '').trim() || `\u7b2c ${index + 1} \u8def`;
   if (scope === 'all') return '\u5168\u90e8\u8def';
   if (scope === 'item') {
     const index = Number(tag.vectorIndex ?? source.vectorIndex ?? 0);
-    return Number.isInteger(index) && index >= 0 ? `\u7b2c ${index + 1} \u8def` : '';
+    return Number.isInteger(index) && index >= 0 ? labelForIndex(index) : '';
   }
   const indices = tag.vectorIndices ?? source.vectorIndices;
   if (scope !== 'items' || !Array.isArray(indices)) return '';
   const selected = [...new Set(indices.map(Number).filter((index) => Number.isInteger(index) && index >= 0))]
     .sort((left, right) => left - right);
-  return selected.length ? `\u7b2c ${selected.map((index) => index + 1).join('\u3001')} \u8def` : '';
+  if (!selected.length) return '';
+  return hasNamedElements
+    ? selected.map(labelForIndex).join('\u3001')
+    : `\u7b2c ${selected.map((index) => index + 1).join('\u3001')} \u8def`;
 }
 
 function renderParameterPreviewRows(parameters = {}) {

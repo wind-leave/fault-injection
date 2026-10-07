@@ -18,6 +18,17 @@ class FaultRuntime:
     def reconnect_edge(self, edge_id):
         self.disconnected_edge_ids.discard(edge_id)
 
+    def can_use_single_path(self):
+        """Whether actual and reference paths are guaranteed to be identical.
+
+        A configured fault may affect state before or after its active window
+        (for example, a delayed or held edge value), so merely checking whether
+        a fault is active at one timestamp is not sufficient.  The simulation
+        engine may share a path only when the run has no configured faults and
+        no line is manually disconnected.
+        """
+        return not self.fault_instances and not self.disconnected_edge_ids
+
     def _is_active(self, fault, time):
         if not fault.get("enabled", True):
             return False
@@ -38,8 +49,22 @@ class FaultRuntime:
                 return target_field[len(prefix):]
         return ""
 
+    @classmethod
+    def _parameter_keys(cls, fault):
+        configured = fault.get("parameterKeys")
+        keys = []
+        if isinstance(configured, list):
+            for value in configured:
+                key = str(value or "").strip()
+                if key and key not in keys:
+                    keys.append(key)
+        primary = cls._parameter_key(fault)
+        if primary and primary not in keys:
+            keys.insert(0, primary)
+        return keys
+
     def _is_module_parameter_fault(self, fault):
-        return bool(self._parameter_key(fault)) and fault.get("injectionForm") == "module-variable"
+        return bool(self._parameter_keys(fault)) and fault.get("injectionForm") == "module-variable"
 
     @staticmethod
     def _signal_binding_name(fault):
@@ -68,9 +93,50 @@ class FaultRuntime:
 
     @staticmethod
     def _zero_like(value):
+        if FaultRuntime._is_complex_envelope(value):
+            result = copy.deepcopy(value)
+            result["i"] = 0.0
+            result["q"] = 0.0
+            return result
         if isinstance(value, list):
             return [FaultRuntime._zero_like(item) for item in value]
         return 0.0
+
+    @staticmethod
+    def _is_complex_envelope(value):
+        if not isinstance(value, dict):
+            return False
+        try:
+            float(value.get("i"))
+            float(value.get("q"))
+            float(value.get("referenceFrequencyHz"))
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    def _apply_complex_envelope_fault(self, fault, target_id, target_field, value, time):
+        """Apply the frontend layered signal subset to one complete I/Q frame."""
+        result = copy.deepcopy(value)
+        params = fault.get("parameters") or {}
+        fault_type = fault.get("faultType")
+        if fault_type == "signal_attenuation":
+            if "scale" in params:
+                scale = float(params.get("scale", 1.0))
+            else:
+                attenuation_db = max(0.0, float(params.get("attenuation_db", params.get("attenuationDb", 0.0))))
+                scale = 10.0 ** (-attenuation_db / 20.0)
+            result["i"] = float(result["i"]) * scale
+            result["q"] = float(result["q"]) * scale
+            return result
+        if fault_type == "signal_cutoff":
+            result["i"] = 0.0
+            result["q"] = 0.0
+            return result
+        if fault_type == "signal_stuck":
+            # A hold fault must retain the whole frame, including reference
+            # frequency and impedance metadata, rather than one I/Q component.
+            return self._frozen_signal_value(fault, target_id, target_field, result)
+        return result
 
     @staticmethod
     def _vector_injection_scope(fault):
@@ -103,7 +169,9 @@ class FaultRuntime:
         return indices
 
     def _apply_vector_fault(self, fault, target_id, target_field, value, time, apply_item):
-        scope = self._vector_injection_scope(fault)
+        # Protocol faults affect an entire transported message.  Vector
+        # payloads are not independently selectable at the protocol layer.
+        scope = "all" if fault.get("injectionForm") == "protocol-bus" else self._vector_injection_scope(fault)
         if scope == "item":
             index = self._vector_injection_index(fault, len(value))
             return [
@@ -131,6 +199,10 @@ class FaultRuntime:
                 time,
                 lambda item_field, item: self._apply_signal_fault(fault, target_id, item_field, item, time),
             )
+        if self._is_complex_envelope(value):
+            return self._apply_complex_envelope_fault(
+                fault, target_id, target_field, value, time
+            )
         params = fault.get("parameters") or {}
         fault_type = fault.get("faultType")
         result = float(value)
@@ -143,13 +215,15 @@ class FaultRuntime:
                 params.get("scale", 1.0)
             )
         if fault_type == "parameter_step":
-            return result + float(params.get("stepValue", params.get("step_value", 0.0)))
+            return float(params.get("targetValue", params.get("target_value", params.get("value", params.get("stepValue", params.get("step_value", params.get("step", result)))))))
         if fault_type == "parameter_drift":
             start = float(fault.get("startTime", params.get("start", 0.0)))
             return result + float(params.get("rate", 0.0)) * max(0.0, time - start)
         if fault_type == "sensor_bias":
             return result + float(params.get("bias", 0.0))
         if fault_type == "signal_attenuation":
+            if "scale" in params:
+                return result * float(params.get("scale", 1.0))
             attenuation_db = max(0.0, float(params.get("attenuation_db", params.get("attenuationDb", 0.0))))
             return result * (10.0 ** (-attenuation_db / 20.0))
         if fault_type == "noise_increase":
@@ -210,7 +284,7 @@ class FaultRuntime:
         if fault_type == "parameter_degradation":
             return result * float(params.get("scale", 1.0))
         if fault_type == "parameter_step":
-            return result + float(params.get("stepValue", params.get("step_value", params.get("step", 0.0))))
+            return float(params.get("targetValue", params.get("target_value", params.get("value", params.get("stepValue", params.get("step_value", params.get("step", result)))))))
         if fault_type == "parameter_drift":
             start = float(fault.get("startTime", params.get("start", 0.0)))
             return result + float(params.get("rate", 0.0)) * max(0.0, time - start)
@@ -253,11 +327,11 @@ class FaultRuntime:
                 continue
             if not self._is_module_parameter_fault(fault):
                 continue
-            parameter_key = self._parameter_key(fault)
-            value = result.get(parameter_key, 1.0)
-            result[parameter_key] = self._apply_parameter_fault(
-                fault, parameter_key, f"params.{parameter_key}", value, time
-            )
+            for parameter_key in self._parameter_keys(fault):
+                value = result.get(parameter_key, 1.0)
+                result[parameter_key] = self._apply_parameter_fault(
+                    fault, parameter_key, f"params.{parameter_key}", value, time
+                )
         return result
 
     def apply_node_output(self, node_id, value, time, output_name=None, is_primary=True):
@@ -284,7 +358,10 @@ class FaultRuntime:
 
     def apply_edge_value(self, edge_id, value, time):
         result = copy.deepcopy(value)
-        state = self.edge_state.setdefault(edge_id, {"last": copy.deepcopy(result)})
+        state = self.edge_state.get(edge_id)
+        if state is None:
+            state = {"last": copy.deepcopy(result)}
+            self.edge_state[edge_id] = state
         if edge_id in self.disconnected_edge_ids:
             state["last"] = self._zero_like(result)
             return copy.deepcopy(state["last"])

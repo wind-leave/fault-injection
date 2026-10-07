@@ -74,12 +74,26 @@ function normalizeSubsystemInterfaceList(items, prefix, minCount = 0) {
 function renderAutomaticSubsystemInterfaceRows(items, role, helpers = {}) {
   const escape = helpers.escapeHtml || escapeHtml;
   const prefix = getRolePrefix(role);
-  return list(items).map((item, index) => `
+  return list(items).map((item, index) => {
+    const vectorLength = Math.max(0, Number.parseInt(item.vectorLength, 10) || item.vectorElementNames?.length || 0);
+    const elementNames = vectorLength
+      ? Array.from({ length: vectorLength }, (_, elementIndex) => item.vectorElementNames?.[elementIndex] || `元素 ${elementIndex + 1}`)
+      : [item.elementNames?.[0] || item.elementName || item.componentPortName || '元素 1'];
+    return `
       <div class="sim-intf-row subsystem-intf-row" data-subsystem-role="${role}" data-index="${index}" data-port-id="${escape(item.id)}" data-source-component-id="${escape(item.componentNodeId || '')}">
         <div class="props-field">
           <label>${prefix} ${index + 1}</label>
           <input value="${escape(item.name)}" readonly>
         </div>
+        <div class="props-field">
+          <label>端口 ID</label>
+          <input data-subsystem-field="id" value="${escape(item.id)}" readonly>
+        </div>
+        ${elementNames.map((name, elementIndex) => `
+          <div class="props-field">
+            <label>元素名称 ${elementIndex + 1}</label>
+            <input data-subsystem-element-index="${elementIndex}" value="${escape(name)}" readonly>
+          </div>`).join('')}
         <div class="props-field">
           <label>来源组件</label>
           <input value="${escape(item.componentName || item.componentNodeId || '--')}" readonly>
@@ -88,7 +102,8 @@ function renderAutomaticSubsystemInterfaceRows(items, role, helpers = {}) {
           <label>来源端口</label>
           <input value="${escape(item.componentPortName || '--')}" readonly>
         </div>
-      </div>`).join('');
+      </div>`;
+  }).join('');
 }
 
 function ensureSubsystemInterface(nodeOrProps) {
@@ -136,6 +151,7 @@ function readSubsystemInterfaceRows(documentLike, role) {
 export function renderSubsystemBlockFieldsFromSchema(node, helpers = {}) {
   const escape = helpers.escapeHtml || escapeHtml;
   const props = node?.props || {};
+  const subsystemId = props.subsystemId || node?.id || '';
   const intf = ensureSubsystemInterface(node);
   const limits = helpers.interfaceLimits || DEFAULT_INTERFACE_LIMITS;
   const canvasId = helpers.canvasId || node?.targetCanvasId || '--';
@@ -146,7 +162,8 @@ export function renderSubsystemBlockFieldsFromSchema(node, helpers = {}) {
       <div class="pgroup">
         <div class="pglbl">子系统设置</div>
         <div class="props-field"><label>模块名称</label><input id="prop-name" value="${escape(props.name || '')}"></div>
-        <div class="props-field"><label>模块说明</label><textarea id="prop-description" rows="3" placeholder="可填写子系统职责、输入输出说明">${escape(props.description || '')}</textarea></div>
+        <div class="props-field"><label>子系统 ID</label><input id="prop-subsystem-id" value="${escape(subsystemId)}" placeholder="请输入子系统 ID"></div>
+        <div class="props-field"><label>模块说明</label><textarea id="prop-description" rows="3" readonly>${escape(props.description || '')}</textarea></div>
         <div class="prow"><span class="pk">子画布 ID</span><span class="pv">${escape(canvasId || '--')}</span></div>
       </div>
       <div class="sim-intf-toolbar">
@@ -172,6 +189,7 @@ export function renderSubsystemBlockFieldsFromSchema(node, helpers = {}) {
       <div class="pgroup">
         <div class="pglbl">子系统设置</div>
         <div class="props-field"><label>模块名称</label><input id="prop-name" value="${escape(props.name || '')}"></div>
+        <div class="props-field"><label>子系统 ID</label><input id="prop-subsystem-id" value="${escape(subsystemId)}" placeholder="请输入子系统 ID"></div>
         <div class="props-field"><label>模块说明</label><textarea id="prop-description" rows="3" placeholder="可填写子系统职责、输入输出说明">${escape(props.description || '')}</textarea></div>
         <div class="prow"><span class="pk">子画布 ID</span><span class="pv">${escape(canvasId || '--')}</span></div>
       </div>
@@ -208,6 +226,10 @@ export function readSubsystemBlockValuesFromPanel(node, documentLike, helpers = 
   return {
     values: {
       name: textValue(documentLike?.getElementById?.('prop-name')?.value, props.name || ''),
+      subsystemId: textValue(
+        documentLike?.getElementById?.('prop-subsystem-id')?.value,
+        props.subsystemId || node?.id || ''
+      ),
       description: textValue(documentLike?.getElementById?.('prop-description')?.value, ''),
       interface: {
         inputs: normalizeSubsystemInterfaceList(

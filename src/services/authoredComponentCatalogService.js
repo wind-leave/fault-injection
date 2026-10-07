@@ -57,6 +57,11 @@ function normalizeVectorElementNames(value, vectorLength) {
     .map((item) => String(item ?? '').trim());
 }
 
+function normalizeSidePosition(value) {
+  const numeric = Number.parseInt(value, 10);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : undefined;
+}
+
 function toPort(item, direction, index) {
   const type = normalizeType(item?.type);
   const name = String(item?.name ?? '').trim() || `${direction} ${index + 1}`;
@@ -76,6 +81,10 @@ function toPort(item, direction, index) {
       ...(vectorLength ? { vectorLength } : {}),
       ...(vectorElementNames.length ? { vectorElementNames } : {})
     } : {}),
+    side: item?.side === 'left' || item?.side === 'right'
+      ? item.side
+      : (direction === 'input' ? 'left' : 'right'),
+    ...(normalizeSidePosition(item?.sidePosition) ? { sidePosition: normalizeSidePosition(item.sidePosition) } : {}),
     ...(item?.unit ? { unit: String(item.unit).trim() } : {})
   };
 }

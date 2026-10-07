@@ -4,22 +4,34 @@ import os
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from backend.graph_compiler import compile_graph
 from backend.component_registration import ComponentRegistrar
 from backend.diagnostic_knowledge import build_multi_fault_troubleshooting_plan
 from backend.module_registry import ModuleRegistry
-from backend.practice import PracticeSession
+from backend.practice import (
+    PRACTICE_TYPE_TROUBLESHOOTING,
+    PracticeSession,
+    SequencePracticeSession,
+    normalize_practice_type,
+)
 from backend.schemas import SimulationBackendError
 from backend.simulation_engine import SimulationSession, run_simulation
 
 
 MAX_REQUEST_BYTES = 1_000_000
-MAX_STEP_BATCH = 1000
+MAX_STEP_BATCH = 100_000
 SESSION_REAPER_INTERVAL_SECONDS = 30.0
 INTERNAL_ERROR_MESSAGE = "internal server error; use runId to locate the server log"
+DEFAULT_PRACTICE_RESULT_CALLBACK_URL = os.environ.get(
+    "PRACTICE_RESULT_CALLBACK_URL",
+    "http://127.0.0.1:9000/student/practice/result",
+).strip()
+PRACTICE_RESULT_CALLBACK_TIMEOUT_SECONDS = 3.0
 
 
 logger = logging.getLogger(__name__)
@@ -27,6 +39,25 @@ logger = logging.getLogger(__name__)
 
 def _json_bytes(payload):
     return json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
+
+
+def _practice_identity_field(payload, field, required=False):
+    """Normalize an external practice-task identifier.
+
+    Inspection tasks require both identifiers; troubleshooting keeps them
+    optional for existing clients. Supplied values are retained until submit.
+    """
+    if field not in payload:
+        if required:
+            raise SimulationBackendError("INVALID_SCHEMA", field, f"{field} must be a non-empty string or number")
+        return ""
+    value = payload.get(field)
+    if value is None or isinstance(value, bool):
+        raise SimulationBackendError("INVALID_SCHEMA", field, f"{field} must be a non-empty string or number")
+    normalized = str(value).strip()
+    if not normalized:
+        raise SimulationBackendError("INVALID_SCHEMA", field, f"{field} must be a non-empty string or number")
+    return normalized
 
 
 class SimulationBackendHandler(BaseHTTPRequestHandler):
@@ -50,9 +81,10 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
     _session_reservation = object()
     max_active_simulation_sessions = 100
     max_active_practice_sessions = 100
-    max_response_samples = 1000
+    max_response_samples = 100_000
     default_max_practice_actions = 200
     default_simulation_session_idle_timeout_seconds = 900.0
+    practice_result_callback_url = DEFAULT_PRACTICE_RESULT_CALLBACK_URL
 
     def log_message(self, format, *args):
         return
@@ -71,6 +103,52 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    @staticmethod
+    def _external_practice_identity(value):
+        text = str(value or "").strip()
+        return int(text) if text.isdigit() else text
+
+    def _publish_practice_result(self, session, result):
+        callback_url = str(type(self).practice_result_callback_url or "").strip()
+        if not callback_url:
+            return {"status": "skipped", "reason": "callback-not-configured"}
+        parsed = urlparse(callback_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            logger.warning("invalid practice result callback URL: %s", callback_url)
+            return {"status": "failed", "url": callback_url, "reason": "invalid-callback-url"}
+        evaluation_report = dict(result.get("evaluationReport") or {})
+        if getattr(session, "is_sequence_practice", False):
+            evaluation_report = {
+                "totalScore": result["totalScore"],
+                "submittedAt": datetime.fromtimestamp(session.submitted_at, tz=timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "totalDurationSeconds": round(max(0.0, session.submitted_at - session.created_at)),
+            }
+        evaluation_report.pop("studentId", None)
+        evaluation_report.pop("jobId", None)
+        payload = {
+            "studentId": self._external_practice_identity(session.studentid),
+            "jobId": self._external_practice_identity(session.jobid),
+            "evaluationReport": evaluation_report,
+        }
+        request = Request(
+            callback_url,
+            data=_json_bytes(payload),
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=PRACTICE_RESULT_CALLBACK_TIMEOUT_SECONDS) as response:
+                status_code = int(getattr(response, "status", response.getcode()))
+                response.read()
+            if 200 <= status_code < 300:
+                return {"status": "delivered", "url": callback_url, "httpStatus": status_code}
+            return {"status": "failed", "url": callback_url, "httpStatus": status_code}
+        except Exception as exc:
+            logger.warning("failed to publish practice result to %s: %s", callback_url, exc)
+            return {"status": "failed", "url": callback_url, "reason": type(exc).__name__}
 
     @staticmethod
     def _new_id(prefix, store=None):
@@ -438,6 +516,13 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
     def _step_session(self, run_id, session_id, started):
         payload = self._read_json()
         steps = self._validate_steps(payload)
+        actual_only = payload.get("actualOnly", False)
+        if not isinstance(actual_only, bool):
+            raise SimulationBackendError(
+                "INVALID_SCHEMA",
+                "actualOnly",
+                "actualOnly must be a boolean",
+            )
         with self.sessions_lock:
             session = self.sessions.get(session_id)
             if session is self._session_reservation:
@@ -450,13 +535,51 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
                 if self.sessions.get(session_id) is not session:
                     self._send_session_not_found(run_id, session_id)
                     return
-            result = session.step(steps)
+            result = session.step(
+                steps,
+                paths=("actual",) if actual_only else ("actual", "reference"),
+            )
         result["sessionId"] = session_id
         result["metrics"]["elapsedMs"] = round((time.monotonic() - started) * 1000, 3)
         self._send_json(200, result)
 
     def _create_practice_session(self, run_id, started):
         payload = self._read_json()
+        practice_type = normalize_practice_type(payload.get("practiceType"))
+        requires_identity = practice_type != PRACTICE_TYPE_TROUBLESHOOTING
+        studentid = _practice_identity_field(payload, "studentid", required=requires_identity)
+        jobid = _practice_identity_field(payload, "jobid", required=requires_identity)
+        if practice_type != PRACTICE_TYPE_TROUBLESHOOTING:
+            type(self).purge_expired_sessions()
+            with self.state_lock:
+                if len(self.practice_sessions) >= self.max_active_practice_sessions:
+                    raise SimulationBackendError(
+                        "SIMULATION_LIMIT_EXCEEDED",
+                        "practiceSessions",
+                        "too many active practice sessions",
+                    )
+                practice_session_id = self._new_id("practice", self.practice_sessions)
+                self.practice_sessions[practice_session_id] = self._session_reservation
+            try:
+                session = SequencePracticeSession(
+                    practice_session_id,
+                    practice_type,
+                    lifecycle=payload.get("lifecycle"),
+                    resource_limits=payload.get("resourceLimits"),
+                    default_max_actions=self.default_max_practice_actions,
+                    studentid=studentid,
+                    jobid=jobid,
+                )
+                result = session.initial_response()
+            except Exception:
+                with self.state_lock:
+                    if self.practice_sessions.get(practice_session_id) is self._session_reservation:
+                        self.practice_sessions.pop(practice_session_id, None)
+                raise
+            with self.state_lock:
+                self.practice_sessions[practice_session_id] = session
+            self._send_json(200, result)
+            return
         simulation_package = payload.get("simulationPackage")
         if not isinstance(simulation_package, dict):
             raise SimulationBackendError("INVALID_SCHEMA", "simulationPackage", "simulationPackage must be an object")
@@ -506,8 +629,15 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
                 action_rules=payload.get("actionRules"),
                 resource_limits=payload.get("resourceLimits"),
                 display_console_controls=payload.get("displayConsoleControls"),
+                connection_bindings=(
+                    payload.get("connectionBindings")
+                    or simulation_package.get("connectionBindings")
+                ),
+                diagnostic_conditions=payload.get("diagnosticConditions"),
                 model_graph=simulation_package,
                 default_max_actions=self.default_max_practice_actions,
+                studentid=studentid,
+                jobid=jobid,
             )
             result = session.initial_response()
         except Exception:
@@ -551,8 +681,9 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         if expired:
             self._send_practice_session_expired(run_id, session_id)
             return
-        result["runId"] = run_id
-        result["metrics"] = {"elapsedMs": round((time.monotonic() - started) * 1000, 3)}
+        if not getattr(session, "is_sequence_practice", False):
+            result["runId"] = run_id
+            result["metrics"] = {"elapsedMs": round((time.monotonic() - started) * 1000, 3)}
         self._send_json(200, result)
 
     def _submit_practice_session(self, run_id, session_id, started):
@@ -585,8 +716,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         if expired:
             self._send_practice_session_expired(run_id, session_id)
             return
-        result["runId"] = run_id
-        result["metrics"] = {"elapsedMs": round((time.monotonic() - started) * 1000, 3)}
+        result["resultDelivery"] = self._publish_practice_result(session, result)
         self._send_json(200, result)
 
     def _practice_status(self, run_id, session_id, started):

@@ -10,6 +10,7 @@ import {
 import {
   normalizeModelStoreSnapshot
 } from './modelStore.js';
+import { restoreFaultBindingsFromInstances } from './faultBindingRuntimeService.js';
 import { lockSimulationInterfaces } from './simulationInterfaceLockService.js';
 import { COMPONENT_REGISTRY } from './componentRegistry.js';
 
@@ -597,7 +598,12 @@ export function applyFlightModelPackage(pkg, { existingSnapshot = null } = {}) {
     ...normalizedPackage.workbenchSnapshot,
     faultInstances: packageFaultInstances
   });
-  const recoveredSnapshot = mapSnapshotNodes(restoredSnapshot, recoverBuiltinSimulationBinding);
+  const faultBindingRestoredSnapshot = restoreFaultBindingsFromInstances(restoredSnapshot, [
+    ...clone(Array.isArray(normalizedPackage.faultLibrary) ? normalizedPackage.faultLibrary : []),
+    ...clone(Array.isArray(normalizedPackage.diagnosticModel?.faultCases) ? normalizedPackage.diagnosticModel.faultCases : []),
+    ...clone(Array.isArray(restoredSnapshot.importedFaultModels) ? restoredSnapshot.importedFaultModels : [])
+  ]);
+  const recoveredSnapshot = mapSnapshotNodes(faultBindingRestoredSnapshot, recoverBuiltinSimulationBinding);
   const hydratedSnapshot = hydrateSnapshotBindings(recoveredSnapshot, pythonModules);
 
   if (hydratedSnapshot.errors.length > 0) {
@@ -652,6 +658,7 @@ export function buildFlightModelPackage({ meta = {}, snapshot = {}, faultLibrary
     pythonModules: Array.from(pythonModulesById.values()),
     faultLibrary: clone(faultLibrary ?? []),
     faultInstances: clone(Array.isArray(normalizedSnapshot.faultInstances) ? normalizedSnapshot.faultInstances : []),
+    ...(isPlainObject(meta.diagnosticModel) ? { diagnosticModel: clone(meta.diagnosticModel) } : {}),
     workbenchSnapshot: hierarchicalSnapshot
   });
 }

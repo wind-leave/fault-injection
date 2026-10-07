@@ -76,6 +76,52 @@ class FaultRuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.apply_node_output("rf-1", 3.5, 1.9), 3.5)
         self.assertEqual(runtime.apply_node_output("rf-1", 3.5, 2.0), 0.0)
 
+    def test_frontend_layered_faults_preserve_complex_envelope_frames(self):
+        envelope = {
+            "i": 3.0,
+            "q": -4.0,
+            "referenceFrequencyHz": 20e9,
+            "impedanceOhm": 50.0,
+        }
+        attenuation = FaultRuntime([{
+            "faultId": "complex-attenuation",
+            "faultType": "signal_attenuation",
+            "targetId": "complex-edge",
+            "parameters": {"scale": 0.5},
+        }])
+        self.assertEqual(attenuation.apply_edge_value("complex-edge", envelope, 0.0), {
+            **envelope, "i": 1.5, "q": -2.0,
+        })
+
+        cutoff = FaultRuntime([{
+            "faultId": "complex-cutoff",
+            "faultType": "signal_cutoff",
+            "targetId": "complex-edge",
+            "parameters": {},
+        }])
+        self.assertEqual(cutoff.apply_edge_value("complex-edge", envelope, 0.0), {
+            **envelope, "i": 0.0, "q": 0.0,
+        })
+        self.assertEqual(cutoff.apply_edge_value("complex-edge", [envelope, {
+            **envelope, "i": -2.0, "referenceFrequencyHz": 21e9,
+        }], 0.1), [{
+            **envelope, "i": 0.0, "q": 0.0,
+        }, {
+            **envelope, "i": 0.0, "q": 0.0, "referenceFrequencyHz": 21e9,
+        }])
+
+        frozen = FaultRuntime([{
+            "faultId": "complex-freeze",
+            "faultType": "signal_stuck",
+            "targetId": "complex-edge",
+            "parameters": {},
+        }])
+        first = frozen.apply_edge_value("complex-edge", envelope, 0.0)
+        self.assertEqual(first, envelope)
+        self.assertEqual(frozen.apply_edge_value("complex-edge", {
+            **envelope, "i": 9.0, "q": 8.0,
+        }, 0.1), envelope)
+
     def test_parameter_degradation_scales_a_module_parameter(self):
         runtime = FaultRuntime([
             {
@@ -129,7 +175,7 @@ class FaultRuntimeTests(unittest.TestCase):
         self.assertGreaterEqual(first, 1.5)
         self.assertLessEqual(first, 2.5)
 
-    def test_parameter_faults_accept_legacy_target_and_step_field_names(self):
+    def test_parameter_step_sets_the_parameter_to_its_target_value(self):
         step_runtime = FaultRuntime([
             {
                 "faultId": "step",
@@ -137,7 +183,7 @@ class FaultRuntimeTests(unittest.TestCase):
                 "targetId": "sensor-1",
                 "injectionForm": "module-variable",
                 "targetField": "parameter.bias",
-                "parameters": {"step": 0.5},
+                "parameters": {"targetValue": 0.5},
             }
         ])
         random_runtime = FaultRuntime([
@@ -151,8 +197,26 @@ class FaultRuntimeTests(unittest.TestCase):
             }
         ])
 
-        self.assertEqual(step_runtime.apply_node_parameters("sensor-1", {"bias": 0.0}, 0.0)["bias"], 0.5)
+        self.assertEqual(step_runtime.apply_node_parameters("sensor-1", {"bias": 2.0}, 0.0)["bias"], 0.5)
         self.assertNotEqual(random_runtime.apply_node_parameters("sensor-1", {"bias": 0.0}, 0.0)["bias"], 0.0)
+
+    def test_one_parameter_step_fault_can_set_multiple_component_parameters(self):
+        runtime = FaultRuntime([
+            {
+                "faultId": "multi-parameter-step",
+                "faultType": "parameter_step",
+                "targetId": "sensor-1",
+                "injectionForm": "module-variable",
+                "parameterKey": "bias",
+                "parameterKeys": ["bias", "scale"],
+                "parameters": {"targetValue": 0.5},
+            }
+        ])
+
+        self.assertEqual(
+            runtime.apply_node_parameters("sensor-1", {"bias": 2.0, "scale": 1.5}, 0.0),
+            {"bias": 0.5, "scale": 0.5},
+        )
 
     def test_electrical_faults_match_named_inputs_outputs_and_edges(self):
         runtime = FaultRuntime([
@@ -233,13 +297,13 @@ class FaultRuntimeTests(unittest.TestCase):
                 "parameterKey": "gains",
                 "vectorInjectionScope": "item",
                 "vectorIndex": 2,
-                "parameters": {"step": 0.5},
+                "parameters": {"targetValue": 0.5},
             }
         ])
 
         self.assertEqual(
             runtime.apply_node_parameters("controller-1", {"gains": [1.0, 2.0, 3.0]}, 0.0)["gains"],
-            [1.0, 2.0, 3.5],
+            [1.0, 2.0, 0.5],
         )
 
     def test_vector_fault_can_target_selected_items(self):
@@ -259,6 +323,26 @@ class FaultRuntimeTests(unittest.TestCase):
         self.assertEqual(
             runtime.apply_node_output("sensor-1", [1.0, 2.0, 3.0], 0.0, output_name="gyro"),
             [3.5, 2.0, 5.5],
+        )
+
+    def test_protocol_edge_fault_applies_to_the_complete_vector_payload(self):
+        runtime = FaultRuntime([
+            {
+                "faultId": "vector-edge-attenuation",
+                "faultType": "signal_attenuation",
+                "targetId": "edge-command",
+                "injectionForm": "protocol-bus",
+                # Older records may contain a partial vector selection.  The
+                # protocol layer still faults the complete message payload.
+                "vectorInjectionScope": "items",
+                "vectorIndices": [0, 2],
+                "parameters": {"scale": 0.5},
+            }
+        ])
+
+        self.assertEqual(
+            runtime.apply_edge_value("edge-command", [8.0, 4.0, 2.0], 0.0),
+            [4.0, 2.0, 1.0],
         )
 
     def test_electrical_freeze_noise_and_intermittent_faults_transform_signals(self):

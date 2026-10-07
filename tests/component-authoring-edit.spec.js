@@ -26,8 +26,8 @@ function authoredComponent() {
     fileName: `${TYPE}.py`,
     rawSource: 'def process(value):\n    return {"outputs": {"result": value}}',
     entryFunction: 'process',
-    inputs: [{ name: '输入值', varName: 'value', type: 'number', defaultValue: '2' }],
-    outputs: [{ name: '输出值', varName: 'result', type: 'number' }],
+    inputs: [{ name: '输入值', varName: 'value', type: 'number', defaultValue: '2', side: 'right', sidePosition: 3 }],
+    outputs: [{ name: '输出值', varName: 'result', type: 'number', side: 'left', sidePosition: 3 }],
     parameters: []
   }).component;
 }
@@ -67,6 +67,10 @@ describe('authored component editing', () => {
 
     expect(wrapper.find('#component-authoring-title').text()).toBe('修改仿真组件');
     expect(wrapper.find('[data-authoring-component-name]').element.value).toBe('可修改滤波器');
+    expect(wrapper.find('[data-authoring-input-side="0"]').element.value).toBe('right');
+    expect(wrapper.find('[data-authoring-output-side="0"]').element.value).toBe('left');
+    expect(wrapper.find('[data-authoring-input-side-position="0"]').element.value).toBe('3');
+    expect(wrapper.find('[data-authoring-output-side-position="0"]').element.value).toBe('3');
     expect(wrapper.text()).toContain('custom_component_edit_test.py');
     expect(wrapper.find('[data-save-authored-component]').text()).toContain('试运行后保存');
     wrapper.unmount();

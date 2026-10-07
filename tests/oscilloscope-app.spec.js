@@ -235,6 +235,8 @@ describe('Oscilloscope app integration', () => {
     const spectrumSamples = window.__GZ_SIM__.actual.instrumentSamples?.['compare-spectrum'] ?? [];
     expect(loggerSamples.length).toBeGreaterThan(0);
     expect(spectrumSamples.length).toBeGreaterThan(0);
+    expect(loggerSamples.every((sample) => !Object.hasOwn(sample, 'reference'))).toBe(true);
+    expect(window.__GZ_SIM__.reference.instrumentSamples?.['compare-logger']).toBeUndefined();
 
     window.selectNode('compare-logger');
     await flushRuntime();
@@ -249,7 +251,7 @@ describe('Oscilloscope app integration', () => {
     dispatchClick(loggerPanel.querySelector('[data-instrument-action="export"]'));
     await flushRuntime();
     expect(window.__GZ_LAST_INSTRUMENT_EXPORT__?.nodeId).toBe('compare-logger');
-    expect(window.__GZ_LAST_INSTRUMENT_EXPORT__?.csv).toContain('time,actual,reference');
+    expect(window.__GZ_LAST_INSTRUMENT_EXPORT__?.csv.split('\n')[0]).toBe('time,actual');
 
     window.selectNode('compare-spectrum');
     await flushRuntime();
@@ -259,6 +261,46 @@ describe('Oscilloscope app integration', () => {
     expect(spectrumPanel?.textContent).toContain('频谱分析仪');
     expect(spectrumPanel?.textContent).toContain('峰值频点');
     expect(spectrumPanel?.querySelectorAll('[data-spectrum-bin]').length).toBeGreaterThan(0);
+
+    wrapper.unmount();
+  });
+
+  it('preserves nanosecond spectrum timestamps without duplicate rounded samples', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 300, 260);
+    const spectrum = window.createNode('instrument_spectrum', 560, 260);
+    spectrum.props.sampleRate = '32GHz';
+    spectrum.props.fftSize = '64';
+    const canvas = window.getActiveCanvasRecord();
+    canvas.edges.push(window.makeTask5Edge(
+      'normal',
+      source.id,
+      spectrum.id,
+      0,
+      0,
+      window.getNodePorts(source).outputs[0],
+      window.getNodePorts(spectrum).inputs[0],
+      null
+    ));
+    window.renderEdges();
+
+    document.getElementById('sim-dur').value = '10';
+    document.getElementById('sim-dur-unit').value = 'ns';
+    document.getElementById('sim-step').value = '0.1';
+    document.getElementById('sim-step-unit').value = 'ns';
+    window.simInit(true);
+    for (let step = 0; step < 64; step += 1) {
+      window.simStep();
+    }
+    await flushRuntime();
+
+    const samples = window.__GZ_SIM__.actual.instrumentSamples[spectrum.id];
+    expect(samples).toHaveLength(64);
+    samples.forEach((sample, index) => {
+      expect(sample.t).toBeCloseTo(index * 1e-10, 18);
+    });
 
     wrapper.unmount();
   });
@@ -526,6 +568,51 @@ describe('Oscilloscope app integration', () => {
     wrapper.unmount();
   });
 
+  it('accepts a custom positive time window for a floating scope', async () => {
+    const wrapper = await mountWorkbench();
+
+    const scope = window.createNode('instrument_scope', 460, 260);
+    window.__GZ_SIM__.actual.scopeSamples[scope.id] = {
+      ch1: Array.from({ length: 11 }, (_, index) => ({ t: index, actual: index })),
+      ch2: []
+    };
+    window.openScope(scope.id);
+    await flushRuntime();
+
+    const customInput = document.querySelector(`[data-scope-id="${scope.id}"] [data-scope-window-custom]`);
+    const customUnit = document.querySelector(`[data-scope-id="${scope.id}"] [data-scope-window-custom-unit]`);
+    expect(customInput).not.toBeNull();
+    expect(customUnit).not.toBeNull();
+    customUnit.value = 'ns';
+    customUnit.dispatchEvent(new Event('change', { bubbles: true }));
+    customInput.value = '6.5';
+    customInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+
+    expect(window.__GZ_SIM__.scopeWindows[scope.id].windowSeconds).toBe(6.5e-9);
+    expect(window.__GZ_SIM__.scopeWindows[scope.id].customWindowUnit).toBe('ns');
+    expect(document.querySelector(`[data-scope-id="${scope.id}"] [data-scope-window-custom]`)?.value).toBe('6.5');
+    expect(document.querySelector(`[data-scope-id="${scope.id}"] [data-scope-window-custom-unit]`)?.value).toBe('ns');
+    expect(document.querySelector(`[data-scope-id="${scope.id}"] [data-scope-window-size="4"]`)?.classList.contains('is-active')).toBe(false);
+
+    const refreshedCustomUnit = document.querySelector(`[data-scope-id="${scope.id}"] [data-scope-window-custom-unit]`);
+    const refreshedCustomInput = document.querySelector(`[data-scope-id="${scope.id}"] [data-scope-window-custom]`);
+    refreshedCustomUnit.value = 's';
+    refreshedCustomUnit.dispatchEvent(new Event('change', { bubbles: true }));
+    refreshedCustomInput.value = '4';
+    refreshedCustomInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+
+    expect(window.__GZ_SIM__.scopeWindows[scope.id]).toMatchObject({
+      windowSeconds: 4,
+      windowSelection: 'custom'
+    });
+    expect([...document.querySelectorAll(`[data-scope-id="${scope.id}"] [data-scope-window-size]`)]
+      .every((button) => !button.classList.contains('is-active'))).toBe(true);
+
+    wrapper.unmount();
+  });
+
   it('keeps floating scope controls stable while simulation samples update', async () => {
     const wrapper = await mountWorkbench();
 
@@ -677,6 +764,59 @@ describe('Oscilloscope app integration', () => {
     wrapper.unmount();
   });
 
+  it('reconstructs a complex-envelope input as the original real RF waveform', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 300, 260);
+    const scope = window.createNode('instrument_scope', 560, 260);
+    Object.assign(source.props, {
+      signalDomain: 'rf',
+      outputFormat: '复数包络',
+      power: '10',
+      powerUnit: 'dBm',
+      phase: '0',
+      centerFrequency: '10',
+      centerFrequencyUnit: 'Hz',
+      pulseWidth: '1',
+      pulseWidthUnit: 's',
+      pulsePeriod: '1',
+      pulsePeriodUnit: 's'
+    });
+    const canvas = window.getActiveCanvasRecord();
+    canvas.edges.push(window.makeTask5Edge(
+      'normal',
+      source.id,
+      scope.id,
+      0,
+      0,
+      window.getNodePorts(source).outputs[0],
+      window.getNodePorts(scope).inputs[0],
+      null
+    ));
+    window.renderEdges();
+    await flushRuntime();
+
+    document.getElementById('sim-dur').value = '0.1';
+    document.getElementById('sim-step').value = '0.025';
+    window.simInit(true);
+    for (let step = 0; step < 4; step += 1) {
+      window.runSimulationTick();
+    }
+    await flushRuntime();
+
+    const samples = window.__GZ_SIM__.actual.scopeSamples[scope.id].ch1;
+    const amplitude = Math.sqrt(0.01 * 50 * 2);
+    expect(samples.map((sample) => sample.actual)).toEqual([
+      expect.closeTo(amplitude, 12),
+      expect.closeTo(0, 12),
+      expect.closeTo(-amplitude, 12),
+      expect.closeTo(0, 12)
+    ]);
+
+    wrapper.unmount();
+  });
+
   it('updates a digital signal source output during simulation without reinitializing', async () => {
     const wrapper = await mountWorkbench();
 
@@ -780,6 +920,47 @@ describe('Oscilloscope app integration', () => {
     expect(waveCanvas.height).toBe(360);
 
     rectSpy.mockRestore();
+    wrapper.unmount();
+  });
+
+  it('uses the nanosecond time span instead of compressing sub-nanosecond traces', async () => {
+    const traceSegments = [];
+    const axisLabels = [];
+    HTMLCanvasElement.prototype.getContext.mockImplementation(() => {
+      let strokeStyle = '';
+      const context = createCanvasContextStub();
+      Object.defineProperty(context, 'strokeStyle', {
+        configurable: true,
+        get: () => strokeStyle,
+        set: (value) => { strokeStyle = value; }
+      });
+      context.lineTo = (x, y) => traceSegments.push({ x, y, strokeStyle });
+      context.fillText = (value) => axisLabels.push(String(value));
+      return context;
+    });
+
+    const wrapper = await mountWorkbench();
+    const scope = window.createNode('instrument_scope', 420, 240);
+    await flushRuntime();
+
+    window.__GZ_SIM__.stepSize = 1e-10;
+    window.__GZ_SIM__.time = 2e-10;
+    window.__GZ_SIM__.actual.scopeSamples[scope.id] = {
+      ch1: [
+        { t: 0, v: 0 },
+        { t: 1e-10, v: 1 },
+        { t: 2e-10, v: 0.5 }
+      ],
+      ch2: []
+    };
+
+    window.openScope(scope.id);
+    await flushRuntime();
+
+    const waveformSegments = traceSegments.filter((segment) => segment.strokeStyle === '#0f62fe');
+    expect(Math.max(...waveformSegments.map((segment) => segment.x))).toBeGreaterThan(250);
+    expect(axisLabels).toEqual(expect.arrayContaining(['0ns', '0.2ns']));
+
     wrapper.unmount();
   });
 

@@ -1,7 +1,86 @@
 import { describe, expect, it } from 'vitest';
-import { buildBackendExecutablePackage } from '../src/services/backendExecutablePackageService.js';
+import { createDisplayConsoleConfig } from '../src/constants/displayConsoleConfig.js';
+import {
+  buildBackendExecutablePackage,
+  remapSubsystemBoundaryReferences
+} from '../src/services/backendExecutablePackageService.js';
 
 describe('backendExecutablePackageService', () => {
+  it('exports every configured display-console vector input port', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'console', type: 'display_console',
+        props: { displayConfig: createDisplayConsoleConfig({ ports: [
+          { id: 'channel-a', name: '通道 A' },
+          { id: 'channel-b', name: '通道 B' }
+        ] }) }
+      }],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes.find((node) => node.id === 'console').inputs).toEqual([
+      expect.objectContaining({ id: 'channel-a', name: '通道 A', dataType: 'vector', vectorLength: 7 }),
+      expect.objectContaining({ id: 'channel-b', name: '通道 B', dataType: 'vector', vectorLength: 7 })
+    ]);
+  });
+
+  it('exports edited RF source and output port IDs', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'rf-source-32', type: 'signal_source',
+        props: { signalDomain: 'rf', outputPortId: '32', value: 1 }
+      }],
+      modelEdges: []
+    });
+    expect(pkg.nodes[0].id).toBe('rf-source-32');
+    expect(pkg.nodes[0].outputs[0].id).toBe('32');
+    expect(pkg.nodes[0].parameters).not.toHaveProperty('outputPortId');
+  });
+
+  it('exports a complex-envelope vector as one RF port payload', () => {
+    const pkg = buildBackendExecutablePackage({
+      simulationConfig: { duration: 1, stepSize: 0.1 },
+      modelNodes: [{
+        id: 'multi-rf-source',
+        type: 'signal_source',
+        props: {
+          signalDomain: 'rf',
+          outputFormat: '复数包络',
+          value: [
+            { i: 1, q: 0, referenceFrequencyHz: 20e9, impedanceOhm: 50 },
+            { i: 0, q: 1, referenceFrequencyHz: 21e9, impedanceOhm: 75 }
+          ]
+        }
+      }],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].outputs[0]).toMatchObject({ dataType: 'rf_complex_envelope' });
+    expect(pkg.nodes[0].parameters.value).toEqual([
+      { i: 1, q: 0, referenceFrequencyHz: 20e9, impedanceOhm: 50 },
+      { i: 0, q: 1, referenceFrequencyHz: 21e9, impedanceOhm: 75 }
+    ]);
+  });
+
+  it('exports one shared complex-envelope source as a vector of the selected length', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'rf-vector-source', type: 'signal_source',
+        props: {
+          signalDomain: 'rf', outputFormat: '复数包络',
+          rfComplexEnvelopeMode: 'vector', rfVectorLength: 32,
+          centerFrequency: '20', centerFrequencyUnit: 'GHz', power: '0'
+        }
+      }],
+      modelEdges: []
+    });
+    expect(pkg.nodes[0].outputs).toEqual([expect.objectContaining({
+      dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 32
+    })]);
+    expect(pkg.nodes[0].parameters.rfComplexEnvelopeVectorLength).toBe(32);
+    expect(pkg.nodes[0].parameters).not.toHaveProperty('rfVectorValues');
+  });
+
   it('exports only backend executable canvas state', () => {
     const state = {
       packageId: 'pkg-1',
@@ -14,13 +93,13 @@ describe('backendExecutablePackageService', () => {
           type: 'signal_source',
           x: 100,
           y: 200,
-          props: { value: 1 },
+          props: { name: '信号源 A', value: 1 },
           outputs: [{ name: 'out' }]
         },
         {
           id: 'sim-1',
           type: 'simulation_block',
-          props: { kp: 4.5 },
+          props: { name: '仿真组件 A', kp: 4.5 },
           pythonBinding: { moduleId: 'passthrough', entryFunction: 'process', rawSource: 'def process(): pass' },
           inputs: [{ name: 'input' }],
           outputs: [{ name: 'output' }]
@@ -33,7 +112,7 @@ describe('backendExecutablePackageService', () => {
         }
       ],
       modelEdges: [
-        { id: 'edge-1', sourceNodeId: 'source-1', sourcePortIndex: 0, targetNodeId: 'sim-1', targetPortIndex: 0 },
+        { id: 'edge-1', label: '信号线 A', sourceNodeId: 'source-1', sourcePortIndex: 0, targetNodeId: 'sim-1', targetPortIndex: 0 },
         { id: 'edge-2', sourceNodeId: 'sim-1', sourcePortIndex: 0, targetNodeId: 'scope-1', targetPortIndex: 0 }
       ],
       faultInstances: [],
@@ -45,16 +124,40 @@ describe('backendExecutablePackageService', () => {
     expect(pkg.schemaVersion).toBe(1);
     expect(pkg.nodes[0]).toEqual({
       id: 'source-1',
+      name: '信号源 A',
       type: 'signal_source',
       parameters: { value: 1 },
       inputs: [],
       outputs: [{ id: 'out', name: 'out', dataType: 'scalar' }]
     });
     expect(pkg.nodes[1].pythonBinding).toEqual({ moduleId: 'passthrough', entryFunction: 'process' });
+    expect(pkg.nodes[1].name).toBe('仿真组件 A');
+    expect(pkg.edges[0].label).toBe('信号线 A');
     expect(JSON.stringify(pkg)).not.toContain('rawSource');
     expect(JSON.stringify(pkg)).not.toContain('selectedNodeId');
     expect(JSON.stringify(pkg)).not.toContain('viewport');
     expect(JSON.stringify(pkg)).not.toContain('"x"');
+  });
+
+  it('keeps observer sources, including manually added diagnostic test points', () => {
+    const pkg = buildBackendExecutablePackage({
+      simulationConfig: { duration: 1, stepSize: 0.1 },
+      modelNodes: [
+        { id: 'source', type: 'signal_source', props: { value: 1 }, outputs: [{ name: 'out' }] },
+        { id: 'sim', type: 'simulation_block', pythonBinding: { moduleId: 'passthrough' }, inputs: [{ name: 'in' }], outputs: [{ name: 'out' }] },
+        { id: 'scope', type: 'instrument_scope', inputs: [{ name: 'CH1' }] },
+        { id: 'console', type: 'display_console', props: { inputPortNames: ['读数'] } }
+      ],
+      modelEdges: [
+        { id: 'source-sim', sourceNodeId: 'source', sourcePortIndex: 0, targetNodeId: 'sim', targetPortIndex: 0 },
+        { id: 'sim-scope', sourceNodeId: 'sim', sourcePortIndex: 0, targetNodeId: 'scope', targetPortIndex: 0 },
+        { id: 'source-console', sourceNodeId: 'source', sourcePortIndex: 0, targetNodeId: 'console', targetPortIndex: 0 }
+      ],
+      manualDiagnosticTestPoints: [{ pointId: 'point-source-sim', edgeId: 'source-sim' }]
+    });
+
+    expect(pkg.reportedNodeIds).toEqual(expect.arrayContaining(['source', 'sim', 'console']));
+    expect(pkg.reportedNodeIds).not.toContain('scope');
   });
 
   it('flattens a subsystem into its internal backend components and reconnects parent edges', () => {
@@ -123,6 +226,119 @@ describe('backendExecutablePackageService', () => {
     expect(pkg.faultInstances).toEqual([
       expect.objectContaining({ faultId: 'internal-bias', targetId: 'internal-controller', faultType: 'sensor_bias' })
     ]);
+
+    const resultPkg = buildBackendExecutablePackage({
+      ...state,
+      includeSubsystemNodes: true,
+      canvases: {
+        ...state.canvases,
+        'canvas-root': {
+          ...state.canvases['canvas-root'],
+          nodes: state.canvases['canvas-root'].nodes.map((node) => (
+            node.type === 'subsystem_block'
+              ? { ...node, props: { ...node.props, name: '飞控子系统', subsystemId: 'flight-control-01' } }
+              : node
+          ))
+        }
+      }
+    });
+    expect(resultPkg.nodes).toContainEqual({
+      id: 'flight-control-01',
+      name: '飞控子系统',
+      type: 'subsystem_block',
+      parameters: {},
+      inputs: [],
+      outputs: []
+    });
+    expect(resultPkg.nodes).toContainEqual(expect.objectContaining({
+      id: 'internal-controller',
+      type: 'simulation_block'
+    }));
+    expect(resultPkg.edges).toEqual([
+      expect.objectContaining({ sourceNodeId: 'source', targetNodeId: 'flight-control-01' }),
+      expect.objectContaining({ sourceNodeId: 'flight-control-01', targetNodeId: 'scope' })
+    ]);
+    expect(remapSubsystemBoundaryReferences({
+      ...state,
+      includeSubsystemNodes: true,
+      canvases: {
+        ...state.canvases,
+        'canvas-root': {
+          ...state.canvases['canvas-root'],
+          nodes: state.canvases['canvas-root'].nodes.map((node) => (
+            node.type === 'subsystem_block'
+              ? { ...node, props: { ...node.props, subsystemId: 'flight-control-01' } }
+              : node
+          ))
+        }
+      }
+    }, [{
+      pointId: 'M-boundary',
+      edgeId: 'root-subsystem-scope',
+      measurementSourceNodeId: 'internal-controller'
+    }])).toEqual([{
+      pointId: 'M-boundary',
+      edgeId: 'root-subsystem-scope',
+      measurementSourceNodeId: 'flight-control-01'
+    }]);
+  });
+
+  it('keeps distinct internal routes when subsystem interface port IDs repeat', () => {
+    const source = (id) => ({ id, type: 'signal_source', props: { value: 1 }, outputs: [{ name: 'out' }] });
+    const scope = (id) => ({ id, type: 'instrument_scope', props: {}, inputs: [{ name: 'CH1' }] });
+    const component = (id) => ({
+      id, type: 'simulation_block',
+      props: { inputs: [{ name: 'input' }], outputs: [{ name: 'output' }] },
+      pythonBinding: { moduleId: 'passthrough', entryFunction: 'process' }
+    });
+    const edge = (id, sourceNodeId, targetNodeId, sourcePortIndex = 0, targetPortIndex = 0) => ({
+      id, sourceNodeId, sourcePortIndex, targetNodeId, targetPortIndex
+    });
+    const pkg = buildBackendExecutablePackage({
+      rootCanvasId: 'canvas-root',
+      canvases: {
+        'canvas-root': {
+          id: 'canvas-root',
+          nodes: [source('source-a'), source('source-b'), scope('scope-a'), scope('scope-b'), {
+            id: 'subsystem', type: 'subsystem_block', targetCanvasId: 'child',
+            props: { interface: {
+              inputs: [{ id: 'shared-input', order: 0 }, { id: 'shared-input', order: 1 }],
+              outputs: [{ id: 'shared-output', order: 0 }, { id: 'shared-output', order: 1 }]
+            } }
+          }],
+          edges: [
+            edge('source-a-shell', 'source-a', 'subsystem', 0, 0),
+            edge('source-b-shell', 'source-b', 'subsystem', 0, 1),
+            edge('shell-scope-a', 'subsystem', 'scope-a', 0, 0),
+            edge('shell-scope-b', 'subsystem', 'scope-b', 1, 0)
+          ]
+        },
+        child: {
+          id: 'child', parentSubsystemNodeId: 'subsystem',
+          nodes: [
+            { id: 'input-a', type: 'subsystem_in_port', props: { interfacePortId: 'shared-input', order: 0 } },
+            { id: 'input-b', type: 'subsystem_in_port', props: { interfacePortId: 'shared-input', order: 1 } },
+            component('component-a'), component('component-b'),
+            { id: 'output-a', type: 'subsystem_out_port', props: { interfacePortId: 'shared-output', order: 0 } },
+            { id: 'output-b', type: 'subsystem_out_port', props: { interfacePortId: 'shared-output', order: 1 } }
+          ],
+          edges: [
+            edge('input-a-component', 'input-a', 'component-a'),
+            edge('input-b-component', 'input-b', 'component-b'),
+            edge('component-a-output', 'component-a', 'output-a'),
+            edge('component-b-output', 'component-b', 'output-b')
+          ]
+        }
+      }
+    });
+
+    expect(pkg.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceNodeId: 'source-a', targetNodeId: 'component-a' }),
+      expect.objectContaining({ sourceNodeId: 'source-b', targetNodeId: 'component-b' }),
+      expect.objectContaining({ sourceNodeId: 'component-a', targetNodeId: 'scope-a' }),
+      expect.objectContaining({ sourceNodeId: 'component-b', targetNodeId: 'scope-b' })
+    ]));
+    expect(pkg.edges).toHaveLength(4);
   });
 
   it('recursively flattens nested subsystems before sending the graph to the backend', () => {
@@ -363,6 +579,187 @@ describe('backendExecutablePackageService', () => {
     ]);
   });
 
+  it('preserves RF complex-envelope ports and an I/Q source value', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'rf-envelope-source',
+        type: 'signal_source',
+        props: { value: { i: 1, q: -0.25, referenceFrequencyHz: 20e9, impedanceOhm: 50 } },
+        outputs: [{
+          name: 'RF I/Q',
+          dataType: 'rf_complex_envelope',
+          referenceFrequencyHz: 20e9,
+          impedanceOhm: 50,
+          unit: 'V'
+        }]
+      }],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].parameters.value).toEqual({ i: 1, q: -0.25, referenceFrequencyHz: 20e9, impedanceOhm: 50 });
+    expect(pkg.nodes[0].outputs).toEqual([{
+      id: 'RF I/Q',
+      name: 'RF I/Q',
+      dataType: 'rf_complex_envelope',
+      referenceFrequencyHz: 20e9,
+      impedanceOhm: 50,
+      unit: 'V'
+    }]);
+  });
+
+  it('preserves configured scalar port element names', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'scalar-component',
+        type: 'simulation_block',
+        props: {},
+        pythonBinding: {
+          bound: true,
+          portMapping: {
+            inputs: [{ varName: 'voltage_in', type: 'float', elementNames: ['输入电压'] }],
+            outputs: [{ varName: 'voltage_out', type: 'float', elementNames: ['输出电压'] }],
+            middleVars: []
+          }
+        }
+      }],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].inputs[0]).toMatchObject({ elementNames: ['输入电压'] });
+    expect(pkg.nodes[0].outputs[0]).toMatchObject({ elementNames: ['输出电压'] });
+  });
+
+  it('uses a built-in component’s actual complex-envelope ports instead of scalar display defaults', () => {
+    const complexPort = { type: '复数包络', dataType: 'rf_complex_envelope', impedanceOhm: 50, unit: 'V' };
+    const scalarPort = { type: 'float', dataType: 'scalar' };
+    const pkg = buildBackendExecutablePackage({
+      simulationConfig: { duration: 0.1, stepSize: 1e-7 },
+      modelNodes: [
+        {
+          id: 'source',
+          type: 'signal_source',
+          props: {
+            signalDomain: 'rf', outputFormat: '复数包络',
+            centerFrequency: '20', centerFrequencyUnit: 'GHz'
+          }
+        },
+        {
+          id: 'selector', type: 'simulation_block',
+          // These are the legacy property-panel rows present on a newly
+          // placed built-in component. They do not carry the signal contract.
+          props: {
+            inputs: [{ name: '复数包络输入 1', type: '标量' }, { name: '复数包络输入 2', type: '标量' }],
+            outputs: [{ name: '复数包络输出', type: '标量' }]
+          },
+          ports: {
+            inputs: [{ name: '复数包络输入 1', varName: 'input_1', ...complexPort }, { name: '复数包络输入 2', varName: 'input_2', ...complexPort }],
+            outputs: [{ name: '复数包络输出', varName: 'selected_envelope', ...complexPort }]
+          },
+          pythonBinding: { moduleId: 'rf_complex_envelope_selector', entryFunction: 'process' }
+        },
+        {
+          id: 'extractor', type: 'simulation_block',
+          props: {
+            inputs: [{ name: '复数包络输入', type: '标量' }],
+            outputs: [{ name: '中心频率', type: '标量' }]
+          },
+          ports: {
+            inputs: [{ name: '复数包络输入', varName: 'input_envelope', ...complexPort }],
+            outputs: [{ name: '中心频率', varName: 'center_frequency_hz', ...scalarPort }]
+          },
+          pythonBinding: { moduleId: 'rf_complex_envelope_pulse_feature_extractor', entryFunction: 'process' }
+        },
+        {
+          id: 'complex-spectrum',
+          type: 'instrument_spectrum',
+          props: {},
+          ports: { inputs: [{ name: '复数包络输入', varName: 'input_envelope', ...complexPort }], outputs: [] }
+        },
+        { id: 'console', type: 'display_console', props: { inputPortNames: ['中心频率'] } }
+      ],
+      modelEdges: [
+        { id: 'source-selector', sourceNodeId: 'source', sourcePortIndex: 0, targetNodeId: 'selector', targetPortIndex: 0 },
+        { id: 'selector-spectrum', sourceNodeId: 'selector', sourcePortIndex: 0, targetNodeId: 'complex-spectrum', targetPortIndex: 0 },
+        { id: 'selector-extractor', sourceNodeId: 'selector', sourcePortIndex: 0, targetNodeId: 'extractor', targetPortIndex: 0 },
+        { id: 'extractor-console', sourceNodeId: 'extractor', sourcePortIndex: 0, targetNodeId: 'console', targetPortIndex: 0 }
+      ]
+    });
+
+    const selector = pkg.nodes.find((node) => node.id === 'selector');
+    const extractor = pkg.nodes.find((node) => node.id === 'extractor');
+    expect(selector.inputs[0]).toMatchObject({ dataType: 'rf_complex_envelope' });
+    expect(selector.outputs[0]).toMatchObject({ dataType: 'rf_complex_envelope' });
+    expect(extractor.inputs[0]).toMatchObject({ dataType: 'rf_complex_envelope' });
+    expect(extractor.outputs[0]).toMatchObject({ dataType: 'scalar' });
+    expect(pkg.nodes.find((node) => node.id === 'complex-spectrum').inputs[0]).toMatchObject({
+      dataType: 'rf_complex_envelope'
+    });
+    expect(pkg.nodes.find((node) => node.id === 'console').inputs).toEqual([
+      expect.objectContaining({ id: 'console-input', dataType: 'vector', vectorLength: 7 })
+    ]);
+  });
+
+  it('preserves complex-envelope contracts through a subsystem boundary', () => {
+    const complexPort = { type: '复数包络', dataType: 'rf_complex_envelope', impedanceOhm: 50, unit: 'V' };
+    const pkg = buildBackendExecutablePackage({
+      rootCanvasId: 'root',
+      canvases: {
+        root: {
+          id: 'root',
+          nodes: [
+            {
+              id: 'source', type: 'signal_source',
+              props: { signalDomain: 'rf', outputFormat: '复数包络', centerFrequency: '20', centerFrequencyUnit: 'GHz' }
+            },
+            {
+              id: 'subsystem', type: 'subsystem_block', targetCanvasId: 'child',
+              props: {
+                interface: {
+                  inputs: [{ id: 'rf-in', name: '射频输入', ...complexPort, order: 0 }],
+                  outputs: [{ id: 'rf-out', name: '射频输出', ...complexPort, order: 0 }]
+                }
+              }
+            },
+            { id: 'scope', type: 'instrument_scope', props: {} }
+          ],
+          edges: [
+            { id: 'source-subsystem', sourceNodeId: 'source', sourcePortIndex: 0, targetNodeId: 'subsystem', targetPortIndex: 0 },
+            { id: 'subsystem-scope', sourceNodeId: 'subsystem', sourcePortIndex: 0, targetNodeId: 'scope', targetPortIndex: 0 }
+          ]
+        },
+        child: {
+          id: 'child', parentSubsystemNodeId: 'subsystem',
+          nodes: [
+            { id: 'boundary-in', type: 'subsystem_in_port', props: { interfacePortId: 'rf-in', portType: '复数包络', ...complexPort } },
+            {
+              id: 'gain', type: 'simulation_block',
+              props: { inputs: [{ name: '输入', ...complexPort }], outputs: [{ name: '输出', ...complexPort }] },
+              pythonBinding: { moduleId: 'rf_complex_envelope_gain', entryFunction: 'process' }
+            },
+            { id: 'boundary-out', type: 'subsystem_out_port', props: { interfacePortId: 'rf-out', portType: '复数包络', ...complexPort } }
+          ],
+          edges: [
+            { id: 'boundary-gain', sourceNodeId: 'boundary-in', sourcePortIndex: 0, targetNodeId: 'gain', targetPortIndex: 0, subsystemBoundaryMapping: true },
+            { id: 'gain-boundary', sourceNodeId: 'gain', sourcePortIndex: 0, targetNodeId: 'boundary-out', targetPortIndex: 0, subsystemBoundaryMapping: true }
+          ]
+        }
+      }
+    });
+
+    expect(pkg.nodes.map((node) => node.id)).toEqual(['source', 'scope', 'gain']);
+    expect(pkg.nodes.find((node) => node.id === 'gain')).toMatchObject({
+      inputs: [expect.objectContaining({ dataType: 'rf_complex_envelope', impedanceOhm: 50, unit: 'V' })],
+      outputs: [expect.objectContaining({ dataType: 'rf_complex_envelope', impedanceOhm: 50, unit: 'V' })]
+    });
+    expect(pkg.nodes.find((node) => node.id === 'scope').inputs[0]).toMatchObject({
+      dataType: 'rf_complex_envelope', impedanceOhm: 50, unit: 'V'
+    });
+    expect(pkg.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceNodeId: 'source', targetNodeId: 'gain' }),
+      expect.objectContaining({ sourceNodeId: 'gain', targetNodeId: 'scope' })
+    ]));
+  });
+
   it('exports dynamic oscilloscope inputs and inherits the connected signal contract', () => {
     const pkg = buildBackendExecutablePackage({
       modelNodes: [
@@ -539,7 +936,9 @@ describe('backendExecutablePackageService', () => {
       rfModulation: 'cw',
       centerFrequencyHz: 1e9,
       waveType: 'sine',
-      amplitude: 10,
+      // RF power is represented as dBm and converted to a 50-ohm peak
+      // voltage for the backend waveform generator: 10 dBm -> 1 V peak.
+      amplitude: 1,
       frequency: 1e9,
       phase: 0,
       offset: 0,
@@ -570,7 +969,11 @@ describe('backendExecutablePackageService', () => {
             bandwidth: '20MHz',
             symbolRate: '10MHz',
             sampleRate: '40MHz',
-            snr: '12'
+            snr: '12',
+            noiseEnabled: 'on',
+            noiseSnr: '18',
+            noiseBandwidth: '2',
+            noiseBandwidthUnit: 'MHz'
           }
         }
       ],
@@ -592,6 +995,9 @@ describe('backendExecutablePackageService', () => {
       symbolRateHz: 10e6,
       sampleRateHz: 40e6,
       snrDb: 12,
+      additiveNoiseEnabled: 1,
+      additiveNoiseSnrDb: 18,
+      additiveNoiseBandwidthHz: 2e6,
       waveType: 'rf_am'
     }));
   });
@@ -615,6 +1021,68 @@ describe('backendExecutablePackageService', () => {
     expect(pkg.nodes[0].parameters.amplitude).toBeCloseTo(Math.sqrt(0.1), 12);
   });
 
+  it('exports an RF complex-envelope source with ideal rectangular pulse timing', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'rf-envelope-pulse',
+        type: 'signal_source',
+        props: {
+          signalDomain: 'rf',
+          outputFormat: '复数包络',
+          centerFrequency: '20',
+          centerFrequencyUnit: 'GHz',
+          power: '0',
+          modulation: 'am',
+          pulseWidth: '1',
+          pulseWidthUnit: 'ms',
+          pulsePeriod: '10',
+          pulsePeriodUnit: 'ms',
+          riseTime: '100',
+          riseTimeUnit: 'ns',
+          fallTime: '100',
+          fallTimeUnit: 'ns',
+          bandwidth: '3.5MHz',
+          impedanceOhm: '75'
+        }
+      }],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].outputs).toEqual([expect.objectContaining({
+      dataType: 'rf_complex_envelope', referenceFrequencyHz: 20e9, impedanceOhm: 50, unit: 'V'
+    })]);
+    expect(pkg.nodes[0].parameters).toEqual(expect.objectContaining({
+      rfComplexEnvelopeOutput: 1,
+      rfModulation: 'pulse',
+      pulseWidthSeconds: 1e-3,
+      pulsePeriodSeconds: 10e-3,
+      bandwidthHz: 0,
+      nominalBandwidthHz: 0,
+      impedanceOhm: 50
+    }));
+    expect(pkg.nodes[0].parameters).not.toHaveProperty('riseTimeSeconds');
+    expect(pkg.nodes[0].parameters).not.toHaveProperty('fallTimeSeconds');
+  });
+
+  it('converts negative dBm RF power to a non-zero 50-ohm peak voltage', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'rf-negative-dbm',
+        type: 'signal_source',
+        props: {
+          signalDomain: 'rf',
+          centerFrequency: '1',
+          centerFrequencyUnit: 'GHz',
+          power: '-30',
+          powerUnit: 'dBm'
+        }
+      }],
+      modelEdges: []
+    });
+
+    expect(pkg.nodes[0].parameters.amplitude).toBeCloseTo(0.01, 12);
+  });
+
   it('exports sum block signs for backend execution', () => {
     const pkg = buildBackendExecutablePackage({
       modelNodes: [
@@ -636,7 +1104,7 @@ describe('backendExecutablePackageService', () => {
     });
   });
 
-  it('drops edges and measurement points that reference unsupported nodes', () => {
+  it('keeps supported measuring instruments but drops their unsupported measurement-point bindings', () => {
     const pkg = buildBackendExecutablePackage({
       modelNodes: [
         { id: 'source-1', type: 'signal_source', props: { value: 1 } },
@@ -659,8 +1127,8 @@ describe('backendExecutablePackageService', () => {
       ]
     });
 
-    expect(pkg.nodes.map((node) => node.id)).toEqual(['source-1', 'sim-1', 'scope-1']);
-    expect(pkg.edges.map((edge) => edge.id)).toEqual(['edge-kept']);
+    expect(pkg.nodes.map((node) => node.id)).toEqual(['source-1', 'sim-1', 'logger-1', 'scope-1']);
+    expect(pkg.edges.map((edge) => edge.id)).toEqual(['edge-kept', 'edge-dropped']);
     expect(pkg.measurementPoints.map((point) => point.id)).toEqual(['scope-1.ch1']);
   });
 
@@ -785,7 +1253,7 @@ describe('backendExecutablePackageService', () => {
           targetId: 'node-controller',
           slotId: 'physical:controller_gain',
           active: true,
-          parameters: { step_value: -0.35, start: 1 }
+          parameters: { target_value: -0.35, start: 1 }
         }
       ]
     });
@@ -796,7 +1264,42 @@ describe('backendExecutablePackageService', () => {
         faultType: 'parameter_step',
         targetId: 'node-controller',
         startTime: 1,
-        parameters: expect.objectContaining({ stepValue: -0.35 })
+        parameters: expect.objectContaining({ targetValue: -0.35 })
+      })
+    ]);
+  });
+
+  it('preserves multiple parameter targets for one physical fault instance', () => {
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [
+        { id: 'node-controller', type: 'simulation_block', props: {}, pythonBinding: { moduleId: 'control_allocation' } }
+      ],
+      modelEdges: [],
+      faultInstances: [
+        {
+          instanceId: 'controller-multi-step',
+          faultTypeId: 'physical_parameter_step',
+          targetKind: 'node',
+          targetId: 'node-controller',
+          slotId: 'physical:gain',
+          slotIds: ['physical:gain', 'physical:bias'],
+          targetField: 'params.gain',
+          targetFields: ['params.gain', 'params.bias'],
+          parameterKeys: ['gain', 'bias'],
+          active: true,
+          parameters: { targetValue: 0.25, start: 1 }
+        }
+      ]
+    });
+
+    expect(pkg.faultInstances).toEqual([
+      expect.objectContaining({
+        faultType: 'parameter_step',
+        targetId: 'node-controller',
+        parameterKey: 'gain',
+        parameterKeys: ['gain', 'bias'],
+        targetFields: ['params.gain', 'params.bias'],
+        parameters: expect.objectContaining({ targetValue: 0.25 })
       })
     ]);
   });
@@ -933,7 +1436,7 @@ describe('backendExecutablePackageService', () => {
         faultType: 'parameter_step',
         targetField: 'params.bias',
         parameterKey: 'bias',
-        parameters: expect.objectContaining({ stepValue: 0.5 })
+        parameters: expect.objectContaining({ targetValue: 0.5 })
       }),
       expect.objectContaining({
         faultType: 'parameter_random',

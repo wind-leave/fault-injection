@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive } from 'vue';
-import { getPaletteGroups, getSimulationMenuSections } from '../../services/componentRegistry.js';
+import { getElectricalMenuSections, getPaletteGroups, getSimulationMenuSections } from '../../services/componentRegistry.js';
 import { useAuthoredComponentCatalog } from '../../services/authoredComponentCatalogService.js';
 
 defineProps({
@@ -18,14 +18,18 @@ const groupOpen = reactive(Object.fromEntries(
   paletteGroups.map((group) => [group.id, group.defaultOpen !== false])
 ));
 const consumedPaletteKeys = reactive(new Set());
-const simulationMenuOpen = reactive({});
+const paletteMenuOpen = reactive({});
 
-const simulationMenuSections = computed(() => {
+const paletteMenuSections = computed(() => {
   // 新建组件已注册到全局组件库；这里只借助目录的响应式变化重新读取组件库，
   // 不能再把 authoredCatalog.components 追加一次，否则会在左栏出现两份。
   void authoredCatalog.components.length;
-  const simulationGroup = getPaletteGroups().find((group) => group.id === 'simulation');
-  return getSimulationMenuSections(simulationGroup?.components ?? []);
+  const groups = getPaletteGroups();
+  const groupComponents = (groupId) => groups.find((group) => group.id === groupId)?.components ?? [];
+  return {
+    electrical: getElectricalMenuSections(groupComponents('electrical')),
+    simulation: getSimulationMenuSections(groupComponents('simulation'))
+  };
 });
 
 function paletteKey(component) {
@@ -37,7 +41,11 @@ function isPaletteComponentAvailable(component) {
   return component.palette?.repeatable === true || !isOneShotTemplate || !consumedPaletteKeys.has(paletteKey(component));
 }
 
-function availableSimulationMenuCount(section) {
+function paletteMenuSectionsFor(group) {
+  return paletteMenuSections.value[group.id] ?? [];
+}
+
+function availablePaletteMenuCount(section) {
   return section.components.filter(isPaletteComponentAvailable).length;
 }
 
@@ -156,12 +164,18 @@ function toggleGroup(groupId) {
   groupOpen[groupId] = !groupOpen[groupId];
 }
 
-function isSimulationMenuOpen(section) {
-  return simulationMenuOpen[section.id] ?? section.defaultOpen !== false;
+function paletteMenuKey(group, section) {
+  return `${group.id}:${section.id}`;
 }
 
-function toggleSimulationMenu(section) {
-  simulationMenuOpen[section.id] = !isSimulationMenuOpen(section);
+function isPaletteMenuOpen(group, section) {
+  const key = paletteMenuKey(group, section);
+  return paletteMenuOpen[key] ?? section.defaultOpen !== false;
+}
+
+function togglePaletteMenu(group, section) {
+  const key = paletteMenuKey(group, section);
+  paletteMenuOpen[key] = !isPaletteMenuOpen(group, section);
 }
 
 function handleLineToolClick(component) {
@@ -209,25 +223,26 @@ function handleLineToolClick(component) {
           :id="groupDomId(group.id)"
           :data-palette-body="group.id"
         >
-          <template v-if="group.id === 'simulation'">
+          <template v-if="group.id === 'simulation' || group.id === 'electrical'">
             <section
-              v-for="section in simulationMenuSections"
+              v-for="section in paletteMenuSectionsFor(group)"
               :key="section.id"
               class="simulation-menu-section"
-              :data-simulation-menu-section="section.id"
+              :data-simulation-menu-section="group.id === 'simulation' ? section.id : null"
+              :data-electrical-menu-section="group.id === 'electrical' ? section.id : null"
             >
               <button
                 type="button"
                 class="simulation-menu-section__head"
-                :aria-expanded="isSimulationMenuOpen(section)"
-                @click="toggleSimulationMenu(section)"
+                :aria-expanded="isPaletteMenuOpen(group, section)"
+                @click="togglePaletteMenu(group, section)"
               >
                 <span class="simulation-menu-section__icon">{{ section.icon }}</span>
                 <span>{{ section.label }}</span>
-                <span class="simulation-menu-section__count">{{ availableSimulationMenuCount(section) }}</span>
-                <span class="simulation-menu-section__arrow" :class="{ open: isSimulationMenuOpen(section) }">&#9654;</span>
+                <span class="simulation-menu-section__count">{{ availablePaletteMenuCount(section) }}</span>
+                <span class="simulation-menu-section__arrow" :class="{ open: isPaletteMenuOpen(group, section) }">&#9654;</span>
               </button>
-              <div v-show="isSimulationMenuOpen(section)" class="simulation-menu-section__body">
+              <div v-show="isPaletteMenuOpen(group, section)" class="simulation-menu-section__body">
                 <template v-for="component in section.components" :key="paletteKey(component)">
                   <div
                     v-if="isPaletteComponentAvailable(component)"

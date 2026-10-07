@@ -24,4 +24,32 @@ describe('IBM design-md workbench refresh', () => {
     expect(css).toContain('IBM Plex Sans');
     expect(css).toContain('border-radius:0');
   });
+
+  it('uses distinct signal-port styling for inputs and outputs', () => {
+    const css = readFileSync(path.join(repoRoot, 'src', 'styles', 'ibm-workbench.css'), 'utf8');
+
+    expect(css).toContain('.node-port--input:not(.node-port--power)');
+    expect(css).toContain('color:#3f73a8 !important');
+    expect(css).toContain('.node-port--output:not(.node-port--power)');
+    expect(css).toContain('color:#3f8864 !important');
+    expect(css).toContain('transform:rotate(45deg)');
+  });
+
+  it('aligns labels by the terminal side when signal directions are reversed', () => {
+    const css = readFileSync(path.join(repoRoot, 'src', 'styles', 'ibm-workbench.css'), 'utf8');
+
+    expect(css).toContain('.node-port--output.node-port--left .node-port__label');
+    expect(css).toContain('.node-port--input.node-port--right .node-port__label');
+    expect(css).toContain('right:20px;');
+    expect(css).toContain('left:20px;');
+    expect(css).toContain('margin-right:0 !important;');
+    expect(css).toContain('margin-left:0 !important;');
+  });
+
+  it('routes reversed signal ports by their physical side', () => {
+    const runtime = readFileSync(path.join(repoRoot, 'src', 'services', 'legacy-runtime.txt'), 'utf8');
+
+    expect(runtime).toContain("if(side==='left') return {x:port.x-bend,y:port.y+routeOffset};");
+    expect(runtime).toContain('an output configured on the left must depart to the left');
+  });
 });

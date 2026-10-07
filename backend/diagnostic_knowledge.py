@@ -75,6 +75,114 @@ def _node_label(node):
     return _text(node.get("label") or node.get("name") or props.get("name"), node.get("id"))
 
 
+def _port_label(port, fallback=""):
+    if isinstance(port, dict):
+        return _text(
+            port.get("displayName")
+            or port.get("name")
+            or port.get("label")
+            or port.get("varName")
+            or port.get("key")
+            or port.get("id"),
+            fallback,
+        )
+    return _text(port, fallback)
+
+
+def _edge_endpoint_label(edge, node_by_id, direction):
+    is_source = direction == "source"
+    node_id = _text(edge.get("sourceNodeId") if is_source else edge.get("targetNodeId"))
+    port_index = edge.get("sourcePortIndex") if is_source else edge.get("targetPortIndex")
+    try:
+        port_index = max(0, int(port_index or 0))
+    except (TypeError, ValueError):
+        port_index = 0
+    node = node_by_id.get(node_id, {})
+    ports = _arr(node.get("outputs") if is_source else node.get("inputs"))
+    if not ports:
+        ports = _arr(node.get("outputPorts") if is_source else node.get("inputPorts"))
+    edge_port = edge.get("sourcePort") if is_source else edge.get("targetPort")
+    port = _port_label(edge_port, _port_label(ports[port_index] if port_index < len(ports) else None, f"#{port_index + 1}"))
+    return f"{_node_label(node) if node else node_id or '未命名组件'} · {port}"
+
+
+def _edge_endpoint_port_id(edge, node_by_id, direction):
+    is_source = direction == "source"
+    direct_port = edge.get("sourcePortId" if is_source else "targetPortId")
+    if not _text(direct_port):
+        direct_port = edge.get("sourcePort" if is_source else "targetPort")
+    if isinstance(direct_port, dict):
+        direct_port = (
+            direct_port.get("id")
+            or direct_port.get("portId")
+            or direct_port.get("key")
+            or direct_port.get("varName")
+            or direct_port.get("name")
+        )
+    if _text(direct_port):
+        return _text(direct_port)
+
+    node_id = _text(edge.get("sourceNodeId") if is_source else edge.get("targetNodeId"))
+    node = node_by_id.get(node_id, {})
+    ports = _arr(node.get("outputs") if is_source else node.get("inputs"))
+    if not ports:
+        ports = _arr(node.get("outputPorts") if is_source else node.get("inputPorts"))
+    port_index = edge.get("sourcePortIndex") if is_source else edge.get("targetPortIndex")
+    try:
+        port_index = max(0, int(port_index or 0))
+    except (TypeError, ValueError):
+        port_index = 0
+    port = ports[port_index] if port_index < len(ports) else None
+    if isinstance(port, dict):
+        port_id = port.get("id") or port.get("portId") or port.get("key") or port.get("varName") or port.get("name")
+        if _text(port_id):
+            return _text(port_id)
+    return f"{'output' if is_source else 'input'}-{port_index}"
+
+
+def _canonical_canvas_edges(canvas_edges, node_by_id):
+    """Merge different edge IDs that describe the same public endpoints."""
+    canonical_edges = []
+    canonical_id_by_edge_id = {}
+    canonical_id_by_endpoint = {}
+    for edge in canvas_edges:
+        if not isinstance(edge, dict):
+            continue
+        edge_id = _text(edge.get("id"))
+        source_device_id = _text(edge.get("sourceDeviceId") or edge.get("sourceNodeId"))
+        target_device_id = _text(edge.get("targetDeviceId") or edge.get("targetNodeId"))
+        endpoint_key = (
+            source_device_id,
+            _edge_endpoint_port_id(edge, node_by_id, "source"),
+            target_device_id,
+            _edge_endpoint_port_id(edge, node_by_id, "target"),
+        )
+        canonical_id = canonical_id_by_endpoint.get(endpoint_key)
+        if canonical_id is None:
+            canonical_id = edge_id
+            canonical_id_by_endpoint[endpoint_key] = canonical_id
+            canonical_edges.append(edge)
+        if edge_id:
+            canonical_id_by_edge_id[edge_id] = canonical_id
+    return canonical_edges, canonical_id_by_edge_id
+
+
+def edge_endpoint_display_name(model_graph, edge_id, fallback=""):
+    """Return a stable, human-readable label for a connection's two endpoints."""
+    payload = _graph_payload(model_graph)
+    nodes = _arr(payload.get("nodes")) or _arr(payload.get("modelNodes"))
+    edges = _arr(payload.get("edges")) or _arr(payload.get("modelEdges"))
+    edge = next((item for item in edges if isinstance(item, dict) and _text(item.get("id")) == _text(edge_id)), None)
+    if edge is None:
+        return _text(fallback, _text(edge_id))
+    node_by_id = {
+        _text(node.get("id")): node
+        for node in nodes
+        if isinstance(node, dict) and _text(node.get("id"))
+    }
+    return f"{_edge_endpoint_label(edge, node_by_id, 'source')} → {_edge_endpoint_label(edge, node_by_id, 'target')}"
+
+
 def _repair_targets(row):
     targets = []
     seen = set()
@@ -143,6 +251,17 @@ def build_diagnostic_knowledge_graph(d_matrix, model_graph=None):
 
     canvas_nodes = _arr(payload.get("nodes")) or _arr(payload.get("modelNodes"))
     canvas_edges = _arr(payload.get("edges")) or _arr(payload.get("modelEdges"))
+    canvas_nodes_by_id = {
+        _text(node.get("id")): node
+        for node in canvas_nodes
+        if isinstance(node, dict) and _text(node.get("id"))
+    }
+    canvas_edges, canonical_edge_ids = _canonical_canvas_edges(canvas_edges, canvas_nodes_by_id)
+
+    def canonical_edge_id(edge_id):
+        normalized_id = _text(edge_id)
+        return canonical_edge_ids.get(normalized_id, normalized_id)
+
     for node in canvas_nodes:
         if not isinstance(node, dict):
             continue
@@ -151,7 +270,8 @@ def build_diagnostic_knowledge_graph(d_matrix, model_graph=None):
         if not isinstance(edge, dict):
             continue
         edge_id = _text(edge.get("id"))
-        add_node("signalEdge", edge_id, edge.get("label") or edge.get("signalId") or edge_id, signalId=edge.get("signalId"), lineType=edge.get("lineType"))
+        edge_label = f"{_edge_endpoint_label(edge, canvas_nodes_by_id, 'source')} → {_edge_endpoint_label(edge, canvas_nodes_by_id, 'target')}"
+        add_node("signalEdge", edge_id, edge_label, signalId=edge.get("signalId"), lineType=edge.get("lineType"))
         add_relation("OUTPUTS_TO", "component", edge.get("sourceNodeId"), "signalEdge", edge_id)
         add_relation("INPUTS_TO", "signalEdge", edge_id, "component", edge.get("targetNodeId"))
 
@@ -165,14 +285,14 @@ def build_diagnostic_knowledge_graph(d_matrix, model_graph=None):
             point.get("name") or point.get("shortName") or point_id,
             pointCode=_point_code(point),
             pointType=point.get("pointType"),
-            edgeId=point.get("edgeId"),
+            edgeId=canonical_edge_id(point.get("edgeId")),
             nodeId=point.get("nodeId") or point.get("targetNodeId"),
             inputIndex=point.get("inputIndex"),
             inputKey=point.get("inputKey"),
             displayConsoleInput=bool(point.get("displayConsoleInput")),
         )
         if point.get("edgeId"):
-            add_relation("OBSERVES", "measurementPoint", point_id, "signalEdge", point.get("edgeId"))
+            add_relation("OBSERVES", "measurementPoint", point_id, "signalEdge", canonical_edge_id(point.get("edgeId")))
         point_node_id = point.get("nodeId") or point.get("targetNodeId")
         if point_node_id:
             add_node("component", point_node_id, point.get("targetName") or point_node_id)
@@ -189,17 +309,17 @@ def build_diagnostic_knowledge_graph(d_matrix, model_graph=None):
 
     for row in d_matrix["rows"]:
         fault_id = _fault_id(row)
+        target_kind = "signalEdge" if _target_kind(row) == "edge" else "component"
+        target_id = canonical_edge_id(_target_id(row)) if target_kind == "signalEdge" else _target_id(row)
         add_node(
             "fault",
             fault_id,
             _fault_name(row),
             layer=row.get("layer"),
             targetKind=_target_kind(row),
-            targetId=_target_id(row),
+            targetId=target_id,
             slotId=row.get("slotId"),
         )
-        target_kind = "signalEdge" if _target_kind(row) == "edge" else "component"
-        target_id = _target_id(row)
         add_node(target_kind, target_id, row.get("targetLabel") or target_id)
         add_relation("OCCURS_ON", "fault", fault_id, target_kind, target_id)
 
@@ -221,8 +341,9 @@ def build_diagnostic_knowledge_graph(d_matrix, model_graph=None):
         for target in _repair_targets(row):
             repair_kind = "signalEdge" if target["kind"] == "edge" else "component"
             action = "replaceWire" if target["kind"] == "edge" else "replaceComponent"
-            add_node(repair_kind, target["id"], target["label"])
-            add_relation("RESOLVED_BY_REPLACING", "fault", fault_id, repair_kind, target["id"], action=action)
+            repair_id = canonical_edge_id(target["id"]) if repair_kind == "signalEdge" else target["id"]
+            add_node(repair_kind, repair_id, target["label"])
+            add_relation("RESOLVED_BY_REPLACING", "fault", fault_id, repair_kind, repair_id, action=action)
 
     point_ids_by_code = {
         _point_code(point): _text(point.get("pointId") or point.get("id") or point.get("shortName"))
@@ -599,6 +720,319 @@ def _replacement_steps_from_knowledge_graph(knowledge_graph, target_fault_ids, s
     return steps
 
 
+def _repair_targets_from_knowledge_graph(graph_data):
+    """Return every repair target and the concrete faults it removes."""
+    targets = {}
+    for relation in graph_data["relations"]:
+        if not isinstance(relation, dict) or relation.get("type") != "RESOLVED_BY_REPLACING":
+            continue
+        source = _graph_reference(relation, "source")
+        target = _graph_reference(relation, "target")
+        fault_id = _text(source.get("id"))
+        target_id = _text(target.get("id"))
+        if source.get("kind") != "fault" or not fault_id or not target_id:
+            continue
+        action = _text(relation.get("action"))
+        if action not in {"replaceWire", "replaceComponent"}:
+            action = "replaceWire" if target.get("kind") == "signalEdge" else "replaceComponent"
+        key = (action, target_id)
+        current = targets.setdefault(
+            key,
+            {
+                "action": action,
+                "targetId": target_id,
+                "targetKind": "edge" if target.get("kind") == "signalEdge" else "node",
+                "targetLabel": _text(graph_data["nodes"].get((_text(target.get("kind")), target_id), {}).get("label"), target_id),
+                "resolvedFaultIds": set(),
+            },
+        )
+        current["resolvedFaultIds"].add(fault_id)
+    return list(targets.values())
+
+
+def _confirmed_repair_targets(graph_data, candidates):
+    """Find repair targets implicated by every remaining fault hypothesis.
+
+    A D-matrix can leave several *fault types* indistinguishable while still
+    proving that they all occur on the same replaceable component or wire.
+    Treat that target as confirmed so the plan can make useful progress
+    without requiring the exact fault-type combination to be unique.
+    """
+    active_candidates = [candidate for candidate in candidates if _active_fault_ids(candidate)]
+    if not active_candidates:
+        return []
+    confirmed = []
+    for target in _repair_targets_from_knowledge_graph(graph_data):
+        resolved_fault_ids = set(target["resolvedFaultIds"])
+        supporting_fault_ids = [
+            sorted(resolved_fault_ids & set(_active_fault_ids(candidate)))
+            for candidate in active_candidates
+        ]
+        if not all(supporting_fault_ids):
+            continue
+        confirmed.append({
+            **target,
+            "supportingFaultIds": sorted({fault_id for fault_ids in supporting_fault_ids for fault_id in fault_ids}),
+            "supportingCandidateCount": len(active_candidates),
+            "resolvesEveryCandidateFault": all(
+                set(_active_fault_ids(candidate)).issubset(resolved_fault_ids)
+                for candidate in active_candidates
+            ),
+        })
+    return sorted(confirmed, key=lambda item: (item["action"], item["targetId"]))
+
+
+def _confirmed_repair_steps(confirmed_targets, start_index):
+    steps = []
+    for target in confirmed_targets:
+        action_label = "更换连线" if target["action"] == "replaceWire" else "更换设备"
+        steps.append({
+            "index": start_index + len(steps),
+            "action": target["action"],
+            "purpose": "confirmedRepairTarget",
+            "targetId": target["targetId"],
+            "targetKind": target["targetKind"],
+            "targetLabel": target["targetLabel"],
+            "relatedFaultIds": target["supportingFaultIds"],
+            "supportingCandidateCount": target["supportingCandidateCount"],
+            "text": f"当前候选均指向{target['targetLabel']}，可确认该对象存在故障；{action_label}：{target['targetLabel']}。",
+        })
+    return steps
+
+
+def _signature_after_repair(graph_data, fault_ids, resolved_fault_ids):
+    active_fault_ids = [fault_id for fault_id in fault_ids if fault_id not in resolved_fault_ids]
+    signature = {
+        point_code: any(graph_data["signatures"].get(fault_id, {}).get(point_code, False) for fault_id in active_fault_ids)
+        for point_code in graph_data["pointCodes"]
+    }
+    return _apply_manual_combination_relations(signature, active_fault_ids, graph_data["constraints"])
+
+
+def _active_fault_ids(candidate):
+    """Faults still present in a candidate after earlier diagnostic repairs."""
+    return candidate.get("activeFaultIds", candidate.get("faultIds", []))
+
+
+def _project_candidate_after_repair(graph_data, candidate, resolved_fault_ids):
+    """Keep the original diagnosis identity while updating its post-repair state."""
+    projected = dict(candidate)
+    active_fault_ids = [
+        fault_id for fault_id in _active_fault_ids(candidate)
+        if fault_id not in resolved_fault_ids
+    ]
+    projected["activeFaultIds"] = active_fault_ids
+    projected["signature"] = _signature_after_repair(graph_data, active_fault_ids, set())
+    return projected
+
+
+def _measurement_steps_for_target(graph_data, candidates, target_candidate, used_codes, max_steps, start_index):
+    """Follow the target combination through the best remaining virtual measurements."""
+    remaining = list(candidates)
+    selected_steps = []
+    used = set(used_codes)
+    while len({_candidate_key(candidate) for candidate in remaining}) > 1 and len(selected_steps) < max_steps:
+        ranked = _rank_points(graph_data["points"], remaining, used)
+        if not ranked:
+            break
+        selected = ranked[0]
+        point = selected["point"]
+        point_code = _point_code(point)
+        expected_abnormal = bool(target_candidate["signature"].get(point_code, False))
+        used.add(point_code)
+        abnormal_candidates = selected["abnormal"]
+        normal_candidates = selected["normal"]
+        remaining = abnormal_candidates if expected_abnormal else normal_candidates
+        point_name = _text(point.get("name"), point_code)
+        selected_steps.append(
+            {
+                "index": start_index + len(selected_steps),
+                "action": "measure",
+                "pointId": point.get("pointId") or point.get("id") or point_code,
+                "pointCode": point_code,
+                "pointName": point_name,
+                "expectedState": "abnormal" if expected_abnormal else "normal",
+                "expected": f"检测结果应为{'异常' if expected_abnormal else '正常'}。",
+                "reason": "该测点能够最大程度区分当前单故障和多故障候选。",
+                "branches": {
+                    "abnormal": {
+                        "remainingFaultSets": [candidate["faultIds"] for candidate in abnormal_candidates],
+                        "remainingFaultSetNames": [_candidate_names(candidate) for candidate in abnormal_candidates],
+                    },
+                    "normal": {
+                        "remainingFaultSets": [candidate["faultIds"] for candidate in normal_candidates],
+                        "remainingFaultSetNames": [_candidate_names(candidate) for candidate in normal_candidates],
+                    },
+                    "unknown": {
+                        "remainingFaultSets": [candidate["faultIds"] for candidate in selected["abnormal"] + selected["normal"]],
+                    },
+                },
+                "remainingFaultIds": sorted({fault_id for candidate in remaining for fault_id in candidate["faultIds"]}),
+                "remainingFaultNames": [_candidate_names(candidate) for candidate in remaining],
+            }
+        )
+    return selected_steps, remaining, used
+
+
+def _diagnostic_replacement_probe_steps(graph_data, candidates, target_candidate, start_index):
+    """Choose one diagnostic replacement that can split unresolved candidates.
+
+    Replacement is a diagnostic probe here, not a final repair conclusion.  A
+    replacement automatically updates physical point states.  A changed
+    physical point can therefore advance the path without adding a measurement
+    action; every affected virtual point still requires an explicit retest.
+    """
+    if len({_candidate_key(candidate) for candidate in candidates}) < 2:
+        return []
+
+    probes = []
+    for target in _repair_targets_from_knowledge_graph(graph_data):
+        resolved_fault_ids = target["resolvedFaultIds"]
+        after_signatures = {
+            _candidate_key(candidate): _signature_after_repair(graph_data, _active_fault_ids(candidate), resolved_fault_ids)
+            for candidate in candidates
+        }
+        target_key = _candidate_key(target_candidate)
+        target_signature = after_signatures.get(target_key)
+        if target_signature is None:
+            continue
+
+        invalidated_virtual_points = []
+        physical_updates = []
+        for point in graph_data["points"]:
+            point_code = _point_code(point)
+            if not point_code:
+                continue
+            changed = any(
+                bool(candidate["signature"].get(point_code, False))
+                != bool(after_signatures[_candidate_key(candidate)].get(point_code, False))
+                for candidate in candidates
+            )
+            if _is_physical_point(point):
+                if changed:
+                    physical_updates.append(
+                        {
+                            "pointId": point.get("pointId") or point.get("id") or point_code,
+                            "pointCode": point_code,
+                            "pointName": _text(point.get("name"), point_code),
+                            "observed": "abnormal" if target_signature.get(point_code, False) else "normal",
+                            "source": "auto-after-repair",
+                        }
+                    )
+                continue
+            if changed:
+                invalidated_virtual_points.append(point_code)
+
+        for point in graph_data["points"]:
+            point_code = _point_code(point)
+            if not point_code:
+                continue
+            abnormal = [
+                candidate
+                for candidate in candidates
+                if bool(after_signatures[_candidate_key(candidate)].get(point_code, False))
+            ]
+            normal = [candidate for candidate in candidates if candidate not in abnormal]
+            information_gain = _entropy(len(abnormal), len(normal))
+            if information_gain <= 0:
+                continue
+            if _is_physical_point(point):
+                probes.append(
+                    {
+                        "target": target,
+                        "point": point,
+                        "pointCode": point_code,
+                        "probeType": "physical",
+                        "abnormal": abnormal,
+                        "normal": normal,
+                        "expectedAbnormal": bool(target_signature.get(point_code, False)),
+                        "invalidatedVirtualPointCodes": invalidated_virtual_points,
+                        "automaticPhysicalUpdates": physical_updates,
+                        # A physical result is available automatically after
+                        # replacement.  Keep its score comparable to a virtual
+                        # retest so an already more-informative virtual probe
+                        # still wins when one exists.
+                        "score": information_gain * 100,
+                    }
+                )
+                continue
+            probes.append(
+                {
+                    "target": target,
+                    "point": point,
+                    "pointCode": point_code,
+                    "probeType": "virtual",
+                    "abnormal": abnormal,
+                    "normal": normal,
+                    "expectedAbnormal": bool(target_signature.get(point_code, False)),
+                    "invalidatedVirtualPointCodes": invalidated_virtual_points,
+                    "automaticPhysicalUpdates": physical_updates,
+                    "score": (information_gain * 100) + (len(invalidated_virtual_points) * 2),
+                }
+            )
+
+    if not probes:
+        return []
+    probe = sorted(
+        probes,
+        key=lambda item: (-item["score"], item["target"]["action"], item["target"]["targetId"], item["pointCode"]),
+    )[0]
+    target = probe["target"]
+    point = probe["point"]
+    repair_index = start_index
+    is_physical_probe = probe["probeType"] == "physical"
+    retest_index = start_index + 1
+    replacement_label = "更换连线" if target["action"] == "replaceWire" else "更换设备"
+    retest_point_name = _text(point.get("name"), probe["pointCode"])
+    branches = {
+        "abnormal": {
+            "remainingFaultSets": [candidate["faultIds"] for candidate in probe["abnormal"]],
+            "remainingFaultSetNames": [_candidate_names(candidate) for candidate in probe["abnormal"]],
+        },
+        "normal": {
+            "remainingFaultSets": [candidate["faultIds"] for candidate in probe["normal"]],
+            "remainingFaultSetNames": [_candidate_names(candidate) for candidate in probe["normal"]],
+        },
+    }
+    repair_step = {
+        "index": repair_index,
+        "action": target["action"],
+        "purpose": "diagnosticIsolation",
+        "targetId": target["targetId"],
+        "targetKind": target["targetKind"],
+        "targetLabel": target["targetLabel"],
+        "relatedFaultIds": sorted(target["resolvedFaultIds"]),
+        "invalidatedVirtualPointCodes": probe["invalidatedVirtualPointCodes"],
+        "automaticPhysicalUpdates": probe["automaticPhysicalUpdates"],
+        "text": f"{replacement_label}：{target['targetLabel']}。",
+    }
+    if is_physical_probe:
+        repair_step["automaticObservationPointId"] = point.get("pointId") or point.get("id") or probe["pointCode"]
+        repair_step["automaticObservationPointCode"] = probe["pointCode"]
+        repair_step["automaticObservationPointName"] = retest_point_name
+        repair_step["automaticObservationExpectedState"] = "abnormal" if probe["expectedAbnormal"] else "normal"
+        return [repair_step]
+
+    repair_step["requiredRetestPointId"] = point.get("pointId") or point.get("id") or probe["pointCode"]
+    repair_step["requiredRetestPointCode"] = probe["pointCode"]
+    retest_step = {
+        "index": retest_index,
+        "action": "measure",
+        "purpose": "postRepairRetest",
+        "afterRepairStepIndex": repair_index,
+        "pointId": point.get("pointId") or point.get("id") or probe["pointCode"],
+        "pointCode": probe["pointCode"],
+        "pointName": retest_point_name,
+        "expectedState": "abnormal" if probe["expectedAbnormal"] else "normal",
+        "expected": f"更换后重新测量；目标故障组合下结果应为{'异常' if probe['expectedAbnormal'] else '正常'}。",
+        "reason": f"该虚拟测点可根据更换 {target['targetLabel']} 后的结果继续区分剩余候选。",
+        "branches": branches,
+        "remainingFaultIds": sorted({fault_id for candidate in (probe["abnormal"] if probe["expectedAbnormal"] else probe["normal"]) for fault_id in candidate["faultIds"]}),
+        "remainingFaultNames": [_candidate_names(candidate) for candidate in (probe["abnormal"] if probe["expectedAbnormal"] else probe["normal"])],
+    }
+    return [repair_step, retest_step]
+
+
 def _target_labels_from_knowledge_graph(knowledge_graph, target_fault_ids):
     graph_data = _knowledge_graph_diagnostic_data(knowledge_graph)
     target_set = set(target_fault_ids)
@@ -729,59 +1163,157 @@ def build_multi_fault_troubleshooting_plan_from_knowledge_graph(
     used_codes = {
         point_code for point_code, value in normalized_observations.items() if value is not None
     } | set(physical_states)
-    measurement_steps = []
-
-    while len({_candidate_key(candidate) for candidate in remaining}) > 1 and len(measurement_steps) < max_steps:
-        ranked = _rank_points(graph_data["points"], remaining, used_codes)
-        if not ranked:
-            break
-        selected = ranked[0]
-        point = selected["point"]
-        point_code = _point_code(point)
-        expected_abnormal = bool(target_candidate["signature"].get(point_code, False))
-        used_codes.add(point_code)
-        abnormal_candidates = selected["abnormal"]
-        normal_candidates = selected["normal"]
-        remaining = abnormal_candidates if expected_abnormal else normal_candidates
-        point_name = _text(point.get("name"), point_code)
-        measurement_steps.append(
-            {
-                "index": len(measurement_steps) + 1,
-                "action": "measure",
-                "pointId": point.get("pointId") or point.get("id") or point_code,
-                "pointCode": point_code,
-                "pointName": point_name,
-                "expectedState": "abnormal" if expected_abnormal else "normal",
-                "expected": f"检测结果应为{'异常' if expected_abnormal else '正常'}。",
-                "reason": "该测点能够最大程度区分当前单故障和多故障候选。",
-                "branches": {
-                    "abnormal": {
-                        "remainingFaultSets": [candidate["faultIds"] for candidate in abnormal_candidates],
-                        "remainingFaultSetNames": [_candidate_names(candidate) for candidate in abnormal_candidates],
-                    },
-                    "normal": {
-                        "remainingFaultSets": [candidate["faultIds"] for candidate in normal_candidates],
-                        "remainingFaultSetNames": [_candidate_names(candidate) for candidate in normal_candidates],
-                    },
-                    "unknown": {
-                        "remainingFaultSets": [candidate["faultIds"] for candidate in selected["abnormal"] + selected["normal"]],
-                    },
-                },
-                "remainingFaultIds": sorted({fault_id for candidate in remaining for fault_id in candidate["faultIds"]}),
-                "remainingFaultNames": [_candidate_names(candidate) for candidate in remaining],
-            }
-        )
+    measurement_steps, remaining, used_codes = _measurement_steps_for_target(
+        graph_data,
+        remaining,
+        target_candidate,
+        used_codes,
+        max_steps,
+        1,
+    )
 
     fault_names = [_fault_name(row) for row in target_rows]
     target_labels = _target_labels_from_knowledge_graph(knowledge_graph, normalized_target_ids)
     unique_remaining = {_candidate_key(candidate) for candidate in remaining}
     isolated = unique_remaining == {target_key}
-    replacement_steps = (
-        _replacement_steps_from_knowledge_graph(knowledge_graph, normalized_target_ids, len(measurement_steps) + 1)
-        if isolated
+    steps = list(measurement_steps)
+    diagnostic_replacement_steps = []
+    repaired_target_fault_ids = set()
+    diagnostic_rounds = 0
+
+    # A replacement used to distinguish candidates is only one diagnostic
+    # state transition.  Follow its target-result branch and continue planning
+    # until the original target combination is isolated, rather than ending at
+    # the mandatory virtual retest.
+    while not isolated and diagnostic_rounds < len(graph_data["faults"]):
+        probe_steps = _diagnostic_replacement_probe_steps(
+            graph_data,
+            remaining,
+            target_candidate,
+            len(steps) + 1,
+        )
+        if not probe_steps:
+            break
+        repair_step = probe_steps[0]
+        retest_step = probe_steps[1] if len(probe_steps) > 1 else None
+        diagnostic_replacement_steps.extend(probe_steps)
+        steps.extend(probe_steps)
+        diagnostic_rounds += 1
+
+        resolved_fault_ids = set(repair_step["relatedFaultIds"])
+        repaired_target_fault_ids.update(resolved_fault_ids & set(normalized_target_ids))
+        remaining = [
+            _project_candidate_after_repair(graph_data, candidate, resolved_fault_ids)
+            for candidate in remaining
+        ]
+        target_candidate = next(
+            candidate for candidate in remaining if _candidate_key(candidate) == target_key
+        )
+
+        # A repair changes affected physical point states immediately.  They
+        # are therefore known evidence, but virtual point states are invalid
+        # until their explicit post-repair retest.
+        automatic_physical_states = {
+            update["pointCode"]: update["observed"] == "abnormal"
+            for update in repair_step["automaticPhysicalUpdates"]
+        }
+        if automatic_physical_states:
+            remaining = [
+                candidate
+                for candidate in remaining
+                if all(
+                    bool(candidate["signature"].get(point_code, False)) == observed
+                    for point_code, observed in automatic_physical_states.items()
+                )
+            ]
+            for condition in known_conditions:
+                point_code = condition["pointCode"]
+                if point_code in automatic_physical_states:
+                    observed = automatic_physical_states[point_code]
+                    condition.update({
+                        "observed": "abnormal" if observed else "normal",
+                        "expectedState": "abnormal" if observed else "normal",
+                        "source": "auto-after-repair",
+                    })
+
+        # Re-evaluate the candidate set before requiring an explicit virtual
+        # retest. A replacement can make physical observations sufficient to
+        # isolate the target, in which case the pre-planned virtual probe no
+        # longer adds diagnostic information.
+        isolated_after_physical_update = (
+            {_candidate_key(candidate) for candidate in remaining} == {target_key}
+        )
+        if retest_step is not None and isolated_after_physical_update:
+            steps.remove(retest_step)
+            diagnostic_replacement_steps.remove(retest_step)
+            repair_step.pop("requiredRetestPointId", None)
+            repair_step.pop("requiredRetestPointCode", None)
+            repair_step["virtualRetestSkipped"] = True
+            repair_step["virtualRetestSkippedPointId"] = retest_step["pointId"]
+            repair_step["virtualRetestSkippedPointCode"] = retest_step["pointCode"]
+            repair_step["virtualRetestSkippedReason"] = "修复后的物理测点已足以隔离目标故障组合。"
+            retest_step = None
+
+        if retest_step is not None:
+            expected_retest_abnormal = retest_step["expectedState"] == "abnormal"
+            remaining = [
+                candidate
+                for candidate in remaining
+                if bool(candidate["signature"].get(retest_step["pointCode"], False)) == expected_retest_abnormal
+            ]
+            if not any(_candidate_key(candidate) == target_key for candidate in remaining):
+                remaining.append(target_candidate)
+        used_codes.difference_update(repair_step["invalidatedVirtualPointCodes"])
+        if retest_step is not None:
+            used_codes.add(retest_step["pointCode"])
+
+        unique_remaining = {_candidate_key(candidate) for candidate in remaining}
+        isolated = unique_remaining == {target_key}
+        if isolated:
+            break
+
+        ordinary_measurement_count = sum(
+            1 for step in steps
+            if step["action"] == "measure" and step.get("purpose") != "postRepairRetest"
+        )
+        next_measurement_steps, remaining, used_codes = _measurement_steps_for_target(
+            graph_data,
+            remaining,
+            target_candidate,
+            used_codes,
+            max(0, max_steps - ordinary_measurement_count),
+            len(steps) + 1,
+        )
+        steps.extend(next_measurement_steps)
+        unique_remaining = {_candidate_key(candidate) for candidate in remaining}
+        isolated = unique_remaining == {target_key}
+
+    fault_type_isolated = isolated
+    confirmed_repair_targets = _confirmed_repair_targets(graph_data, remaining) if not fault_type_isolated else []
+    repair_target_isolated = any(
+        target["resolvesEveryCandidateFault"]
+        for target in confirmed_repair_targets
+    )
+    # Exact fault type is not needed once one repair target resolves every
+    # fault in every remaining hypothesis.  The component/line is then the
+    # actionable isolation result.
+    isolated = fault_type_isolated or repair_target_isolated
+    active_target_fault_ids = [
+        fault_id for fault_id in normalized_target_ids
+        if fault_id not in repaired_target_fault_ids
+    ]
+    final_replacement_steps = (
+        _replacement_steps_from_knowledge_graph(knowledge_graph, active_target_fault_ids, len(steps) + 1)
+        if isolated and active_target_fault_ids
         else []
     )
-    steps = [*measurement_steps, *replacement_steps]
+    steps.extend(final_replacement_steps)
+    confirmed_repair_steps = _confirmed_repair_steps(confirmed_repair_targets, len(steps) + 1) if not isolated else []
+    steps.extend(confirmed_repair_steps)
+    replacement_steps = [
+        step for step in steps
+        if step["action"] in {"replaceComponent", "replaceWire"}
+    ]
     invalid_actions = [step.get("action") for step in steps if step.get("action") not in ALLOWED_ACTIONS]
     if invalid_actions:
         raise AssertionError(f"unsupported troubleshooting actions: {invalid_actions}")
@@ -795,6 +1327,20 @@ def build_multi_fault_troubleshooting_plan_from_knowledge_graph(
         "layer": " + ".join(dict.fromkeys(_text(row.get("layer"), "故障") for row in target_rows)),
         "targetLabel": "、".join(target_labels),
         "isolated": isolated,
+        "faultTypeIsolated": fault_type_isolated,
+        "repairTargetIsolated": repair_target_isolated,
+        "componentLocalized": bool(confirmed_repair_targets),
+        "confirmedRepairTargets": [
+            {
+                "action": target["action"],
+                "targetId": target["targetId"],
+                "targetKind": target["targetKind"],
+                "targetLabel": target["targetLabel"],
+                "relatedFaultIds": target["supportingFaultIds"],
+                "supportingCandidateCount": target["supportingCandidateCount"],
+            }
+            for target in confirmed_repair_targets
+        ],
         "knownConditions": known_conditions,
         "remainingCandidateFaultSets": [candidate["faultIds"] for candidate in remaining],
         "remainingCandidateFaultSetNames": [_candidate_names(candidate) for candidate in remaining],
@@ -808,7 +1354,8 @@ def build_multi_fault_troubleshooting_plan_from_knowledge_graph(
                     "pointCode": step["pointCode"],
                     "text": f"检测测点：{step['pointCode']} {step['pointName']}，预期结果为{'异常' if step['expectedState'] == 'abnormal' else '正常'}。",
                 }
-                for step in measurement_steps
+            for step in steps
+            if step["action"] == "measure"
             ],
             *[
                 {
@@ -818,12 +1365,19 @@ def build_multi_fault_troubleshooting_plan_from_knowledge_graph(
                     "targetLabel": step["targetLabel"],
                     "text": step["text"],
                 }
-                for step in replacement_steps
+            for step in replacement_steps
+            if step["action"] != "measure"
             ],
         ],
         "summary": (
             f"已通过人工 D 矩阵区分并定位{'单故障' if len(normalized_target_ids) == 1 else '多故障组合'}，按顺序执行检测和更换。"
-            if isolated
-            else f"当前测点不足以唯一隔离该{'单故障' if len(normalized_target_ids) == 1 else '多故障组合'}；路径停止在检测步骤，不给出未经唯一定位的更换动作。"
+            if fault_type_isolated
+            else f"故障类型无需继续区分：所有剩余候选均可通过更换{'、'.join(target['targetLabel'] for target in confirmed_repair_targets if target['resolvesEveryCandidateFault'])}解决，可直接执行更换。"
+            if repair_target_isolated
+            else f"当前测点尚不能区分具体故障组合，但已确认{'、'.join(target['targetLabel'] for target in confirmed_repair_targets)}存在故障；可先执行对应更换，再继续排查其余候选。"
+            if confirmed_repair_targets
+            else f"当前测点不足以唯一隔离该{'单故障' if len(normalized_target_ids) == 1 else '多故障组合'}；建议先执行替换验证并复测受影响的虚拟测点。"
+            if diagnostic_replacement_steps
+            else f"当前测点不足以唯一隔离该{'单故障' if len(normalized_target_ids) == 1 else '多故障组合'}；没有可区分候选的替换验证动作。"
         ),
     }

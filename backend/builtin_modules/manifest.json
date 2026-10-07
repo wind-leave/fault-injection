@@ -32,6 +32,90 @@
       }
     },
     {
+      "moduleId": "DZDK_A",
+      "importPath": "backend.builtin_modules.dzdk_a_filter",
+      "entryFunction": "process",
+      "inputs": ["socket01"],
+      "outputs": ["socket02"],
+      "parameters": {
+        "cutoff_frequency_hz": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000000,
+          "default": 1000
+        }
+      }
+    },
+    {
+      "moduleId": "DZDK_B",
+      "importPath": "backend.builtin_modules.dzdk_b_limiter",
+      "entryFunction": "process",
+      "inputs": ["socket01"],
+      "outputs": ["socket02"],
+      "parameters": {
+        "lower_limit": {
+          "type": "number",
+          "min": -1000000000,
+          "max": 1000000000,
+          "default": -1
+        },
+        "upper_limit": {
+          "type": "number",
+          "min": -1000000000,
+          "max": 1000000000,
+          "default": 1
+        }
+      }
+    },
+    {
+      "moduleId": "DZDK_C",
+      "importPath": "backend.builtin_modules.dzdk_c_downconverter",
+      "entryFunction": "process",
+      "inputs": ["socket01"],
+      "outputs": ["socket02", "socket03"],
+      "parameters": {
+        "lo_frequency_hz": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000000000,
+          "default": 990000000
+        },
+        "lo_phase_deg": {
+          "type": "number",
+          "min": -360,
+          "max": 360,
+          "default": 0
+        },
+        "conversion_gain": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000,
+          "default": 1
+        },
+        "low_pass_cutoff_hz": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000000000,
+          "default": 20000000
+        }
+      }
+    },
+    {
+      "moduleId": "DZDK_D",
+      "importPath": "backend.builtin_modules.dzdk_d_feature_extractor",
+      "entryFunction": "process",
+      "inputs": ["socket01"],
+      "outputs": ["socket02", "socket03", "socket04"],
+      "parameters": {
+        "window_size": {
+          "type": "integer",
+          "min": 1,
+          "max": 4096,
+          "default": 32
+        }
+      }
+    },
+    {
       "moduleId": "electrical_ac_power_source",
       "importPath": "backend.builtin_modules.electrical_ac_power_source",
       "entryFunction": "process",
@@ -439,6 +523,45 @@
       "parameters": {}
     },
     {
+      "moduleId": "rf_complex_envelope_scalar_source",
+      "importPath": "backend.builtin_modules.rf_complex_envelope_scalar_source",
+      "entryFunction": "process",
+      "inputs": [],
+      "outputs": [
+        "output_envelope"
+      ],
+      "parameters": {
+        "pulse_width_seconds": {"type": "number", "min": 0, "max": 1000000, "default": 0.001},
+        "pulse_period_seconds": {"type": "number", "min": 0, "max": 1000000, "default": 0.01},
+        "center_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 10},
+        "power_dbm": {"type": "number", "min": -300, "max": 100, "default": 0}
+      }
+    },
+    {
+      "moduleId": "rf_complex_envelope_to_vector4",
+      "importPath": "backend.builtin_modules.rf_complex_envelope_to_vector4",
+      "entryFunction": "process",
+      "inputs": [
+        "input_envelope"
+      ],
+      "outputs": [
+        "envelope_vector"
+      ],
+      "parameters": {}
+    },
+    {
+      "moduleId": "rf_complex_envelope_vector4_power_divider",
+      "importPath": "backend.builtin_modules.rf_complex_envelope_vector4_power_divider",
+      "entryFunction": "process",
+      "inputs": [
+        "input_envelope"
+      ],
+      "outputs": [
+        "output_envelope_vector"
+      ],
+      "parameters": {}
+    },
+    {
       "moduleId": "rf_four_channel_source",
       "importPath": "backend.builtin_modules.rf_four_channel_source",
       "entryFunction": "process",
@@ -564,16 +687,12 @@
       "importPath": "backend.builtin_modules.rf_four_port_up_down_converter",
       "entryFunction": "process",
       "inputs": [
-        "downconvert_rf_input_1",
-        "downconvert_rf_input_2",
-        "upconvert_baseband_input_1",
-        "upconvert_baseband_input_2"
+        "downconvert_rf_inputs",
+        "upconvert_baseband_inputs"
       ],
       "outputs": [
-        "downconverted_output_1",
-        "downconverted_output_2",
-        "upconverted_output_1",
-        "upconverted_output_2"
+        "downconverted_baseband_outputs",
+        "upconverted_rf_outputs"
       ],
       "parameters": {
         "downconvert_lo_frequency_hz": {
@@ -624,7 +743,8 @@
       ],
       "outputs": [
         "if_i",
-        "if_q"
+        "if_q",
+        "if_iq"
       ],
       "parameters": {
         "input_mode": {
@@ -668,13 +788,15 @@
       "importPath": "backend.builtin_modules.rf_pulse_feature_extractor",
       "entryFunction": "process",
       "inputs": [
-        "rf_signal"
+        "if_i",
+        "if_q"
       ],
       "outputs": [
         "center_frequency_hz",
         "pulse_period_seconds",
         "pulse_width_seconds",
-        "pulse_amplitude_adc"
+        "pulse_amplitude_adc",
+        "pulse_count"
       ],
       "parameters": {
         "fft_size": {
@@ -694,7 +816,133 @@
           "min": 0,
           "max": 255,
           "default": 12
+        },
+        "complex_filter_bandwidth_hz": {
+          "type": "number",
+          "min": 0,
+          "max": 1000000000000,
+          "default": 2000000000
         }
+      }
+    },
+    {
+      "moduleId": "rf_complex_envelope_pulse_feature_extractor",
+      "importPath": "backend.builtin_modules.rf_complex_envelope_pulse_feature_extractor",
+      "entryFunction": "process",
+      "inputs": ["input_envelope_vector"],
+      "outputs": ["center_frequency_hz", "pulse_period_seconds", "pulse_width_seconds", "pulse_amplitude_adc", "pulse_count"],
+      "parameters": {
+        "fft_size": {"type": "number", "min": 4, "max": 4096, "default": 1024},
+        "adc_full_scale": {"type": "number", "min": 1e-09, "max": 1000000, "default": 1},
+        "envelope_threshold_adc": {"type": "number", "min": 0, "max": 255, "default": 12},
+        "envelope_smoothing": {"type": "number", "min": 0, "max": 1, "default": 1}
+      }
+    },
+    {
+      "moduleId": "rf_band_pass_filter",
+      "importPath": "backend.builtin_modules.rf_band_pass_filter",
+      "entryFunction": "process",
+      "inputs": ["rf_input"],
+      "outputs": ["filtered_signal"],
+      "parameters": {
+        "center_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 1000000},
+        "bandwidth_hz": {"type": "number", "min": 1, "max": 1000000000000, "default": 100000}
+      }
+    },
+    {
+      "moduleId": "rf_complex_envelope_selector",
+      "importPath": "backend.builtin_modules.rf_complex_envelope_selector",
+      "entryFunction": "process",
+      "inputs": ["input_1", "input_2"],
+      "outputs": ["selected_envelope"],
+      "parameters": {
+        "selected_input": {"type": "number", "min": 1, "max": 2, "default": 1}
+      }
+    },
+    {
+      "moduleId": "rf_complex_envelope_vector4_dual_output_receiver",
+      "importPath": "backend.builtin_modules.rf_complex_envelope_vector4_dual_output_receiver",
+      "entryFunction": "process",
+      "inputs": ["input_envelope_vector"],
+      "outputs": ["output_envelope_vector_1", "output_envelope_vector_2"],
+      "parameters": {}
+    },
+    {
+      "moduleId": "rf_complex_envelope_gain",
+      "importPath": "backend.builtin_modules.rf_complex_envelope_gain",
+      "entryFunction": "process",
+      "inputs": ["input_envelope"],
+      "outputs": ["output_envelope"],
+      "parameters": {
+        "gain_db": {"type": "number", "min": -200, "max": 200, "default": 0}
+      }
+    },
+    {
+      "moduleId": "rf_complex_envelope_limiter",
+      "importPath": "backend.builtin_modules.rf_complex_envelope_limiter",
+      "entryFunction": "process",
+      "inputs": ["input_envelope"],
+      "outputs": ["output_envelope"],
+      "parameters": {
+        "limit_amplitude": {"type": "number", "min": 0, "max": 1000000, "default": 1}
+      }
+    },
+    {
+      "moduleId": "rf_complex_envelope_band_pass_filter",
+      "importPath": "backend.builtin_modules.rf_complex_envelope_band_pass_filter",
+      "entryFunction": "process",
+      "inputs": ["input_envelope"],
+      "outputs": ["filtered_envelope"],
+      "parameters": {
+        "center_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 1000000},
+        "bandwidth_hz": {"type": "number", "min": 1, "max": 1000000000000, "default": 100000}
+      }
+    },
+    {
+      "moduleId": "rf_complex_envelope_amplitude_phase_modulator",
+      "importPath": "backend.builtin_modules.rf_complex_envelope_amplitude_phase_modulator",
+      "entryFunction": "process",
+      "inputs": ["input_envelope"],
+      "outputs": ["output_envelope"],
+      "parameters": {
+        "amplitude_scale": {"type": "number", "min": 0, "max": 1000000, "default": 1},
+        "phase_shift_deg": {"type": "number", "min": -360, "max": 360, "default": 0}
+      }
+    },
+    {
+      "moduleId": "rf_complex_envelope_downconverter",
+      "importPath": "backend.builtin_modules.rf_complex_envelope_downconverter",
+      "entryFunction": "process",
+      "inputs": ["input_envelope"],
+      "outputs": ["output_envelope"],
+      "parameters": {
+        "lo_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 0},
+        "lo_phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0},
+        "conversion_gain": {"type": "number", "min": 0, "max": 1000000, "default": 1}
+      }
+    },
+    {
+      "moduleId": "rf_complex_envelope_upconverter",
+      "importPath": "backend.builtin_modules.rf_complex_envelope_upconverter",
+      "entryFunction": "process",
+      "inputs": ["input_envelope"],
+      "outputs": ["output_envelope"],
+      "parameters": {
+        "lo_frequency_hz": {"type": "number", "min": 0, "max": 1000000000000, "default": 0},
+        "lo_phase_deg": {"type": "number", "min": -360, "max": 360, "default": 0},
+        "conversion_gain": {"type": "number", "min": 0, "max": 1000000, "default": 1}
+      }
+    },
+    {
+      "moduleId": "rf_amplitude_phase_modulator",
+      "importPath": "backend.builtin_modules.rf_amplitude_phase_modulator",
+      "entryFunction": "process",
+      "inputs": ["input_i", "input_q"],
+      "outputs": ["output_i", "output_q"],
+      "parameters": {
+        "amplitude_scale": {"type": "number", "min": 0, "max": 1000000, "default": 1},
+        "phase_shift_deg": {"type": "number", "min": -360, "max": 360, "default": 0},
+        "output_filter_cutoff_hz": {"type": "number", "min": 0, "max": 1000000000, "default": 0}
       }
     },
     {

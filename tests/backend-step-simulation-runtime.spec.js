@@ -70,7 +70,7 @@ function createRuntimeTarget() {
 }
 
 describe('backend step simulation runtime', () => {
-  it('appends backend chunk channels into dual scope sample buckets', () => {
+  it('appends only actual backend channels into scope samples', () => {
     const target = createRuntimeTarget();
 
     appendBackendSimulationChunk(target, {
@@ -89,10 +89,7 @@ describe('backend step simulation runtime', () => {
       { t: 0, actual: 1 },
       { t: 0.1, actual: 1.1 }
     ]);
-    expect(target.__GZ_SIM__.reference.scopeSamples['scope-1'].ch1).toEqual([
-      { t: 0, actual: 0.9 },
-      { t: 0.1, actual: 1 }
-    ]);
+    expect(target.__GZ_SIM__.reference.scopeSamples['scope-1']).toBeUndefined();
     expect(target.__GZ_SIM__.actual.scopeSamples['scope-1'].ch2).toEqual([
       { t: 0, actual: 2 },
       { t: 0.1, actual: 2.1 }
@@ -100,6 +97,28 @@ describe('backend step simulation runtime', () => {
     expect(target.__GZ_SIM__.time).toBe(0.2);
     expect(target.__GZ_SIM__.stepIndex).toBe(2);
     expect(target.__GZ_SIM__.hasSamples).toBe(true);
+  });
+
+  it('reconstructs complex-envelope scope channels as real RF samples', () => {
+    const target = createRuntimeTarget();
+    const envelope = { i: 2, q: 0.5, referenceFrequencyHz: 10, impedanceOhm: 50, unit: 'V' };
+
+    appendBackendSimulationChunk(target, {
+      curves: {
+        time: [0, 0.025, 0.05, 0.075],
+        channels: {
+          'scope-1.ch1.actual': [envelope, envelope, envelope, envelope]
+        }
+      },
+      metrics: { sampleCount: 4, stepIndex: 4, time: 0.1, done: false }
+    });
+
+    expect(target.__GZ_SIM__.actual.scopeSamples['scope-1'].ch1.map((sample) => sample.actual)).toEqual([
+      expect.closeTo(2, 12),
+      expect.closeTo(-0.5, 12),
+      expect.closeTo(-2, 12),
+      expect.closeTo(0.5, 12)
+    ]);
   });
 
   it('appends backend component output traces for export', () => {
@@ -131,7 +150,7 @@ describe('backend step simulation runtime', () => {
     expect(target.__GZ_SIM__.componentOutputs.time).toEqual([0, 0.1]);
     expect(target.__GZ_SIM__.componentOutputs.steps).toHaveLength(2);
     expect(target.__GZ_SIM__.componentOutputs.steps[1].actual['sim-1'].output).toBe(1.5);
-    expect(target.__GZ_SIM__.componentOutputs.steps[1].reference['sim-1'].output).toBe(1);
+    expect(target.__GZ_SIM__.componentOutputs.steps[1]).not.toHaveProperty('reference');
   });
 
   it('syncs backend vector outputs into frontend node and edge runtime state', () => {
@@ -182,8 +201,8 @@ describe('backend step simulation runtime', () => {
     expect(target.__GZ_SIM__.actual.nodeStates.vectorizer.lastOutputs).toEqual([actualVector]);
     expect(target.__GZ_SIM__.actual.nodeStates.vectorizer.lastOutput).toEqual(actualVector);
     expect(target.__GZ_SIM__.actual.edgeStates['edge-vector-display'].lastOutput).toEqual(actualVector);
-    expect(target.__GZ_SIM__.reference.nodeStates.vectorizer.lastOutputs).toEqual([referenceVector]);
-    expect(target.__GZ_SIM__.reference.edgeStates['edge-vector-display'].lastOutput).toEqual(referenceVector);
+    expect(target.__GZ_SIM__.reference.nodeStates).toBeUndefined();
+    expect(target.__GZ_SIM__.reference.edgeStates).toBeUndefined();
   });
 
   it('syncs scalar and multi-port backend outputs for every simulation component', () => {
@@ -246,7 +265,7 @@ describe('backend step simulation runtime', () => {
     expect(target.__GZ_SIM__.actual.edgeStates['edge-scalar'].lastOutput).toBe(3.25);
     expect(target.__GZ_SIM__.actual.nodeStates['multi-component'].lastOutputs).toEqual([11, 22]);
     expect(target.__GZ_SIM__.actual.edgeStates['edge-multi-second'].lastOutput).toBe(22);
-    expect(target.__GZ_SIM__.reference.nodeStates['multi-component'].lastOutputs).toEqual([10, 20]);
+    expect(target.__GZ_SIM__.reference.nodeStates).toBeUndefined();
   });
 
   it('keeps the complete component output trace beyond the rolling display capacity', () => {
@@ -301,7 +320,94 @@ describe('backend step simulation runtime', () => {
       { t: 0, actual: 4 },
       { t: 0.1, actual: 5 }
     ]);
-    expect(target.__GZ_SIM__.reference.instrumentSamples['spectrum-1']).toBeUndefined();
+    expect(target.__GZ_SIM__.reference.instrumentSamples).toBeUndefined();
+  });
+
+  it('records I/Q samples and RF reference frequency when an ordinary spectrum analyzer receives a complex envelope', () => {
+    const target = createRuntimeTarget();
+    target.__GZ_STATE__.canvases = {
+      'canvas-root': {
+        nodes: [
+          {
+            id: 'source-1',
+            type: 'signal_source',
+            outputs: [{ name: 'out', dataType: 'rf_complex_envelope' }]
+          },
+          {
+            id: 'complex-spectrum-1',
+            type: 'instrument_spectrum',
+            // Every spectrum analyzer must retain each simulation step even
+            // if a stale saved model contains a much lower sample rate.
+            props: { sampleRate: '1Hz', fftSize: 16, vectorChannel: 2 }
+          }
+        ],
+        edges: [{
+          id: 'edge-source-complex-spectrum',
+          sourceNodeId: 'source-1',
+          sourcePortIndex: 0,
+          targetNodeId: 'complex-spectrum-1',
+          targetPortIndex: 0
+        }]
+      }
+    };
+    const sample = (i, q) => ({ i, q, referenceFrequencyHz: 20e9, impedanceOhm: 50, unit: 'V' });
+
+    appendBackendSimulationChunk(target, {
+      curves: { time: [0, 1e-7], channels: {} },
+      componentOutputs: {
+        time: [0, 1e-7],
+        steps: [
+          { time: 0, actual: { 'source-1': { out: [sample(1, 0), sample(9, 9)] } }, reference: { 'source-1': { out: [sample(1, 0), sample(9, 9)] } } },
+          { time: 1e-7, actual: { 'source-1': { out: [sample(0, 1), sample(8, 8)] } }, reference: { 'source-1': { out: [sample(0, 1), sample(8, 8)] } } }
+        ]
+      },
+      metrics: { sampleCount: 2, stepIndex: 2, time: 2e-7, done: false }
+    });
+
+    expect(target.__GZ_SIM__.actual.instrumentSamples['complex-spectrum-1']).toEqual([
+      { t: 0, actual: sample(9, 9) },
+      { t: 1e-7, actual: sample(8, 8) }
+    ]);
+    expect(target.__GZ_SIM__.reference.instrumentSamples).toBeUndefined();
+  });
+
+  it('records a spectrum signal connected to a subsystem output port', () => {
+    const target = createRuntimeTarget();
+    target.__GZ_STATE__.canvases = {
+      'canvas-root': {
+        nodes: [
+          {
+            id: 'subsystem-1',
+            type: 'subsystem_block',
+            targetCanvasId: 'canvas-subsystem',
+            props: { interface: { outputs: [{ id: 'out-1', componentNodeId: 'internal-source', componentPortIndex: 0 }] } }
+          },
+          { id: 'spectrum-1', type: 'instrument_spectrum', props: {} }
+        ],
+        edges: [{
+          id: 'edge-subsystem-spectrum',
+          sourceNodeId: 'subsystem-1',
+          sourcePortIndex: 0,
+          targetNodeId: 'spectrum-1',
+          targetPortIndex: 0
+        }]
+      },
+      'canvas-subsystem': {
+        nodes: [{ id: 'internal-source', type: 'simulation_block', outputs: [{ name: 'out' }] }],
+        edges: []
+      }
+    };
+
+    appendBackendSimulationChunk(target, {
+      curves: { time: [0], channels: {} },
+      componentOutputs: {
+        time: [0],
+        steps: [{ time: 0, actual: { 'internal-source': { out: 8.5 } }, reference: { 'internal-source': { out: 8 } } }]
+      },
+      metrics: { sampleCount: 1, stepIndex: 1, time: 0.1, done: false }
+    });
+
+    expect(target.__GZ_SIM__.actual.instrumentSamples['spectrum-1']).toEqual([{ t: 0, actual: 8.5 }]);
   });
 
   it('samples the selected output port of a multi-output simulation component', () => {
@@ -341,11 +447,11 @@ describe('backend step simulation runtime', () => {
     });
 
     expect(target.__GZ_SIM__.actual.instrumentSamples['logger-1']).toEqual([
-      { t: 0, actual: 22, reference: 20 }
+      { t: 0, actual: 22 }
     ]);
   });
 
-  it('decimates spectrum instrument samples to its configured sampling rate', () => {
+  it('captures every scalar spectrum sample at the simulation time step', () => {
     const target = createRuntimeTarget();
     target.__GZ_STATE__.canvases = {
       'canvas-root': {
@@ -374,13 +480,12 @@ describe('backend step simulation runtime', () => {
       metrics: { sampleCount: steps.length, stepIndex: steps.length, time: 0.0011, done: false }
     });
 
-    expect(target.__GZ_SIM__.actual.instrumentSamples['spectrum-1']).toEqual([
-      { t: 0, actual: 0 },
-      { t: 0.001, actual: 10 }
-    ]);
+    expect(target.__GZ_SIM__.actual.instrumentSamples['spectrum-1']).toEqual(
+      steps.map((step, index) => ({ t: step.time, actual: index }))
+    );
   });
 
-  it('retains spectrum samples up to its FFT window instead of the generic 720-point limit', () => {
+  it('retains spectrum samples up to its FFT window instead of the generic 1000-point limit', () => {
     const target = createRuntimeTarget();
     target.__GZ_STATE__.canvases = {
       'canvas-root': {
@@ -457,7 +562,7 @@ describe('backend step simulation runtime', () => {
 
     appendBackendSimulationChunk(target, chunk);
     expect(target.__GZ_SIM__.actual.instrumentSamples['meter-1']).toEqual([
-      { t: 0, actual: 12, reference: 10 }
+      { t: 0, actual: 12 }
     ]);
 
     target.__GZ_STATE__.canvases['canvas-root'].nodes.find((node) => node.id === 'meter-1').props = {
@@ -477,8 +582,8 @@ describe('backend step simulation runtime', () => {
     });
 
     expect(target.__GZ_SIM__.actual.instrumentSamples['meter-1']).toEqual([
-      { t: 0, actual: 12, reference: 10 },
-      { t: 0.1, actual: 12, reference: 10 }
+      { t: 0, actual: 12 },
+      { t: 0.1, actual: 12 }
     ]);
 
     target.__GZ_STATE__.canvases['canvas-root'].nodes.find((node) => node.id === 'meter-1').props = {
@@ -491,7 +596,7 @@ describe('backend step simulation runtime', () => {
       curves: { time: [0.2], channels: {} },
       componentOutputs: { ...chunk.componentOutputs, time: [0.2], steps: [{ ...chunk.componentOutputs.steps[0], time: 0.2 }] }
     });
-    expect(target.__GZ_SIM__.actual.instrumentSamples['meter-1'].at(-1)).toEqual({ t: 0.2, actual: 1, reference: 1 });
+    expect(target.__GZ_SIM__.actual.instrumentSamples['meter-1'].at(-1)).toEqual({ t: 0.2, actual: 1 });
 
     target.__GZ_STATE__.canvases['canvas-root'].nodes.find((node) => node.id === 'meter-1').props = {
       measurementMode: '直流电流',
@@ -515,7 +620,7 @@ describe('backend step simulation runtime', () => {
       curves: { time: [0.4], channels: {} },
       componentOutputs: { ...chunk.componentOutputs, time: [0.4], steps: [{ ...chunk.componentOutputs.steps[0], time: 0.4 }] }
     });
-    expect(target.__GZ_SIM__.actual.instrumentSamples['meter-1'].at(-1)).toEqual({ t: 0.4, actual: -12, reference: -10 });
+    expect(target.__GZ_SIM__.actual.instrumentSamples['meter-1'].at(-1)).toEqual({ t: 0.4, actual: -12 });
   });
 
   it('overrides simStep to create a backend session and append one step', async () => {
@@ -526,9 +631,9 @@ describe('backend step simulation runtime', () => {
 
     expect(target.__GZ_BACKEND_SIMULATION__.buildExecutablePackage).toHaveBeenCalledWith(target.__GZ_STATE__);
     expect(target.__GZ_BACKEND_SIMULATION__.createSession).toHaveBeenCalledWith({ schemaVersion: 1 });
-    expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenCalledWith('session-1', { steps: 1 });
+    expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenCalledWith('session-1', { steps: 1, actualOnly: true });
     expect(target.__GZ_SIM__.actual.scopeSamples['scope-1'].ch1.at(-1)).toEqual({ t: 0, actual: 1.2 });
-    expect(target.__GZ_SIM__.reference.scopeSamples['scope-1'].ch2.at(-1)).toEqual({ t: 0, actual: 2.0 });
+    expect(target.__GZ_SIM__.reference.scopeSamples['scope-1']).toBeUndefined();
     expect(target.__GZ_SIM__.stepIndex).toBe(1);
     expect(target.__GZ_STATE__.step).toBe(3);
     expect(target.renderSpectrumInstrument).toHaveBeenCalled();
@@ -589,7 +694,7 @@ describe('backend step simulation runtime', () => {
     await target.simStep();
 
     expect(target.__GZ_SIM__.actual.scopeSamples['scope-1'].ch1).toEqual([{ t: 0, actual: 0.33 }]);
-    expect(target.__GZ_SIM__.reference.scopeSamples['scope-1'].ch1).toEqual([{ t: 0, actual: 0.33 }]);
+    expect(target.__GZ_SIM__.reference.scopeSamples['scope-1']).toBeUndefined();
     expect(target.__GZ_SIM__.componentOutputs.time).toEqual([0]);
     expect(target.__GZ_SIM__.componentOutputs.steps[0].actual['node-error-sum'].output).toBe(0.330092);
   });
@@ -606,7 +711,7 @@ describe('backend step simulation runtime', () => {
 
     expect(target.__GZ_BACKEND_SIMULATION__.deleteSession).toHaveBeenCalledWith('session-1');
     expect(target.__GZ_BACKEND_SIMULATION__.createSession).toHaveBeenCalledTimes(2);
-    expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenLastCalledWith('session-1', { steps: 1 });
+    expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenLastCalledWith('session-1', { steps: 1, actualOnly: true });
   });
 
   it('discards the backend session before running after a parameter edit', async () => {
@@ -615,10 +720,145 @@ describe('backend step simulation runtime', () => {
     await target.simStep();
 
     target.__GZ_SIM__.inited = false;
+    target.__GZ_BACKEND_SIMULATION__.stepSession.mockImplementationOnce(() => new Promise(() => {}));
     await target.simRun();
 
     expect(target.__GZ_BACKEND_SIMULATION__.deleteSession).toHaveBeenCalledWith('session-1');
     expect(target.__GZ_SIM__.backendSessionId).toBe('');
+  });
+
+  it('uses the configured request batch size while continuous simulation is running', async () => {
+    const target = createRuntimeTarget();
+    target.__GZ_SIM__.requestSteps = 300;
+    target.__GZ_BACKEND_SIMULATION__.stepSession.mockResolvedValueOnce({
+      status: 'success',
+      curves: { time: [0], channels: {} },
+      metrics: { sampleCount: 1, stepIndex: 3, time: 0.3, done: true }
+    });
+
+    installBackendStepSimulationRuntime(target);
+    await target.simRun();
+    await vi.waitFor(() => {
+      expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenCalledWith('session-1', { steps: 300, actualOnly: true });
+    });
+  });
+
+  it('uses the restored workbench request batch size when the runtime has not initialized it yet', async () => {
+    const target = createRuntimeTarget();
+    delete target.__GZ_SIM__.requestSteps;
+    target.__GZ_STATE__.simulationRequestSteps = 300;
+    target.__GZ_BACKEND_SIMULATION__.stepSession.mockResolvedValueOnce({
+      status: 'success',
+      curves: { time: [0], channels: {} },
+      metrics: { sampleCount: 1, stepIndex: 3, time: 0.3, done: true }
+    });
+
+    installBackendStepSimulationRuntime(target);
+    await target.simRun();
+    await vi.waitFor(() => {
+      expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenCalledWith('session-1', { steps: 300, actualOnly: true });
+    });
+  });
+
+  it('starts the next batch immediately and refreshes the view at most every 100 ms', async () => {
+    const target = createRuntimeTarget();
+    const pendingBatches = [];
+    let refreshView;
+    target.setInterval.mockImplementation((callback, interval) => {
+      expect(interval).toBe(100);
+      refreshView = callback;
+      return 123;
+    });
+    target.__GZ_BACKEND_SIMULATION__.stepSession.mockImplementation(() => new Promise((resolve) => {
+      pendingBatches.push(resolve);
+    }));
+    const finishBatch = (batchCount) => pendingBatches.shift()({
+      status: 'success',
+      sessionId: 'session-1',
+      curves: { time: [(batchCount - 1) * 0.1], channels: {} },
+      componentOutputs: { time: [], steps: [] },
+      metrics: { sampleCount: 1, stepIndex: batchCount, time: batchCount * 0.1, done: batchCount === 3 }
+    });
+
+    installBackendStepSimulationRuntime(target);
+    await target.simRun();
+    expect(target.renderScopeWindows).toHaveBeenCalledTimes(1);
+
+    await vi.waitFor(() => expect(pendingBatches).toHaveLength(1));
+    finishBatch(1);
+    await vi.waitFor(() => expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenCalledTimes(2));
+    expect(target.renderScopeWindows).toHaveBeenCalledTimes(1);
+
+    finishBatch(2);
+    await vi.waitFor(() => expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenCalledTimes(3));
+    refreshView();
+    expect(target.renderScopeWindows).toHaveBeenCalledTimes(2);
+    refreshView();
+    expect(target.renderScopeWindows).toHaveBeenCalledTimes(2);
+
+    finishBatch(3);
+    await vi.waitFor(() => expect(target.__GZ_SIM__.running).toBe(false));
+    expect(target.renderScopeWindows).toHaveBeenCalledTimes(3);
+    expect(target.publishSimulationRuntimeSummary).toHaveBeenLastCalledWith('completed');
+    expect(target.clearInterval).toHaveBeenCalledWith(123);
+  });
+
+  it('does not queue another batch while paused with a step request in flight', async () => {
+    const target = createRuntimeTarget();
+    let finishStep;
+    target.__GZ_BACKEND_SIMULATION__.stepSession.mockImplementationOnce(() => new Promise((resolve) => {
+      finishStep = resolve;
+    }));
+    target.__GZ_BACKEND_SIMULATION__.stepSession.mockImplementationOnce(() => new Promise(() => {}));
+
+    installBackendStepSimulationRuntime(target);
+    await target.simRun();
+    await vi.waitFor(() => {
+      expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenCalledTimes(1);
+    });
+
+    target.simPause();
+    finishStep({
+      status: 'success',
+      sessionId: 'session-1',
+      curves: { time: [0], channels: {} },
+      componentOutputs: { time: [], steps: [] },
+      metrics: { sampleCount: 1, stepIndex: 1, time: 0.1, done: false }
+    });
+    await vi.waitFor(() => expect(target.__GZ_SIM__.stepIndex).toBe(1));
+    expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenCalledTimes(1);
+    expect(target.publishSimulationRuntimeSummary).toHaveBeenLastCalledWith('paused');
+
+    target.simPause();
+    await vi.waitFor(() => {
+      expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenCalledTimes(2);
+    });
+    expect(target.__GZ_SIM__.paused).toBe(false);
+  });
+
+  it('ignores an in-flight batch after stopping continuous simulation', async () => {
+    const target = createRuntimeTarget();
+    let finishStep;
+    target.__GZ_BACKEND_SIMULATION__.stepSession.mockImplementationOnce(() => new Promise((resolve) => {
+      finishStep = resolve;
+    }));
+
+    installBackendStepSimulationRuntime(target);
+    await target.simRun();
+    await vi.waitFor(() => expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenCalledTimes(1));
+    await target.simStop('manual');
+
+    finishStep({
+      status: 'success',
+      sessionId: 'session-1',
+      curves: { time: [0], channels: {} },
+      componentOutputs: { time: [], steps: [] },
+      metrics: { sampleCount: 1, stepIndex: 1, time: 0.1, done: false }
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenCalledTimes(1);
+    expect(target.__GZ_SIM__.stepIndex).toBe(0);
+    expect(target.__GZ_SIM__.actual.scopeSamples).toEqual({});
   });
 
   it('deletes the backend session when simulation stops', async () => {
@@ -630,6 +870,22 @@ describe('backend step simulation runtime', () => {
 
     expect(target.__GZ_BACKEND_SIMULATION__.deleteSession).toHaveBeenCalledWith('session-1');
     expect(target.__GZ_SIM__.backendSessionId).toBe('');
+  });
+
+  it('restarts the backend session when a manually added test point changes observed outputs', async () => {
+    const target = createRuntimeTarget();
+    installBackendStepSimulationRuntime(target);
+
+    await target.simStep();
+    target.__GZ_STATE__.manualDiagnosticTestPoints = [{
+      pointId: 'point-1',
+      edgeId: 'edge-source-sim'
+    }];
+    await target.simStep();
+
+    expect(target.__GZ_BACKEND_SIMULATION__.deleteSession).toHaveBeenCalledWith('session-1');
+    expect(target.__GZ_BACKEND_SIMULATION__.createSession).toHaveBeenCalledTimes(2);
+    expect(target.__GZ_SIM__.time).toBe(0.1);
   });
 
   it('keeps the second simulation session when the first session finishes deleting late', async () => {
@@ -663,19 +919,14 @@ describe('backend step simulation runtime', () => {
     await secondStep;
 
     expect(target.__GZ_BACKEND_SIMULATION__.createSession).toHaveBeenCalledTimes(2);
-    expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenLastCalledWith('session-2', { steps: 1 });
+    expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenLastCalledWith('session-2', { steps: 1, actualOnly: true });
     expect(target.__GZ_SIM__.backendSessionId).toBe('session-2');
     expect(target.__GZ_SIM__.componentOutputs.time).toEqual([]);
   });
 
   it('runs a completed simulation a second time with a fresh backend session', async () => {
     const target = createRuntimeTarget();
-    const timerCallbacks = [];
     let sessionSequence = 0;
-    target.setInterval.mockImplementation((callback) => {
-      timerCallbacks.push(callback);
-      return timerCallbacks.length;
-    });
     target.__GZ_BACKEND_SIMULATION__.createSession.mockImplementation(async () => {
       sessionSequence += 1;
       return { status: 'success', sessionId: `session-${sessionSequence}` };
@@ -690,15 +941,14 @@ describe('backend step simulation runtime', () => {
 
     installBackendStepSimulationRuntime(target);
     await target.simRun();
-    await timerCallbacks[0]();
-    expect(target.__GZ_BACKEND_SIMULATION__.deleteSession).toHaveBeenCalledWith('session-1');
+    await vi.waitFor(() => expect(target.__GZ_BACKEND_SIMULATION__.deleteSession).toHaveBeenCalledWith('session-1'));
 
     await target.simRun();
-    await timerCallbacks[1]();
-
-    expect(target.__GZ_BACKEND_SIMULATION__.createSession).toHaveBeenCalledTimes(2);
-    expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenLastCalledWith('session-2', { steps: 1 });
-    expect(target.__GZ_BACKEND_SIMULATION__.deleteSession).toHaveBeenLastCalledWith('session-2');
+    await vi.waitFor(() => expect(target.__GZ_BACKEND_SIMULATION__.createSession).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => {
+      expect(target.__GZ_BACKEND_SIMULATION__.stepSession).toHaveBeenLastCalledWith('session-2', { steps: 1, actualOnly: true });
+      expect(target.__GZ_BACKEND_SIMULATION__.deleteSession).toHaveBeenLastCalledWith('session-2');
+    });
   });
 
   it('ignores a late step response from the previous simulation run', async () => {

@@ -52,8 +52,65 @@ class PracticeActionRuntimeTests(unittest.TestCase):
                 "targetId": "console-1",
                 "parameters": {"value": 9.0, "frequency": 100.0},
             })
-        self.assertEqual(context.exception.error_code, "PARAMETER_NOT_ALLOWED")
+        self.assertEqual(context.exception.error_code, "INVALID_ACTION_SCHEMA")
         self.assertEqual(session.graph.nodes["source-1"].parameters["value"], 2.5)
+
+    def test_display_console_can_control_multiple_components_one_action_at_a_time(self):
+        session = self._session()
+        runtime = PracticeActionRuntime(session, display_console_controls=[
+            {
+                "displayConsoleId": "console-1",
+                "targetComponentId": "source-1",
+                "parameterKeys": ["value"],
+            },
+            {
+                "displayConsoleId": "console-1",
+                "targetComponentId": "sim-1",
+                "parameterKeys": ["gain"],
+            },
+        ])
+
+        result = runtime.apply({
+            "actionType": "adjustDisplayConsoleParameter",
+            "targetId": "console-1",
+            "componentId": "sim-1",
+            "parameters": {"gain": 3.0},
+        })
+
+        self.assertEqual(result["changes"][0]["nodeId"], "sim-1")
+        self.assertEqual(session.graph.nodes["sim-1"].parameters["gain"], 3.0)
+
+    def test_display_console_records_operator_setting_while_physical_fault_overrides_runtime_value(self):
+        package = valid_package()
+        package["faultInstances"] = [{
+            "faultId": "source-output-mode-stuck",
+            "faultType": "parameter_step",
+            "targetId": "source-1",
+            "injectionForm": "module-variable",
+            "parameterKey": "value",
+            "startTime": 0.0,
+            "parameters": {"targetValue": 1.0},
+        }]
+        session = self._session(package)
+        runtime = PracticeActionRuntime(session, display_console_controls=[{
+            "displayConsoleId": "console-1",
+            "targetComponentId": "source-1",
+            "parameterKeys": ["value"],
+        }])
+
+        runtime.apply({
+            "actionType": "adjustDisplayConsoleParameter",
+            "targetId": "console-1",
+            "parameters": {"value": 2.0},
+        })
+
+        # The stored component parameter is the operator's latest setting;
+        # the actual simulation receives the value imposed by the fault.
+        self.assertEqual(session.graph.nodes["source-1"].parameters["value"], 2.0)
+        actual_parameters = session.fault_runtime.apply_node_parameters(
+            "source-1", session.graph.nodes["source-1"].parameters, 0.0
+        )
+        self.assertEqual(actual_parameters["value"], 1.0)
 
     def test_repair_component_disables_matching_runtime_faults(self):
         package = valid_package()
@@ -99,6 +156,45 @@ class PracticeActionRuntimeTests(unittest.TestCase):
         self.assertEqual(result["status"], "applied")
         self.assertEqual(result["changes"][0]["type"], "fault_disabled")
         self.assertFalse(session.fault_runtime.fault_instances[0]["enabled"])
+
+    def test_replace_wire_applies_to_every_backing_edge(self):
+        package = valid_package()
+        package["faultInstances"] = [
+            {
+                "faultId": "fault-wire-input",
+                "faultType": "wire_open",
+                "targetId": "edge-source-sim",
+                "enabled": True,
+                "startTime": 0.0,
+                "duration": 0.3,
+                "parameters": {},
+            },
+            {
+                "faultId": "fault-wire-output",
+                "faultType": "wire_open",
+                "targetId": "edge-sim-scope",
+                "enabled": True,
+                "startTime": 0.0,
+                "duration": 0.3,
+                "parameters": {},
+            },
+        ]
+        session = self._session(package)
+        runtime = PracticeActionRuntime(session)
+
+        result = runtime.apply({
+            "actionType": "replaceWire",
+            "targetId": "edge-source-sim",
+            "targetIds": ["edge-source-sim", "edge-sim-scope"],
+        })
+
+        self.assertFalse(any(fault["enabled"] for fault in session.fault_runtime.fault_instances))
+        replacement = result["changes"][-1]
+        self.assertEqual(replacement["wireIds"], ["edge-source-sim", "edge-sim-scope"])
+        self.assertEqual(
+            replacement["clearedFaultIds"],
+            ["fault-wire-input", "fault-wire-output"],
+        )
 
     def test_replacement_uses_target_and_ignores_optional_mismatched_fault_id(self):
         package = valid_package()

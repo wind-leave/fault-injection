@@ -13,6 +13,9 @@ import {
   findCompatibleFaultTarget
 } from '../src/services/faultInjectionService.js';
 import {
+  getFaultSlotVectorLength
+} from '../src/services/faultBindingRuntimeService.js';
+import {
   createWorkbenchSnapshot,
   restoreWorkbenchSnapshot
 } from '../src/services/workbenchSnapshotService.js';
@@ -363,7 +366,11 @@ describe('flightModelPackageService', () => {
     ];
 
     const snapshot = createWorkbenchSnapshot({
-      modelNodes: [],
+      modelNodes: [{
+        id: 'node-imu',
+        type: 'simulation_block',
+        props: { name: 'IMU', inputs: [], outputs: [], middleVars: [] }
+      }],
       modelEdges: [],
       faultInstances
     });
@@ -382,6 +389,16 @@ describe('flightModelPackageService', () => {
     expect(restored.faultInstances).toEqual(faultInstances);
     expect(packageData.faultInstances).toEqual(faultInstances);
     expect(applied.snapshot.faultInstances).toEqual(faultInstances);
+    expect(applied.snapshot.modelNodes[0]).toMatchObject({
+      injectedFault: {
+        instanceId: 'fault-0526-gyro-bias',
+        modelId: 'gyro_zero_bias_offset'
+      },
+      faultBindings: [expect.objectContaining({
+        faultTypeId: 'gyro_zero_bias_offset',
+        active: true
+      })]
+    });
   });
 
   it('does not save custom python modules in a flight model package', () => {
@@ -785,6 +802,150 @@ describe('flightModelPackageService', () => {
       moduleId: 'scalar_to_vector4',
       entryFunction: 'process'
     });
+  });
+
+  it('keeps an internal simulation component runnable after saving and importing a subsystem', () => {
+    const template = COMPONENT_REGISTRY.scalar_to_vector4;
+    const component = {
+      id: 'internal-vectorizer',
+      type: 'simulation_block',
+      templateId: template.templateId,
+      props: JSON.parse(JSON.stringify(template.defaults)),
+      ports: JSON.parse(JSON.stringify(template.ports)),
+      pythonBinding: JSON.parse(JSON.stringify(template.pythonBinding))
+    };
+    const state = {
+      rootCanvasId: 'canvas-root',
+      activeCanvasId: 'canvas-root',
+      canvases: {
+        'canvas-root': {
+          id: 'canvas-root', nodes: [
+            { id: 'source', type: 'signal_source', props: { value: 2 }, outputs: [{ name: 'out' }] },
+            {
+              id: 'subsystem', type: 'subsystem_block', targetCanvasId: 'canvas-child',
+              props: { interface: {
+                inputs: [{ id: 'shared-port', order: 0, componentNodeId: component.id, componentPortIndex: 0 }],
+                outputs: [{ id: 'shared-port', order: 0, componentNodeId: component.id, componentPortIndex: 0 }]
+              } }
+            },
+            { id: 'scope', type: 'instrument_scope', props: {}, inputs: [{ name: 'CH1', dataType: 'vector', vectorLength: 4 }] }
+          ], edges: [
+            { id: 'source-subsystem', sourceNodeId: 'source', sourcePortIndex: 0, targetNodeId: 'subsystem', targetPortIndex: 0 },
+            { id: 'subsystem-scope', sourceNodeId: 'subsystem', sourcePortIndex: 0, targetNodeId: 'scope', targetPortIndex: 0 }
+          ]
+        },
+        'canvas-child': {
+          id: 'canvas-child', parentSubsystemNodeId: 'subsystem',
+          nodes: [
+            { id: 'boundary-in', type: 'subsystem_in_port', props: { interfacePortId: 'shared-port', order: 0 } },
+            component,
+            { id: 'boundary-out', type: 'subsystem_out_port', props: { interfacePortId: 'shared-port', order: 0 } }
+          ], edges: [
+            { id: 'boundary-component', sourceNodeId: 'boundary-in', sourcePortIndex: 0, targetNodeId: component.id, targetPortIndex: 0 },
+            { id: 'component-boundary', sourceNodeId: component.id, sourcePortIndex: 0, targetNodeId: 'boundary-out', targetPortIndex: 0 }
+          ]
+        }
+      }
+    };
+    const saved = buildFlightModelPackage({ meta: { modelId: 'subsystem-round-trip' }, snapshot: state });
+    const imported = applyFlightModelPackage(saved);
+    expect(imported.ok).toBe(true);
+    expect(imported.snapshot.canvases['canvas-child'].nodes.find((node) => node.id === component.id)?.pythonBinding)
+      .toMatchObject({ moduleId: 'scalar_to_vector4', entryFunction: 'process', bound: true });
+
+    const executable = buildBackendExecutablePackage(imported.snapshot);
+    expect(executable.nodes.find((node) => node.id === component.id)?.outputs)
+      .toEqual([expect.objectContaining({ dataType: 'vector', vectorLength: 4 })]);
+    expect(executable.edges).toEqual([
+      expect.objectContaining({ sourceNodeId: 'source', targetNodeId: component.id }),
+      expect.objectContaining({ sourceNodeId: component.id, targetNodeId: 'scope' })
+    ]);
+  });
+
+  it('keeps named vector elements on electrical fault slots after save and re-import', () => {
+    const template = COMPONENT_REGISTRY.rf_four_port_up_down_converter;
+    const simulationNode = {
+      id: 'rf-converter-node',
+      type: 'simulation_block',
+      templateId: template.templateId,
+      props: JSON.parse(JSON.stringify(template.defaults)),
+      ports: JSON.parse(JSON.stringify(template.ports)),
+      pythonBinding: JSON.parse(JSON.stringify(template.pythonBinding)),
+      faultSlots: JSON.parse(JSON.stringify(template.faultSlots))
+    };
+    const savedPackage = buildFlightModelPackage({
+      meta: { modelId: 'named-vector-save-import', modelName: 'Named Vector Save Import' },
+      snapshot: { modelNodes: [simulationNode], modelEdges: [] }
+    });
+    const imported = applyFlightModelPackage(savedPackage);
+    const outputSlot = imported.snapshot.modelNodes[0].faultSlots
+      .find((slot) => slot.slotId === 'electrical:output:downconverted_baseband_outputs');
+
+    expect(imported.ok).toBe(true);
+    expect(outputSlot).toMatchObject({
+      targetField: 'outputs.downconverted_baseband_outputs',
+      bindingObject: 'downconverted_baseband_outputs',
+      dataType: 'vector',
+      vectorLength: 2,
+      vectorElementNames: ['下变频基带输出 1（I）', '下变频基带输出 2（I）']
+    });
+  });
+
+  it('keeps RF pulse settings and scalar electrical slots correct after package save and import', () => {
+    const savedPackage = buildFlightModelPackage({
+      meta: { modelId: 'pulse-and-scalar-round-trip', modelName: 'Pulse And Scalar Round Trip' },
+      snapshot: {
+        modelNodes: [
+          {
+            id: 'rf-source',
+            type: 'signal_source',
+            props: {
+              signalDomain: 'rf',
+              modulation: '脉冲调制',
+              pulseWidth: '250us',
+              pulsePeriod: '1ms'
+            }
+          },
+          {
+            id: 'scalar-component',
+            type: 'simulation_block',
+            props: {
+              inputs: [{ varName: 'scalar_input', name: '标量输入', dataType: 'scalar', vectorLength: 4 }],
+              outputs: [],
+              middleVars: []
+            },
+            faultSlots: [{
+              slotId: 'electrical:input:scalar_input',
+              layer: 'electrical',
+              targetField: 'inputs.scalar_input',
+              bindingObject: 'scalar_input',
+              dataType: 'vector',
+              vectorLength: 4
+            }]
+          }
+        ],
+        modelEdges: []
+      }
+    });
+    const savedScalarSlot = savedPackage.workbenchSnapshot.modelNodes.find((node) => node.id === 'scalar-component')?.faultSlots
+      .find((slot) => slot.slotId === 'electrical:input:scalar_input');
+    expect(savedScalarSlot).toMatchObject({ dataType: 'scalar' });
+    expect(savedScalarSlot).not.toHaveProperty('vectorLength');
+    const imported = applyFlightModelPackage(savedPackage);
+
+    expect(imported.ok).toBe(true);
+    expect(imported.snapshot.modelNodes.find((node) => node.id === 'rf-source')?.props).toMatchObject({
+      modulation: 'pulse',
+      pulseWidth: '250',
+      pulseWidthUnit: 'μs',
+      pulsePeriod: '1',
+      pulsePeriodUnit: 'ms'
+    });
+    const scalarSlot = imported.snapshot.modelNodes.find((node) => node.id === 'scalar-component')?.faultSlots
+      .find((slot) => slot.slotId === 'electrical:input:scalar_input');
+    expect(scalarSlot).toMatchObject({ dataType: 'scalar' });
+    expect(scalarSlot).not.toHaveProperty('vectorLength');
+    expect(getFaultSlotVectorLength(scalarSlot)).toBe(0);
   });
 
   it('skips incomplete bound simulation blocks when exporting python modules', () => {
@@ -1233,23 +1394,27 @@ describe('flightModelPackageService', () => {
     expect(node.faultSlots.some((slot) => slot.slotId === 'physical:missing_gain')).toBe(false);
   });
 
-  it('defines distinct physical-layer math models for slot selection', () => {
+  it('limits physical-layer math models to degradation', () => {
     const byId = Object.fromEntries(
       FAULT_MATH_MODEL_DEFINITIONS.physical.map((model) => [model.id, model])
     );
 
-    expect(Object.keys(byId)).toEqual([
-      'bias',
-      'drift',
-      'step',
-      'degradation',
-      'freeze',
-      'random'
+    expect(Object.keys(byId)).toEqual(['degradation']);
+    expect(byId.degradation.formula).toBe('p_fault = p * scale(t)');
+    expect(byId.degradation.defaultParameters).toEqual({ scale: 0.85, start: 0, duration: '' });
+  });
+
+  it('limits electrical-layer math models to attenuation and cutoff', () => {
+    expect(FAULT_MATH_MODEL_DEFINITIONS.electrical).toEqual([
+      expect.objectContaining({
+        id: 'attenuation',
+        defaultParameters: { attenuation_db: 6, start: 0, duration: '' }
+      }),
+      expect.objectContaining({
+        id: 'data_cutoff',
+        defaultParameters: { start: 0, duration: '' }
+      })
     ]);
-    expect(byId.bias.formula).toBe('p_fault = p + bias');
-    expect(byId.drift.formula).toBe('p_fault = p + rate * max(t - start, 0)');
-    expect(byId.freeze.defaultParameters).toEqual({ start: 0 });
-    expect(byId.random.defaultParameters).toMatchObject({ seed: 1, std: 0.08 });
   });
 
   it('limits protocol-layer math models to attenuation and cutoff', () => {

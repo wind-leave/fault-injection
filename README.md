@@ -18,6 +18,8 @@ https://blank1cheng.github.io/uav-fault-platform/
 
 ## 本地运行
 
+Windows 可双击项目根目录的 `启动故障注入平台.cmd`，脚本会启动前端与后端，待两者就绪后自动打开浏览器。关闭分别标有 Frontend 和 Backend 的命令窗口即可停止服务。若前端依赖尚未安装，脚本会先执行 `npm ci`。
+
 进入项目目录后执行：
 
 ```bash

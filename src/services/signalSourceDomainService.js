@@ -11,7 +11,47 @@ function numberOrFallback(value, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
-export const RF_VECTOR_LENGTH_LIMITS = { min: 2, max: 16 };
+export const RF_VECTOR_LENGTH_LIMITS = { min: 2, max: 64 };
+
+const RF_MODULATION_ALIASES = {
+  cw: 'cw',
+  '连续波': 'cw',
+  '连续波(cw)': 'cw',
+  '连续波（cw）': 'cw',
+  am: 'am',
+  '幅度调制': 'am',
+  '幅度调制(am)': 'am',
+  '幅度调制（am）': 'am',
+  fm: 'fm',
+  '频率调制': 'fm',
+  '频率调制(fm)': 'fm',
+  '频率调制（fm）': 'fm',
+  pm: 'pm',
+  '相位调制': 'pm',
+  '相位调制(pm)': 'pm',
+  '相位调制（pm）': 'pm',
+  pulse: 'pulse',
+  pulsed: 'pulse',
+  '脉冲': 'pulse',
+  '脉冲调制': 'pulse',
+  '脉冲信号': 'pulse',
+  digital: 'digital',
+  '数字调制': 'digital',
+  noise: 'noise',
+  '噪声': 'noise',
+  '干扰': 'noise',
+  '噪声/干扰': 'noise'
+};
+
+// Older/imported models sometimes persist the display label rather than the
+// select value.  Keep unknown values intact so that custom extensions are not
+// discarded, while converting known labels to the runtime values.
+export function normalizeRfModulation(value, fallback = 'cw') {
+  const text = String(value ?? '').trim();
+  if (!text) return fallback;
+  const key = text.toLowerCase().replace(/\s+/g, '');
+  return RF_MODULATION_ALIASES[key] || text;
+}
 
 export function normalizeRfVectorLength(value, fallback = 4) {
   const numeric = Math.trunc(Number(value));
@@ -37,6 +77,17 @@ export function formatRfVectorValues(value, length = 4) {
 export function isRfVectorOutput(props = {}) {
   return normalizeSignalDomain(props.signalDomain) === 'rf'
     && ['vector', '向量'].includes(String(props.outputFormat ?? '').trim().toLowerCase());
+}
+
+export function isRfComplexEnvelopeOutput(props = {}) {
+  return normalizeSignalDomain(props.signalDomain) === 'rf'
+    && ['rf_complex_envelope', 'rf-complex-envelope', '复数包络'].includes(
+      String(props.outputFormat ?? '').trim().toLowerCase()
+    );
+}
+
+export function isRfComplexEnvelopeVectorOutput(props = {}) {
+  return isRfComplexEnvelopeOutput(props) && props.rfComplexEnvelopeMode === 'vector';
 }
 
 export const SIGNAL_DOMAINS = [
@@ -113,15 +164,24 @@ const DOMAIN_DEFAULTS = {
     symbolRate: '',
     phase: '',
     snr: '',
+    noiseEnabled: 'off',
+    noiseSnr: '20',
+    noiseBandwidth: '1',
+    noiseBandwidthUnit: 'MHz',
     sampleRate: '',
     pulseWidth: '',
     pulseWidthUnit: 'μs',
     pulsePeriod: '',
     pulsePeriodUnit: 'ms',
+    riseTime: '',
+    riseTimeUnit: 'ns',
+    fallTime: '',
+    fallTimeUnit: 'ns',
     channel: '',
     polarization: '',
     rfProfile: '',
     outputFormat: '标量',
+    rfComplexEnvelopeMode: 'scalar',
     rfVectorLength: 4,
     rfVectorConfigMode: 'batch',
     rfVectorValues: '1, 1, 1, 1'
@@ -159,7 +219,28 @@ export function normalizeSignalSourceProps(props = {}) {
     if (!String(normalized.power ?? '').trim()) {
       normalized.power = '0';
     }
+    normalized.modulation = normalizeRfModulation(normalized.modulation);
+    if (isRfComplexEnvelopeOutput(normalized)) {
+      // Complex-envelope output is intentionally the pulsed-RF model.  The
+      // envelope itself supplies the only modulation needed at this stage.
+      // Its pulse is ideal rectangular gating, so edge-time controls do not
+      // belong to this source contract (including older saved models).
+      normalized.modulation = 'pulse';
+      delete normalized.riseTime;
+      delete normalized.riseTimeUnit;
+      delete normalized.fallTime;
+      delete normalized.fallTimeUnit;
+    }
+    // “噪声”曾被当作一种调制方式。保留旧模型的效果，但将其迁移为
+    // 连续波叠加噪声，使噪声配置与所有调制方式使用同一套参数。
+    if (normalized.modulation === 'noise') {
+      normalized.modulation = 'cw';
+      normalized.noiseEnabled = 'on';
+      if (!String(original.noiseSnr ?? '').trim()) normalized.noiseSnr = normalized.snr || '20';
+      if (!String(original.noiseBandwidth ?? '').trim()) normalized.noiseBandwidth = normalized.bandwidth || '1';
+    }
     normalized.rfVectorLength = normalizeRfVectorLength(normalized.rfVectorLength);
+    normalized.rfComplexEnvelopeMode = normalized.rfComplexEnvelopeMode === 'vector' ? 'vector' : 'scalar';
     normalized.rfVectorConfigMode = normalized.rfVectorConfigMode === 'item' ? 'item' : 'batch';
     normalized.rfVectorValues = formatRfVectorValues(normalized.rfVectorValues, normalized.rfVectorLength);
     ['pulseWidth', 'pulsePeriod'].forEach((key) => {

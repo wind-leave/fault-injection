@@ -34,7 +34,8 @@ export function createEmptyAuthoringPackage({ modelId = 'untitled-model', modelN
     faultInstances: [],
     diagnosticModel: {
       testPoints: [],
-      detectabilityMatrix: []
+      detectabilityMatrix: [],
+      diagnosticConditions: []
     },
     pythonModules: []
   };
@@ -73,7 +74,8 @@ export function normalizeAuthoringPackage(pkg = {}) {
     diagnosticModel: {
       ...diagnosticModel,
       testPoints: arrayOrEmpty(diagnosticModel.testPoints ?? source.testPoints),
-      detectabilityMatrix: arrayOrEmpty(diagnosticModel.detectabilityMatrix ?? source.detectabilityMatrix)
+      detectabilityMatrix: arrayOrEmpty(diagnosticModel.detectabilityMatrix ?? source.detectabilityMatrix),
+      diagnosticConditions: arrayOrEmpty(diagnosticModel.diagnosticConditions ?? source.diagnosticConditions)
     },
     pythonModules: arrayOrEmpty(source.pythonModules)
 };

@@ -53,11 +53,28 @@ class DiagnosticKnowledgeTests(unittest.TestCase):
             matrix,
             model_graph={
                 "modelNodes": [
-                    {"id": "node-a", "type": "simulation_block", "props": {"name": "设备A"}},
-                    {"id": "node-b", "type": "simulation_block", "props": {"name": "设备B"}},
+                    {
+                        "id": "node-a",
+                        "type": "simulation_block",
+                        "props": {"name": "设备A"},
+                        "outputs": [{"name": "控制输出"}],
+                    },
+                    {
+                        "id": "node-b",
+                        "type": "simulation_block",
+                        "props": {"name": "设备B"},
+                        "inputs": [{"name": "控制输入"}],
+                    },
                 ],
                 "modelEdges": [
-                    {"id": "edge-b", "sourceNodeId": "node-a", "targetNodeId": "node-b", "label": "连线B"},
+                    {
+                        "id": "edge-b",
+                        "sourceNodeId": "node-a",
+                        "sourcePortIndex": 0,
+                        "targetNodeId": "node-b",
+                        "targetPortIndex": 0,
+                        "label": "连线B",
+                    },
                 ],
             },
         )
@@ -72,6 +89,8 @@ class DiagnosticKnowledgeTests(unittest.TestCase):
         self.assertTrue(all(relation["evidenceSource"] == "manual-d-matrix" for relation in detectability))
         self.assertIn("replaceWire", [relation["action"] for relation in repairs])
         self.assertIn("replaceComponent", [relation["action"] for relation in repairs])
+        edge_node = next(node for node in graph["nodes"] if node["kind"] == "signalEdge" and node["id"] == "edge-b")
+        self.assertEqual(edge_node["label"], "设备A · 控制输出 → 设备B · 控制输入")
         self.assertEqual(graph["source"], "canvas-and-manual-d-matrix")
 
     def test_builds_single_and_multiple_fault_candidates_from_manual_rows(self):
@@ -157,7 +176,83 @@ class DiagnosticKnowledgeTests(unittest.TestCase):
         self.assertEqual(replacements[0]["targetId"], "node-a")
         self.assertEqual(set(replacements[0]["relatedFaultIds"]), {"fault-device-a", "fault-device-a-secondary"})
 
-    def test_does_not_recommend_replacement_when_an_unselected_fault_has_the_same_signature(self):
+    def test_deduplicates_different_wire_ids_with_the_same_public_endpoints(self):
+        matrix = {
+            "points": [],
+            "rows": [
+                {
+                    "faultId": "fault-wire-first",
+                    "faultName": "连线故障一",
+                    "targetKind": "edge",
+                    "targetId": "edge-first",
+                    "targetEdgeId": "edge-first",
+                    "cells": [],
+                },
+                {
+                    "faultId": "fault-wire-duplicate",
+                    "faultName": "连线故障二",
+                    "targetKind": "edge",
+                    "targetId": "edge-duplicate",
+                    "targetEdgeId": "edge-duplicate",
+                    "cells": [],
+                },
+            ],
+        }
+        model_graph = {
+            "modelNodes": [
+                {"id": "source-node", "type": "simulation_block"},
+                {"id": "target-node", "type": "simulation_block"},
+            ],
+            "modelEdges": [
+                {
+                    "id": "edge-first",
+                    "sourceNodeId": "source-node",
+                    "targetNodeId": "target-node",
+                    "sourceDeviceId": "source-device",
+                    "sourcePort": "output-1",
+                    "targetDeviceId": "target-device",
+                    "targetPort": "input-1",
+                    "label": "最早出现的连线",
+                },
+                {
+                    "id": "edge-duplicate",
+                    "sourceNodeId": "source-node",
+                    "targetNodeId": "target-node",
+                    "sourceDeviceId": "source-device",
+                    "sourcePort": "output-1",
+                    "targetDeviceId": "target-device",
+                    "targetPort": "input-1",
+                    "label": "后出现的重复连线",
+                },
+            ],
+        }
+
+        graph = build_diagnostic_knowledge_graph(matrix, model_graph=model_graph)
+        edge_nodes = [node for node in graph["nodes"] if node["kind"] == "signalEdge"]
+        repairs = [
+            relation
+            for relation in graph["relations"]
+            if relation["type"] == "RESOLVED_BY_REPLACING"
+        ]
+        self.assertEqual([node["id"] for node in edge_nodes], ["edge-first"])
+        self.assertEqual({relation["target"]["id"] for relation in repairs}, {"edge-first"})
+
+        plan = build_multi_fault_troubleshooting_plan(
+            matrix,
+            ["fault-wire-first", "fault-wire-duplicate"],
+            max_faults=2,
+            max_steps=0,
+            model_graph=model_graph,
+        )
+        replacements = [step for step in plan["steps"] if step["action"] == "replaceWire"]
+        self.assertEqual(len(replacements), 1)
+        self.assertEqual(replacements[0]["targetId"], "edge-first")
+        self.assertEqual(
+            set(replacements[0]["relatedFaultIds"]),
+            {"fault-wire-first", "fault-wire-duplicate"},
+        )
+
+    def test_uses_replacement_and_virtual_retest_when_measurements_cannot_isolate_candidates(self):
         matrix = sample_concrete_fault_matrix()
         indistinguishable = copy.deepcopy(matrix["rows"][0])
         indistinguishable.update({
@@ -179,11 +274,143 @@ class DiagnosticKnowledgeTests(unittest.TestCase):
             max_steps=3,
         )
 
-        self.assertFalse(plan["isolated"])
-        self.assertIn(["fault-voltage-drop"], plan["remainingCandidateFaultSets"])
-        self.assertIn(["fault-device-a", "fault-wire-b"], plan["remainingCandidateFaultSets"])
-        self.assertTrue(all(step["action"] == "measure" for step in plan["steps"]))
-        self.assertIn("不给出未经唯一定位的更换动作", plan["summary"])
+        self.assertTrue(plan["isolated"])
+        self.assertEqual(plan["remainingCandidateFaultSets"], [["fault-device-a", "fault-wire-b"]])
+        replacement = next(step for step in plan["steps"] if step["action"] == "replaceComponent")
+        retest = next(step for step in plan["steps"] if step.get("purpose") == "postRepairRetest")
+        self.assertEqual(replacement["purpose"], "diagnosticIsolation")
+        # "node-a" and "node-power" are equally informative replacement
+        # probes for this candidate set.  The planner may choose either one,
+        # provided it pairs the repair with a discriminating virtual retest.
+        self.assertIn(replacement["targetId"], {"node-a", "node-power"})
+        self.assertEqual(replacement["requiredRetestPointCode"], retest["pointCode"])
+        self.assertEqual(retest["action"], "measure")
+        self.assertIn("已通过人工 D 矩阵区分并定位", plan["summary"])
+        completed_target_repairs = {
+            step["targetId"]
+            for step in plan["steps"]
+            if step["action"] in {"replaceComponent", "replaceWire"}
+            and step["targetId"] in {"node-a", "edge-b"}
+        }
+        self.assertEqual(completed_target_repairs, {"node-a", "edge-b"})
+
+    def test_replacement_probe_skips_virtual_retest_when_physical_update_is_sufficient(self):
+        matrix = {
+            "points": [
+                {"pointId": "tp-p1", "shortName": "P1", "name": "物理测点", "pointType": "physical"},
+                {"pointId": "tp-v1", "shortName": "V1", "name": "虚拟残差", "pointType": "virtual"},
+            ],
+            "rows": [
+                {
+                    "faultId": "fault-sensor",
+                    "faultName": "传感器故障",
+                    "targetKind": "node",
+                    "targetId": "sensor-1",
+                    "targetLabel": "姿态传感器",
+                    "cells": [
+                        {"pointId": "tp-p1", "pointCode": "P1", "detectable": True},
+                        {"pointId": "tp-v1", "pointCode": "V1", "detectable": True},
+                    ],
+                },
+                {
+                    "faultId": "fault-wire",
+                    "faultName": "线束故障",
+                    "targetKind": "edge",
+                    "targetId": "wire-1",
+                    "targetLabel": "传感器线束",
+                    "cells": [
+                        {"pointId": "tp-p1", "pointCode": "P1", "detectable": True},
+                        {"pointId": "tp-v1", "pointCode": "V1", "detectable": True},
+                    ],
+                },
+            ],
+        }
+
+        plan = build_multi_fault_troubleshooting_plan(
+            matrix,
+            ["fault-sensor"],
+            max_faults=1,
+            max_steps=2,
+        )
+
+        self.assertTrue(plan["isolated"])
+        self.assertEqual(len(plan["steps"]), 1)
+        repair = plan["steps"][0]
+        self.assertEqual(repair["action"], "replaceComponent")
+        self.assertEqual(repair["targetId"], "sensor-1")
+        self.assertEqual(repair["invalidatedVirtualPointCodes"], ["V1"])
+        self.assertEqual(repair["automaticPhysicalUpdates"], [{
+            "pointId": "tp-p1",
+            "pointCode": "P1",
+            "pointName": "物理测点",
+            "observed": "normal",
+            "source": "auto-after-repair",
+        }])
+        self.assertTrue(repair["virtualRetestSkipped"])
+        self.assertEqual(repair["virtualRetestSkippedPointCode"], "V1")
+        self.assertEqual(repair["virtualRetestSkippedReason"], "修复后的物理测点已足以隔离目标故障组合。")
+        self.assertNotIn("requiredRetestPointCode", repair)
+        self.assertFalse(any(step["action"] == "measure" for step in plan["steps"]))
+
+    def test_continues_to_the_remaining_component_when_a_physical_point_stays_abnormal_after_wire_replacement(self):
+        """A physical post-repair result must advance the path without a measure step."""
+        points = [
+            {"pointId": "tp-m1", "shortName": "M1", "name": "虚拟测点一", "pointType": "virtual"},
+            {"pointId": "tp-m2", "shortName": "M2", "name": "物理测点二", "pointType": "physical"},
+            {"pointId": "tp-m3", "shortName": "M3", "name": "物理测点三", "pointType": "physical"},
+            {"pointId": "tp-m4", "shortName": "M4", "name": "虚拟测点四", "pointType": "virtual"},
+        ]
+
+        def row(fault_id, target_kind, target_id, target_label, signature):
+            return {
+                "faultId": fault_id,
+                "faultName": target_label + "故障",
+                "targetKind": target_kind,
+                "targetId": target_id,
+                "targetLabel": target_label,
+                "cells": [
+                    {
+                        "pointId": point["pointId"],
+                        "pointCode": point["shortName"],
+                        "detectable": detectable,
+                    }
+                    for point, detectable in zip(points, signature)
+                ],
+            }
+
+        matrix = {
+            "points": points,
+            "rows": [
+                row("fault-limiter", "node", "limiter-1", "限幅组件", [False, True, False, False]),
+                row("fault-downconverter", "node", "downconverter-1", "下变频组件", [True, False, False, False]),
+                row("fault-filter", "node", "filter-1", "滤波组件", [True, False, True, False]),
+                row("fault-edge", "edge", "edge-1", "edge-1", [False, True, True, True]),
+            ],
+        }
+
+        plan = build_multi_fault_troubleshooting_plan(
+            matrix,
+            ["fault-limiter", "fault-edge"],
+            max_faults=2,
+            max_steps=4,
+        )
+
+        replacements = [
+            (step["action"], step["targetId"])
+            for step in plan["steps"]
+            if step["action"] in {"replaceComponent", "replaceWire"}
+        ]
+        self.assertEqual(replacements, [
+            ("replaceWire", "edge-1"),
+            ("replaceComponent", "limiter-1"),
+        ])
+        wire_step = next(step for step in plan["steps"] if step.get("targetId") == "edge-1")
+        self.assertEqual(wire_step["automaticObservationPointCode"], "M2")
+        self.assertNotIn("requiredRetestPointCode", wire_step)
+        self.assertFalse(any(
+            step["action"] == "measure" and step.get("purpose") == "postRepairRetest"
+            for step in plan["steps"]
+        ))
 
     def test_uses_physical_point_states_as_known_conditions_without_measurement_actions(self):
         matrix = sample_concrete_fault_matrix()
@@ -252,10 +479,64 @@ class DiagnosticKnowledgeTests(unittest.TestCase):
         self.assertFalse(plan["isolated"])
         self.assertIn(["fault-wire-b"], plan["remainingCandidateFaultSets"])
         self.assertIn(["fault-device-a", "fault-wire-b"], plan["remainingCandidateFaultSets"])
-        self.assertTrue(all(step["action"] == "measure" for step in plan["steps"]))
+        self.assertTrue(plan["componentLocalized"])
+        self.assertTrue(plan["confirmedRepairTargets"])
+        self.assertTrue(any(step["action"] in {"replaceComponent", "replaceWire"} for step in plan["steps"]))
         self.assertNotIn("pathGeneration", plan)
         self.assertNotIn("source", plan)
         self.assertNotIn("isCustomized", plan)
+
+    def test_confirms_a_shared_component_when_its_fault_types_remain_indistinguishable(self):
+        matrix = {
+            "points": [
+                {"pointId": "tp-m1", "shortName": "M1", "name": "电压测点", "pointType": "physical"},
+            ],
+            "rows": [
+                {
+                    "faultId": "physical-voltage-drop",
+                    "faultName": "物理层电压跌落",
+                    "targetKind": "node",
+                    "targetId": "voltage-drop-module",
+                    "targetLabel": "电压跌落组件",
+                    "cells": [{"pointId": "tp-m1", "pointCode": "M1", "detectable": True}],
+                },
+                {
+                    "faultId": "electrical-voltage-drop",
+                    "faultName": "电气层电压跌落",
+                    "targetKind": "node",
+                    "targetId": "voltage-drop-module",
+                    "targetLabel": "电压跌落组件",
+                    "cells": [{"pointId": "tp-m1", "pointCode": "M1", "detectable": True}],
+                },
+            ],
+        }
+
+        plan = build_multi_fault_troubleshooting_plan(
+            matrix,
+            ["physical-voltage-drop", "electrical-voltage-drop"],
+            max_faults=2,
+            max_steps=2,
+        )
+
+        self.assertTrue(plan["isolated"])
+        self.assertFalse(plan["faultTypeIsolated"])
+        self.assertTrue(plan["repairTargetIsolated"])
+        self.assertTrue(plan["componentLocalized"])
+        self.assertEqual(plan["confirmedRepairTargets"], [
+            {
+                "action": "replaceComponent",
+                "targetId": "voltage-drop-module",
+                "targetKind": "node",
+                "targetLabel": "电压跌落组件",
+                "relatedFaultIds": ["electrical-voltage-drop", "physical-voltage-drop"],
+                "supportingCandidateCount": 3,
+            }
+        ])
+        repair_steps = [step for step in plan["steps"] if step.get("action") == "replaceComponent"]
+        self.assertEqual([(step["action"], step["targetId"]) for step in repair_steps], [
+            ("replaceComponent", "voltage-drop-module"),
+        ])
+        self.assertIn("故障类型无需继续区分", plan["summary"])
 
     def test_repair_relations_in_the_knowledge_graph_drive_replacement_steps(self):
         graph = build_diagnostic_knowledge_graph(sample_concrete_fault_matrix())

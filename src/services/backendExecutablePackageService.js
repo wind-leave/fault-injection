@@ -1,9 +1,12 @@
 import {
   getRfVectorValues,
   getSignalSourceScalarFallback,
+  isRfComplexEnvelopeOutput,
+  isRfComplexEnvelopeVectorOutput,
   isRfVectorOutput,
   normalizeSignalSourceProps
 } from './signalSourceDomainService.js';
+import { DISPLAY_CONSOLE_INPUTS, DISPLAY_CONSOLE_PRESETS, createDisplayConsoleConfig, createDisplayConsoleVectorPort } from '../constants/displayConsoleConfig.js';
 
 const SUPPORTED_NODE_TYPES = new Set([
   'signal_source',
@@ -12,7 +15,11 @@ const SUPPORTED_NODE_TYPES = new Set([
   'gain_block',
   'sum_block',
   'mux_block',
-  'instrument_scope'
+  'instrument_scope',
+  'instrument_spectrum',
+  'instrument_logger',
+  'instrument_multimeter',
+  'display_console'
 ]);
 
 function sanitizeNumber(value, fallback = 0) {
@@ -32,6 +39,7 @@ function pickNumericParameters(props = {}) {
   return Object.fromEntries(
     Object.entries(props)
       .flatMap(([key, value]) => {
+        if (key === 'outputPortId') return [];
         const vector = key === 'value' ? sanitizeNumericVector(value) : null;
         if (vector) return [[key, vector]];
         return String(value ?? '').trim() !== '' && Number.isFinite(Number(value))
@@ -93,7 +101,8 @@ function addSignalSourceExecutionParameters(parameters, rawProps = {}, normalize
     parameters.waveType = String(rawProps.waveType).trim();
   }
   if (normalizedProps.signalDomain === 'rf') {
-    const modulation = String(normalizedProps.modulation || 'cw').trim().toLowerCase();
+    const complexEnvelope = isRfComplexEnvelopeOutput(normalizedProps);
+    const modulation = complexEnvelope ? 'pulse' : String(normalizedProps.modulation || 'cw').trim().toLowerCase();
     const centerFrequencyHz = parseFrequencyHz(
       normalizedProps.centerFrequency,
       normalizedProps.centerFrequencyUnit
@@ -107,18 +116,38 @@ function addSignalSourceExecutionParameters(parameters, rawProps = {}, normalize
     parameters.modulationDepthRatio = Math.max(0, Math.min(100, sanitizeNumber(normalizedProps.modulationDepth, 0))) / 100;
     parameters.frequencyDeviationHz = Math.max(0, parseFrequencyHz(normalizedProps.frequencyDeviation, 0));
     parameters.phaseDeviationRad = sanitizeNumber(normalizedProps.phaseDeviation, 0);
+    parameters.initialPhaseRad = sanitizeNumber(normalizedProps.phase, 0);
     parameters.pulseWidthSeconds = Math.max(0, parseDurationSeconds(normalizedProps.pulseWidth, normalizedProps.pulseWidthUnit, 0));
     parameters.pulsePeriodSeconds = Math.max(0, parseDurationSeconds(normalizedProps.pulsePeriod, normalizedProps.pulsePeriodUnit, 0));
-    parameters.bandwidthHz = Math.max(0, parseFrequencyHz(normalizedProps.bandwidth, 0));
+    if (!complexEnvelope) {
+      parameters.riseTimeSeconds = Math.max(0, parseDurationSeconds(normalizedProps.riseTime, normalizedProps.riseTimeUnit, 0));
+      parameters.fallTimeSeconds = Math.max(0, parseDurationSeconds(normalizedProps.fallTime, normalizedProps.fallTimeUnit, 0));
+    }
+    parameters.bandwidthHz = complexEnvelope ? 0 : Math.max(0, parseFrequencyHz(normalizedProps.bandwidth, 0));
+    parameters.nominalBandwidthHz = parameters.bandwidthHz;
+    parameters.impedanceOhm = 50;
+    parameters.rfComplexEnvelopeOutput = complexEnvelope ? 1 : 0;
     parameters.symbolRateHz = Math.max(0, parseFrequencyHz(normalizedProps.symbolRate, 0));
     parameters.sampleRateHz = Math.max(0, parseFrequencyHz(normalizedProps.sampleRate, 0));
     parameters.snrDb = sanitizeNumber(normalizedProps.snr, 0);
+    // Executable-package parameters have a numeric-only backend contract.
+    // Use 0/1 rather than a boolean so adding RF noise cannot make backend
+    // session creation fail and silently fall back to the legacy runtime.
+    parameters.additiveNoiseEnabled = ['on', 'true', '1', 'yes'].includes(String(normalizedProps.noiseEnabled || '').trim().toLowerCase()) ? 1 : 0;
+    parameters.additiveNoiseSnrDb = sanitizeNumber(normalizedProps.noiseSnr, 20);
+    parameters.additiveNoiseBandwidthHz = Math.max(
+      0,
+      parseFrequencyHz(normalizedProps.noiseBandwidth, normalizedProps.noiseBandwidthUnit)
+    );
     if (isRfVectorOutput(normalizedProps)) {
       parameters.rfVectorLength = Number(normalizedProps.rfVectorLength);
       parameters.rfVectorValues = getRfVectorValues(
         normalizedProps.rfVectorValues,
         normalizedProps.rfVectorLength
       );
+    }
+    if (isRfComplexEnvelopeVectorOutput(normalizedProps)) {
+      parameters.rfComplexEnvelopeVectorLength = Number(normalizedProps.rfVectorLength);
     }
     if (modulation === 'cw') {
       // The backend already evaluates generic sine sources from these fields.
@@ -151,7 +180,29 @@ function normalizePortDataType(value) {
   const text = String(value ?? 'scalar').trim().toLowerCase();
   if (['scalar', '标量', 'float', 'number'].includes(text)) return 'scalar';
   if (['vector', '向量'].includes(text)) return 'vector';
+  if (['rf_complex_envelope', 'rf-complex-envelope', 'rfcomplexenvelope', '复数包络', '射频复数包络'].includes(text)) return 'rf_complex_envelope';
   return 'scalar';
+}
+
+function normalizeRfComplexEnvelopeValue(value, fallbackReferenceFrequencyHz = 0) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const i = Number(value.i ?? value.re);
+  const q = Number(value.q ?? value.im ?? 0);
+  const referenceFrequencyHz = Number(value.referenceFrequencyHz ?? fallbackReferenceFrequencyHz);
+  if (!Number.isFinite(i) || !Number.isFinite(q) || !Number.isFinite(referenceFrequencyHz) || referenceFrequencyHz < 0) {
+    return null;
+  }
+  const normalized = { i, q, referenceFrequencyHz };
+  const impedanceOhm = Number(value.impedanceOhm);
+  if (Number.isFinite(impedanceOhm) && impedanceOhm > 0) normalized.impedanceOhm = impedanceOhm;
+  if (String(value.unit ?? '').trim()) normalized.unit = String(value.unit).trim();
+  return normalized;
+}
+
+function normalizeRfComplexEnvelopeVector(value, fallbackReferenceFrequencyHz = 0) {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const envelopes = value.map((item) => normalizeRfComplexEnvelopeValue(item, fallbackReferenceFrequencyHz));
+  return envelopes.every(Boolean) ? envelopes : null;
 }
 
 function normalizePorts(ports = []) {
@@ -167,12 +218,25 @@ function normalizePorts(ports = []) {
           .map((elementName) => String(elementName ?? '').trim())
           .slice(0, vectorLength)
         : [];
+      const elementNames = (Array.isArray(port?.elementNames) ? port.elementNames : [port?.elementName])
+        .map((elementName) => String(elementName ?? '').trim())
+        .filter(Boolean)
+        .slice(0, 1);
       return {
         name,
         id,
         dataType,
+        ...(port?.collectionKind === 'vector' ? { collectionKind: 'vector' } : {}),
+        ...(port?.allowsVector ? { allowsVector: true } : {}),
         ...(port?.unit ? { unit: String(port.unit) } : {}),
-        ...(dataType === 'vector' && Number.isInteger(vectorLength) && vectorLength > 0
+        ...(dataType === 'rf_complex_envelope' && Number.isFinite(Number(port?.referenceFrequencyHz))
+          ? { referenceFrequencyHz: Number(port.referenceFrequencyHz) }
+          : {}),
+        ...(dataType === 'rf_complex_envelope' && Number(port?.impedanceOhm) > 0
+          ? { impedanceOhm: Number(port.impedanceOhm) }
+          : {}),
+        ...(elementNames.length ? { elementNames } : {}),
+        ...((dataType === 'vector' || dataType === 'rf_complex_envelope') && Number.isInteger(vectorLength) && vectorLength > 0
           ? {
             vectorLength,
             ...(vectorElementNames.length ? { vectorElementNames } : {})
@@ -181,6 +245,34 @@ function normalizePorts(ports = []) {
       };
     }).filter((port) => port.name)
     : [];
+}
+
+function normalizeNodePorts(node = {}, direction) {
+  // Python-backed components keep their executable signal contract in
+  // `node.ports`. Their `props.inputs` / `props.outputs` are also used by the
+  // legacy property panel and can intentionally show the generic display type
+  // “标量”. Exporting those display rows would downgrade a 复数包络 port to a
+  // scalar port and make backend graph validation reject an otherwise valid
+  // connection.
+  const configured = normalizePorts(node?.pythonBinding?.portMapping?.[direction]);
+  const declared = normalizePorts(node?.ports?.[direction]);
+  const direct = declared.length
+    ? declared
+    : normalizePorts(node?.[direction] ?? node?.props?.[direction]);
+  if (!direct.length) return configured;
+  return direct.map((port, index) => {
+    const configuredPort = configured[index];
+    if (!configuredPort) return port;
+    return {
+      ...port,
+      ...(Array.isArray(configuredPort.elementNames)
+        ? { elementNames: configuredPort.elementNames }
+        : {}),
+      ...(Array.isArray(configuredPort.vectorElementNames)
+        ? { vectorElementNames: configuredPort.vectorElementNames }
+        : {})
+    };
+  });
 }
 
 function defaultScopeInput(index, props = {}) {
@@ -198,6 +290,24 @@ function normalizeScopeInputs(node = {}, props = {}) {
     .map(normalizePorts)
     .find((ports) => ports.length);
   return declared ?? [defaultScopeInput(0, props), defaultScopeInput(1, props)];
+}
+
+function normalizeDisplayConsoleInputs(node = {}, props = {}) {
+  const preset = DISPLAY_CONSOLE_PRESETS[node.templateId || node.paletteKey];
+  const config = preset ? createDisplayConsoleConfig(preset) : props.displayConfig;
+  const inputs = Array.isArray(config?.inputs) ? config.inputs : [];
+  const names = Array.isArray(props.inputPortNames) ? props.inputPortNames : [];
+  const ports = Array.isArray(config?.ports) && config.ports.length ? config.ports : [{}];
+  return ports.map((port, portIndex) => {
+    const portInputs = Array.isArray(port?.inputs) ? port.inputs : inputs;
+    const configured = Array.from({ length: DISPLAY_CONSOLE_INPUTS.length }, (_, index) => ({
+      label: portInputs[index]?.label || inputs[index]?.label || names[index]
+    }));
+    return createDisplayConsoleVectorPort(configured, {
+      id: port?.id || (portIndex === 0 ? 'console-input' : `console-input-${portIndex + 1}`),
+      name: port?.name || (portIndex === 0 ? '七路参数输入' : `七路参数输入 ${portIndex + 1}`)
+    });
+  });
 }
 
 function alignScopeInputsWithConnectedSignals(nodes, edges) {
@@ -218,7 +328,16 @@ function alignScopeInputsWithConnectedSignals(nodes, edges) {
     target.inputs[targetPortIndex] = {
       ...current,
       dataType: sourcePort.dataType,
-      ...(sourcePort.dataType === 'vector' && Number.isInteger(sourcePort.vectorLength)
+      ...(sourcePort.dataType === 'rf_complex_envelope' && Number.isFinite(Number(sourcePort.referenceFrequencyHz))
+        ? { referenceFrequencyHz: Number(sourcePort.referenceFrequencyHz) }
+        : {}),
+      ...(sourcePort.dataType === 'rf_complex_envelope' && Number(sourcePort.impedanceOhm) > 0
+        ? { impedanceOhm: Number(sourcePort.impedanceOhm) }
+        : {}),
+      ...(sourcePort.dataType === 'rf_complex_envelope' && String(sourcePort.unit || '').trim()
+        ? { unit: String(sourcePort.unit).trim() }
+        : {}),
+      ...((sourcePort.dataType === 'vector' || sourcePort.dataType === 'rf_complex_envelope') && Number.isInteger(sourcePort.vectorLength)
         ? {
           vectorLength: sourcePort.vectorLength,
           ...(Array.isArray(sourcePort.vectorElementNames) && sourcePort.vectorElementNames.length
@@ -227,9 +346,14 @@ function alignScopeInputsWithConnectedSignals(nodes, edges) {
         }
         : {})
     };
-    if (sourcePort.dataType !== 'vector') {
+    if (sourcePort.dataType !== 'vector' && sourcePort.dataType !== 'rf_complex_envelope') {
       delete target.inputs[targetPortIndex].vectorLength;
       delete target.inputs[targetPortIndex].vectorElementNames;
+    }
+    if (sourcePort.dataType !== 'rf_complex_envelope') {
+      delete target.inputs[targetPortIndex].referenceFrequencyHz;
+      delete target.inputs[targetPortIndex].impedanceOhm;
+      delete target.inputs[targetPortIndex].unit;
     }
   });
 }
@@ -243,6 +367,11 @@ function normalizePowerPorts(ports = []) {
       supplyType: String(port?.supplyType ?? 'DC').toUpperCase() === 'AC' ? 'AC' : 'DC'
     })).filter((port) => port.name)
     : [];
+}
+
+function simulationBlockRequiresPower(node, props = {}) {
+  if (props.requiresPower === false) return false;
+  return !new Set(['DZDK_A', 'DZDK_B', 'DZDK_C', 'DZDK_D']).has(String(node?.templateId ?? node?.pythonBinding?.moduleId ?? ''));
 }
 
 function pickDeclaredSimulationParameters(props = {}) {
@@ -268,36 +397,72 @@ function normalizeSignalSourceOutputs(node, props) {
     ? directOutputs
     : normalizePorts(node.props?.outputs);
   const primary = outputs[0] ?? {};
+  const primaryId = props.signalDomain === 'rf'
+    ? String(props.outputPortId || primary.id || 'signal')
+    : (primary.id || 'signal');
+  if (isRfComplexEnvelopeOutput(props)) {
+    return [{
+      name: primary.name || String(props.outputPortName || '输出'),
+      id: primaryId,
+      dataType: 'rf_complex_envelope',
+      ...(isRfComplexEnvelopeVectorOutput(props)
+        ? { collectionKind: 'vector', vectorLength: Number(props.rfVectorLength) }
+        : {}),
+      referenceFrequencyHz: parseFrequencyHz(props.centerFrequency, props.centerFrequencyUnit),
+      impedanceOhm: 50,
+      unit: 'V'
+    }];
+  }
   if (!isRfVectorOutput(props)) {
-    return outputs.length ? outputs : [{
+    return outputs.length
+      ? (props.signalDomain === 'rf'
+        ? outputs.map((output, index) => index === 0 ? { ...output, id: primaryId } : output)
+        : outputs)
+      : [{
       name: String(props.outputPortName || 'output'),
-      id: 'signal',
+      id: primaryId,
       dataType: 'scalar'
     }];
   }
   const vectorLength = Number(props.rfVectorLength);
   return [{
     name: primary.name || String(props.outputPortName || '输出'),
-    id: primary.id || 'signal',
+    id: primaryId,
     dataType: 'vector',
     ...(Number.isInteger(vectorLength) && vectorLength > 0 ? { vectorLength } : {})
   }];
 }
 
 function normalizeNode(node) {
-  const rawProps = node.props ?? node.parameters ?? {};
+  const rawProps = node.templateId === 'XHFSQ'
+    ? {
+        ...(node.props ?? node.parameters ?? {}),
+        signalDomain: 'rf',
+        outputFormat: '复数包络',
+        outputPortId: 'XHFSQ_X1'
+      }
+    : (node.props ?? node.parameters ?? {});
   const props = node.type === 'signal_source'
     ? normalizeSignalSourceProps(rawProps)
     : rawProps;
+  const sourceOutputs = node.type === 'signal_source'
+    ? normalizeSignalSourceOutputs(node, props)
+    : null;
   const parameters = {
     ...pickNumericParameters(rawProps),
     ...(node.type === 'simulation_block' ? pickDeclaredSimulationParameters(rawProps) : {})
   };
   if (node.type === 'signal_source') {
     addSignalSourceExecutionParameters(parameters, rawProps, props);
-    parameters.value = isRfVectorOutput(props)
-      ? getRfVectorValues(props.rfVectorValues, props.rfVectorLength)
-      : (sanitizeNumericVector(rawProps.value) ?? getSignalSourceScalarFallback(props));
+    const primaryOutput = sourceOutputs[0];
+    const complexEnvelope = primaryOutput?.dataType === 'rf_complex_envelope'
+      ? (normalizeRfComplexEnvelopeVector(rawProps.value, primaryOutput.referenceFrequencyHz)
+        ?? normalizeRfComplexEnvelopeValue(rawProps.value, primaryOutput.referenceFrequencyHz))
+      : null;
+    parameters.value = complexEnvelope
+      ?? (isRfVectorOutput(props)
+        ? getRfVectorValues(props.rfVectorValues, props.rfVectorLength)
+        : (sanitizeNumericVector(rawProps.value) ?? getSignalSourceScalarFallback(props)));
   }
   if (node.type === 'sum_block') {
     addSumBlockExecutionParameters(parameters, rawProps);
@@ -305,15 +470,22 @@ function normalizeNode(node) {
 
   const normalized = {
     id: String(node.id),
+    name: String(node.props?.name ?? node.name ?? node.label ?? node.id),
     type: node.type,
     parameters,
     inputs: node.type === 'instrument_scope'
       ? normalizeScopeInputs(node, props)
-      : normalizePorts(node.inputs ?? node.props?.inputs),
+      : node.type === 'display_console'
+        ? normalizeDisplayConsoleInputs(node, props)
+        : normalizeNodePorts(node, 'inputs'),
     outputs: node.type === 'signal_source'
-      ? normalizeSignalSourceOutputs(node, props)
-      : normalizePorts(node.outputs ?? node.props?.outputs)
+      ? sourceOutputs
+      : normalizeNodePorts(node, 'outputs')
   };
+
+  if (node.templateId === 'XHFSQ') {
+    normalized.componentId = 'XHFSQ';
+  }
 
   if (node.type === 'simulation_block') {
     const moduleId = String(node.pythonBinding?.moduleId ?? '').trim() || 'passthrough';
@@ -326,7 +498,9 @@ function normalizeNode(node) {
     };
     // Power terminals are deliberately separate from model signal ports: they
     // carry the execution precondition, rather than an argument to Python.
-    normalized.powerInputs = normalizePowerPorts(rawProps.powerInputs);
+    normalized.powerInputs = simulationBlockRequiresPower(node, rawProps)
+      ? normalizePowerPorts(rawProps.powerInputs)
+      : [];
     normalized.powerOutputs = [];
   }
 
@@ -336,6 +510,8 @@ function normalizeNode(node) {
 function normalizeEdge(edge) {
   return {
     id: String(edge.id),
+    label: String(edge.label ?? edge.name ?? edge.signalId ?? edge.id),
+    labelCustomized: Boolean(edge.labelCustomized),
     sourceNodeId: String(edge.sourceNodeId),
     sourcePortIndex: sanitizeNumber(edge.sourcePortIndex, 0),
     targetNodeId: String(edge.targetNodeId),
@@ -382,7 +558,7 @@ function normalizeFaultType(fault = {}) {
     if (/drift/.test(key) || fault.parameters?.rate !== undefined) {
       return 'parameter_drift';
     }
-    if (/step/.test(key) || fault.parameters?.step_value !== undefined || fault.parameters?.stepValue !== undefined) {
+    if (/step/.test(key) || fault.parameters?.target_value !== undefined || fault.parameters?.targetValue !== undefined || fault.parameters?.step_value !== undefined || fault.parameters?.stepValue !== undefined) {
       return 'parameter_step';
     }
     if (/bias|offset|parameter/.test(key) || fault.parameters?.bias !== undefined || fault.parameters?.offset !== undefined) {
@@ -433,9 +609,17 @@ function normalizeFaultParameters(fault = {}) {
   if (bias !== '') {
     parameters.bias = sanitizeNumber(bias, 0);
   }
-  const stepValue = firstPresent(parameters.stepValue, parameters.step_value, parameters.step, parameters.delta_p);
-  if (stepValue !== '') {
-    parameters.stepValue = sanitizeNumber(stepValue, 0);
+  const targetValue = firstPresent(
+    parameters.targetValue,
+    parameters.target_value,
+    parameters.value,
+    parameters.stepValue,
+    parameters.step_value,
+    parameters.step,
+    parameters.delta_p
+  );
+  if (targetValue !== '') {
+    parameters.targetValue = sanitizeNumber(targetValue, 0);
   }
   const driftRate = firstPresent(parameters.rate, parameters.driftRate);
   if (driftRate !== '') {
@@ -597,6 +781,70 @@ function buildMeasurementPoints(state, nodes, edges) {
   return [...pointsById.values()];
 }
 
+function configuredDiagnosticPoints(state = {}) {
+  return [
+    ...(Array.isArray(state.manualDiagnosticTestPoints) ? state.manualDiagnosticTestPoints : []),
+    ...(Array.isArray(state.diagnosticTestPoints) ? state.diagnosticTestPoints : []),
+    ...(Array.isArray(state.testPoints) ? state.testPoints : []),
+    ...(Array.isArray(state.diagnosticModel?.testPoints) ? state.diagnosticModel.testPoints : []),
+    ...(Array.isArray(state.activeModelPackage?.diagnosticModel?.testPoints)
+      ? state.activeModelPackage.diagnosticModel.testPoints
+      : [])
+  ];
+}
+
+function tracePointEdgeId(point = {}) {
+  return String(
+    point.edgeId
+    ?? point.edgeID
+    ?? point.targetEdgeId
+    ?? point.targetId
+    ?? ''
+  ).trim();
+}
+
+function buildReportedNodeIds(state, nodes, edges, edgeIdMap) {
+  // Component traces are intentionally restricted to consumers that are
+  // visible outside the simulation engine.  Diagnostic test points can be
+  // attached to ordinary signal wires, so they must be included alongside
+  // display consoles and measurement instruments.
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const instrumentTypes = new Set([
+    'instrument_scope',
+    'instrument_spectrum',
+    'instrument_logger',
+    'instrument_multimeter'
+  ]);
+  const selected = new Set(nodes
+    .filter((node) => node.type === 'display_console')
+    .map((node) => node.id));
+
+  edges.forEach((edge) => {
+    const target = nodesById.get(edge.targetNodeId);
+    if (edge.lineType !== 'power' && (target?.type === 'display_console' || instrumentTypes.has(target?.type))) {
+      selected.add(edge.sourceNodeId);
+    }
+  });
+
+  const points = configuredDiagnosticPoints(state);
+  const pointEdgeIds = new Set(points.map(tracePointEdgeId).filter(Boolean));
+  const flattenedPointEdgeIds = new Set([...pointEdgeIds].map((id) => edgeIdMap.get(id) ?? id));
+  edges.forEach((edge) => {
+    if (flattenedPointEdgeIds.has(edge.id) && edge.lineType !== 'power') {
+      selected.add(edge.sourceNodeId);
+    }
+  });
+
+  points.forEach((point) => {
+    const sourceNodeId = String(point?.measurementSourceNodeId ?? point?.sourceNodeId ?? point?.nodeId ?? '').trim();
+    if (nodesById.has(sourceNodeId)) {
+      selected.add(sourceNodeId);
+    }
+  });
+
+  return [...selected];
+}
+
 function endpointKey(direction, nodeId, portIndex = 0) {
   return `${direction}:${String(nodeId)}:${Math.max(0, Math.trunc(Number(portIndex) || 0))}`;
 }
@@ -618,13 +866,9 @@ function subsystemInterface(node, role) {
 
 function boundaryNodeForInterface(canvas, role, item, index) {
   const type = role === 'inputs' ? 'subsystem_in_port' : 'subsystem_out_port';
-  return (canvas?.nodes ?? []).find((node) => (
-    node?.type === type
-    && (
-      String(node?.props?.interfacePortId ?? '') === String(item?.id ?? '')
-      || Number(node?.props?.order) === Number(item?.order ?? index)
-    )
-  ));
+  const boundaries = (canvas?.nodes ?? []).filter((node) => node?.type === type);
+  return boundaries.find((node) => Number(node?.props?.order) === index)
+    ?? boundaries.find((node) => String(node?.props?.interfacePortId ?? '') === String(item?.id ?? ''));
 }
 
 function reachableCanvasRecords(state = {}) {
@@ -658,6 +902,106 @@ function reachableCanvasRecords(state = {}) {
   return records;
 }
 
+function subsystemExportContext(state = {}, reservedIds = new Set()) {
+  const context = {
+    nodes: [],
+    nodeSubsystemPaths: new Map(),
+    resultIdBySubsystemNodeId: new Map()
+  };
+  if (!state.includeSubsystemNodes || !state.canvases || typeof state.canvases !== 'object') return context;
+
+  const rootCanvasId = state.canvases[state.rootCanvasId]
+    ? state.rootCanvasId
+    : state.canvases['canvas-root']
+      ? 'canvas-root'
+      : Object.keys(state.canvases)[0];
+  const visited = new Set();
+  const reserveResultId = (node) => {
+    const internalId = String(node?.id ?? '').trim();
+    const baseId = String(node?.props?.subsystemId ?? '').trim() || internalId;
+    if (!baseId) return '';
+    let id = baseId;
+    let suffix = 2;
+    while (reservedIds.has(id)) {
+      id = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
+    reservedIds.add(id);
+    context.resultIdBySubsystemNodeId.set(internalId, id);
+    context.nodes.push({
+      id,
+      name: String(node.props?.name ?? node.name ?? id),
+      type: 'subsystem_block',
+      parameters: {},
+      inputs: [],
+      outputs: []
+    });
+    return id;
+  };
+  const visit = (canvasId, subsystemPath = []) => {
+    if (!canvasId || visited.has(canvasId) || !state.canvases[canvasId]) return;
+    visited.add(canvasId);
+    const canvas = state.canvases[canvasId];
+    const nodes = Array.isArray(canvas?.nodes) ? canvas.nodes : [];
+    nodes.forEach((node) => {
+      if (node?.id) context.nodeSubsystemPaths.set(String(node.id), [...subsystemPath]);
+    });
+    nodes.filter((node) => node?.type === 'subsystem_block').forEach((node) => {
+      reserveResultId(node);
+      visit(node.targetCanvasId, [...subsystemPath, String(node.id)]);
+    });
+  };
+  visit(rootCanvasId, []);
+  return context;
+}
+
+function remapSubsystemBoundaryEdge(edge, context) {
+  const sourcePath = context.nodeSubsystemPaths.get(String(edge?.sourceNodeId)) ?? [];
+  const targetPath = context.nodeSubsystemPaths.get(String(edge?.targetNodeId)) ?? [];
+  let commonLength = 0;
+  while (commonLength < sourcePath.length
+    && commonLength < targetPath.length
+    && sourcePath[commonLength] === targetPath[commonLength]) {
+    commonLength += 1;
+  }
+  const sourceSubsystemNodeId = sourcePath[commonLength];
+  const targetSubsystemNodeId = targetPath[commonLength];
+  return {
+    ...edge,
+    sourceNodeId: sourceSubsystemNodeId
+      ? (context.resultIdBySubsystemNodeId.get(sourceSubsystemNodeId) ?? edge.sourceNodeId)
+      : edge.sourceNodeId,
+    targetNodeId: targetSubsystemNodeId
+      ? (context.resultIdBySubsystemNodeId.get(targetSubsystemNodeId) ?? edge.targetNodeId)
+      : edge.targetNodeId
+  };
+}
+
+export function remapSubsystemBoundaryReferences(state = {}, records = []) {
+  if (!state.includeSubsystemNodes || !Array.isArray(records)) return records;
+  const flattened = flattenSubsystemGraph(state);
+  const reservedIds = new Set(flattened.nodes.map((node) => String(node.id)));
+  const context = subsystemExportContext(state, reservedIds);
+  const edgesById = new Map(flattened.edges
+    .map((edge) => remapSubsystemBoundaryEdge(edge, context))
+    .map((edge) => [String(edge.id), edge]));
+
+  return records.map((record) => {
+    const originalEdgeId = String(record?.edgeId ?? record?.edgeID ?? record?.targetEdgeId ?? record?.targetId ?? '');
+    const lookupEdgeId = flattened.edgeIdMap.get(originalEdgeId) ?? originalEdgeId;
+    const edge = edgesById.get(lookupEdgeId);
+    if (!edge) return { ...record };
+    const next = { ...record };
+    ['measurementSourceNodeId', 'sourceNodeId', 'sourceDeviceId'].forEach((key) => {
+      if (Object.hasOwn(next, key)) next[key] = edge.sourceNodeId;
+    });
+    ['measurementTargetNodeId', 'targetNodeId', 'targetDeviceId'].forEach((key) => {
+      if (Object.hasOwn(next, key)) next[key] = edge.targetNodeId;
+    });
+    return next;
+  });
+}
+
 function flattenedEdgeId(pathEdges, usedIds) {
   const preferred = pathEdges.find((edge) => !edge?.subsystemBoundaryMapping)?.id
     || pathEdges[0]?.id
@@ -670,6 +1014,11 @@ function flattenedEdgeId(pathEdges, usedIds) {
   }
   usedIds.add(id);
   return id;
+}
+
+function flattenedEdgeLabel(pathEdges, fallbackId) {
+  const edge = pathEdges.find(item => item?.label || item?.name || item?.signalId);
+  return String(edge?.label ?? edge?.name ?? edge?.signalId ?? fallbackId);
 }
 
 function flattenedLineType(pathEdges) {
@@ -734,7 +1083,7 @@ function flattenSubsystemGraph(state = {}) {
   const flattenedEdges = [];
   const usedIds = new Set();
   const edgeIdMap = new Map();
-  const connectionSignatures = new Set();
+  const connectionIdsBySignature = new Map();
   const walk = (source, currentKey, pathEdges, visited) => {
     if (visited.has(currentKey)) return;
     const nextVisited = new Set(visited);
@@ -742,11 +1091,19 @@ function flattenSubsystemGraph(state = {}) {
     const endpoint = parseEndpointKey(currentKey);
     if (endpoint.direction === 'in' && executableNodeIds.has(endpoint.nodeId)) {
       const signature = `${source.nodeId}:${source.portIndex}>${endpoint.nodeId}:${endpoint.portIndex}`;
-      if (connectionSignatures.has(signature)) return;
-      connectionSignatures.add(signature);
+      if (connectionIdsBySignature.has(signature)) {
+        const existingId = connectionIdsBySignature.get(signature);
+        pathEdges.forEach((edge) => {
+          if (edge?.id) edgeIdMap.set(String(edge.id), existingId);
+        });
+        return;
+      }
       const id = flattenedEdgeId(pathEdges, usedIds);
+      connectionIdsBySignature.set(signature, id);
       const flattened = {
         id,
+        label: flattenedEdgeLabel(pathEdges, id),
+        labelCustomized: pathEdges.some((edge) => edge?.labelCustomized === true),
         sourceNodeId: source.nodeId,
         sourcePortIndex: source.portIndex,
         targetNodeId: endpoint.nodeId,
@@ -795,13 +1152,34 @@ function executableFaultInstances(state, nodeIds, edgeIds, edgeIdMap) {
 export function buildBackendExecutablePackage(state = {}) {
   const simulationConfig = state.simulationConfig ?? {};
   const flattened = flattenSubsystemGraph(state);
-  const nodes = flattened.nodes.map(normalizeNode);
+  const allExecutableNodes = flattened.nodes.map(normalizeNode);
+  const reservedNodeIds = new Set(allExecutableNodes.map((node) => node.id));
+  const subsystemContext = subsystemExportContext(state, reservedNodeIds);
+  const visibleSubsystemResultIds = new Set(
+    [...subsystemContext.resultIdBySubsystemNodeId.entries()]
+      .filter(([nodeId]) => (
+        (subsystemContext.nodeSubsystemPaths.get(String(nodeId)) ?? []).length === 0
+      ))
+      .map(([, resultId]) => resultId)
+  );
+  const nodes = [
+    // Public result data keeps the executable components visible, including
+    // components inside a subsystem. Only subsystem-boundary connections are
+    // projected onto the subsystem node; the internal component itself must
+    // not disappear from the public device catalogue.
+    ...allExecutableNodes,
+    ...subsystemContext.nodes.filter((node) => visibleSubsystemResultIds.has(node.id))
+  ];
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const edges = flattened.edges
-    .filter((edge) => nodeIds.has(String(edge?.sourceNodeId)) && nodeIds.has(String(edge?.targetNodeId)))
-    .map(normalizeEdge);
-  const edgeIds = new Set(edges.map((edge) => edge.id));
+  const normalizedEdges = flattened.edges.map(normalizeEdge);
+  const presentationEdges = state.includeSubsystemNodes
+    ? normalizedEdges.map((edge) => remapSubsystemBoundaryEdge(edge, subsystemContext))
+    : normalizedEdges;
+  const edges = presentationEdges.filter((edge) => (
+    nodeIds.has(String(edge?.sourceNodeId)) && nodeIds.has(String(edge?.targetNodeId))
+  ));
   alignScopeInputsWithConnectedSignals(nodes, edges);
+  const edgeIds = new Set(edges.map((edge) => edge.id));
   return {
     schemaVersion: 1,
     packageId: String(state.packageId ?? state.modelPackageId ?? 'frontend-package'),
@@ -812,6 +1190,7 @@ export function buildBackendExecutablePackage(state = {}) {
     nodes,
     edges,
     faultInstances: executableFaultInstances(state, nodeIds, edgeIds, flattened.edgeIdMap),
-    measurementPoints: buildMeasurementPoints(state, nodes, edges)
+    measurementPoints: buildMeasurementPoints(state, nodes, edges),
+    reportedNodeIds: buildReportedNodeIds(state, nodes, edges, flattened.edgeIdMap)
   };
 }

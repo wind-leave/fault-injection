@@ -32,6 +32,31 @@ def _validate_steps(value):
     return value
 
 
+def _measurement_endpoint(action):
+    component_id = _require_text(action, "componentId")
+    port_id = _require_text(action, "portId")
+    return {"componentId": component_id, "portId": port_id}
+
+
+def _wire_endpoints(action):
+    fields = {
+        "sourceComponentId": _text(action.get("sourceComponentId") or action.get("sourceDeviceId")),
+        "sourcePortId": _text(action.get("sourcePortId") or action.get("sourcePort")),
+        "targetComponentId": _text(action.get("targetComponentId") or action.get("targetDeviceId")),
+        "targetPortId": _text(action.get("targetPortId") or action.get("targetPort")),
+    }
+    if not any(fields.values()):
+        return None
+    missing = [field for field, value in fields.items() if not value]
+    if missing:
+        raise SimulationBackendError(
+            "INVALID_ACTION_SCHEMA",
+            missing[0],
+            "replaceWire requires sourceComponentId, sourcePortId, targetComponentId and targetPortId",
+        )
+    return fields
+
+
 def normalize_practice_action(action):
     if not isinstance(action, dict):
         raise SimulationBackendError("INVALID_ACTION_SCHEMA", "action", "action must be an object")
@@ -42,8 +67,15 @@ def normalize_practice_action(action):
         raise SimulationBackendError("UNSUPPORTED_ACTION_TYPE", "actionType", f"unsupported action type: {action_type}")
 
     target = action.get("target")
+    endpoint = _measurement_endpoint(action) if action_type == "measurePoint" else None
+    wire_endpoints = _wire_endpoints(action) if action_type == "replaceWire" else None
     if not isinstance(target, dict):
-        raise SimulationBackendError("INVALID_ACTION_SCHEMA", "target", "target must be an object")
+        if action_type == "measurePoint":
+            target = {"type": expected_target_type, "id": f"{endpoint['componentId']}::{endpoint['portId']}"}
+        elif action_type == "replaceWire" and wire_endpoints is not None:
+            target = {"type": expected_target_type}
+        else:
+            raise SimulationBackendError("INVALID_ACTION_SCHEMA", "target", "target must be an object")
 
     target_type = _require_text(target, "type")
     if target_type != expected_target_type:
@@ -52,19 +84,29 @@ def normalize_practice_action(action):
             "target.type",
             f"target.type must be {expected_target_type} for {action_type}",
         )
-    target_id = _require_text(target, "id")
+    target_id = _text(target.get("id"))
+    if not target_id and action_type == "measurePoint":
+        target_id = f"{endpoint['componentId']}::{endpoint['portId']}"
+    if not target_id and wire_endpoints is None:
+        raise SimulationBackendError("INVALID_ACTION_SCHEMA", "target.id", "target.id is required")
     normalized = {
         "protocolVersion": _text(action.get("protocolVersion")) or "1.0",
         "operationId": _text(action.get("operationId")),
         "actionType": action_type,
-        "target": {"type": target_type, "id": target_id},
-        "targetId": target_id,
+        "target": {
+            "type": target_type,
+            **({"id": target_id} if target_id else {}),
+        },
+        **({"targetId": target_id} if target_id else {}),
         "steps": _validate_steps(action.get("steps")),
         "safetyState": action.get("safetyState") if isinstance(action.get("safetyState"), dict) else {},
         "rawAction": action.get("rawAction") if isinstance(action.get("rawAction"), dict) else {},
     }
+    if wire_endpoints is not None:
+        normalized.update(wire_endpoints)
     if action_type == "measurePoint":
-        normalized["pointCode"] = _require_text(action, "pointCode")
+        normalized.update(endpoint)
+        normalized["elementName"] = _require_text(action, "elementName")
     elif action_type == "adjustDisplayConsoleParameter":
         parameters = action.get("parameters") if isinstance(action.get("parameters"), dict) else {}
         parameter = _text(action.get("parameter") or action.get("parameterName"))
@@ -77,6 +119,12 @@ def normalize_practice_action(action):
                 "INVALID_ACTION_SCHEMA",
                 "parameters",
                 "parameters or parameter/value is required",
+            )
+        if len(parameters) != 1:
+            raise SimulationBackendError(
+                "INVALID_ACTION_SCHEMA",
+                "parameters",
+                "only one display-console parameter may be adjusted per action",
             )
         normalized["parameters"] = dict(parameters)
         component_id = _text(action.get("componentId") or action.get("targetComponentId"))

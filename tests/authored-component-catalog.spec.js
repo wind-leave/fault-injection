@@ -16,8 +16,8 @@ describe('authored component catalog', () => {
       icon: '算',
       rawSource: 'def process(samples):\n    return samples',
       entryFunction: 'process',
-      inputs: [{ name: '输入向量', varName: 'samples', type: 'number[]', vectorLength: 3, vectorElementNames: ['横滚', '俯仰', '偏航'] }],
-      outputs: [{ name: '输出向量', varName: 'filtered', type: 'number[]', vectorLength: 3, vectorElementNames: ['横滚滤波值', '俯仰滤波值', '偏航滤波值'] }],
+      inputs: [{ name: '输入向量', varName: 'samples', type: 'number[]', vectorLength: 3, vectorElementNames: ['横滚', '俯仰', '偏航'], side: 'right', sidePosition: 3 }],
+      outputs: [{ name: '输出向量', varName: 'filtered', type: 'number[]', vectorLength: 3, vectorElementNames: ['横滚滤波值', '俯仰滤波值', '偏航滤波值'], side: 'left', sidePosition: 3 }],
       parameters: [{ name: '滤波系数', key: 'coefficients', type: 'number[]', vectorLength: 3, defaultValue: [0.2, 0.3, 0.5] }]
     });
 
@@ -29,8 +29,10 @@ describe('authored component catalog', () => {
       palette: { icon: '算', repeatable: true },
       pythonBinding: { sourceKind: 'custom', executionMode: 'mock' }
     });
-    expect(component.ports.inputs[0]).toMatchObject({ dataType: 'vector', vectorLength: 3, varName: 'samples', vectorElementNames: ['横滚', '俯仰', '偏航'] });
-    expect(component.ports.outputs[0]).toMatchObject({ dataType: 'vector', vectorLength: 3, varName: 'filtered', vectorElementNames: ['横滚滤波值', '俯仰滤波值', '偏航滤波值'] });
+    expect(component.ports.inputs[0]).toMatchObject({ dataType: 'vector', vectorLength: 3, varName: 'samples', vectorElementNames: ['横滚', '俯仰', '偏航'], side: 'right' });
+    expect(component.ports.outputs[0]).toMatchObject({ dataType: 'vector', vectorLength: 3, varName: 'filtered', vectorElementNames: ['横滚滤波值', '俯仰滤波值', '偏航滤波值'], side: 'left' });
+    expect(component.ports.inputs[0].sidePosition).toBe(3);
+    expect(component.ports.outputs[0].sidePosition).toBe(3);
     expect(component.pythonBinding.portMapping.inputs[0].vectorElementNames).toEqual(['横滚', '俯仰', '偏航']);
     expect(component.pythonBinding.portMapping.outputs[0].vectorElementNames).toEqual(['横滚滤波值', '俯仰滤波值', '偏航滤波值']);
     expect(component.defaults.parameterValues).toEqual({ coefficients: [0.2, 0.3, 0.5] });

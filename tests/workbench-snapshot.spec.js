@@ -5,6 +5,54 @@ import {
 } from '../src/services/workbenchSnapshotService.js';
 
 describe('workbenchSnapshotService', () => {
+  it('preserves subsystem ids through system-model save and restore', () => {
+    const snapshot = createWorkbenchSnapshot({
+      modelNodes: [{
+        id: 'node-subsystem',
+        type: 'subsystem_block',
+        targetCanvasId: 'canvas-child',
+        props: { name: '飞控子系统', subsystemId: 'flight-control-01' }
+      }],
+      modelEdges: []
+    });
+    const restored = restoreWorkbenchSnapshot(snapshot);
+
+    expect(snapshot.modelNodes[0].props.subsystemId).toBe('flight-control-01');
+    expect(restored.modelNodes[0].props.subsystemId).toBe('flight-control-01');
+  });
+
+  it('fills a missing legacy subsystem id from the stable node id', () => {
+    const restored = restoreWorkbenchSnapshot({
+      modelNodes: [{
+        id: 'node-subsystem-legacy',
+        type: 'subsystem_block',
+        props: { name: '旧子系统' }
+      }],
+      modelEdges: []
+    });
+
+    expect(restored.modelNodes[0].props.subsystemId).toBe('node-subsystem-legacy');
+  });
+
+  it('preserves diagnostic conditions and point rules through a snapshot round-trip', () => {
+    const snapshot = createWorkbenchSnapshot({
+      modelNodes: [],
+      modelEdges: [],
+      diagnosticModel: {
+        diagnosticConditions: [{ key: 'input_mode', options: ['1', '2'], currentValue: '2' }]
+      },
+      diagnosticTestPoints: [{
+        pointId: 'M1',
+        conditionKeys: ['input_mode'],
+        detectabilityRules: [{ faultId: 'fault-a', when: { input_mode: '2' }, detectable: true }]
+      }]
+    });
+    const restored = restoreWorkbenchSnapshot(snapshot);
+
+    expect(restored.diagnosticModel.diagnosticConditions[0].currentValue).toBe('2');
+    expect(restored.diagnosticTestPoints[0].detectabilityRules[0]).toMatchObject({ faultId: 'fault-a', detectable: true });
+  });
+
   it('restores the persisted immutable simulation interface definition', () => {
     const restored = restoreWorkbenchSnapshot({
       modelNodes: [{
@@ -118,6 +166,23 @@ describe('workbenchSnapshotService', () => {
     expect(restored.nodeSeq).toBe(7);
     expect(restored.edgeSeq).toBe(0);
     expect(restored.activeLineType).toBe('normal');
+  });
+
+  it('removes the retired complex-envelope analyzer and its connections from older workspaces', () => {
+    const restored = restoreWorkbenchSnapshot({
+      modelNodes: [
+        { id: 'node-source', type: 'signal_source' },
+        { id: 'node-retired', type: 'instrument_complex_envelope_spectrum' },
+        { id: 'node-sink', type: 'instrument_spectrum' }
+      ],
+      modelEdges: [
+        { id: 'edge-retired-input', sourceNodeId: 'node-source', targetNodeId: 'node-retired' },
+        { id: 'edge-retired-output', sourceNodeId: 'node-retired', targetNodeId: 'node-sink' }
+      ]
+    });
+
+    expect(restored.modelNodes.map((node) => node.id)).toEqual(['node-source', 'node-sink']);
+    expect(restored.modelEdges).toEqual([]);
   });
 
   it('preserves workspaceSource and layered canvas viewport data through snapshot round-trip', () => {

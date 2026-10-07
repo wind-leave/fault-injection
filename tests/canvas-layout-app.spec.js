@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import App from '../src/App.vue';
-import { __resetLegacyRuntimeForTests } from '../src/services/legacyRuntimeBootstrap.js';
+import { __resetLegacyRuntimeForTests, openDefaultBlankWorkspace, restoreStoredWorkbench } from '../src/services/legacyRuntimeBootstrap.js';
 
 function loadPublicPackage(fileName) {
   const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -147,9 +147,32 @@ function createCanvasContextStub() {
 describe('canvas layout cleanup', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     window.localStorage.clear();
     document.body.innerHTML = '';
     __resetLegacyRuntimeForTests();
+  });
+
+  it('renders all ports of a 32-input simulation component after a canvas update', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+
+    const node = window.createNode('simulation_block', 240, 240);
+    node.props.requiresPower = false;
+    node.props.powerInputs = [];
+    node.props.inputs = Array.from({ length: 32 }, (_, index) => ({ name: `输入 ${index + 1}`, type: '标量' }));
+    node.props.outputs = Array.from({ length: 32 }, (_, index) => ({ name: `输出 ${index + 1}`, type: '标量' }));
+    window.renderModelNodes();
+
+    const element = document.getElementById(`b-${node.id}`);
+    const inputs = [...element.querySelectorAll('.node-port--input')];
+    const outputs = [...element.querySelectorAll('.node-port--output')];
+    expect(inputs).toHaveLength(32);
+    expect(outputs).toHaveLength(32);
+    expect(inputs.every((port, index) => Number.parseFloat(port.style.top) > (index ? Number.parseFloat(inputs[index - 1].style.top) : -1))).toBe(true);
+    expect(outputs.every((port, index) => Number.parseFloat(port.style.top) > (index ? Number.parseFloat(outputs[index - 1].style.top) : -1))).toBe(true);
+    wrapper.unmount();
   });
 
   it('exposes extracted canvas graph geometry helpers to the legacy runtime', async () => {
@@ -240,6 +263,68 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('configures and bounds the continuous backend request batch size', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const requestStepsInput = document.getElementById('sim-request-steps');
+    expect(requestStepsInput.value).toBe('1000');
+
+    requestStepsInput.value = '300';
+    requestStepsInput.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(window.__GZ_STATE__.simulationRequestSteps).toBe(300);
+
+    requestStepsInput.value = '120000';
+    requestStepsInput.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(window.__GZ_STATE__.simulationRequestSteps).toBe(100000);
+    expect(requestStepsInput.value).toBe('100000');
+
+    wrapper.unmount();
+  });
+
+  it('persists the continuous backend request batch size through model export and import', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const requestStepsInput = document.getElementById('sim-request-steps');
+    requestStepsInput.value = '300';
+    requestStepsInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const exported = window.__GZ_FLIGHT_MODEL_PACKAGE__.exportCurrent();
+    expect(exported.workbenchSnapshot.simulationRequestSteps).toBe(300);
+
+    requestStepsInput.value = '1';
+    requestStepsInput.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(window.__GZ_STATE__.simulationRequestSteps).toBe(1);
+
+    expect(window.__GZ_FLIGHT_MODEL_PACKAGE__.importObject(exported).ok).toBe(true);
+    expect(window.__GZ_STATE__.simulationRequestSteps).toBe(300);
+    expect(window.__GZ_SIM__.requestSteps).toBe(300);
+    expect(requestStepsInput.value).toBe('300');
+
+    wrapper.unmount();
+  });
+
+  it('accepts 0.01 ps as the minimum simulation step size', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const stepInput = document.getElementById('sim-step');
+    const stepUnit = document.getElementById('sim-step-unit');
+    stepInput.value = '0.01';
+    stepUnit.value = 'ps';
+    stepInput.dispatchEvent(new Event('input', { bubbles: true }));
+    stepUnit.dispatchEvent(new Event('change', { bubbles: true }));
+
+    expect(window.__GZ_STATE__.simulationConfig.stepSize).toBe(1e-14);
+
+    stepInput.value = '0.001';
+    stepInput.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(window.__GZ_STATE__.simulationConfig.stepSize).toBe(1e-14);
+
+    wrapper.unmount();
+  });
+
   it('rejects simulation startup when the step size exceeds the duration', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -309,6 +394,120 @@ describe('canvas layout cleanup', () => {
     await flushRuntime();
     const savedSnapshot = JSON.parse(window.localStorage.getItem('gz-workbench-system-model'));
     expect(savedSnapshot.taskName).toBe('姿态控制回归任务');
+
+    wrapper.unmount();
+  });
+
+  it('saves a system model to the file chosen by the user', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+    window.createNode('signal_source', 320, 220);
+
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    let resolvePicker;
+    const picker = vi.fn().mockImplementation(() => new Promise((resolve) => { resolvePicker = resolve; }));
+    vi.stubGlobal('showSaveFilePicker', picker);
+    const exportCurrent = vi.spyOn(window.__GZ_FLIGHT_MODEL_PACKAGE__, 'exportCurrent');
+
+    const saving = window.doSaveSys();
+    expect(picker).toHaveBeenCalledOnce();
+    expect(exportCurrent).not.toHaveBeenCalled();
+    resolvePicker({ name: 'chosen-model.json', createWritable: async () => ({ write, close }) });
+    const saved = await saving;
+    expect(saved).toMatchObject({ ok: true, filename: 'chosen-model.json', saveMethod: 'file' });
+    expect(picker).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'gz-system-model',
+      suggestedName: expect.stringMatching(/\.json$/)
+    }));
+    expect(JSON.parse(write.mock.calls[0][0]).packageType).toBe('flight-control-model');
+    expect(close).toHaveBeenCalledOnce();
+    expect(window.localStorage.getItem('gz-workbench-system-model')).not.toBeNull();
+    wrapper.unmount();
+  });
+
+  it('leaves the system model unsaved when the save dialog is cancelled', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+    window.createNode('signal_source', 320, 220);
+    window.localStorage.removeItem('gz-workbench-system-model');
+    vi.stubGlobal('showSaveFilePicker', vi.fn().mockRejectedValue({ name: 'AbortError' }));
+
+    expect(await window.doSaveSys()).toMatchObject({ ok: false, reason: 'cancelled' });
+    expect(window.localStorage.getItem('gz-workbench-system-model')).toBeNull();
+    expect(window.__GZ_STATE__.systemSaved).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('opens the save dialog before building and writing a simulation result', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+    window.createNode('signal_source', 320, 220);
+    window.__GZ_STATE__.simDone = true;
+
+    const write = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    let resolvePicker;
+    const picker = vi.fn().mockImplementation(() => new Promise((resolve) => { resolvePicker = resolve; }));
+    vi.stubGlobal('showSaveFilePicker', picker);
+    delete window.__GZ_LAST_SIMULATION_RESULT_EXPORT__;
+
+    const saving = window.doSaveRes();
+    expect(picker).toHaveBeenCalledOnce();
+    expect(window.__GZ_LAST_SIMULATION_RESULT_EXPORT__).toBeUndefined();
+    resolvePicker({ name: 'chosen-result.json', createWritable: async () => ({ write, close }) });
+    const saved = await saving;
+    expect(saved).toMatchObject({ ok: true, filename: 'chosen-result.json', saveMethod: 'file' });
+    expect(picker).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'gz-simulation-result',
+      suggestedName: expect.stringMatching(/\.json$/)
+    }));
+    expect(JSON.parse(write.mock.calls[0][0]).publicData).toBeDefined();
+    expect(window.__GZ_LAST_SIMULATION_RESULT_EXPORT__.filename).toBe('chosen-result.json');
+    expect(close).toHaveBeenCalledOnce();
+    wrapper.unmount();
+  });
+
+  it('does not export a simulation result when the save dialog is cancelled', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+    window.createNode('signal_source', 320, 220);
+    window.__GZ_STATE__.simDone = true;
+    delete window.__GZ_LAST_SIMULATION_RESULT_EXPORT__;
+    vi.stubGlobal('showSaveFilePicker', vi.fn().mockRejectedValue({ name: 'AbortError' }));
+
+    expect(await window.doSaveRes()).toMatchObject({ ok: false, reason: 'cancelled' });
+    expect(window.__GZ_LAST_SIMULATION_RESULT_EXPORT__).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('keeps the task name editable while a Chinese IME composes text', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const input = document.getElementById('task-name');
+    const originalName = window.__GZ_STATE__.taskName;
+    input.focus();
+    input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    input.value = '';
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: true }));
+    expect(input.value).toBe('');
+    expect(window.__GZ_STATE__.taskName).toBe(originalName);
+
+    input.value = '故障注入任务';
+    input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '故障注入任务' }));
+    expect(input.value).toBe('故障注入任务');
+    expect(window.__GZ_STATE__.taskName).toBe('故障注入任务');
+
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(input.value).toBe('');
+    input.dispatchEvent(new Event('blur', { bubbles: true }));
+    expect(input.value).toBe('故障注入任务');
 
     wrapper.unmount();
   });
@@ -412,7 +611,7 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
-  it('exposes one-click layout cleanup and arranges imported model edges left-to-right', async () => {
+  it('hides layout cleanup controls while retaining the canvas arrangement command', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
@@ -431,7 +630,8 @@ describe('canvas layout cleanup', () => {
       sourcePortIndex: 0,
       targetPortIndex: 0
     });
-    expect(document.querySelector('.canvas-arrange__button')?.textContent).toContain('一键整理');
+    expect(document.querySelector('.canvas-arrange__button')).toBeNull();
+    expect(document.querySelector('[data-canvas-command="auto-arrange"]')).toBeNull();
     expect(typeof window.autoArrangeCanvas).toBe('function');
 
     const beforeForward = countForwardEdges(window.__GZ_STATE__);
@@ -496,6 +696,26 @@ describe('canvas layout cleanup', () => {
 
     expect(collapsedActionsRule).toContain('justify-self:end;');
     expect(collapsedActionsRule).toContain('margin-left:auto;');
+  });
+
+  it('keeps the D-matrix title below the tab strip after the component library is hidden', () => {
+    const css = readComponentsCss();
+    const panelRule = findCssRule(css, '.d-matrix-panel');
+    const chromeRule = findCssRule(css, '.canvas-wrap[data-view="dmatrix"] .canvas-chrome');
+    const runtime = readFileSync(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'services', 'legacy-runtime.txt'),
+      'utf8'
+    );
+
+    expect(panelRule).toContain('top:calc(var(--canvas-dmatrix-chrome-height) + 1px);');
+    expect(chromeRule).toContain('height:var(--canvas-dmatrix-chrome-height);');
+    expect(findCssRule(css, '.d-matrix-condition-status')).toContain('white-space:nowrap');
+    expect(findCssRule(css, '.d-matrix-condition-status')).toContain('width:100%');
+    expect(findCssRule(css, '.d-matrix-condition-status')).toContain('grid-area:condition;');
+    expect(findCssRule(css, '.d-matrix-header')).toContain('"condition condition";');
+    expect(findCssRule(css, '.d-matrix-header')).toContain('min-height:95px;');
+    expect(runtime).toContain('<h2>D矩阵</h2>');
+    expect(runtime).toContain('${renderDiagnosticConditionControls(model.diagnosticContext)}');
   });
 
   it('collapses and restores the right inspector while preserving its edge toggle', async () => {
@@ -766,6 +986,67 @@ describe('canvas layout cleanup', () => {
 
     expect(node.y).toBe(24);
 
+    wrapper.unmount();
+  });
+
+  it('keeps drag-time edge renders incremental without rebuilding diagnostic annotations', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const originalRenderAnnotations = window.renderCanvasDiagnosticAnnotations;
+    const renderAnnotations = vi.fn();
+    window.renderCanvasDiagnosticAnnotations = renderAnnotations;
+    try {
+      window.renderEdges({ nodeIds: [], incremental: true });
+      expect(renderAnnotations).not.toHaveBeenCalled();
+    } finally {
+      window.renderCanvasDiagnosticAnnotations = originalRenderAnnotations;
+    }
+
+    wrapper.unmount();
+  });
+
+  it('starts node dragging and background panning without tracing unrelated edge geometry', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+    const first = window.createNode('flow_block', 180, 220);
+    const second = window.createNode('flow_block', 460, 220);
+    window.__GZ_STATE__.modelEdges.push({
+      id: 'edge-interaction-scan',
+      sourceNodeId: first.id,
+      sourcePortIndex: 0,
+      targetNodeId: second.id,
+      targetPortIndex: 0
+    });
+    window.renderEdges();
+
+    const path = document.querySelector('.edge-path[data-edge-id="edge-interaction-scan"]');
+    const traceLength = vi.fn(() => 100);
+    path.getTotalLength = traceLength;
+    path.getPointAtLength = vi.fn(() => ({ x: 400, y: 300 }));
+    path.getBoundingClientRect = () => ({ left: 300, right: 500, top: 150, bottom: 350, width: 200, height: 200 });
+    const viewport = document.getElementById('canvas-viewport');
+    const originX = second.x;
+
+    dispatchPointer(document.getElementById(`b-${second.id}`), 'pointerdown', { pointerId: 71, clientX: 460, clientY: 220 });
+    expect(traceLength).not.toHaveBeenCalled();
+    dispatchPointer(viewport, 'pointermove', { pointerId: 71, clientX: 500, clientY: 260 });
+    dispatchPointer(viewport, 'pointerup', { pointerId: 71, clientX: 500, clientY: 260 });
+    expect(second.x).toBeGreaterThan(originX);
+
+    dispatchPointer(viewport, 'pointerdown', { pointerId: 72, clientX: 20, clientY: 20 });
+    expect(traceLength).not.toHaveBeenCalled();
+    dispatchPointer(viewport, 'pointermove', { pointerId: 72, clientX: 60, clientY: 70 });
+    dispatchPointer(viewport, 'pointerup', { pointerId: 72, clientX: 60, clientY: 70 });
+    await flushRuntime();
+    const stage = document.getElementById('canvas-stage');
+    expect(stage.style.transform).toBe('none');
+    expect(Number(stage.style.zoom)).toBeCloseTo(window.__GZ_STATE__.canvasScale);
+    expect(Number.parseFloat(stage.style.left) * window.__GZ_STATE__.canvasScale)
+      .toBeCloseTo(window.__GZ_STATE__.canvasOffsetX);
+    expect(Number.parseFloat(stage.style.top) * window.__GZ_STATE__.canvasScale)
+      .toBeCloseTo(window.__GZ_STATE__.canvasOffsetY);
     wrapper.unmount();
   });
 
@@ -1142,6 +1423,96 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('moves selected canvas components with WASD or arrow keys and ignores typing or dialogs', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const node = window.createNode('signal_source', 300, 240);
+    await flushRuntime();
+    const startX = node.x;
+    const startY = node.y;
+    document.getElementById(`b-${node.id}`).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(window.__GZ_STATE__.selectedNodeIds).toContain(node.id);
+    const press = (key) => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      window.dispatchEvent(event);
+      return event;
+    };
+
+    expect(press('w').defaultPrevented).toBe(true);
+    press('a');
+    press('s');
+    press('d');
+    expect(node.x).toBe(startX);
+    expect(node.y).toBe(startY);
+    expect(document.getElementById(`b-${node.id}`).style.left).toBe(`${startX}px`);
+
+    press('d');
+    expect(node.x).toBe(startX + 10);
+    expect(window.undoCanvasCommand().ok).toBe(true);
+    expect(window.__GZ_STATE__.modelNodes.find((item) => item.id === node.id).x).toBe(startX);
+
+    document.getElementById(`b-${node.id}`).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(window.__GZ_STATE__.selectedNodeIds).toContain(node.id);
+    for (const key of ['ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight']) {
+      expect(press(key).defaultPrevented).toBe(true);
+    }
+    expect(window.__GZ_STATE__.modelNodes.find((item) => item.id === node.id)).toMatchObject({ x: startX, y: startY });
+    press('ArrowRight');
+    expect(window.__GZ_STATE__.modelNodes.find((item) => item.id === node.id).x).toBe(startX + 10);
+    expect(window.undoCanvasCommand().ok).toBe(true);
+    expect(window.__GZ_STATE__.modelNodes.find((item) => item.id === node.id).x).toBe(startX);
+    document.getElementById(`b-${node.id}`).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+    press('ArrowRight');
+    expect(window.__GZ_STATE__.modelNodes.find((item) => item.id === node.id).x).toBe(startX);
+    input.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay open';
+    document.body.appendChild(overlay);
+    press('ArrowRight');
+    expect(window.__GZ_STATE__.modelNodes.find((item) => item.id === node.id).x).toBe(startX);
+    overlay.remove();
+
+    window.setCanvasView('components');
+    press('ArrowRight');
+    expect(window.__GZ_STATE__.modelNodes.find((item) => item.id === node.id).x).toBe(startX);
+
+    wrapper.unmount();
+  });
+
+  it('moves a multi-selection together with WASD and arrow keys', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const first = window.createNode('flow_block', 200, 220);
+    const second = window.createNode('flow_block', 450, 300);
+    await flushRuntime();
+    const firstY = first.y;
+    const secondY = second.y;
+    document.getElementById(`b-${first.id}`).dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      ctrlKey: true
+    }));
+    expect(window.__GZ_STATE__.selectedNodeIds).toEqual(expect.arrayContaining([first.id, second.id]));
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true }));
+    expect(first.y).toBe(firstY + 10);
+    expect(second.y).toBe(secondY + 10);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
+    expect(first.y).toBe(firstY);
+    expect(second.y).toBe(secondY);
+
+    wrapper.unmount();
+  });
+
   it('wires canvas toolbar view, interaction, zoom, and fullscreen controls to runtime state', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -1299,6 +1670,8 @@ describe('canvas layout cleanup', () => {
     expect(matrix.rows.some((row) => row.faultId === 'sensor_bias_imu_pitch')).toBe(false);
 
     const manualRow = matrix.rows.find((row) => row.faultId === 'manual-output-bias');
+    const endpointLabel = '手动控制器 · 输出 1 → 手动示波器 · CH1';
+    expect(manualRow.targetLabel).toBe(endpointLabel);
     expect(manualRow.cells.find((cell) => cell.pointId === outputPoint.pointId)?.detectable).toBe(true);
     expect(manualRow.cells.find((cell) => cell.pointId === observerOnlyPoint.pointId)?.detectable).toBe(false);
     expect(manualRow.cells.some((cell) => cell.edgeId === 'edge-manual-command')).toBe(false);
@@ -1306,13 +1679,28 @@ describe('canvas layout cleanup', () => {
     window.setCanvasView('dmatrix');
     await flushRuntime();
     expect(document.getElementById('d-matrix-panel')?.textContent).toContain('manual-output-bias');
+    expect(document.getElementById('d-matrix-panel')?.textContent).toContain(endpointLabel);
+    const knowledgeGraph = window.getDiagnosticKnowledgeGraph();
+    expect(knowledgeGraph.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'signalEdge', id: 'edge-manual-output', label: endpointLabel })
+    ]));
 
     vi.stubGlobal('fetch', async (url, request) => {
       expect(url).toBe('/api/troubleshooting/plan');
-      expect(JSON.parse(request.body)).toMatchObject({
+      const requestBody = JSON.parse(request.body);
+      expect(requestBody).toMatchObject({
         targetFaultIds: ['manual-output-bias'],
         modelGraph: expect.objectContaining({ modelNodes: expect.any(Array), modelEdges: expect.any(Array) })
       });
+      expect(requestBody.modelGraph.modelEdges).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: 'edge-manual-output',
+          sourceDeviceId: controller.id,
+          sourcePort: 'output-0',
+          targetDeviceId: scope.id,
+          targetPort: 'ch1'
+        })
+      ]));
       return {
         ok: true,
         json: async () => ({
@@ -1371,6 +1759,200 @@ describe('canvas layout cleanup', () => {
       source: 'backend-knowledge-graph',
       isCustomized: false
     });
+
+    wrapper.unmount();
+  });
+
+  it('locates exact single faults and matching combinations from selected point states', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    const originalBuilder = window.buildDetectionMatrixModel;
+    const matrix = {
+      points: [
+        { pointId: 'tp-m1', shortName: 'M1', name: '测点一', pointType: 'virtual' },
+        { pointId: 'tp-m2', shortName: 'M2', name: '测点二', pointType: 'physical' }
+      ],
+      faults: [],
+      rows: [
+        {
+          faultId: 'fault-device-a', faultName: '设备A故障', targetLabel: '设备A', layer: '物理层', detectableCount: 1,
+          cells: [
+            { pointId: 'tp-m1', detectable: true },
+            { pointId: 'tp-m2', detectable: false }
+          ]
+        },
+        {
+          faultId: 'fault-device-a-copy', faultName: '设备A同征故障', targetLabel: '设备A备份', layer: '物理层', detectableCount: 1,
+          cells: [
+            { pointId: 'tp-m1', detectable: true },
+            { pointId: 'tp-m2', detectable: false }
+          ]
+        },
+        {
+          faultId: 'fault-wire-b', faultName: '连线B故障', targetLabel: '连线B', layer: '电气层', detectableCount: 1,
+          cells: [
+            { pointId: 'tp-m1', detectable: false },
+            { pointId: 'tp-m2', detectable: true }
+          ]
+        }
+      ],
+      summary: { pointCount: 2, faultCount: 3, detectableCells: 3 }
+    };
+    window.buildDetectionMatrixModel = () => matrix;
+    window.renderDetectionMatrixPanel();
+
+    let view = document.querySelector('[data-d-matrix-view]');
+    expect(view.querySelector('[data-open-fault-localization]')).not.toBeNull();
+    view.querySelector('[data-open-fault-localization]').click();
+    await flushRuntime();
+    let localization = document.querySelector('[data-fault-localization-view]');
+    expect(document.querySelector('[data-d-matrix-view]')).not.toBeNull();
+    expect(localization.querySelectorAll('[data-fault-localization-point]')).toHaveLength(2);
+    expect(localization.querySelector('[data-run-fault-localization]')?.disabled).toBe(true);
+
+    for (const [pointId, value] of [['tp-m1', 'abnormal'], ['tp-m2', 'normal']]) {
+      const input = localization.querySelector(`[data-fault-localization-state="${pointId}"][value="${value}"]`);
+      input.click();
+      await flushRuntime();
+      localization = document.querySelector('[data-fault-localization-view]');
+    }
+    localization.querySelector('[data-run-fault-localization]').click();
+    await flushRuntime();
+    localization = document.querySelector('[data-fault-localization-view]');
+    const diagnosisDuration = localization.querySelector('[data-fault-localization-diagnosis-duration]');
+    expect(diagnosisDuration).not.toBeNull();
+    expect(diagnosisDuration.textContent).toMatch(/^诊断用时：\d+\.\d{2} ms$/);
+    expect(localization.querySelectorAll('[data-fault-localization-candidate]')).toHaveLength(3);
+    expect(localization.textContent).toContain('设备A故障');
+    expect(localization.textContent).toContain('设备A同征故障');
+    expect(localization.textContent).toContain('设备A故障 + 设备A同征故障');
+    expect(localization.textContent).not.toContain('连线B故障');
+    localization.querySelector('[data-fault-localization-close]').click();
+    await flushRuntime();
+    expect(document.querySelector('[data-fault-localization-view]')).toBeNull();
+    expect(document.querySelector('[data-d-matrix-view]')).not.toBeNull();
+
+    window.buildDetectionMatrixModel = originalBuilder;
+    wrapper.unmount();
+  });
+
+  it('saves phenomena per fault and measurement point and refreshes the live graph', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    const originalBuilder = window.buildDetectionMatrixModel;
+    window.buildDetectionMatrixModel = () => ({
+      points: [{ pointId: 'tp-shared', shortName: 'M1', name: '共享测点' }],
+      rows: [
+        { faultId: 'fault-a', faultDisplayName: '故障 A', cells: [{ pointId: 'tp-shared', pointCode: 'M1', detectable: true }] },
+        { faultId: 'fault-b', faultDisplayName: '故障 B', cells: [{ pointId: 'tp-shared', pointCode: 'M1', detectable: true }] }
+      ],
+      diagnosticContext: { summary: '测试工况' }
+    });
+
+    const save = window.__GZ_DIAGNOSTIC_PHENOMENA__.save;
+    expect(save('fault-a', 'tp-shared', [' 幅值下降 ', '幅值下降', '输出抖动'])).toMatchObject({
+      ok: true, phenomena: ['幅值下降', '输出抖动'], persisted: true
+    });
+    expect(save('fault-b', 'tp-shared', ['频率异常'])).toMatchObject({
+      ok: true, phenomena: ['频率异常'], persisted: true
+    });
+    expect(save('fault-a', 'missing-point', ['无效现象']).ok).toBe(false);
+
+    const relations = window.getDiagnosticKnowledgeGraph().relations.filter((relation) => relation.type === 'DETECTABILITY');
+    expect(relations.find((relation) => relation.source.id === 'fault-a').phenomena).toEqual(['幅值下降', '输出抖动']);
+    expect(relations.find((relation) => relation.source.id === 'fault-b').phenomena).toEqual(['频率异常']);
+    expect(window.__GZ_STATE__.diagnosticModel.faultPointPhenomena).toEqual({
+      'fault-a': { 'tp-shared': ['幅值下降', '输出抖动'] },
+      'fault-b': { 'tp-shared': ['频率异常'] }
+    });
+    const snapshot = JSON.parse(window.localStorage.getItem('gz-workbench-system-model'));
+    expect(snapshot.diagnosticModel.faultPointPhenomena).toEqual(window.__GZ_STATE__.diagnosticModel.faultPointPhenomena);
+
+    window.buildDetectionMatrixModel = originalBuilder;
+    wrapper.unmount();
+  });
+
+  it('persists operation requirements and allowed instruments per device', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+    const deviceA = window.createNode('simulation_block', 260, 220);
+    const deviceB = window.createNode('simulation_block', 520, 220);
+    deviceA.props.name = '设备 A';
+    deviceB.props.name = '设备 B';
+
+    const updates = [];
+    const onGraphUpdate = (event) => updates.push(event.detail.graph);
+    window.addEventListener('gz:knowledge-graph-updated', onGraphUpdate, { once: true });
+    const save = window.__GZ_DEVICE_SPECIFICATIONS__.save;
+    expect(save(deviceA.id, 'operationRequirements', [' 断电检查 ', '断电检查', '记录参数'])).toMatchObject({
+      ok: true, entries: ['断电检查', '记录参数'], persisted: true
+    });
+    expect(save(deviceA.id, 'allowedInstruments', ['数字万用表'])).toMatchObject({
+      ok: true, entries: ['数字万用表'], persisted: true
+    });
+    expect(save(deviceB.id, 'allowedInstruments', ['示波器'])).toMatchObject({
+      ok: true, entries: ['示波器'], persisted: true
+    });
+    expect(save('missing-device', 'operationRequirements', ['无效内容']).ok).toBe(false);
+
+    const graph = window.getDiagnosticKnowledgeGraph();
+    const graphA = graph.nodes.find((node) => node.kind === 'component' && node.id === deviceA.id);
+    const graphB = graph.nodes.find((node) => node.kind === 'component' && node.id === deviceB.id);
+    expect(graphA).toMatchObject({ operationRequirements: ['断电检查', '记录参数'], allowedInstruments: ['数字万用表'] });
+    expect(graphB).toMatchObject({ operationRequirements: [], allowedInstruments: ['示波器'] });
+    expect(updates.some((updated) => updated.nodes.some((node) =>
+      node.id === deviceA.id && node.operationRequirements?.includes('记录参数')
+    ))).toBe(true);
+    const saved = window.__GZ_STATE__.diagnosticModel.deviceSpecifications;
+    expect(saved[deviceA.id]).toEqual({ operationRequirements: ['断电检查', '记录参数'], allowedInstruments: ['数字万用表'] });
+    expect(saved[deviceB.id]).toEqual({ allowedInstruments: ['示波器'] });
+    const snapshot = JSON.parse(window.localStorage.getItem('gz-workbench-system-model'));
+    expect(snapshot.diagnosticModel.deviceSpecifications).toEqual(saved);
+    window.removeEventListener('gz:knowledge-graph-updated', onGraphUpdate);
+    wrapper.unmount();
+  });
+
+  it('renders the D-matrix shell even when a blank workspace has no rows or points', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    window.setCanvasView('dmatrix');
+    await flushRuntime();
+
+    const panel = document.getElementById('d-matrix-panel');
+    expect(panel?.querySelector('[data-d-matrix-view]')).not.toBeNull();
+    expect(panel?.textContent).toContain('D矩阵');
+    expect(panel?.textContent).toContain('0故障类型');
+    expect(panel?.textContent).toContain('0已启用测点');
+
+    wrapper.unmount();
+  });
+
+  it('keeps the D matrix visible when enabled measurement records contain empty entries', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    window.buildDiagnosticTestPointModel = () => ({
+      installed: [null, undefined, {
+        pointId: 'M-incomplete',
+        shortName: 'M1',
+        name: '不完整测点',
+        edgeId: 'missing-edge',
+        vectorIndex: 0,
+        pointType: 'virtual',
+        detects: []
+      }]
+    });
+    window.setCanvasView('dmatrix');
+    await flushRuntime();
+
+    const panel = document.getElementById('d-matrix-panel');
+    expect(panel?.querySelector('.is-error')).toBeNull();
+    expect(panel?.querySelector('[data-d-matrix-view]')).not.toBeNull();
+    expect(panel?.textContent).toContain('M1');
 
     wrapper.unmount();
   });
@@ -1503,8 +2085,8 @@ describe('canvas layout cleanup', () => {
     expect(panel?.textContent).toContain('设备A故障 + 连线B故障');
     expect(panel?.textContent).toContain('更换设备');
     expect(panel?.textContent).toContain('更换连线');
-    expect(panel?.textContent).toContain('物理测点已知条件');
-    expect(panel?.textContent).toContain('M2 测点二：正常');
+    expect(panel?.textContent).not.toContain('物理测点已知条件');
+    expect(panel?.textContent).not.toContain('M2 测点二：正常');
     expect(Array.from(panel?.querySelectorAll('.troubleshooting-path__steps li') || []).some((step) => step.textContent.includes('M2'))).toBe(false);
     expect(panel?.textContent).toContain('知识图谱 7 节点 / 9 关系');
     const liveGraph = window.getDiagnosticKnowledgeGraph();
@@ -1590,13 +2172,113 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('opens an empty canvas by default without deleting a saved model', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    const savedModel = JSON.stringify({ modelNodes: [{ id: 'saved-node' }] });
+    window.localStorage.setItem('gz-workbench-system-model', savedModel);
+
+    openDefaultBlankWorkspace();
+
+    expect(window.__GZ_STATE__.sysLoaded).toBe(true);
+    expect(window.__GZ_STATE__.modelNodes).toEqual([]);
+    expect(document.getElementById('diagram')?.classList.contains('on')).toBe(true);
+    expect(document.getElementById('empty')?.style.display).toBe('none');
+    expect(window.localStorage.getItem('gz-workbench-system-model')).toBe(savedModel);
+    wrapper.unmount();
+  });
+
+  it('restores root and nested canvas contents after page exit and reload initialization', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_rf', 160, 220);
+    const rootConsole = window.createNode('display_console_1', 420, 220);
+    const subsystem = window.createNode('subsystem_block', 680, 220);
+    const state = window.__GZ_STATE__;
+    state.modelEdges.push({
+      id: 'edge-before-refresh',
+      sourceNodeId: source.id,
+      sourcePortIndex: 0,
+      targetNodeId: rootConsole.id,
+      targetPortIndex: 0
+    });
+    window.openSubsystemCanvas(subsystem.id);
+    const nestedConsole = window.createNode('display_console_2', 320, 240);
+    const childCanvasId = state.activeCanvasId;
+
+    window.dispatchEvent(new Event('pagehide'));
+    const saved = JSON.parse(window.localStorage.getItem('gz-workbench-system-model'));
+    expect(saved.canvases['canvas-root'].nodes.map((node) => node.id)).toEqual([source.id, rootConsole.id, subsystem.id]);
+    expect(saved.canvases['canvas-root'].edges.map((edge) => edge.id)).toContain('edge-before-refresh');
+    expect(saved.canvases[childCanvasId].nodes.map((node) => node.id)).toContain(nestedConsole.id);
+
+    openDefaultBlankWorkspace();
+    expect(state.modelNodes).toHaveLength(0);
+    expect(restoreStoredWorkbench()).toBe(true);
+    expect(state.activeCanvasId).toBe(childCanvasId);
+    expect(state.canvases['canvas-root'].edges.map((edge) => edge.id)).toContain('edge-before-refresh');
+    expect(state.canvases[childCanvasId].nodes.map((node) => node.id)).toContain(nestedConsole.id);
+    expect(document.querySelector(`#b-${nestedConsole.id}`)).not.toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('removes every measurement point bound to an incident edge when deleting a component', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    const node = { id: 'node-delete-component-source', type: 'flow_block', props: { name: '待删除组件' } };
+    const neighbour = { id: 'node-delete-component-target', type: 'flow_block', props: { name: '相邻组件' } };
+    const incidentEdge = {
+      id: 'edge-delete-component-incident',
+      sourceNodeId: node.id,
+      targetNodeId: neighbour.id
+    };
+    state.modelNodes = [node, neighbour];
+    state.modelEdges = [incidentEdge];
+    state.nodes = state.modelNodes;
+    state.edges = state.modelEdges;
+    const pointId = 'tp-delete-component-incident-edge';
+    const point = { pointId, edgeId: incidentEdge.id, name: '待清理的连线测点' };
+    state.manualDiagnosticTestPoints = [point];
+    state.diagnosticTestPoints = [point];
+    state.testPoints = [point];
+    state.diagnosticModel = {
+      testPoints: [point],
+      detectabilityMatrix: [{ faultTypeId: 'fault-delete-component', testPointId: pointId, detectable: true }]
+    };
+    state.installedDiagnosticTestPointIds = [pointId];
+    state.simulationTestPointIds = [pointId];
+
+    window.selectNode(node.id);
+    window.deleteSelectedNode();
+    await flushRuntime();
+
+    expect(state.modelEdges.some((edge) => edge.id === incidentEdge.id)).toBe(false);
+    expect(state.manualDiagnosticTestPoints).toEqual([]);
+    expect(state.diagnosticTestPoints).toEqual([]);
+    expect(state.testPoints).toEqual([]);
+    expect(state.diagnosticModel.testPoints).toEqual([]);
+    expect(state.diagnosticModel.detectabilityMatrix).toEqual([]);
+    expect(state.installedDiagnosticTestPointIds).not.toContain(pointId);
+    expect(state.simulationTestPointIds).not.toContain(pointId);
+
+    wrapper.unmount();
+  });
+
   it('creates an installed physical point only for connected display-console inputs and shows it in edge settings', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
     window.doCreateBlankWorkspace();
-    const source = window.createNode('signal_source', 180, 220);
+    const source = window.createNode('signal_source_rf', 180, 220);
     const displayConsole = window.createNode('display_console_1', 520, 220);
+    const liveSource = window.__GZ_STATE__.modelNodes.find((node) => node.id === source.id);
+    liveSource.props.outputFormat = '向量';
+    liveSource.props.rfVectorLength = 7;
     expect(window.buildDiagnosticTestPointModel().positions.filter(point => point.displayConsoleInput)).toHaveLength(0);
     window.__GZ_STATE__.modelEdges.push({
       id: 'edge-default-console-observation',
@@ -1610,29 +2292,30 @@ describe('canvas layout cleanup', () => {
 
     const pointModel = window.buildDiagnosticTestPointModel();
     const consolePoints = pointModel.positions.filter(point => point.displayConsoleInput);
-    expect(consolePoints).toHaveLength(1);
-    expect(consolePoints.map(point => point.shortName)).toEqual(['M1']);
+    expect(consolePoints).toHaveLength(6);
+    expect(consolePoints.map(point => point.shortName)).toEqual(['M1', 'M2', 'M3', 'M4', 'M5', 'M6']);
     expect(consolePoints.every(point => point.pointType === 'physical' && point.installed)).toBe(true);
     expect(consolePoints[0]).toMatchObject({
       edgeId: 'edge-default-console-observation',
       nodeId: displayConsole.id,
-      inputIndex: 0,
-      inputKey: 'centerFrequency',
+      inputIndex: 1,
+      vectorIndex: 1,
+      inputKey: 'repetitionPeriod',
       defaultInstalled: true
     });
-    expect(consolePoints.map(point => point.name)).toEqual(['显控台 1 · 中心频率（MHz）']);
+    expect(consolePoints[0].name).toBe('显控台 1 · 重复周期（μs）');
 
     const matrix = window.buildDetectionMatrixModel();
-    expect(matrix.points.filter(point => point.displayConsoleInput)).toHaveLength(1);
+    expect(matrix.points.filter(point => point.displayConsoleInput)).toHaveLength(6);
     const graph = window.getDiagnosticKnowledgeGraph();
-    expect(graph.nodes.filter(node => node.kind === 'measurementPoint' && node.displayConsoleInput)).toHaveLength(1);
+    expect(graph.nodes.filter(node => node.kind === 'measurementPoint' && node.displayConsoleInput)).toHaveLength(6);
     expect(graph.relations).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: 'OBSERVES',
         source: { kind: 'measurementPoint', id: consolePoints[0].pointId },
         target: { kind: 'component', id: displayConsole.id },
-        inputIndex: 0,
-        inputKey: 'centerFrequency',
+        inputIndex: 1,
+        inputKey: 'repetitionPeriod',
         observationSource: 'display-console-input'
       })
     ]));
@@ -1655,14 +2338,14 @@ describe('canvas layout cleanup', () => {
     expect(automaticCard?.querySelector('[data-edge-testpoint-type]')?.value).toBe('physical');
     expect(automaticCard?.querySelector('[data-edge-testpoint-type]')?.disabled).toBe(true);
     expect(automaticCard?.querySelector('[data-delete-edge-testpoint]')).toBeNull();
-    automaticCard.querySelector('[data-edge-testpoint-name]').value = '中心频率物理观测点';
+    automaticCard.querySelector('[data-edge-testpoint-name]').value = '重复周期物理观测点';
     automaticCard.querySelector('[data-save-edge-testpoint]').click();
     await flushRuntime();
     expect(window.__GZ_STATE__.manualDiagnosticTestPoints).toEqual(expect.arrayContaining([
       expect.objectContaining({
         pointId: consolePoints[0].pointId,
         edgeId: 'edge-default-console-observation',
-        name: '中心频率物理观测点',
+        name: '重复周期物理观测点',
         pointType: 'physical',
         displayConsoleInput: true
       })
@@ -1679,14 +2362,212 @@ describe('canvas layout cleanup', () => {
       targetNodeId: displayConsole.id,
       targetPortIndex: 0
     });
-    expect(window.buildDiagnosticTestPointModel().positions.filter(point => point.displayConsoleInput)).toEqual([
+    const reconnectedPoints = window.buildDiagnosticTestPointModel().positions.filter(point => point.displayConsoleInput);
+    expect(reconnectedPoints).toHaveLength(6);
+    expect(reconnectedPoints).toEqual(expect.arrayContaining([
       expect.objectContaining({
         pointId: consolePoints[0].pointId,
         edgeId: 'edge-reconnected-console-observation',
-        name: '中心频率物理观测点',
         pointType: 'physical'
       })
+    ]));
+
+    wrapper.unmount();
+  });
+
+  it('defaults manual and display-console point detectability from fault paths and preserves edits', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_rf', 180, 220);
+    const middle = window.createNode('simulation_block', 400, 220);
+    const scope = window.createNode('instrument_scope', 650, 220);
+    const consoleNode = window.createNode('display_console_1', 650, 380);
+    const other = window.createNode('flow_block', 180, 450);
+    const state = window.__GZ_STATE__;
+    const firstFault = { id: 'fault-upstream', name: '上游故障', targetNodeId: source.id };
+    source.injectedFault = firstFault;
+    state.modelEdges.push(
+      { id: 'edge-fault-source', sourceNodeId: source.id, targetNodeId: middle.id, sourcePortIndex: 0, targetPortIndex: 0 },
+      { id: 'edge-observation', sourceNodeId: middle.id, targetNodeId: scope.id, sourcePortIndex: 0, targetPortIndex: 0 },
+      { id: 'edge-console-observation', sourceNodeId: middle.id, targetNodeId: consoleNode.id, sourcePortIndex: 0, targetPortIndex: 0 },
+      { id: 'edge-unrelated', sourceNodeId: other.id, targetNodeId: scope.id, sourcePortIndex: 0, targetPortIndex: 0 }
+    );
+
+    const authoring = window.__GZ_TEST_POINT_AUTHORING__;
+    const draft = authoring.createDraft('edge-observation');
+    expect(draft.detects).toContain(firstFault.id);
+    expect(authoring.save('edge-observation', draft)).toMatchObject({ ok: true });
+    const sourcePoint = window.addDiagnosticTestPointFromEdge('edge-fault-source').point;
+    expect(sourcePoint.detects).toContain(firstFault.id);
+    const unrelatedDraft = authoring.createDraft('edge-unrelated');
+    expect(unrelatedDraft.detects).not.toContain(firstFault.id);
+
+    const consolePoint = window.buildDiagnosticTestPointModel().positions.find((point) => point.displayConsoleInput);
+    expect(consolePoint.detects).toContain(firstFault.id);
+    window.selectEdge('edge-console-observation');
+    window.setPropertyPanelTab('testpoints');
+    const consoleCard = document.querySelector(`[data-edge-testpoint-card="${consolePoint.pointId}"]`);
+    const firstFaultCheckbox = consoleCard.querySelector(`[data-edge-testpoint-fault="${firstFault.id}"]`);
+    expect(firstFaultCheckbox.checked).toBe(true);
+    firstFaultCheckbox.checked = false;
+    consoleCard.querySelector('[data-save-edge-testpoint]').click();
+    expect(authoring.save('edge-observation', { ...draft, detects: [] })).toMatchObject({ ok: true });
+    state.manualDiagnosticTestPoints.push({
+      pointId: 'tp-legacy-observation',
+      edgeId: 'edge-observation',
+      pointType: 'virtual',
+      detects: []
+    });
+    expect(window.buildDiagnosticTestPointModel().positions.find((point) => point.pointId === 'tp-legacy-observation').detects).toEqual([]);
+
+    const newFault = { id: 'fault-new', name: '新增故障', targetEdgeId: 'edge-fault-source' };
+    state.modelEdges.find((edge) => edge.id === 'edge-fault-source').injectedFault = newFault;
+    const points = window.buildDiagnosticTestPointModel().positions;
+    const manualPoint = points.find((point) => point.pointId === draft.pointId);
+    const editedConsolePoint = points.find((point) => point.pointId === consolePoint.pointId);
+    const legacyPoint = points.find((point) => point.pointId === 'tp-legacy-observation');
+    expect(points.find((point) => point.pointId === sourcePoint.pointId).detects).toEqual([firstFault.id, newFault.id]);
+    expect(manualPoint.detects).toEqual([newFault.id]);
+    expect(editedConsolePoint.detects).toEqual([newFault.id]);
+    expect(legacyPoint.detects).toEqual([newFault.id]);
+
+    window.installDiagnosticTestPoint(draft.pointId);
+    const matrix = window.buildDetectionMatrixModel();
+    expect(matrix.rows.find((row) => row.faultId === firstFault.id)?.cells.find((cell) => cell.pointId === draft.pointId)?.detectable).toBe(false);
+    expect(matrix.rows.find((row) => row.faultId === newFault.id)?.cells.find((cell) => cell.pointId === draft.pointId)?.detectable).toBe(true);
+    expect(matrix.rows.find((row) => row.faultId === newFault.id)?.cells.find((cell) => cell.pointId === consolePoint.pointId)?.detectable).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it('compacts constant display-console values when saving simulation results', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_rf', 180, 220);
+    const displayConsole = window.createNode('display_console_1', 520, 220);
+    const liveSource = window.__GZ_STATE__.modelNodes.find((node) => node.id === source.id);
+    liveSource.props.outputFormat = '向量';
+    liveSource.props.rfVectorLength = 7;
+    window.__GZ_STATE__.modelEdges.push({
+      id: 'edge-compact-console-series',
+      sourceNodeId: source.id,
+      sourcePortIndex: 0,
+      targetNodeId: displayConsole.id,
+      targetPortIndex: 0
+    });
+    window.__GZ_SIM__.componentOutputs = {
+      time: [0, 0.01, 0.02, 0.03, 0.04, 0.05],
+      steps: [100, 100, 100, 200, 200, 200].map((value, index) => ({
+        time: index * 0.01,
+        actual: { [source.id]: { output: [value, 2, 3, 4, 5, 6, 7] } }
+      }))
+    };
+
+    const savedResult = await window.buildSimulationResultSnapshot();
+    const channel = savedResult.publicData.renderData.devices
+      .find((device) => device.id === displayConsole.id)
+      ?.channels?.centerFrequency;
+    expect(channel?.series).toEqual([
+      { t: 0, value: 100, constantRangeBoundary: 'start' },
+      { t: 0.02, value: 100, constantRangeBoundary: 'end' },
+      { t: 0.03, value: 200, constantRangeBoundary: 'start' },
+      { t: 0.05, value: 200, constantRangeBoundary: 'end' }
     ]);
+
+    wrapper.unmount();
+  });
+
+  it('exports connection labels from the component and port names', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const limiter = window.createNode('rf_complex_envelope_limiter', 180, 220);
+    const filter = window.createNode('rf_complex_envelope_band_pass_filter', 520, 220);
+    limiter.props.name = '复数包络限幅器';
+    filter.props.name = '复数包络带通滤波器';
+    window.__GZ_STATE__.modelEdges.push({
+      id: 'edge-envelope-limiter-filter',
+      label: 'edge-3',
+      sourceNodeId: limiter.id,
+      sourcePortIndex: 0,
+      targetNodeId: filter.id,
+      targetPortIndex: 0
+    });
+
+    const savedResult = await window.buildSimulationResultSnapshot();
+    const connection = savedResult.publicData.renderData.connections
+      .find((item) => item.id === 'edge-envelope-limiter-filter');
+    expect(connection?.label).toBe('复数包络限幅器·output_envelope→复数包络带通滤波器·input_envelope');
+
+    wrapper.unmount();
+  });
+
+  it('keeps display-console measurement point labels after renaming all fixed points', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.doCreateBlankWorkspace();
+    const state = window.__GZ_STATE__;
+    const source = { id: 'rename-console-source', type: 'signal_source', props: { name: '信号源' } };
+    const displayConsole = {
+      id: 'rename-console',
+      type: 'display_console',
+      props: {
+        name: '显控台 1',
+        displayConfig: {
+          inputs: [
+            { key: 'input-a', label: '输入 A', generateMeasurementPoint: true },
+            { key: 'input-b', label: '输入 B', generateMeasurementPoint: true },
+            { key: 'input-c', label: '输入 C', generateMeasurementPoint: true }
+          ]
+        }
+      }
+    };
+    state.modelNodes = [source, displayConsole];
+    state.nodes = state.modelNodes;
+    state.modelEdges = [{
+      id: 'rename-console-vector-edge',
+      sourceNodeId: source.id,
+      sourcePortIndex: 0,
+      targetNodeId: displayConsole.id,
+      targetPortIndex: 0
+    }];
+    state.edges = state.modelEdges;
+    state.diagnosticTestPoints = [];
+    state.testPoints = [];
+    state.manualDiagnosticTestPoints = [
+      { pointId: 'rename-manual-1', shortName: 'M8', name: '手动测点 1', edgeId: 'manual-edge-1', createdAt: Date.now() },
+      { pointId: 'rename-manual-2', shortName: 'M9', name: '手动测点 2', edgeId: 'manual-edge-2', createdAt: Date.now() + 1 }
+    ];
+    delete state.compactDiagnosticFixedPoints;
+    delete state.compactDiagnosticFixedPointSignature;
+
+    expect(window.buildDiagnosticTestPointModel({ includeAllCanvases: true }).positions.map((point) => point.shortName))
+      .toEqual(['M8', 'M9', 'M10', 'M11', 'M12', 'M13', 'M14', 'M15', 'M16']);
+
+    window.renameDiagnosticTestPoints();
+    delete state.compactDiagnosticFixedPoints;
+    delete state.compactDiagnosticFixedPointSignature;
+
+    const renamed = window.buildDiagnosticTestPointModel({ includeAllCanvases: true }).positions;
+    expect(renamed.filter((point) => point.displayConsoleInput).map((point) => point.shortName))
+      .toEqual(['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7']);
+    expect(renamed.filter((point) => !point.displayConsoleInput).map((point) => point.shortName)).toEqual(['M8', 'M9']);
+    expect(state.diagnosticTestPointLabels).toMatchObject({
+      ...Object.fromEntries(Array.from({ length: 7 }, (_, index) =>
+        [`tp-display-console-rename-console-input-${index}`, `M${index + 1}`])),
+      'rename-manual-1': 'M8',
+      'rename-manual-2': 'M9'
+    });
+
+    window.renderDataflowPanel(true);
+    expect(Array.from(document.querySelectorAll('.tp-console-point__code')).map((element) => element.textContent))
+      .toEqual(['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9']);
 
     wrapper.unmount();
   });
@@ -2229,6 +3110,106 @@ describe('canvas layout cleanup', () => {
 
 
 
+  it('selects a complex-envelope vector route before switching between I and Q values', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    window.createNode('signal_source', 160, 260);
+    window.createNode('instrument_scope', 420, 260);
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    const source = state.modelNodes.find((node) => node.type === 'signal_source');
+    const scope = state.modelNodes.find((node) => node.type === 'instrument_scope');
+    source.props = {
+      ...source.props,
+      name: '复数包络源',
+      signalDomain: 'rf',
+      outputFormat: '复数包络',
+      centerFrequency: '20',
+      centerFrequencyUnit: 'GHz'
+    };
+    state.modelEdges.push({
+      id: 'edge-envelope-scope',
+      sourceNodeId: source.id,
+      sourcePortIndex: 0,
+      targetNodeId: scope.id,
+      targetPortIndex: 0,
+      lineType: 'normal',
+      label: '复数包络测点',
+      sourcePortMeta: { varName: 'output', dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4 }
+    });
+    state.diagnosticTestPoints = [{
+      pointId: 'tp-envelope',
+      id: 'tp-envelope',
+      shortName: 'E1',
+      name: '复数包络测点',
+      edgeId: 'edge-envelope-scope',
+      pointType: 'physical',
+      vectorIndex: 2
+    }];
+    state.simulationTestPointIds = ['tp-envelope'];
+    window.__GZ_SIM__.componentOutputs = {
+      time: [0, 1],
+      steps: [
+        {
+          time: 0,
+          actual: { [source.id]: { output: [
+            { i: 1, q: -0.25, referenceFrequencyHz: 20e9 },
+            { i: 2, q: -0.5, referenceFrequencyHz: 20e9 },
+            { i: 3, q: -0.75, referenceFrequencyHz: 20e9 },
+            { i: 4, q: -1, referenceFrequencyHz: 20e9 }
+          ] } },
+          reference: { [source.id]: { output: [
+            { i: 0.5, q: -0.5, referenceFrequencyHz: 20e9 },
+            { i: 1, q: -0.75, referenceFrequencyHz: 20e9 },
+            { i: 1.5, q: -1, referenceFrequencyHz: 20e9 },
+            { i: 2, q: -1.25, referenceFrequencyHz: 20e9 }
+          ] } }
+        },
+        {
+          time: 1,
+          actual: { [source.id]: { output: [
+            { i: 4, q: -0.5, referenceFrequencyHz: 20e9 },
+            { i: 5, q: -0.75, referenceFrequencyHz: 20e9 },
+            { i: 6, q: -1, referenceFrequencyHz: 20e9 },
+            { i: 7, q: -1.25, referenceFrequencyHz: 20e9 }
+          ] } },
+          reference: { [source.id]: { output: [
+            { i: 1.5, q: -0.75, referenceFrequencyHz: 20e9 },
+            { i: 2, q: -1, referenceFrequencyHz: 20e9 },
+            { i: 2.5, q: -1.25, referenceFrequencyHz: 20e9 },
+            { i: 3, q: -1.5, referenceFrequencyHz: 20e9 }
+          ] } }
+        }
+      ]
+    };
+
+    window.setCanvasView('components');
+    await flushRuntime();
+
+    let card = document.querySelector('[data-simulation-testpoint="tp-envelope"]');
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain('I 路实际值');
+    expect(card?.textContent).not.toContain('参考值');
+    expect(card?.textContent).not.toContain('偏差');
+    expect(card?.textContent).toContain('6');
+    expect(card?.querySelector('[data-simulation-complex-component="i"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(card?.querySelector('[data-simulation-complex-component="q"]')?.getAttribute('aria-pressed')).toBe('false');
+
+    card?.querySelector('[data-simulation-complex-component="q"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushRuntime();
+
+    card = document.querySelector('[data-simulation-testpoint="tp-envelope"]');
+    expect(state.simulationComplexEnvelopeDisplayComponents['tp-envelope']).toBe('q');
+    expect(card?.textContent).toContain('Q 路实际值');
+    expect(card?.textContent).toContain('-1');
+    expect(card?.querySelector('[data-simulation-complex-component="i"]')?.getAttribute('aria-pressed')).toBe('false');
+    expect(card?.querySelector('[data-simulation-complex-component="q"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(card?.querySelector('[data-simulation-series="actual"]')?.getAttribute('points')).toMatch(/\d+,.+ \d+,.+/);
+
+    wrapper.unmount();
+  });
 
   it('renders digital signal test points as discrete state timelines in the simulation view', async () => {
     const wrapper = mount(App, { attachTo: document.body });
@@ -2308,7 +3289,9 @@ describe('canvas layout cleanup', () => {
     expect(card?.querySelector('[data-digital-simulation-chart="tp-digital"]')).not.toBeNull();
     expect(card?.querySelector('[data-simulation-chart="tp-digital"]')).toBeNull();
     expect(card?.querySelector('[data-digital-step-series="actual"]')?.getAttribute('points')).toMatch(/\d+,\d+ \d+,\d+/);
-    expect(card?.querySelectorAll('[data-digital-transition]')).toHaveLength(2);
+    expect(card?.querySelectorAll('[data-digital-transition]')).toHaveLength(1);
+    expect(card?.textContent).not.toContain('参考状态');
+    expect(card?.querySelector('[data-digital-step-series="reference"]')).toBeNull();
     expect(card?.textContent).toContain('低电平');
 
     const controlPanel = document.querySelector('[data-simulation-control-panel]');

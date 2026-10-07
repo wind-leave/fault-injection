@@ -9,12 +9,17 @@ SUPPORTED_NODE_TYPES = {
     "sum_block",
     "mux_block",
     "instrument_scope",
+    "instrument_spectrum",
+    "instrument_logger",
+    "instrument_multimeter",
+    "display_console",
+    "subsystem_block",
 }
 
 LIMITS = {
     "max_duration": 1000.0,
-    # 1 ps supports a 100 GHz carrier with ten samples per cycle.
-    "min_step_size": 1e-12,
+    # 0.01 ps supports a 10 THz carrier with ten samples per cycle.
+    "min_step_size": 1e-14,
     "max_step_size": 1.0,
     "max_nodes": 200,
     "max_edges": 400,
@@ -58,11 +63,65 @@ def ensure_number(value, field):
     return float(value)
 
 
+def ensure_rf_complex_envelope(value, field):
+    """Validate one JSON-safe I/Q sample and its RF frequency context."""
+    ensure_mapping(value, field)
+    i_value = value.get("i", value.get("re"))
+    q_value = value.get("q", value.get("im"))
+    if i_value is None:
+        raise SimulationBackendError("INVALID_SCHEMA", f"{field}.i", "I component is required")
+    if q_value is None:
+        raise SimulationBackendError("INVALID_SCHEMA", f"{field}.q", "Q component is required")
+    if "referenceFrequencyHz" not in value:
+        raise SimulationBackendError(
+            "INVALID_SCHEMA",
+            f"{field}.referenceFrequencyHz",
+            "referenceFrequencyHz is required",
+        )
+    reference_frequency = ensure_number(value["referenceFrequencyHz"], f"{field}.referenceFrequencyHz")
+    if reference_frequency < 0.0:
+        raise SimulationBackendError(
+            "INVALID_SCHEMA",
+            f"{field}.referenceFrequencyHz",
+            "referenceFrequencyHz must be non-negative",
+        )
+    normalized = {
+        "i": ensure_number(i_value, f"{field}.i"),
+        "q": ensure_number(q_value, f"{field}.q"),
+        "referenceFrequencyHz": reference_frequency,
+    }
+    if "impedanceOhm" in value:
+        impedance = ensure_number(value["impedanceOhm"], f"{field}.impedanceOhm")
+        if impedance <= 0.0:
+            raise SimulationBackendError("INVALID_SCHEMA", f"{field}.impedanceOhm", "impedanceOhm must be positive")
+        normalized["impedanceOhm"] = impedance
+    if "unit" in value:
+        if not isinstance(value["unit"], str) or not value["unit"].strip():
+            raise SimulationBackendError("INVALID_SCHEMA", f"{field}.unit", "unit must be a non-empty string")
+        normalized["unit"] = value["unit"].strip()
+    return normalized
+
+
+def ensure_rf_complex_envelope_batch(value, field):
+    """Validate a non-empty collection of independent RF I/Q frames."""
+    ensure_list(value, field)
+    if not value:
+        raise SimulationBackendError("INVALID_SCHEMA", field, f"{field} must not be an empty envelope collection")
+    return [
+        ensure_rf_complex_envelope(item, f"{field}[{index}]")
+        for index, item in enumerate(value)
+    ]
+
+
 def ensure_signal_value(value, field):
-    """Validate a scalar or a fixed-length numeric vector signal."""
+    """Validate a scalar, numeric vector, RF frame, or collection of RF frames."""
+    if isinstance(value, dict):
+        return ensure_rf_complex_envelope(value, field)
     if isinstance(value, list):
         if not value:
             raise SimulationBackendError("INVALID_SCHEMA", field, f"{field} must not be an empty vector")
+        if all(isinstance(item, dict) for item in value):
+            return ensure_rf_complex_envelope_batch(value, field)
         return [ensure_number(item, f"{field}[{index}]") for index, item in enumerate(value)]
     return ensure_number(value, field)
 
@@ -73,6 +132,8 @@ def normalize_port_data_type(value):
         return "scalar"
     if text in {"vector", "向量"}:
         return "vector"
+    if text in {"rf_complex_envelope", "rf-complex-envelope", "rfcomplexenvelope", "复数包络", "射频复数包络"}:
+        return "rf_complex_envelope"
     return text
 
 
@@ -81,8 +142,8 @@ def validate_ports(value, field):
     for index, port in enumerate(ports):
         ensure_mapping(port, f"{field}[{index}]")
         data_type = normalize_port_data_type(port.get("dataType", port.get("type", "scalar")))
-        if data_type not in {"scalar", "vector"}:
-            raise SimulationBackendError("INVALID_SCHEMA", f"{field}[{index}].dataType", "only scalar and vector ports are supported")
+        if data_type not in {"scalar", "vector", "rf_complex_envelope"}:
+            raise SimulationBackendError("INVALID_SCHEMA", f"{field}[{index}].dataType", "only scalar, vector, and rf_complex_envelope ports are supported")
         if data_type == "vector":
             length = port.get("vectorLength", port.get("length"))
             if isinstance(length, bool) or not isinstance(length, int) or not 1 <= length <= 1024:
@@ -91,6 +152,23 @@ def validate_ports(value, field):
                     f"{field}[{index}].vectorLength",
                     "vectorLength must be an integer from 1 to 1024",
                 )
+        if data_type == "rf_complex_envelope":
+            if "vectorLength" in port:
+                length = port["vectorLength"]
+                if isinstance(length, bool) or not isinstance(length, int) or not 1 <= length <= 1024:
+                    raise SimulationBackendError(
+                        "INVALID_SCHEMA",
+                        f"{field}[{index}].vectorLength",
+                        "vectorLength must be an integer from 1 to 1024",
+                    )
+            if "referenceFrequencyHz" in port:
+                reference_frequency = ensure_number(port["referenceFrequencyHz"], f"{field}[{index}].referenceFrequencyHz")
+                if reference_frequency < 0.0:
+                    raise SimulationBackendError("INVALID_SCHEMA", f"{field}[{index}].referenceFrequencyHz", "referenceFrequencyHz must be non-negative")
+            if "impedanceOhm" in port:
+                impedance = ensure_number(port["impedanceOhm"], f"{field}[{index}].impedanceOhm")
+                if impedance <= 0.0:
+                    raise SimulationBackendError("INVALID_SCHEMA", f"{field}[{index}].impedanceOhm", "impedanceOhm must be positive")
     return ports
 
 
@@ -113,13 +191,20 @@ def ensure_sign_sequence(value, field):
     return value
 
 
-def validate_numeric_parameters(parameters, field, text_parameters=None):
+def validate_numeric_parameters(parameters, field, text_parameters=None, complex_envelope_parameters=None):
     if parameters is None:
         return {}
     ensure_mapping(parameters, field)
     allowed_text = set(text_parameters or ())
+    allowed_complex_envelopes = set(complex_envelope_parameters or ())
     for key, value in parameters.items():
         if key in allowed_text and isinstance(value, str):
+            continue
+        if key in allowed_complex_envelopes and isinstance(value, dict):
+            ensure_rf_complex_envelope(value, f"{field}.{key}")
+            continue
+        if key in allowed_complex_envelopes and isinstance(value, list):
+            ensure_rf_complex_envelope_batch(value, f"{field}.{key}")
             continue
         if isinstance(value, list):
             ensure_signal_value(value, f"{field}.{key}")
@@ -177,6 +262,7 @@ def validate_executable_package(package):
     edges = ensure_list(package.get("edges"), "edges")
     faults = ensure_list(package.get("faultInstances", []), "faultInstances")
     measurement_points = ensure_list(package.get("measurementPoints", []), "measurementPoints")
+    reported_node_ids = ensure_list(package.get("reportedNodeIds", []), "reportedNodeIds")
 
     if len(nodes) > LIMITS["max_nodes"]:
         raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "nodes", "too many nodes")
@@ -186,6 +272,8 @@ def validate_executable_package(package):
         raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "faultInstances", "too many fault instances")
     if len(measurement_points) > LIMITS["max_measurement_points"]:
         raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "measurementPoints", "too many measurement points")
+    if len(reported_node_ids) > LIMITS["max_nodes"]:
+        raise SimulationBackendError("SIMULATION_LIMIT_EXCEEDED", "reportedNodeIds", "too many reported node ids")
 
     _validate_unique_ids(nodes, "nodes", "id")
     _validate_unique_ids(
@@ -201,6 +289,9 @@ def validate_executable_package(package):
         default_factory=lambda item, _index: f"{item.get('scopeNodeId')}.ch1",
     )
     _validate_unique_ids(faults, "faultInstances", "faultId")
+    for index, node_id in enumerate(reported_node_ids):
+        if not isinstance(node_id, str) or not node_id:
+            raise SimulationBackendError("INVALID_SCHEMA", f"reportedNodeIds[{index}]", "reported node id must be a non-empty string")
 
     for index, node in enumerate(nodes):
         ensure_mapping(node, f"nodes[{index}]")
@@ -219,6 +310,16 @@ def validate_executable_package(package):
             validate_sum_block_parameters(node.get("parameters", {}), f"nodes[{index}].parameters")
         else:
             text_parameters = SIGNAL_SOURCE_TEXT_PARAMETERS if node_type == "signal_source" else None
-            validate_numeric_parameters(node.get("parameters", {}), f"nodes[{index}].parameters", text_parameters)
+            source_has_rf_complex_output = node_type == "signal_source" and any(
+                normalize_port_data_type(port.get("dataType", port.get("type", "scalar"))) == "rf_complex_envelope"
+                for port in node.get("outputs", [])
+                if isinstance(port, dict)
+            )
+            validate_numeric_parameters(
+                node.get("parameters", {}),
+                f"nodes[{index}].parameters",
+                text_parameters,
+                complex_envelope_parameters={"value"} if source_has_rf_complex_output else None,
+            )
 
     return package

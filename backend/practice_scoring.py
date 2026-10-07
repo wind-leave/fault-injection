@@ -81,6 +81,23 @@ def _covers_repair_target(node, steps):
     return False
 
 
+def _covers_display_console_parameter(node, steps):
+    expected_component_id = _text(node.get("componentId"))
+    expected_parameter = _text(node.get("parameter"))
+    expected_value = node.get("value")
+    for step in steps:
+        if step.get("actionType") != "adjustDisplayConsoleParameter":
+            continue
+        if _text(step.get("componentId")) != expected_component_id:
+            continue
+        parameters = step.get("parameters") if isinstance(step.get("parameters"), dict) else {}
+        if expected_parameter not in parameters:
+            continue
+        if expected_value is None or parameters.get(expected_parameter) == expected_value:
+            return True
+    return False
+
+
 def _evaluate_key_node_coverage(fault_tree_key_nodes, steps, initial_physical_measurement_snapshot):
     nodes = _arr(fault_tree_key_nodes)
     covered_node_ids = []
@@ -98,6 +115,8 @@ def _evaluate_key_node_coverage(fault_tree_key_nodes, steps, initial_physical_me
             covered = _covers_measure_point(node, steps)
         elif node_type == "repairTarget":
             covered = _covers_repair_target(node, steps)
+        elif node_type == "displayConsoleParameter":
+            covered = _covers_display_console_parameter(node, steps)
         else:
             covered = False
         if covered:

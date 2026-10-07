@@ -2,7 +2,10 @@ export const KNOWLEDGE_GRAPH_NODE_KINDS = Object.freeze([
   { value: 'fault', label: '故障' },
   { value: 'component', label: '设备' },
   { value: 'signalEdge', label: '连线' },
-  { value: 'measurementPoint', label: '测点' }
+  { value: 'measurementPoint', label: '测点' },
+  { value: 'phenomenon', label: '现象' },
+  { value: 'operationRequirement', label: '操作要求' },
+  { value: 'measurementInstrument', label: '测量仪器' }
 ]);
 
 export const KNOWLEDGE_GRAPH_RELATION_LABELS = Object.freeze({
@@ -11,6 +14,9 @@ export const KNOWLEDGE_GRAPH_RELATION_LABELS = Object.freeze({
   OBSERVES: '观测',
   OCCURS_ON: '发生于',
   DETECTABILITY: '可检测性',
+  MANIFESTS_AS: '表现为',
+  REQUIRES_OPERATION: '操作要求',
+  ALLOWS_INSTRUMENT: '允许使用',
   RESOLVED_BY_REPLACING: '更换修复'
 });
 
@@ -116,6 +122,116 @@ export function createKnowledgeGraphLayout(graph, options = {}) {
     width,
     height,
     kinds: presentKinds
+  };
+}
+
+function alignRelatedColumn(nodes, parentIdForNode, parentY, height, compareSiblings) {
+  const gap = 62;
+  const margin = 46;
+  const grouped = new Map();
+  nodes.forEach((node) => {
+    const parentId = parentIdForNode(node);
+    const siblings = grouped.get(parentId) || [];
+    siblings.push(node);
+    grouped.set(parentId, siblings);
+  });
+  const ordered = [...grouped.entries()]
+    .sort(([left], [right]) => (parentY.get(left) ?? height / 2) - (parentY.get(right) ?? height / 2))
+    .flatMap(([parentId, siblings]) => siblings
+      .sort(compareSiblings)
+      .map((node, index) => ({
+        key: node.key,
+        desiredY: (parentY.get(parentId) ?? height / 2) + ((index - ((siblings.length - 1) / 2)) * gap)
+      })));
+  if (!ordered.length) return new Map();
+  const positions = [];
+  ordered.forEach(({ desiredY }, index) => {
+    positions.push(Math.max(desiredY, index ? positions[index - 1] + gap : margin));
+  });
+  const overflow = positions.at(-1) - (height - margin);
+  if (overflow > 0) positions.forEach((position, index) => { positions[index] = position - overflow; });
+  if (positions[0] < margin) {
+    const correction = margin - positions[0];
+    positions.forEach((position, index) => { positions[index] = position + correction; });
+  }
+  if (positions.at(-1) > height - margin) {
+    positions.forEach((position, index) => { positions[index] = margin + (index * gap); });
+  }
+  return new Map(ordered.map((item, index) => [item.key, positions[index]]));
+}
+
+export function createMaintenanceKnowledgeGraphLayout(graph, options = {}) {
+  const layout = createKnowledgeGraphLayout(graph, options);
+  const width = Math.max(800, layout.width);
+  const faults = layout.nodes.filter((node) => node.kind === 'fault')
+    .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
+  const entities = layout.nodes.filter((node) => node.kind === 'component' || node.kind === 'signalEdge');
+  const points = layout.nodes.filter((node) => node.kind === 'measurementPoint')
+    .sort((left, right) => String(left.pointCode || left.label).localeCompare(String(right.pointCode || right.label), 'zh-CN', { numeric: true }));
+  const phenomena = layout.nodes.filter((node) => node.kind === 'phenomenon');
+  const height = Math.max(layout.height, Math.max(faults.length, entities.length, points.length, phenomena.length, 1) * 68 + 100);
+  const yByKey = new Map();
+  const faultY = new Map();
+  faults.forEach((node, index) => {
+    const y = ((index + 1) * height) / (faults.length + 1);
+    yByKey.set(node.key, y);
+    faultY.set(node.id, y);
+  });
+  const pointY = new Map();
+  points.forEach((node, index) => {
+    const y = ((index + 1) * height) / (points.length + 1);
+    yByKey.set(node.key, y);
+    pointY.set(node.id, y);
+  });
+  const entityFault = new Map();
+  layout.relations.forEach((relation) => {
+    if ((relation.type === 'OCCURS_ON' || relation.type === 'RESOLVED_BY_REPLACING')
+      && relation.source?.kind === 'fault'
+      && (relation.target?.kind === 'component' || relation.target?.kind === 'signalEdge')) {
+      const previous = entityFault.get(relation.targetKey);
+      if (!previous || (faultY.get(relation.source.id) ?? Infinity) < (faultY.get(previous) ?? Infinity)) {
+        entityFault.set(relation.targetKey, relation.source.id);
+      }
+    }
+  });
+  alignRelatedColumn(entities, (node) => entityFault.get(node.key), faultY, height,
+    (left, right) => left.label.localeCompare(right.label, 'zh-CN'))
+    .forEach((y, key) => yByKey.set(key, y));
+  alignRelatedColumn(phenomena, (node) => node.pointId, pointY, height,
+    (left, right) => (left.phenomenonOrder ?? 0) - (right.phenomenonOrder ?? 0))
+    .forEach((y, key) => yByKey.set(key, y));
+  const columnX = { fault: width * 0.12, component: width * 0.36, signalEdge: width * 0.36, measurementPoint: width * 0.62, phenomenon: width * 0.86 };
+  return {
+    ...layout,
+    width,
+    height,
+    nodes: layout.nodes.map((node) => ({ ...node, x: columnX[node.kind] ?? node.x, y: yByKey.get(node.key) ?? node.y }))
+  };
+}
+
+export function createSpecificationKnowledgeGraphLayout(graph, options = {}) {
+  const layout = createKnowledgeGraphLayout(graph, options);
+  const width = Math.max(800, layout.width);
+  const devices = layout.nodes.filter((node) => node.kind === 'component')
+    .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
+  const requirements = layout.nodes.filter((node) => node.kind === 'operationRequirement');
+  const instruments = layout.nodes.filter((node) => node.kind === 'measurementInstrument');
+  const height = Math.max(layout.height, Math.max(devices.length, requirements.length, instruments.length, 1) * 68 + 100);
+  const deviceY = new Map();
+  devices.forEach((node, index) => deviceY.set(node.id, ((index + 1) * height) / (devices.length + 1)));
+  const byOrder = (left, right) => (left.itemOrder ?? 0) - (right.itemOrder ?? 0);
+  const requirementY = alignRelatedColumn(requirements, (node) => node.deviceId, deviceY, height, byOrder);
+  const instrumentY = alignRelatedColumn(instruments, (node) => node.deviceId, deviceY, height, byOrder);
+  return {
+    ...layout,
+    width,
+    height,
+    nodes: layout.nodes.map((node) => {
+      if (node.kind === 'component') return { ...node, x: width * 0.5, y: deviceY.get(node.id) };
+      if (node.kind === 'operationRequirement') return { ...node, x: width * 0.18, y: requirementY.get(node.key) ?? node.y };
+      if (node.kind === 'measurementInstrument') return { ...node, x: width * 0.82, y: instrumentY.get(node.key) ?? node.y };
+      return node;
+    })
   };
 }
 

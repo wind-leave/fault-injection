@@ -3,10 +3,11 @@ import json
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from backend.server import SimulationBackendHandler
 from backend.tests.fixtures import valid_package
@@ -54,6 +55,8 @@ def d_matrix_with_physical_and_virtual_points():
         "name": "virtual instrument point",
         "pointType": "virtual",
         "channel": "scope-1.ch1",
+        "sourceElementName": "输出",
+        "targetElementName": "输入",
     })
     return matrix
 
@@ -66,6 +69,8 @@ def d_matrix_with_rankable_virtual_points():
         "name": "low value virtual point",
         "pointType": "virtual",
         "channel": "scope-3.ch1",
+        "sourceElementName": "输出",
+        "targetElementName": "输入",
     })
     matrix["rows"][0]["cells"].extend([
         {"pointId": "tp-virtual", "pointCode": "V1", "pointName": "virtual instrument point", "detectable": True, "value": 1},
@@ -88,9 +93,10 @@ class SimulationBackendServerTests(unittest.TestCase):
         SimulationBackendHandler.practice_sessions = {}
         SimulationBackendHandler.max_active_simulation_sessions = 100
         SimulationBackendHandler.max_active_practice_sessions = 100
-        SimulationBackendHandler.max_response_samples = 1000
+        SimulationBackendHandler.max_response_samples = 100000
         SimulationBackendHandler.default_max_practice_actions = 200
         SimulationBackendHandler.default_simulation_session_idle_timeout_seconds = 900.0
+        SimulationBackendHandler.practice_result_callback_url = ""
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), SimulationBackendHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -124,6 +130,217 @@ class SimulationBackendServerTests(unittest.TestCase):
         response_body = response.read().decode("utf-8")
         connection.close()
         return response.status, json.loads(response_body)
+
+    def test_sequence_practice_types_return_student_and_job_ids(self):
+        for practice_type in ("inspection2", "inspection4"):
+            with self.subTest(practice_type=practice_type):
+                status, created = self._post(
+                    "/api/practice/session",
+                    {"practiceType": practice_type, "studentid": "student-1", "jobid": "job-1"},
+                )
+
+                self.assertEqual(status, 200)
+                self.assertEqual(created["practiceType"], practice_type)
+                self.assertEqual(created["practiceSessionId"], created["sessionId"])
+                self.assertNotIn("simulationSessionId", created)
+                session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+                self.assertFalse(hasattr(session, "optimal_action_sequence"))
+
+                for action_number in (1, 2, 3, 4, 5):
+                    action_status, action_result = self._post(
+                        f"/api/practice/session/{created['practiceSessionId']}/action",
+                        {"actionNumber": action_number},
+                    )
+                    self.assertEqual(action_status, 200)
+                    self.assertEqual(action_result, {"status": "success"})
+
+                submit_status, submitted = self._post(
+                    f"/api/practice/session/{created['practiceSessionId']}/submit",
+                    {},
+                )
+                self.assertEqual(submit_status, 200)
+                self.assertEqual(submitted, {
+                    "studentId": "student-1",
+                    "jobId": "job-1",
+                    "totalScore": 100.0,
+                    "resultDelivery": {"status": "skipped", "reason": "callback-not-configured"},
+                })
+
+    def test_fixed_score_practice_types_submit_without_actions(self):
+        for practice_type in ("inspection1", "inspection3"):
+            with self.subTest(practice_type=practice_type):
+                status, created = self._post(
+                    "/api/practice/session",
+                    {"practiceType": practice_type, "studentid": "student-2", "jobid": "job-2"},
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(created["practiceType"], practice_type)
+                self.assertNotIn("simulationSessionId", created)
+
+                submit_status, submitted = self._post(
+                    f"/api/practice/session/{created['practiceSessionId']}/submit",
+                    {},
+                )
+                self.assertEqual(submit_status, 200)
+                self.assertEqual(submitted, {
+                    "studentId": "student-2",
+                    "jobId": "job-2",
+                    "totalScore": 100.0,
+                    "resultDelivery": {"status": "skipped", "reason": "callback-not-configured"},
+                })
+
+    def test_all_inspection_types_post_score_to_student_service(self):
+        callback_url = "http://127.0.0.1:9000/student/practice/result"
+        with patch.object(
+            SimulationBackendHandler,
+            "practice_result_callback_url",
+            callback_url,
+        ), patch("backend.server.urlopen") as mocked_urlopen:
+            callback_response = MagicMock()
+            callback_response.status = 201
+            mocked_urlopen.return_value.__enter__.return_value = callback_response
+
+            for practice_type in ("inspection1", "inspection2", "inspection3", "inspection4"):
+                with self.subTest(practice_type=practice_type):
+                    status, created = self._post(
+                        "/api/practice/session",
+                        {"practiceType": practice_type, "studentid": 21, "jobid": 61},
+                    )
+                    self.assertEqual(status, 200)
+                    session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+                    if practice_type in ("inspection2", "inspection4"):
+                        for action_number in (1, 3, 2, 4, 5):
+                            action_status, _ = self._post(
+                                f"/api/practice/session/{created['practiceSessionId']}/action",
+                                {"actionNumber": action_number},
+                            )
+                            self.assertEqual(action_status, 200)
+
+                    status, submitted = self._post(
+                        f"/api/practice/session/{created['practiceSessionId']}/submit",
+                        {},
+                    )
+                    self.assertEqual(status, 200)
+                    expected_score = 60.0 if practice_type in ("inspection2", "inspection4") else 100.0
+                    self.assertEqual(submitted["totalScore"], expected_score)
+                    self.assertEqual(submitted["studentId"], "21")
+                    self.assertEqual(submitted["jobId"], "61")
+                    self.assertEqual(submitted["resultDelivery"], {
+                        "status": "delivered",
+                        "url": callback_url,
+                        "httpStatus": 201,
+                    })
+                    request = mocked_urlopen.call_args.args[0]
+                    self.assertEqual(request.full_url, callback_url)
+                    self.assertEqual(json.loads(request.data.decode("utf-8")), {
+                        "studentId": 21,
+                        "jobId": 61,
+                        "evaluationReport": {
+                            "totalScore": expected_score,
+                            "submittedAt": datetime.fromtimestamp(session.submitted_at, tz=timezone.utc)
+                            .isoformat()
+                            .replace("+00:00", "Z"),
+                            "totalDurationSeconds": round(max(0.0, session.submitted_at - session.created_at)),
+                        },
+                    })
+
+            self.assertEqual(mocked_urlopen.call_count, 4)
+
+    def test_inspection_practice_requires_student_and_job_ids(self):
+        for practice_type in ("inspection1", "inspection2", "inspection3", "inspection4"):
+            with self.subTest(practice_type=practice_type):
+                for payload, missing_field in (
+                    ({"practiceType": practice_type}, "studentid"),
+                    ({"practiceType": practice_type, "studentid": "student-1"}, "jobid"),
+                ):
+                    status, rejected = self._post("/api/practice/session", payload)
+                    self.assertEqual(status, 400)
+                    self.assertEqual(rejected["field"], missing_field)
+
+    def test_fixed_score_practice_types_reject_actions(self):
+        for practice_type in ("inspection1", "inspection3"):
+            with self.subTest(practice_type=practice_type):
+                status, created = self._post(
+                    "/api/practice/session",
+                    {"practiceType": practice_type, "studentid": "student-1", "jobid": "job-1"},
+                )
+                self.assertEqual(status, 200)
+
+                action_status, rejected = self._post(
+                    f"/api/practice/session/{created['practiceSessionId']}/action",
+                    {"actionNumber": 1},
+                )
+                self.assertEqual(action_status, 400)
+                self.assertEqual(rejected["field"], "actionNumber")
+
+    def test_sequence_practice_deducts_by_action_position_and_returns_ids(self):
+        for practice_type in ("inspection2", "inspection4"):
+            with self.subTest(practice_type=practice_type):
+                status, created = self._post(
+                    "/api/practice/session",
+                    {"practiceType": practice_type, "studentid": "student-1", "jobid": "job-1"},
+                )
+                self.assertEqual(status, 200)
+
+                for action_number in (1, 3, 2, 4, 5):
+                    status, result = self._post(
+                        f"/api/practice/session/{created['practiceSessionId']}/action",
+                        {"actionNumber": action_number},
+                    )
+                    self.assertEqual(status, 200)
+                    self.assertEqual(result, {"status": "success"})
+
+                status, submitted = self._post(
+                    f"/api/practice/session/{created['practiceSessionId']}/submit",
+                    {},
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(submitted, {
+                    "studentId": "student-1",
+                    "jobId": "job-1",
+                    "totalScore": 60.0,
+                    "resultDelivery": {"status": "skipped", "reason": "callback-not-configured"},
+                })
+
+    def test_sequence_practice_requires_the_fixed_action_count_before_submit(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {"practiceType": "inspection4", "studentid": "student-1", "jobid": "job-1"},
+        )
+        self.assertEqual(status, 200)
+        for action_number in (1, 2, 3, 4):
+            status, result = self._post(
+                f"/api/practice/session/{created['practiceSessionId']}/action",
+                {"actionNumber": action_number},
+            )
+            self.assertEqual(status, 200)
+
+        status, rejected = self._post(
+            f"/api/practice/session/{created['practiceSessionId']}/submit",
+            {},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(rejected["field"], "actionNumber")
+
+    def test_sequence_practice_rejects_invalid_type_and_action_number(self):
+        status, rejected = self._post(
+            "/api/practice/session",
+            {"practiceType": "unknown"},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(rejected["field"], "practiceType")
+
+        status, created = self._post(
+            "/api/practice/session",
+            {"practiceType": "inspection2", "studentid": "student-1", "jobid": "job-1"},
+        )
+        self.assertEqual(status, 200)
+        status, rejected = self._post(
+            f"/api/practice/session/{created['practiceSessionId']}/action",
+            {"actionNumber": True},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(rejected["field"], "actionNumber")
 
     def test_create_practice_session_retains_supplied_private_task_data(self):
         initial_recommended_path = {
@@ -306,6 +523,42 @@ class SimulationBackendServerTests(unittest.TestCase):
         }
         self.assertEqual(score_details["faultLocalization"], 30)
 
+    def test_submit_scores_duplicate_wire_ids_as_one_canonical_target(self):
+        matrix = d_matrix_with_physical_and_virtual_points()
+        target_row = next(row for row in matrix["rows"] if row["faultId"] == "target-fault")
+        target_row["targetId"] = "edge-duplicate"
+        target_row["targetEdgeId"] = "edge-duplicate"
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": matrix,
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+        for relation in session.diagnostic_knowledge_graph["relations"]:
+            if (
+                relation.get("type") == "OCCURS_ON"
+                and (relation.get("source") or {}).get("id") == "target-fault"
+            ):
+                relation["target"] = {"kind": "signalEdge", "id": "edge-sim-scope"}
+
+        status, submitted = self._post(
+            f"/api/practice/session/{created['practiceSessionId']}/submit",
+            {"finalTargetIds": ["edge-duplicate"]},
+        )
+
+        self.assertEqual(status, 200)
+        conclusion = submitted["evaluationReport"]["targetConclusion"]
+        self.assertTrue(conclusion["exactMatch"])
+        self.assertEqual(conclusion["expectedTargetIds"], ["edge-sim-scope"])
+        self.assertEqual(conclusion["studentTargetIds"], ["edge-sim-scope"])
+        self.assertEqual(conclusion["matchedTargetIds"], ["edge-sim-scope"])
+        self.assertEqual(conclusion["missedTargetIds"], [])
+        self.assertEqual(conclusion["extraTargetIds"], [])
+
     def test_submit_scores_partial_multi_target_conclusion_by_jaccard_accuracy(self):
         status, created = self._post(
             "/api/practice/session",
@@ -356,6 +609,27 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(rejected["errorCode"], "INVALID_SCHEMA")
         self.assertEqual(rejected["field"], "finalTargetIds")
+
+    def test_submit_accepts_arbitrary_final_target_ids(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+
+        status, submitted = self._post(
+            f"/api/practice/session/{created['practiceSessionId']}/submit",
+            {"finalTargetIds": ["external-result-id", "external-result-id"]},
+        )
+
+        self.assertEqual(status, 200)
+        conclusion = submitted["evaluationReport"]["targetConclusion"]
+        self.assertEqual(conclusion["studentTargetIds"], ["external-result-id"])
+        self.assertEqual(conclusion["extraTargetIds"], ["external-result-id"])
 
     def test_rank_one_does_not_promote_a_low_value_action_to_optimal(self):
         status, created = self._post(
@@ -508,6 +782,44 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(second["curves"]["time"], [0.1, 0.2])
         self.assertTrue(second["metrics"]["done"])
 
+    def test_steps_simulation_session_on_actual_path_only(self):
+        package = valid_package()
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.3,
+            "parameters": {"bias": 0.5},
+        }]
+        status, created = self._post("/api/simulations/session", package)
+        self.assertEqual(status, 200)
+
+        status, result = self._post(
+            f"/api/simulations/session/{created['sessionId']}/step",
+            {"steps": 1, "actualOnly": True},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(result["curves"]["channels"]["scope-1.ch1.actual"])
+        self.assertEqual(result["curves"]["channels"]["scope-1.ch1.reference"], [])
+        self.assertTrue(result["componentOutputs"]["steps"][0]["actual"])
+        self.assertEqual(result["componentOutputs"]["steps"][0]["reference"], {})
+
+    def test_rejects_non_boolean_actual_only_step_option(self):
+        status, created = self._post("/api/simulations/session", valid_package())
+        self.assertEqual(status, 200)
+
+        status, result = self._post(
+            f"/api/simulations/session/{created['sessionId']}/step",
+            {"actualOnly": "true"},
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(result["errorCode"], "INVALID_SCHEMA")
+        self.assertEqual(result["field"], "actualOnly")
+
     def test_step_session_keeps_small_step_size_and_allows_long_total_timeline(self):
         package = valid_package()
         package["simulationConfig"] = {"duration": 1000.0, "stepSize": 0.0005}
@@ -556,7 +868,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body["status"], "success")
         status, missing = self._post(f"/api/simulations/session/{session_id}/step", {})
-        self.assertEqual(status, 404)
+        self.assertEqual(status, 400)
         self.assertEqual(missing["errorCode"], "SESSION_NOT_FOUND")
 
     def test_active_reaper_removes_idle_standalone_simulation_session(self):
@@ -607,6 +919,18 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(rejected["errorCode"], "SIMULATION_LIMIT_EXCEEDED")
         self.assertEqual(rejected["field"], "steps")
+
+    def test_accepts_the_default_one_hundred_thousand_step_batch(self):
+        status, created = self._post("/api/simulations/session", valid_package())
+        self.assertEqual(status, 200)
+
+        status, result = self._post(
+            f"/api/simulations/session/{created['sessionId']}/step",
+            {"steps": 100_000},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(result["metrics"]["sampleCount"], 3)
 
     def test_runs_practice_session_action_and_submit_flow(self):
         package = valid_package()
@@ -659,7 +983,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(updated["simulationResult"]["status"], "completed")
         self.assertEqual(updated["simulationResult"]["simulationConfig"], {"duration": 0.3, "stepSize": 0.1})
         self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["pointCode"], "M1")
-        self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["sourceDeviceId"], "sim-1")
+        self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["sourceDeviceId"], "passthrough")
         self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["sourcePort"], "socket03")
         self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["samples"], [
             {"time": 0.0, "actual": 1.0},
@@ -681,8 +1005,9 @@ class SimulationBackendServerTests(unittest.TestCase):
             {
                 "operationId": "op-virtual-before-submit",
                 "actionType": "measurePoint",
-                "target": {"type": "testPoint", "id": "scope-1.ch1"},
-                "pointCode": "V1",
+                "componentId": "sim-1",
+                "portId": "socket03",
+                "elementName": "输出",
                 "steps": 1,
             },
         )
@@ -698,6 +1023,15 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(submitted["status"], "success")
         report = submitted["evaluationReport"]
+        self.assertTrue(all(step.get("text") for step in report["initialOptimalPath"]["steps"]))
+        self.assertTrue(all(
+            evaluation["studentAction"].get("text")
+            for evaluation in report["stepEvaluations"]
+        ))
+        self.assertTrue(all(
+            node.get("text")
+            for node in report["keyNodeCoverage"]["nodes"]
+        ))
         score_details = {item["item"]: item["score"] for item in report["scoreDetails"]}
         self.assertEqual(score_details["faultLocalization"], 30)
         self.assertEqual(score_details["efficiency"], 5)
@@ -710,6 +1044,40 @@ class SimulationBackendServerTests(unittest.TestCase):
         for field in ("score", "grade", "scoreBreakdown", "deductions", "initialRecommendedPath"):
             self.assertNotIn(field, submitted)
         self.assertNotIn("record", submitted)
+
+    def test_replace_component_resolves_python_binding_module_id(self):
+        package = valid_package()
+        package["faultInstances"] = [{
+            "faultId": "fault-bias",
+            "faultType": "sensor_bias",
+            "targetId": "sim-1",
+            "enabled": True,
+            "startTime": 0.0,
+            "duration": 0.3,
+            "parameters": {"bias": 0.5},
+        }]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+
+        status, updated = self._post(
+            f"/api/practice/session/{created['sessionId']}/action",
+            {
+                "operationId": "op-module-id",
+                "actionType": "replaceComponent",
+                "target": {"type": "component", "id": "passthrough"},
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(updated["normalizedAction"]["target"], {"type": "component", "id": "passthrough"})
+        self.assertEqual(updated["normalizedAction"]["resolvedTarget"], {"type": "component", "id": "sim-1"})
 
     def test_practice_full_rerun_rejects_total_sample_count_and_rolls_back_action(self):
         package = valid_package()
@@ -757,6 +1125,7 @@ class SimulationBackendServerTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 200)
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
 
         status, updated = self._post(
             f"/api/practice/session/{created['practiceSessionId']}/action",
@@ -784,6 +1153,82 @@ class SimulationBackendServerTests(unittest.TestCase):
             [sample["actual"] for sample in updated["simulationResult"]["physicalMeasurements"][0]["samples"]],
             [2.5, 2.5, 2.5],
         )
+        self.assertEqual(
+            session.latest_simulation_result["curves"]["channels"]["scope-1.ch1.reference"],
+            [],
+        )
+        self.assertEqual(session.simulation_session.module_states["reference"], {})
+        self.assertEqual(session.latest_physical_measurement_snapshot["source"], "d-matrix")
+        self.assertEqual(session.latest_physical_measurement_snapshot["abnormalPointCodes"], [])
+        self.assertIn("M1", session.latest_physical_measurement_snapshot["normalPointCodes"])
+        self.assertEqual(session.repair_attempts[-1]["repairEffect"]["status"], "recovered")
+
+    def test_live_path_refreshes_after_optional_console_condition_action(self):
+        matrix = {
+            "diagnosticContext": {"values": {"component:source-1:value": 1}},
+            "points": [{
+                "pointId": "M1",
+                "shortName": "M1",
+                "name": "physical point M1",
+                "pointType": "physical",
+                "channel": "scope-1.ch1",
+                "conditionKeys": ["component:source-1:value"],
+                "detectabilityRules": [
+                    {"faultId": "fault-a", "when": {"component:source-1:value": 1}, "detectable": True},
+                    {"faultId": "fault-a", "when": {"component:source-1:value": 2}, "detectable": False},
+                    {"faultId": "fault-b", "when": {"component:source-1:value": 1}, "detectable": True},
+                    {"faultId": "fault-b", "when": {"component:source-1:value": 2}, "detectable": True},
+                ],
+            }],
+            "rows": [
+                {"faultId": "fault-a", "faultName": "fault A", "targetNodeId": "sim-1", "cells": [{"pointCode": "M1", "detectable": True, "value": 1}]},
+                {"faultId": "fault-b", "faultName": "fault B", "targetNodeId": "source-1", "cells": [{"pointCode": "M1", "detectable": True, "value": 1}]},
+            ],
+        }
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": matrix,
+                "targetFaultId": "fault-a",
+                "displayConsoleControls": [{
+                    "displayConsoleId": "console-1",
+                    "targetComponentId": "source-1",
+                    "parameterKeys": ["value"],
+                }],
+                "diagnosticConditions": [{
+                    "key": "component:source-1:value",
+                    "componentId": "source-1",
+                    "parameterKey": "value",
+                    "label": "输入模式",
+                    "options": [{"value": 1, "label": "工况 1"}, {"value": 2, "label": "工况 2"}],
+                    "currentValue": 1,
+                }],
+            },
+        )
+
+        self.assertEqual(status, 200)
+        session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
+        self.assertNotEqual(
+            (session._build_dynamic_reference().get("nextContinuousAction") or {}).get("actionType"),
+            "adjustDisplayConsoleParameter",
+        )
+
+        status, updated = self._post(
+            f"/api/practice/session/{created['practiceSessionId']}/action",
+            {
+                "operationId": "op-optional-condition",
+                "actionType": "adjustDisplayConsoleParameter",
+                "target": {"type": "displayConsole", "id": "console-1"},
+                "componentId": "source-1",
+                "parameter": "value",
+                "value": 2,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(updated["simulationResult"]["diagnosticContext"]["values"], {"component:source-1:value": 2.0})
+        self.assertTrue(session._build_dynamic_reference()["continuousPath"]["isolated"])
 
     def test_operation_id_is_idempotent_and_rejects_conflicting_reuse(self):
         status, created = self._post(
@@ -910,11 +1355,19 @@ class SimulationBackendServerTests(unittest.TestCase):
             "duration": 0.3,
             "parameters": {},
         }]
+        matrix = d_matrix_with_physical_and_virtual_points()
+        matrix["points"][0].update({
+            # A legacy point can retain its parent canvas ID. The simulation
+            # result must resolve the real component that emits the edge.
+            "sourceDeviceId": "canvas-flight-control",
+            "sourceNodeId": "canvas-flight-control",
+            "measurementSourceNodeId": "sim-1",
+        })
         status, created = self._post(
             "/api/practice/session",
             {
                 "simulationPackage": package,
-                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "dMatrix": matrix,
                 "targetFaultId": "target-fault",
             },
         )
@@ -1023,7 +1476,8 @@ class SimulationBackendServerTests(unittest.TestCase):
                 "actionType": "adjustDisplayConsoleParameter",
                 "target": {"type": "displayConsole", "id": "console-1"},
                 "componentId": "source-1",
-                "parameters": {"value": 2.5},
+                "parameter": "value",
+                "value": 2.5,
             },
         )
 
@@ -1075,8 +1529,9 @@ class SimulationBackendServerTests(unittest.TestCase):
             {
                 "operationId": "op-measure",
                 "actionType": "measurePoint",
-                "target": {"type": "testPoint", "id": "scope-2.ch1"},
-                "pointCode": "V1",
+                "componentId": "sim-1",
+                "portId": "socket03",
+                "elementName": "输出",
             },
         )
         self.assertEqual(status, 200)
@@ -1114,6 +1569,7 @@ class SimulationBackendServerTests(unittest.TestCase):
                 step.get("actionType") == "replaceWire"
                 and step.get("target") == {"type": "wire", "id": "edge-sim-scope"}
                 and step.get("routeRole") == "repairAttempt"
+                and step.get("text") == "更换连线：sim-1 · output → scope-1 · CH1。"
                 for step in initial_steps
             )
         )
@@ -1122,8 +1578,12 @@ class SimulationBackendServerTests(unittest.TestCase):
         evaluations = submitted["evaluationReport"]["stepEvaluations"]
         self.assertEqual([item["studentAction"]["actionType"] for item in evaluations], ["measurePoint", "replaceWire"])
         self.assertEqual(evaluations[0]["studentAction"]["pointCode"], "V1")
-        self.assertEqual(evaluations[1]["studentAction"]["target"], {"type": "wire", "id": "edge-sim-scope"})
+        self.assertEqual(
+            evaluations[1]["studentAction"]["target"],
+            {"type": "wire", "name": "sim-1 · output → scope-1 · CH1"},
+        )
         self.assertEqual(evaluations[1]["studentAction"]["faultId"], "fault-wire")
+        self.assertEqual(evaluations[1]["studentAction"]["text"], "更换连线：sim-1 · output → scope-1 · CH1。")
         self.assertEqual(submitted["evaluationReport"]["keyNodeCoverage"]["score"], 12)
         self.assertEqual(submitted["evaluationReport"]["keyNodeCoverage"]["maxScore"], 12)
         self.assertEqual(submitted["evaluationReport"]["keyNodeCoverage"]["missedNodeIds"], [])
@@ -1174,7 +1634,7 @@ class SimulationBackendServerTests(unittest.TestCase):
 
         status, submitted = self._post(
             f"/api/practice/session/{session_id}/submit",
-            {"finalTargetIds": ["sim-1"]},
+            {"finalTargetIds": ["sim-1"], "submittedAt": "2000-01-01T00:00:00Z"},
         )
 
         self.assertEqual(status, 200)
@@ -1216,8 +1676,9 @@ class SimulationBackendServerTests(unittest.TestCase):
             {
                 "operationId": "op-v1",
                 "actionType": "measurePoint",
-                "target": {"type": "testPoint", "id": "scope-2.ch1"},
-                "pointCode": "V1",
+                "componentId": "sim-1",
+                "portId": "socket03",
+                "elementName": "输出",
             },
         )
         self.assertEqual(status, 200)
@@ -1275,8 +1736,9 @@ class SimulationBackendServerTests(unittest.TestCase):
             {
                 "operationId": "op-v1",
                 "actionType": "measurePoint",
-                "target": {"type": "testPoint", "id": "scope-1.ch1"},
-                "pointCode": "V1",
+                "componentId": "sim-1",
+                "portId": "socket03",
+                "elementName": "输出",
             },
         )
         self.assertEqual(status, 200)
@@ -1328,8 +1790,9 @@ class SimulationBackendServerTests(unittest.TestCase):
             {
                 "operationId": "op-v2",
                 "actionType": "measurePoint",
-                "target": {"type": "testPoint", "id": "scope-3.ch1"},
-                "pointCode": "V2",
+                "componentId": "scope-3",
+                "portId": "CH1",
+                "elementName": "输入",
             },
         )
         self.assertEqual(status, 200)
@@ -1518,8 +1981,9 @@ class SimulationBackendServerTests(unittest.TestCase):
             {
                 "operationId": "op-measure-virtual",
                 "actionType": "measurePoint",
-                "target": {"type": "testPoint", "id": "scope-2.ch1"},
-                "pointCode": "V1",
+                "componentId": "sim-1",
+                "portId": "socket03",
+                "elementName": "输出",
                 "steps": 1,
                 "observed": "normal",
             },
@@ -1533,7 +1997,159 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertNotIn("simulationResult", body)
         self.assertNotIn("troubleshootingState", body)
 
-    def test_measure_point_rejects_physical_console_point(self):
+    def test_measure_point_resolves_both_endpoints_of_one_virtual_measurement(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        session_id = created["sessionId"]
+
+        source_status, source_body = self._post(
+            f"/api/practice/session/{session_id}/action",
+            {
+                "operationId": "op-measure-source-endpoint",
+                "actionType": "measurePoint",
+                "componentId": "sim-1",
+                "portId": "socket03",
+                "elementName": "输出",
+            },
+        )
+        self.assertEqual(source_status, 200)
+        self.assertEqual(source_body["normalizedAction"]["pointCode"], "V1")
+        self.assertEqual(source_body["normalizedAction"]["elementName"], "输出")
+        self.assertEqual(source_body["normalizedAction"]["target"]["id"], "scope-1.ch1")
+
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+        target_session_id = created["sessionId"]
+        target_status, target_body = self._post(
+            f"/api/practice/session/{target_session_id}/action",
+            {
+                "operationId": "op-measure-target-endpoint",
+                "actionType": "measurePoint",
+                "componentId": "scope-1",
+                "portId": "CH1",
+                "elementName": "输入",
+            },
+        )
+        self.assertEqual(target_status, 200)
+        self.assertEqual(target_body["normalizedAction"]["pointCode"], "V1")
+        self.assertEqual(target_body["normalizedAction"]["elementName"], "输入")
+        self.assertEqual(target_body["normalizedAction"]["target"]["id"], "scope-1.ch1")
+
+    def test_measure_point_rejects_wrong_scalar_element_name(self):
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+
+        status, body = self._post(
+            f"/api/practice/session/{created['sessionId']}/action",
+            {
+                "operationId": "op-measure-wrong-scalar-element",
+                "actionType": "measurePoint",
+                "componentId": "sim-1",
+                "portId": "socket03",
+                "elementName": "错误名称",
+            },
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(body["errorCode"], "TARGET_NOT_FOUND")
+        self.assertEqual(body["field"], "elementName")
+
+    def test_measure_point_uses_vector_element_name_to_resolve_endpoint(self):
+        matrix = d_matrix_with_physical_and_virtual_points()
+        vector_point = next(point for point in matrix["points"] if point.get("shortName") == "V1")
+        vector_point["sourceVectorElementName"] = "A"
+        vector_point["targetVectorElementName"] = "A输入"
+        matrix["points"].append({
+            "pointId": "tp-virtual-pitch",
+            "shortName": "V2",
+            "name": "virtual pitch point",
+            "pointType": "virtual",
+            "channel": "scope-1.ch1",
+            "sourceVectorElementName": "B",
+            "targetVectorElementName": "B输入",
+        })
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": matrix,
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+
+        status, body = self._post(
+            f"/api/practice/session/{created['sessionId']}/action",
+            {
+                "operationId": "op-measure-vector-element",
+                "actionType": "measurePoint",
+                "componentId": "scope-1",
+                "portId": "CH1",
+                "elementName": "B输入",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["normalizedAction"]["pointCode"], "V2")
+        self.assertEqual(body["normalizedAction"]["elementName"], "B输入")
+        self.assertEqual(
+            body["normalizedAction"]["resolvedMeasurementPoint"]["elementName"],
+            "B输入",
+        )
+        self.assertNotIn("sourceVectorElementName", body["normalizedAction"])
+        self.assertNotIn("targetVectorElementName", body["normalizedAction"])
+
+    def test_measure_point_requires_element_name_for_every_point(self):
+        matrix = d_matrix_with_physical_and_virtual_points()
+        vector_point = next(point for point in matrix["points"] if point.get("shortName") == "V1")
+        vector_point["sourceVectorElementName"] = "B"
+        vector_point["targetVectorElementName"] = "B输入"
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": valid_package(),
+                "dMatrix": matrix,
+                "targetFaultId": "target-fault",
+            },
+        )
+        self.assertEqual(status, 200)
+
+        status, body = self._post(
+            f"/api/practice/session/{created['sessionId']}/action",
+            {
+                "operationId": "op-measure-vector-without-name",
+                "actionType": "measurePoint",
+                "componentId": "sim-1",
+                "portId": "socket03",
+            },
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(body["errorCode"], "INVALID_ACTION_SCHEMA")
+        self.assertEqual(body["field"], "elementName")
+
+    def test_measure_point_rejects_legacy_point_code_only_request(self):
         status, created = self._post(
             "/api/practice/session",
             {
@@ -1558,7 +2174,7 @@ class SimulationBackendServerTests(unittest.TestCase):
 
         self.assertEqual(status, 400)
         self.assertEqual(body["errorCode"], "INVALID_ACTION_SCHEMA")
-        self.assertEqual(body["field"], "pointCode")
+        self.assertEqual(body["field"], "componentId")
 
     def test_practice_action_repeated_replacement_is_recorded_and_applied(self):
         package = valid_package()
@@ -1642,6 +2258,11 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertNotIn("physicalMeasurementSnapshot", updated)
         self.assertNotIn("repairEffect", updated)
         self.assertNotIn("troubleshootingState", updated)
+        self.assertEqual(
+            session.latest_simulation_result["curves"]["channels"]["scope-1.ch1.reference"],
+            [],
+        )
+        self.assertEqual(session.simulation_session.module_states["reference"], {})
 
     def test_repeated_replacement_reports_unchanged_repair_effect(self):
         package = valid_package()
@@ -1813,19 +2434,121 @@ class SimulationBackendServerTests(unittest.TestCase):
             {
                 "operationId": "op-replace-healthy-wire",
                 "actionType": "replaceWire",
-                "target": {"type": "wire", "id": "edge-source-sim"},
+                "sourceComponentId": "source-1",
+                "sourcePortId": "out",
+                "targetComponentId": "passthrough",
+                "targetPortId": "input",
             },
         )
         self.assertEqual(status, 200)
         self.assertNotIn("appliedAction", wire_result)
+        self.assertEqual(
+            wire_result["normalizedAction"]["target"],
+            {"type": "wire", "id": "edge-source-sim"},
+        )
+        self.assertEqual(wire_result["normalizedAction"]["targetId"], "edge-source-sim")
         self.assertEqual(
             [sample["time"] for sample in wire_result["simulationResult"]["physicalMeasurements"][0]["samples"]],
             [0.0, 0.1, 0.2],
         )
         self.assertTrue(wire_result["simulationResult"]["summary"]["done"])
 
+    def test_replace_wire_uses_four_endpoint_binding_for_all_private_edges(self):
+        package = valid_package()
+        package["faultInstances"] = [
+            {
+                "faultId": "fault-input-wire",
+                "faultType": "wire_open",
+                "targetId": "edge-source-sim",
+                "enabled": True,
+                "startTime": 0.0,
+                "duration": 0.3,
+                "parameters": {},
+            },
+            {
+                "faultId": "fault-output-wire",
+                "faultType": "wire_open",
+                "targetId": "edge-sim-scope",
+                "enabled": True,
+                "startTime": 0.0,
+                "duration": 0.3,
+                "parameters": {},
+            },
+        ]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+                "connectionBindings": [{
+                    "sourceDeviceId": "external-device",
+                    "sourcePort": "output",
+                    "targetDeviceId": "subsystem-1",
+                    "targetPort": "input",
+                    "backingEdgeIds": ["edge-source-sim", "edge-sim-scope"],
+                }],
+            },
+        )
+        self.assertEqual(status, 200)
+
+        status, result = self._post(
+            f"/api/practice/session/{created['sessionId']}/action",
+            {
+                "operationId": "op-replace-public-wire",
+                "actionType": "replaceWire",
+                "sourceDeviceId": "external-device",
+                "sourcePort": "output",
+                "targetDeviceId": "subsystem-1",
+                "targetPort": "input",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            result["normalizedAction"]["targetIds"],
+            ["edge-source-sim", "edge-sim-scope"],
+        )
+        self.assertTrue(result["simulationResult"]["summary"]["done"])
+
+        package["connectionBindings"] = [{
+            "sourceDeviceId": "external-device",
+            "sourcePort": "output",
+            "targetDeviceId": "subsystem-1",
+            "targetPort": "input",
+            "backingEdgeIds": ["edge-source-sim", "edge-sim-scope"],
+        }]
+        status, created = self._post(
+            "/api/practice/session",
+            {
+                "simulationPackage": package,
+                "dMatrix": sample_d_matrix(),
+                "targetFaultId": "target-fault",
+                "connectionBindings": [],
+            },
+        )
+        self.assertEqual(status, 200)
+
+        status, result = self._post(
+            f"/api/practice/session/{created['sessionId']}/action",
+            {
+                "operationId": "op-replace-embedded-public-wire",
+                "actionType": "replaceWire",
+                "sourceDeviceId": "external-device",
+                "sourcePort": "output",
+                "targetDeviceId": "subsystem-1",
+                "targetPort": "input",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            result["normalizedAction"]["targetIds"],
+            ["edge-source-sim", "edge-sim-scope"],
+        )
+
     def test_submit_returns_complete_practice_evaluation_report(self):
         package = valid_package()
+        package["nodes"][1]["name"] = "仿真设备"
         package["simulationConfig"]["duration"] = 0.3
         package["faultInstances"] = [{
             "faultId": "fault-bias",
@@ -1842,9 +2565,13 @@ class SimulationBackendServerTests(unittest.TestCase):
                 "simulationPackage": package,
                 "dMatrix": d_matrix_with_physical_and_virtual_points(),
                 "targetFaultId": "target-fault",
+                "studentid": "student-20260001",
+                "jobid": "job-fault-training-001",
             },
         )
         self.assertEqual(status, 200)
+        self.assertNotIn("studentid", created)
+        self.assertNotIn("jobid", created)
         session_id = created["sessionId"]
 
         status, _ = self._post(
@@ -1852,8 +2579,9 @@ class SimulationBackendServerTests(unittest.TestCase):
             {
                 "operationId": "op-report-measure",
                 "actionType": "measurePoint",
-                "target": {"type": "testPoint", "id": "scope-2.ch1"},
-                "pointCode": "V1",
+                "componentId": "sim-1",
+                "portId": "socket03",
+                "elementName": "输出",
             },
         )
         self.assertEqual(status, 200)
@@ -1873,7 +2601,15 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
 
         self.assertEqual(status, 200, submitted)
+        self.assertNotIn("studentid", submitted)
+        self.assertNotIn("jobid", submitted)
         report = submitted["evaluationReport"]
+        self.assertEqual(report["studentId"], "student-20260001")
+        self.assertEqual(report["jobId"], "job-fault-training-001")
+        self.assertRegex(report["submittedAt"], r"^\d{4}-\d{2}-\d{2}T.*Z$")
+        self.assertNotEqual(report["submittedAt"], "2000-01-01T00:00:00Z")
+        self.assertIsInstance(report["totalDurationSeconds"], int)
+        self.assertGreaterEqual(report["totalDurationSeconds"], 0)
         self.assertNotIn("candidateFaultSets", report["initialOptimalPath"])
         self.assertNotIn("knowledgeGraph", report["initialOptimalPath"])
         self.assertNotIn("pathGeneration", report["initialOptimalPath"])
@@ -1882,6 +2618,12 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(report["targetConclusion"]["expectedTargetIds"], ["sim-1"])
         self.assertEqual(report["targetConclusion"]["studentTargetIds"], ["sim-1"])
         self.assertTrue(report["targetConclusion"]["correct"])
+        repair_action = next(
+            item["studentAction"]
+            for item in report["stepEvaluations"]
+            if item["studentAction"].get("actionType") == "replaceComponent"
+        )
+        self.assertEqual(repair_action["target"], {"type": "component", "name": "仿真设备"})
         self.assertEqual(len(report["scoreDetails"]), 5)
         self.assertEqual(sum(item["score"] for item in report["scoreDetails"]), report["totalScore"])
         self.assertNotIn("initialRecommendedPath", submitted)
@@ -1896,6 +2638,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertTrue(all("candidateCountAfter" not in step for step in report["stepEvaluations"]))
         self.assertTrue(all("removedCandidateCombinations" not in step for step in report["stepEvaluations"]))
         self.assertTrue(all("addedCandidateCombinations" not in step for step in report["stepEvaluations"]))
+
         self.assertTrue(all("virtualMeasurement" not in step["studentAction"] for step in report["stepEvaluations"]))
         self.assertTrue(all("candidateFaultsAfterAction" not in step["studentAction"] for step in report["stepEvaluations"]))
         self.assertTrue(all("faultId" not in step["studentAction"] for step in report["stepEvaluations"]))
@@ -1926,6 +2669,57 @@ class SimulationBackendServerTests(unittest.TestCase):
             round(100 - report["totalScore"], 3),
         )
         self.assertIsInstance(report["improvementSuggestions"], list)
+
+    def test_submit_posts_the_complete_result_to_the_configured_student_service(self):
+        with patch.object(
+            SimulationBackendHandler,
+            "practice_result_callback_url",
+            "http://127.0.0.1:9000/student/practice/result",
+        ), patch("backend.server.urlopen") as mocked_urlopen:
+            callback_response = MagicMock()
+            callback_response.status = 201
+            mocked_urlopen.return_value.__enter__.return_value = callback_response
+            status, created = self._post(
+                "/api/practice/session",
+                {
+                    "simulationPackage": valid_package(),
+                    "dMatrix": d_matrix_with_physical_and_virtual_points(),
+                    "targetFaultId": "target-fault",
+                    "studentid": 21,
+                    "jobid": 61,
+                },
+            )
+            self.assertEqual(status, 200)
+            status, submitted = self._post(
+                f"/api/practice/session/{created['practiceSessionId']}/submit",
+                {"finalTargetIds": ["sim-1"]},
+            )
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("runId", submitted)
+        self.assertNotIn("metrics", submitted)
+        self.assertEqual(submitted["resultDelivery"], {
+            "status": "delivered",
+            "url": "http://127.0.0.1:9000/student/practice/result",
+            "httpStatus": 201,
+        })
+        request = mocked_urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "http://127.0.0.1:9000/student/practice/result")
+        callback_payload = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(callback_payload["studentId"], 21)
+        self.assertEqual(callback_payload["jobId"], 61)
+        self.assertNotIn("practiceSessionId", callback_payload)
+        self.assertNotIn("simulationSessionId", callback_payload)
+        self.assertNotIn("studentId", callback_payload["evaluationReport"])
+        self.assertNotIn("jobId", callback_payload["evaluationReport"])
+        self.assertEqual(
+            callback_payload["evaluationReport"],
+            {
+                key: value
+                for key, value in submitted["evaluationReport"].items()
+                if key not in {"studentId", "jobId"}
+            },
+        )
 
     def test_submit_ends_practice_and_bound_simulation_session(self):
         status, created = self._post(
@@ -2014,8 +2808,9 @@ class SimulationBackendServerTests(unittest.TestCase):
             {
                 "operationId": "op-1",
                 "actionType": "measurePoint",
-                "target": {"type": "testPoint", "id": "scope-2.ch1"},
-                "pointCode": "V1",
+                "componentId": "sim-1",
+                "portId": "socket03",
+                "elementName": "输出",
             },
         )
         self.assertEqual(status, 200)
@@ -2027,8 +2822,9 @@ class SimulationBackendServerTests(unittest.TestCase):
             {
                 "operationId": "op-2",
                 "actionType": "measurePoint",
-                "target": {"type": "testPoint", "id": "scope-2.ch1"},
-                "pointCode": "V1",
+                "componentId": "sim-1",
+                "portId": "socket03",
+                "elementName": "输出",
             },
         )
 

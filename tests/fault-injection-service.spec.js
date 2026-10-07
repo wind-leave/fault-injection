@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import faultCatalog from '../fault-types/fault-type-catalog.json';
 import {
+  applyComplexEnvelopeFault,
+  applyComplexEnvelopeFaultBindings,
   applyScalarFault,
   applyScalarFaultBindings,
   appendFaultBinding,
@@ -181,6 +183,13 @@ describe('faultInjectionService', () => {
     expect(getFaultRuntimeBehavior({ runtimeBehavior: 'bias' })).toBe('additive_bias');
     expect(getFaultRuntimeBehavior({ runtimeBehavior: 'dropout' })).toBe('packet_loss');
     expect(getFaultRuntimeBehavior({ runtimeBehavior: 'delay' })).toBe('fixed_delay');
+
+    expect(applyScalarFault(2, {
+      faultModel: { runtimeBehavior: 'step' },
+      params: { targetValue: 0.5, start: 1, duration: 2 },
+      time: 1.5,
+      state: {}
+    })).toBe(0.5);
 
     expect(applyScalarFault(1, {
       faultModel: { runtimeBehavior: 'bias' },
@@ -448,5 +457,108 @@ describe('faultInjectionService', () => {
       time: 0,
       dt: 0.1
     })).toBeCloseTo(1.5);
+  });
+
+  it('applies a protocol fault to the complete vector payload', () => {
+    const target = {
+      id: 'edge-vector-command',
+      faultBindings: [{
+        bindingId: 'vector-edge-bias',
+        faultModelId: 'vector-edge-bias',
+        layer: 'protocol',
+        runtimeBehavior: 'additive_bias',
+        parameters: { bias: 0.5 },
+        vectorInjectionScope: 'items',
+        vectorIndices: [0, 2],
+        active: true
+      }]
+    };
+
+    expect([1, 2, 3].map((value, vectorIndex) => applyScalarFaultBindings(value, {
+      target,
+      stateBucket: {},
+      time: 0,
+      vectorIndex
+    }))).toEqual([1.5, 2.5, 3.5]);
+  });
+
+  it('applies frontend attenuation and cutoff to I/Q while preserving envelope metadata', () => {
+    const envelope = {
+      i: 3,
+      q: -4,
+      referenceFrequencyHz: 20e9,
+      impedanceOhm: 50,
+      unit: 'V'
+    };
+
+    expect(applyComplexEnvelopeFault(envelope, {
+      behavior: 'attenuation',
+      params: { attenuation_db: 6 },
+      time: 0,
+      state: {}
+    })).toMatchObject({
+      i: 3 * Math.pow(10, -6 / 20),
+      q: -4 * Math.pow(10, -6 / 20),
+      referenceFrequencyHz: 20e9,
+      impedanceOhm: 50,
+      unit: 'V'
+    });
+
+    expect(applyComplexEnvelopeFault(envelope, {
+      behavior: 'data_cutoff',
+      params: {},
+      time: 0,
+      state: {}
+    })).toEqual({ ...envelope, i: 0, q: 0 });
+  });
+
+  it('holds a complete I/Q frame and applies protocol bindings frame-wise', () => {
+    const first = { i: 1, q: 2, referenceFrequencyHz: 20e9, impedanceOhm: 50 };
+    const second = { i: 9, q: 8, referenceFrequencyHz: 20e9, impedanceOhm: 50 };
+    const state = {};
+    applyComplexEnvelopeFault(first, {
+      behavior: 'freeze',
+      params: { start: 1 },
+      time: 0,
+      state
+    });
+    expect(applyComplexEnvelopeFault(second, {
+      behavior: 'freeze',
+      params: { start: 1 },
+      time: 1,
+      state
+    })).toEqual(first);
+
+    const target = {
+      id: 'edge-complex-envelope',
+      faultBindings: [{
+        bindingId: 'protocol-attenuation',
+        layer: 'protocol',
+        runtimeBehavior: 'attenuation',
+        parameters: { scale: 0.5 },
+        active: true
+      }]
+    };
+    expect(applyComplexEnvelopeFaultBindings(first, {
+      target,
+      stateBucket: {},
+      time: 0
+    })).toEqual({ ...first, i: 0.5, q: 1 });
+  });
+
+  it('applies a complex-envelope fault independently to every vector lane', () => {
+    const vector = [
+      { i: 1, q: 2, referenceFrequencyHz: 20e9 },
+      { i: -3, q: 4, referenceFrequencyHz: 21e9 }
+    ];
+    expect(applyComplexEnvelopeFault(vector, {
+      behavior: 'attenuation',
+      params: { scale: 0.5 },
+      time: 0,
+      state: {}
+    })).toEqual([
+      { i: 0.5, q: 1, referenceFrequencyHz: 20e9 },
+      { i: -1.5, q: 2, referenceFrequencyHz: 21e9 }
+    ]);
   });
 });

@@ -301,15 +301,51 @@ def _key_node_report(path_evaluation):
     }
 
 
+def _missed_key_node_descriptions(path_evaluation):
+    evaluation = path_evaluation if isinstance(path_evaluation, dict) else {}
+    coverage = evaluation.get("keyNodeCoverage") if isinstance(evaluation.get("keyNodeCoverage"), dict) else {}
+    missed_ids = _arr(coverage.get("missedNodeIds"))
+    nodes_by_id = {
+        _text(node.get("nodeId")): node
+        for node in _arr(evaluation.get("faultTreeKeyNodes"))
+        if _text(node.get("nodeId"))
+    }
+    descriptions = []
+    for node_id in missed_ids:
+        node = nodes_by_id.get(_text(node_id))
+        if not isinstance(node, dict):
+            descriptions.append(_text(node_id))
+            continue
+        node_type = _text(node.get("type"))
+        if node_type == "measurePoint":
+            descriptions.append(f"测量{_text(node.get('pointCode'), _text(node_id))}")
+            continue
+        if node_type == "repairTarget":
+            target = node.get("target") if isinstance(node.get("target"), dict) else {}
+            target_type = _text(target.get("type"))
+            target_name = _text(target.get("name") or target.get("id"), _text(node_id))
+            if target_type == "wire":
+                descriptions.append(f"更换连线{target_name}")
+                continue
+            if target_type == "component":
+                descriptions.append(f"更换设备：{target_name}")
+                continue
+        if node_type == "displayConsoleParameter":
+            descriptions.append(_text(node.get("text"), _text(node_id)).rstrip("。"))
+            continue
+        descriptions.append(_text(node.get("text") or node.get("label"), _text(node_id)).rstrip("。"))
+    return descriptions
+
+
 def _deduction_reason(item, correct, path_evaluation, elapsed_seconds, scoring_rules):
     evaluation = path_evaluation if isinstance(path_evaluation, dict) else {}
     if item == "faultLocalization":
         return "学生最终定位目标集合与正确组件、连线集合不一致", "结合测点证据重新核对漏报及多报的组件或连线。"
     if item == "diagnosticTreePath":
-        missed = _arr((evaluation.get("keyNodeCoverage") or {}).get("missedNodeIds"))
+        missed = _missed_key_node_descriptions(evaluation)
         reason = "关键节点未完全覆盖或路径中存在无效、重复操作"
         if missed:
-            reason = f"未覆盖关键节点：{', '.join(str(value) for value in missed)}"
+            reason = f"未覆盖关键节点：{', '.join(missed)}"
         return reason, "优先覆盖关键测点和维修目标，减少无效或重复更换。"
     if item == "informationGain":
         unmatched = int(evaluation.get("dynamicReferenceUnmatchedCount") or 0)

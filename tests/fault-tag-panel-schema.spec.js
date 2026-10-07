@@ -52,6 +52,11 @@ describe('fault tag panel schema service', () => {
 
     expect(getFaultTagInjectedChannels({ vectorInjectionScope: 'item', vectorIndex: 1 })).toBe('第 2 路');
     expect(getFaultTagInjectedChannels({ vectorInjectionScope: 'items', vectorIndices: [2, 0, 2] })).toBe('第 1、3 路');
+    expect(getFaultTagInjectedChannels({
+      vectorInjectionScope: 'items',
+      vectorIndices: [1, 0],
+      vectorElementNames: ['下变频基带输出 1（I）', '下变频基带输出 2（I）']
+    })).toBe('下变频基带输出 1（I）、下变频基带输出 2（I）');
     expect(html).toContain('注入路数');
     expect(html).toContain('第 1、3 路');
     expect(html.indexOf('目标参数')).toBeLessThan(html.indexOf('注入路数'));

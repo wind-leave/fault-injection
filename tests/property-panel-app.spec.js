@@ -197,6 +197,7 @@ describe('property panel interaction', () => {
     expect(document.getElementById('prop-name')).toBeNull();
     expect(document.getElementById('prop-centerFrequency')).not.toBeNull();
     expect(document.getElementById('prop-waveType')).toBeNull();
+    expect(document.getElementById('prop-power')).toMatchObject({ type: 'number', min: '', step: 'any' });
 
     setFieldValue('#prop-modulation', 'digital', 'change');
     await flushRuntime();
@@ -214,6 +215,116 @@ describe('property panel interaction', () => {
       bandwidth: '40MHz',
       power: '12',
       powerUnit: 'dBm'
+    });
+
+    wrapper.unmount();
+  });
+
+  it('keeps the testpoint editor rendered when an enum diagnostic condition exists on the canvas', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('rf_downconverter', 180, 220);
+    const target = window.createNode('instrument_scope', 520, 220);
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    const edge = {
+      id: 'edge-enum-condition-testpoint',
+      lineType: 'normal',
+      sourceNodeId: source.id,
+      sourcePortIndex: 0,
+      targetNodeId: target.id,
+      targetPortIndex: 0
+    };
+    state.modelEdges.push(edge);
+    state.diagnosticTestPoints = [{
+      id: 'tp-enum-condition',
+      pointId: 'tp-enum-condition',
+      edgeId: edge.id,
+      name: '变频输出测点',
+      pointType: 'physical'
+    }];
+    window.renderModelNodes();
+    window.renderEdges();
+    window.selectEdge(edge.id);
+    await flushRuntime();
+
+    window.setPropertyPanelTab('testpoints');
+    await flushRuntime();
+
+    expect(document.querySelector('[data-edge-testpoint-panel]')).not.toBeNull();
+    expect(document.querySelector('[data-edge-testpoint-card]')).not.toBeNull();
+    expect(document.querySelector('[data-edge-testpoint-condition]')).not.toBeNull();
+    expect(document.getElementById('pd')?.textContent).toContain('影响检测能力的参数');
+    expect(document.getElementById('pd')?.textContent).not.toContain('当前连线可注入协议层故障。');
+
+    wrapper.unmount();
+  });
+
+  it('exports unique simulation module IDs as device and connection IDs', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const filter = window.createNode('DZDK_A', 180, 220);
+    const limiter = window.createNode('DZDK_B', 480, 220);
+    window.__GZ_STATE__.modelEdges.push({
+      id: 'edge-filter-limiter',
+      lineType: 'normal',
+      sourceNodeId: filter.id,
+      sourcePortIndex: 0,
+      targetNodeId: limiter.id,
+      targetPortIndex: 0
+    });
+    await flushRuntime();
+
+    const result = await window.buildSimulationResultSnapshot();
+    const devices = result.publicData.renderData.devices;
+
+    expect(devices).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'DZDK_A' }),
+      expect.objectContaining({ id: 'DZDK_B' })
+    ]));
+    expect(result.publicData.renderData.connections).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'edge-filter-limiter',
+        sourceDeviceId: 'DZDK_A',
+        targetDeviceId: 'DZDK_B'
+      })
+    ]));
+
+    wrapper.unmount();
+  });
+
+  it('enables and saves RF pulse width and repetition period after pulse modulation is selected', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_rf', 220, 220);
+    await flushRuntime();
+    window.selectNode(source.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    expect(document.getElementById('prop-pulseWidth')).toBeNull();
+    setFieldValue('#prop-modulation', 'pulse', 'change');
+    await flushRuntime();
+
+    expect(document.getElementById('prop-pulseWidth')).not.toBeNull();
+    expect(document.getElementById('prop-pulsePeriod')).not.toBeNull();
+    setFieldValue('#prop-pulseWidth', '250');
+    setFieldValue('#prop-pulseWidthUnit', 'μs', 'change');
+    setFieldValue('#prop-pulsePeriod', '1');
+    setFieldValue('#prop-pulsePeriodUnit', 'ms', 'change');
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+
+    expect(source.props).toMatchObject({
+      modulation: 'pulse',
+      pulseWidth: '250',
+      pulseWidthUnit: 'μs',
+      pulsePeriod: '1',
+      pulsePeriodUnit: 'ms'
     });
 
     wrapper.unmount();
@@ -250,7 +361,7 @@ describe('property panel interaction', () => {
     source.props.phaseDeviation = `${Math.PI / 2}`;
     expect(outputAt(0.25)).toBeCloseTo(0, 6);
 
-    source.props.modulation = 'pulse';
+    source.props.modulation = '脉冲调制';
     source.props.pulseWidth = '500';
     source.props.pulseWidthUnit = 'ms';
     source.props.pulsePeriod = '1';
@@ -354,6 +465,49 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
+  it('configures a complex-envelope vector with one shared RF configuration', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_rf', 220, 220);
+    await flushRuntime();
+    window.selectNode(source.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    setFieldValue('#prop-outputFormat', '复数包络', 'change');
+    await flushRuntime();
+    expect(document.getElementById('prop-rfComplexEnvelopeMode')?.value).toBe('scalar');
+    expect(document.getElementById('prop-rfVectorLength')).toBeNull();
+    setFieldValue('#prop-rfComplexEnvelopeMode', 'vector', 'change');
+    await flushRuntime();
+    expect(document.getElementById('prop-rfVectorLength')).not.toBeNull();
+    expect(document.getElementById('prop-rfVectorConfigMode')).toBeNull();
+    expect(document.getElementById('prop-rfVectorValues')).toBeNull();
+    expect(document.querySelectorAll('[data-rf-vector-value]')).toHaveLength(0);
+
+    setFieldValue('#prop-rfVectorLength', '32', 'change');
+    await flushRuntime();
+    setFieldValue('#prop-centerFrequency', '20');
+    setFieldValue('#prop-pulseWidth', '1');
+    setFieldValue('#prop-pulsePeriod', '10');
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+
+    expect(source.props).toMatchObject({
+      outputFormat: '复数包络', rfComplexEnvelopeMode: 'vector', rfVectorLength: 32,
+      centerFrequency: '20', pulseWidth: '1', pulsePeriod: '10'
+    });
+    expect(window.getNodePorts(source).outputs[0]).toMatchObject({
+      dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 32
+    });
+    const output = window.resolveNodeOutput(source.id, 0, 'actual', 0, 0.01, new Map(), new Set());
+    expect(output).toHaveLength(32);
+    expect(output[0]).toMatchObject({ i: expect.any(Number), q: expect.any(Number), referenceFrequencyHz: 20e9 });
+    expect(output[1]).toEqual(output[0]);
+    expect(output[1]).not.toBe(output[0]);
+    wrapper.unmount();
+  });
+
   it('shows signal source definition and hides module status and canvas position for signal sources', async () => {
     const wrapper = await mountWorkbench();
 
@@ -405,6 +559,43 @@ describe('property panel interaction', () => {
     expect(document.getElementById('prop-centerFrequency')).not.toBeNull();
     expect(document.getElementById('prop-signalDomain')).toBeNull();
 
+    wrapper.unmount();
+  });
+
+  it('edits RF component and output port IDs without breaking a connection', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_rf', 220, 220);
+    const target = window.createNode('flow_block', 500, 220);
+    await flushRuntime();
+    window.handlePortClick({ stopPropagation() {} }, source.id, 'output', 0);
+    window.handlePortClick({ stopPropagation() {} }, target.id, 'input', 0);
+    await flushRuntime();
+    const edge = window.__GZ_STATE__.modelEdges[0];
+    expect(edge?.sourceNodeId).toBe(source.id);
+
+    window.selectNode(source.id);
+    await flushRuntime();
+    expect(document.getElementById('prop-componentId')?.value).toBe(source.id);
+    setFieldValue('#prop-componentId', 'rf-source-32');
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+    expect(source.id).toBe('rf-source-32');
+    expect(window.__GZ_STATE__.selBlk).toBe('rf-source-32');
+    expect(edge.sourceNodeId).toBe('rf-source-32');
+    expect(document.getElementById('b-rf-source-32')).not.toBeNull();
+
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+    expect(document.getElementById('prop-outputPortId')?.value).toBe('signal');
+    setFieldValue('#prop-outputPortId', 'rf.out');
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+    expect(source.props.outputPortId).toBe('rf.out');
+    expect(window.getNodePorts(source).outputs[0].portId).toBe('rf.out');
+    expect(edge.sourcePortMeta.portId).toBe('rf.out');
+    expect(edge.sourcePort.portId).toBe('rf.out');
+    expect(edge.sourceNodeId).toBe(source.id);
     wrapper.unmount();
   });
 
@@ -778,10 +969,14 @@ describe('property panel interaction', () => {
         inputs: [{
           varName: 'error', displayName: '误差', type: 'vector', vectorLength: 3,
           vectorElementNames: ['横滚误差', '俯仰误差', '偏航误差'], connected: false
+        }, {
+          varName: 'mode', displayName: '模式输入', type: 'float', elementNames: ['输入模式'], connected: false
         }],
         outputs: [{
           varName: 'command', displayName: '控制指令', type: 'vector', vectorLength: 4,
           vectorElementNames: ['副翼', '升降舵', '方向舵', '油门']
+        }, {
+          varName: 'status', displayName: '状态输出', type: 'float', elementNames: ['输出状态']
         }],
         middleVars: [{ varName: 'integral', displayName: '积分量', type: 'float' }]
       }
@@ -800,6 +995,8 @@ describe('property panel interaction', () => {
     setFieldValue('[data-python-port-display-name][data-python-port-kind="outputs"]', '执行器指令');
     setFieldValue('[data-python-port-vector-element-name][data-python-port-kind="inputs"][data-python-port-vector-element-index="1"]', '俯仰角误差');
     setFieldValue('[data-python-port-vector-element-name][data-python-port-kind="outputs"][data-python-port-vector-element-index="3"]', '发动机推力');
+    setFieldValue('[data-python-port-scalar-element-name][data-python-port-kind="inputs"][data-python-port-index="1"]', '工作模式');
+    setFieldValue('[data-python-port-scalar-element-name][data-python-port-kind="outputs"][data-python-port-index="1"]', '运行状态');
     document.querySelector('[data-property-save-node]').click();
     await flushRuntime();
 
@@ -807,10 +1004,13 @@ describe('property panel interaction', () => {
     expect(block.pythonBinding.portMapping.outputs[0].displayName).toBe('执行器指令');
     expect(block.pythonBinding.portMapping.inputs[0].vectorElementNames).toEqual(['横滚误差', '俯仰角误差', '偏航误差']);
     expect(block.pythonBinding.portMapping.outputs[0].vectorElementNames).toEqual(['副翼', '升降舵', '方向舵', '发动机推力']);
+    expect(block.pythonBinding.portMapping.inputs[1].elementNames).toEqual(['工作模式']);
+    expect(block.pythonBinding.portMapping.outputs[1].elementNames).toEqual(['运行状态']);
     expect(block.pythonBinding.portMapping.middleVars[0].displayName).toBe('积分量');
     expect(window.getNodePorts(block).inputs[0].label).toBe('姿态误差');
-    expect(window.getNodePorts(block).outputs.map((port) => port.label)).toEqual(['执行器指令']);
+    expect(window.getNodePorts(block).outputs.map((port) => port.label)).toEqual(['执行器指令', '状态输出']);
     expect(window.getNodePorts(block).outputs[0].meta.vectorElementNames).toEqual(['副翼', '升降舵', '方向舵', '发动机推力']);
+    expect(window.getNodePorts(block).outputs[1].meta.elementNames).toEqual(['运行状态']);
 
     wrapper.unmount();
   });
@@ -932,16 +1132,20 @@ describe('property panel interaction', () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
-    const sensor = window.createNode('barometer_sensor', 360, 220);
+    const sensor = window.createNode('simulation_block', 360, 220);
+    sensor.props.modelParameters = [
+      { key: 'bias', name: 'Bias', targetField: 'params.bias' },
+      { key: 'scale', name: 'Scale', targetField: 'params.scale' }
+    ];
     const injector = window.createNode('physical_fault_injector', 160, 220);
     await flushRuntime();
 
     const result = window.bindLayeredFaultInjectorToTarget(injector.id, {
       targetKind: 'node',
       targetId: sensor.id,
-      slotId: 'physical:barometer_bias',
-      mathModel: 'step',
-      parameters: { step: 0.5, start: 0, duration: '' }
+      slotId: 'physical:parameter:bias',
+      mathModel: 'degradation',
+      parameters: { scale: 0.5, start: 0, duration: '' }
     });
 
     expect(result.ok).toBe(true);
@@ -949,9 +1153,105 @@ describe('property panel interaction', () => {
       expect.objectContaining({
         targetId: sensor.id,
         targetField: 'params.bias',
-        runtimeBehavior: 'step'
+        runtimeBehavior: 'degradation'
       })
     ]));
+
+    wrapper.unmount();
+  });
+
+  it('offers only degradation in the physical fault binding dialog', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const sensor = window.createNode('simulation_block', 360, 220);
+    sensor.props.modelParameters = [{ key: 'scale', name: 'Scale', targetField: 'params.scale' }];
+    const injector = window.createNode('physical_fault_injector', 160, 220);
+    await flushRuntime();
+
+    expect(window.beginLayeredFaultBinding(injector.id)).toBe(true);
+    document.querySelector(`#b-${sensor.id}`).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushRuntime();
+
+    const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    expect(dialog).not.toBeNull();
+    expect([...dialog.querySelectorAll('[data-layered-fault-option="model"]')]
+      .map((option) => option.dataset.layeredFaultOptionValue)).toEqual(['degradation']);
+    expect(dialog.querySelector('[data-layered-fault-model]')?.value).toBe('degradation');
+    wrapper.unmount();
+  });
+
+  it('selects an I/Q envelope route from the spectrum analyzer property panel', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('simulation_block', 180, 220);
+    const spectrum = window.createNode('instrument_spectrum', 480, 220);
+    const state = window.__GZ_STATE__;
+    source.props.outputs = [{
+      name: 'I/Q 向量', type: '复数包络', dataType: 'rf_complex_envelope',
+      vectorLength: 3, vectorElementNames: ['目标 1', '目标 2', '目标 3']
+    }];
+    state.modelEdges.push({
+      id: 'edge-complex-vector-to-spectrum',
+      sourceNodeId: source.id,
+      targetNodeId: spectrum.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0
+    });
+    window.renderModelNodes();
+
+    window.selectNode(spectrum.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    expect(window.getInstrumentVectorMeasurements(spectrum)).toHaveLength(1);
+    const selector = document.querySelector('[data-instrument-vector-channel="vectorChannel"]');
+    expect(selector).not.toBeNull();
+    expect(Array.from(selector.options).map((option) => option.value)).toEqual(['1', '2', '3']);
+    selector.value = '2';
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+    expect(spectrum.props.vectorChannel).toBe(2);
+
+    wrapper.unmount();
+  });
+
+  it('binds one physical fault instance to multiple component parameters', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const sensor = window.createNode('simulation_block', 360, 220);
+    sensor.props.modelParameters = [
+      { key: 'bias', name: 'Bias', targetField: 'params.bias' },
+      { key: 'scale', name: 'Scale', targetField: 'params.scale' }
+    ];
+    const injector = window.createNode('physical_fault_injector', 160, 220);
+    await flushRuntime();
+
+    const slots = window.getLayeredFaultSlotsForTarget(sensor)
+      .filter((slot) => slot.layer === 'physical')
+      .slice(0, 2);
+    expect(slots).toHaveLength(2);
+
+    const result = window.bindLayeredFaultInjectorToTarget(injector.id, {
+      targetKind: 'node',
+      targetId: sensor.id,
+      slotId: slots[0].id,
+      slotIds: slots.map((slot) => slot.id),
+      mathModel: 'degradation',
+      parameters: { scale: 0.5, start: 0, duration: '' }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(window.__GZ_STATE__.faultInstances).toContainEqual(expect.objectContaining({
+      targetId: sensor.id,
+      slotId: slots[0].id,
+      slotIds: slots.map((slot) => slot.id),
+      targetFields: slots.map((slot) => slot.targetField),
+      parameterKeys: slots.map((slot) => slot.parameterKey),
+      parameters: expect.objectContaining({ scale: 0.5 })
+    }));
 
     wrapper.unmount();
   });
@@ -990,6 +1290,23 @@ describe('property panel interaction', () => {
     expect(window.canBindLayeredFaultInjectorToTarget(injector.id, edge)).toBe(false);
     expect(window.resolveNodeOutput(gain.id, 0, 'actual', 0.25, 0.1, new Map(), new Set())).toBeCloseTo(1);
 
+    wrapper.unmount();
+  });
+
+  it('accepts negative dBm values for an RF signal source', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_rf', 220, 220);
+    window.selectNode(source.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    setFieldValue('#prop-power', '-30');
+    document.querySelector('[data-property-save-node]').click();
+    await flushRuntime();
+
+    expect(source.props).toMatchObject({ power: '-30', powerUnit: 'dBm' });
     wrapper.unmount();
   });
 
@@ -1043,7 +1360,47 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('uses a bias default when electrical bias is bound to a component output', async () => {
+  it('applies a protocol-edge fault to a complete vector payload', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('rf_four_channel_source', 180, 220);
+    const sink = window.createNode('simulation_block', 520, 220);
+    sink.props.inputs = [{ name: '四路指令', type: '向量', dataType: 'vector', vectorLength: 4 }];
+    const injector = window.createNode('protocol_fault_injector', 320, 420);
+    const edge = {
+      id: 'edge-protocol-vector',
+      lineType: 'normal',
+      signalId: 'rf.command',
+      sourceNodeId: source.id,
+      targetNodeId: sink.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0
+    };
+    window.__GZ_STATE__.modelEdges.push(edge);
+    window.renderModelNodes();
+    await flushRuntime();
+
+    window.beginLayeredFaultBinding(injector.id);
+    document.querySelector(`.edge-path[data-edge-id="${edge.id}"]`)
+      .dispatchEvent(new MouseEvent('pointerup', { bubbles: true, cancelable: true }));
+    await flushRuntime();
+
+    const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    expect(dialog.querySelectorAll('[data-layered-fault-vector-item]')).toHaveLength(0);
+    dialog.querySelector('[data-layered-fault-confirm]').click();
+    await flushRuntime();
+
+    expect(window.__GZ_STATE__.faultInstances).toContainEqual(expect.objectContaining({
+      targetKind: 'edge',
+      targetId: edge.id
+    }));
+    expect(window.__GZ_STATE__.faultInstances.find((item) => item.targetId === edge.id))
+      .not.toHaveProperty('vectorInjectionScope');
+    wrapper.unmount();
+  });
+
+  it('uses an attenuation default when electrical attenuation is bound to a component output', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
@@ -1070,30 +1427,30 @@ describe('property panel interaction', () => {
       targetKind: 'node',
       targetId: sensor.id,
       slotId: outputSlot.id,
-      mathModel: 'bias'
+      mathModel: 'attenuation'
     });
 
     expect(result.ok).toBe(true);
     const reference = window.resolveNodeOutput(sensor.id, 0, 'reference', 0.25, 0.1, new Map(), new Set());
     const actual = window.resolveNodeOutput(sensor.id, 0, 'actual', 0.25, 0.1, new Map(), new Set());
-    expect(actual).toBeCloseTo(reference + 0.1);
+    expect(actual).toBeCloseTo(reference * Math.pow(10, -6 / 20));
 
     wrapper.unmount();
   });
 
-  it('selects individual RF vector channels in the electrical fault binding dialog', async () => {
+  it('selects named RF vector channels in the electrical fault binding dialog', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
-    const source = window.createNode('rf_four_channel_source', 360, 220);
+    const source = window.createNode('rf_four_port_up_down_converter', 360, 220);
     const injector = window.createNode('electrical_fault_injector', 160, 220);
     await flushRuntime();
 
     const slot = window.getLayeredFaultSlotsForTarget(source)
-      .find((item) => item.layer === 'electrical' && item.bindingObject === 'rf_samples');
+      .find((item) => item.layer === 'electrical' && item.bindingObject === 'downconverted_baseband_outputs');
     expect(slot).toMatchObject({
-      targetField: 'outputs.rf_samples',
-      vectorLength: 4
+      targetField: 'outputs.downconverted_baseband_outputs',
+      vectorLength: 2
     });
 
     window.beginLayeredFaultBinding(injector.id);
@@ -1104,25 +1461,105 @@ describe('property panel interaction', () => {
     expect(dialog).not.toBeNull();
     expect(dialog.textContent).toContain('信号衰减');
     expect(dialog.textContent).toContain('数据通断');
+    expect([...dialog.querySelectorAll('[data-layered-fault-option="model"]')]
+      .map((option) => option.dataset.layeredFaultOptionValue)).toEqual(['attenuation', 'data_cutoff']);
     expect(dialog.querySelector('[data-layered-fault-vector-scope]')).toBeNull();
     expect(dialog.querySelector('[data-layered-fault-vector-index]')).toBeNull();
-    expect(dialog.querySelectorAll('[data-layered-fault-vector-item]')).toHaveLength(4);
+    dialog.querySelector(`[data-layered-fault-option="slot"][data-layered-fault-option-value="${slot.id}"]`).click();
+    await flushRuntime();
+    expect(dialog.querySelectorAll('[data-layered-fault-vector-item]')).toHaveLength(2);
     const items = dialog.querySelectorAll('[data-layered-fault-vector-item]');
+    expect(Array.from(items).map((item) => item.parentElement?.textContent.trim()))
+      .toEqual(['下变频基带输出 1（I）', '下变频基带输出 2（I）']);
     items[0].checked = true;
     items[1].checked = false;
-    items[2].checked = true;
-    items[3].checked = false;
     dialog.querySelector('[data-layered-fault-confirm]').click();
     await flushRuntime();
 
     expect(window.__GZ_STATE__.faultInstances).toContainEqual(expect.objectContaining({
       targetId: source.id,
-      targetField: 'outputs.rf_samples',
+      targetField: 'outputs.downconverted_baseband_outputs',
       vectorInjectionScope: 'items',
-      vectorIndices: [0, 2]
+      vectorIndices: [0]
     }));
     expect(document.getElementById('pd')?.textContent).toContain('注入路数');
-    expect(document.getElementById('pd')?.textContent).toContain('第 1、3 路');
+    expect(document.getElementById('pd')?.textContent).toContain('下变频基带输出 1（I）');
+    wrapper.unmount();
+  });
+
+  it('selects named complex-envelope vector routes in the electrical fault binding dialog', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('rf_complex_envelope_to_vector4', 360, 220);
+    const injector = window.createNode('electrical_fault_injector', 160, 220);
+    const routeNames = ['天线阵元 1', '天线阵元 2', '天线阵元 3', '天线阵元 4'];
+    // Port element names are edited in the Python binding. The immutable
+    // component declaration remains unnamed, matching a user-edited block.
+    source.pythonBinding.portMapping.outputs[0].vectorElementNames = [...routeNames];
+    await flushRuntime();
+
+    const slot = window.getLayeredFaultSlotsForTarget(source)
+      .find((item) => item.layer === 'electrical' && item.bindingObject === 'envelope_vector');
+    expect(slot).toMatchObject({
+      targetField: 'outputs.envelope_vector',
+      dataType: 'rf_complex_envelope',
+      vectorLength: 4
+    });
+
+    window.beginLayeredFaultBinding(injector.id);
+    document.querySelector(`#b-${source.id}`).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushRuntime();
+
+    const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    const items = dialog.querySelectorAll('[data-layered-fault-vector-item]');
+    expect(items).toHaveLength(4);
+    expect(Array.from(items).map((item) => item.parentElement?.textContent.trim())).toEqual(routeNames);
+    items[0].checked = false;
+    items[1].checked = true;
+    items[2].checked = false;
+    items[3].checked = true;
+    dialog.querySelector('[data-layered-fault-confirm]').click();
+    await flushRuntime();
+
+    expect(window.__GZ_STATE__.faultInstances).toContainEqual(expect.objectContaining({
+      targetId: source.id,
+      targetField: 'outputs.envelope_vector',
+      vectorInjectionScope: 'items',
+      vectorIndices: [1, 3]
+    }));
+    wrapper.unmount();
+  });
+
+  it('does not request injection channels for a scalar electrical slot with stale vector metadata', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const target = window.createNode('simulation_block', 360, 220);
+    target.props = {
+      name: 'Scalar target',
+      inputs: [{ name: '标量输入', varName: 'scalar_input', dataType: 'scalar', vectorLength: 4 }],
+      outputs: []
+    };
+    target.faultSlots = [{
+      slotId: 'electrical:input:scalar_input',
+      layer: 'electrical',
+      targetField: 'inputs.scalar_input',
+      bindingObject: 'scalar_input',
+      dataType: 'vector',
+      vectorLength: 4
+    }];
+    const injector = window.createNode('electrical_fault_injector', 160, 220);
+    window.renderModelNodes();
+    await flushRuntime();
+
+    window.beginLayeredFaultBinding(injector.id);
+    document.querySelector(`#b-${target.id}`).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flushRuntime();
+
+    const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    expect(dialog).not.toBeNull();
+    expect(dialog.querySelectorAll('[data-layered-fault-vector-item]')).toHaveLength(0);
     wrapper.unmount();
   });
 
@@ -1451,7 +1888,12 @@ describe('property panel interaction', () => {
 
     const state = window.__GZ_STATE__;
     source.props.name = 'Source controller';
-    source.props.outputs = [{ name: 'Control vector', type: '向量', vectorLength: 3 }];
+    source.props.outputs = [{
+      name: 'Control vector',
+      type: '向量',
+      vectorLength: 3,
+      vectorElementNames: ['横滚指令', '俯仰指令', '偏航指令']
+    }];
     target.props.name = 'Output scope';
     source.faultSlots = [
       {
@@ -1508,7 +1950,7 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     expect(visiblePropertyTabs()).toContain('testpoints');
-    window.setPropertyPanelTab('testpoints');
+    document.querySelector('[data-props-tab="testpoints"]')?.click();
     await flushRuntime();
 
     expect(document.querySelector('[data-edge-testpoint-panel]')).not.toBeNull();
@@ -1526,6 +1968,7 @@ describe('property panel interaction', () => {
     expect(cards.every((card) => card.querySelector('[data-edge-testpoint-type]')?.value === 'virtual')).toBe(true);
     const vectorOptions = Array.from(cards[0].querySelectorAll('[data-edge-testpoint-vector-index] option'));
     expect(vectorOptions.map((option) => option.value)).toEqual(['0', '1', '2']);
+    expect(vectorOptions.map((option) => option.textContent)).toEqual(['横滚指令', '俯仰指令', '偏航指令']);
     expect(cards[0].querySelector('[data-edge-testpoint-fault="source_bias"]')).toBeNull();
     expect(cards[0].querySelector('[data-edge-testpoint-fault="source_noise"]')).toBeNull();
     expect(cards[0].querySelector('[data-edge-testpoint-fault="target_fault"]')).toBeNull();
@@ -1566,6 +2009,9 @@ describe('property panel interaction', () => {
     window.setPropertyPanelTab('testpoints');
     await flushRuntime();
     expect(document.querySelector('[data-edge-testpoint-fault="bound_edge_protocol_fault"]')).not.toBeNull();
+    const monitoredEdgeFaultGroup = document.querySelector(`[data-edge-testpoint-component="${monitoredEdge.id}"]`);
+    expect(monitoredEdgeFaultGroup?.querySelector('summary')?.textContent).toContain('Source controller -> Output scope');
+    expect(monitoredEdgeFaultGroup?.querySelector('summary')?.textContent).not.toContain(monitoredEdge.id);
 
     const unrelated = window.createNode('simulation_block', 700, 360);
     unrelated.props.name = 'Unrelated injected module';
@@ -1651,6 +2097,9 @@ describe('property panel interaction', () => {
       ['source_noise']
     ]);
     expect(points.map((point) => point.vectorIndex)).toEqual([2, 0]);
+    expect(points.every((point) => !Object.hasOwn(point, 'vectorElementName'))).toBe(true);
+    expect(points.map((point) => point.sourceVectorElementName)).toEqual(['偏航指令', '横滚指令']);
+    expect(points.map((point) => point.targetVectorElementName)).toEqual(['偏航指令', '横滚指令']);
     expect(new Set(points.map((point) => point.pointId)).size).toBe(2);
 
     const diagnosticPositions = window.buildDiagnosticTestPointModel().positions
@@ -1797,8 +2246,17 @@ describe('property panel interaction', () => {
     const outputsTab = document.querySelector('[data-props-tab="outputs"]');
     expect(parametersTab?.hidden).toBe(true);
     expect(outputsTab?.hidden).toBe(true);
+    expect(document.getElementById('prop-edge-label')).not.toBeNull();
     expect(document.querySelector('[data-edge-channel-list]')).toBeNull();
     expect(document.getElementById('prop-edge-signal-id')).toBeNull();
+    const channelsBeforeRename = structuredClone(edge.signalChannels);
+    document.getElementById('prop-edge-label').value = '姿态速率 CAN 链路';
+    window.savePropertyPanelTarget();
+    expect(edge).toMatchObject({
+      label: '姿态速率 CAN 链路',
+      labelCustomized: true
+    });
+    expect(edge.signalChannels).toEqual(channelsBeforeRename);
 
     edge.faultBindings = [
       {
@@ -2223,7 +2681,7 @@ describe('property panel interaction', () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
-    const source = window.createNode('signal_source', 180, 240);
+    const source = window.createNode('signal_source_rf', 180, 240);
     const displayConsole = window.createNode('display_console_1', 420, 240);
     const secondDisplayConsole = window.createNode('display_console_2', 720, 240);
     await flushRuntime();
@@ -2238,12 +2696,22 @@ describe('property panel interaction', () => {
     expect(document.querySelector('[data-props-tab="faults"]')?.hidden).toBe(true);
     expect(document.querySelector('[data-props-tab="outputs"]')?.hidden).toBe(true);
     expect(window.getNodePorts(displayConsole).inputs).toEqual([
-      expect.objectContaining({ label: '中心频率（MHz） / float', meta: expect.objectContaining({ type: 'float' }) }),
-      expect.objectContaining({ label: '重复周期（μs） / float', meta: expect.objectContaining({ type: 'float' }) }),
-      expect.objectContaining({ label: '脉宽（μs） / float', meta: expect.objectContaining({ type: 'float' }) }),
-      expect.objectContaining({ label: '幅度 / float', meta: expect.objectContaining({ type: 'float' }) })
+      expect.objectContaining({
+        label: '七路参数输入 / 向量 7',
+        dataType: 'vector',
+        vectorLength: 7,
+        vectorElementNames: [
+          '中心频率（MHz）', '重复周期（μs）', '脉宽（μs）', '幅度',
+          '频段编码', '波形编码', '调制方式编码'
+        ]
+      })
     ]);
     expect(document.querySelector('[data-display-console-configuration]')).not.toBeNull();
+    expect(Array.from(document.querySelectorAll('[data-display-console-vector-map] [data-vector-parameter-name]'),
+      (element) => element.textContent)).toEqual([
+      '中心频率（MHz）', '重复周期（μs）', '脉宽（μs）', '幅度',
+      '频段编码', '波形编码', '调制方式编码'
+    ]);
     document.querySelector(`[data-open-display-console="${displayConsole.id}"]`)?.click();
     await flushRuntime();
 
@@ -2259,40 +2727,28 @@ describe('property panel interaction', () => {
     expect(panel?.textContent).toContain('脉宽（μs）');
     expect(panel?.textContent).toContain('幅度');
 
-    window.__GZ_STATE__.modelEdges.push({
-      id: 'edge-source-console',
-      sourceNodeId: source.id,
-      sourcePortIndex: 0,
-      targetNodeId: displayConsole.id,
-      targetPortIndex: 0
-    });
-    window.__GZ_STATE__.modelEdges.push(
-      {
-        id: 'edge-period-console',
-        sourceNodeId: source.id,
-        sourcePortIndex: 0,
-        targetNodeId: displayConsole.id,
-        targetPortIndex: 1
-      },
-      {
-        id: 'edge-width-console',
-        sourceNodeId: source.id,
-        sourcePortIndex: 0,
-        targetNodeId: displayConsole.id,
-        targetPortIndex: 2
-      }
-    );
+    const liveSource = window.__GZ_STATE__.modelNodes.find((node) => node.id === source.id);
+    liveSource.props.outputFormat = '向量';
+    liveSource.props.rfVectorLength = 4;
+    expect(window.getNodePorts(liveSource).outputs[0].vectorLength).toBe(4);
+    expect(window.getNodePorts(displayConsole).inputs[0].vectorLength).toBe(7);
+    window.handlePortClick({ stopPropagation() {} }, source.id, 'output', 0);
+    window.handlePortClick({ stopPropagation() {} }, displayConsole.id, 'input', 0);
+    expect(window.__GZ_STATE__.modelEdges).toHaveLength(0);
+    liveSource.props.rfVectorLength = 7;
+    window.handlePortClick({ stopPropagation() {} }, source.id, 'output', 0);
+    window.handlePortClick({ stopPropagation() {} }, displayConsole.id, 'input', 0);
+    const consoleEdge = window.__GZ_STATE__.modelEdges.find((edge) => edge.targetNodeId === displayConsole.id);
+    expect(consoleEdge).toMatchObject({ sourceNodeId: source.id, targetPortIndex: 0 });
     window.__GZ_SIM__.actual.edgeStates = {
-      'edge-source-console': { lastOutput: 12.5e6 },
-      'edge-period-console': { lastOutput: 2e-6 },
-      'edge-width-console': { lastOutput: 0.5e-6 }
+      [consoleEdge.id]: { lastOutput: [12.5e6, 2e-6, 0.5e-6, 4, 5, 6, 7] }
     };
     window.refreshDisplayConsolePanel();
     const initialCells = panel?.querySelectorAll('[data-display-console-table] tbody td');
     expect(initialCells?.[1]?.textContent).toBe('12.5');
     expect(initialCells?.[2]?.textContent).toBe('2');
     expect(initialCells?.[3]?.textContent).toBe('0.5');
-    window.__GZ_SIM__.actual.edgeStates['edge-source-console'].lastOutput = 25e6;
+    window.__GZ_SIM__.actual.edgeStates[consoleEdge.id].lastOutput[0] = 25e6;
     window.refreshDisplayConsolePanel();
     expect(panel?.querySelector('[data-display-console-table] tbody')?.textContent).toContain('25');
 
@@ -2316,27 +2772,77 @@ describe('property panel interaction', () => {
     await flushRuntime();
     expect(document.querySelector('[data-display-console-panel]')).toBeNull();
 
+    const vectorSource = window.createNode('rf_four_channel_source', 920, 240);
+    const outputSource = window.createNode('rf_four_output_source', 1120, 240);
+    const limitAmplifier = window.createNode('rf_limit_amplify_downconvert_split8', 1320, 240);
+    window.openDisplayConsolePanel(displayConsole.id);
+    await flushRuntime();
+    const sharedControlPanel = document.querySelector(`[data-display-console-panel="${displayConsole.id}"]`);
+    const sharedCenterFrequency = sharedControlPanel?.querySelector('[data-display-console-shared-parameter="rf_center_frequency"]');
+    expect(sharedControlPanel?.querySelector('[data-display-console-shared-controls]')).not.toBeNull();
+    expect(sharedCenterFrequency).not.toBeNull();
+    const sharedTargetSummary = sharedControlPanel?.querySelector('[data-display-console-shared-targets="rf_center_frequency"]');
+    expect(sharedTargetSummary?.textContent).toContain(vectorSource.props.name);
+    expect(sharedTargetSummary?.textContent).toContain(outputSource.props.name);
+    expect(sharedTargetSummary?.textContent).toContain(limitAmplifier.props.name);
+    expect(sharedControlPanel?.querySelector(`[data-display-console-control-component="${vectorSource.id}"] [data-display-console-parameter="center_frequency_hz"]`)).toBeNull();
+    expect(sharedControlPanel?.querySelector(`[data-display-console-control-component="${outputSource.id}"] [data-display-console-parameter="center_frequency_hz"]`)).toBeNull();
+    sharedCenterFrequency.value = '915';
+    const sharedCenterFrequencyUnit = sharedControlPanel?.querySelector('[data-display-console-shared-parameter-unit="rf_center_frequency"]');
+    expect(sharedCenterFrequencyUnit).not.toBeNull();
+    sharedCenterFrequencyUnit.value = 'MHz';
+    sharedControlPanel?.querySelector('[data-display-console-apply]')?.click();
+    await flushRuntime();
+    expect(vectorSource.props.parameterValues.center_frequency_hz).toBe(915000000);
+    expect(outputSource.props.parameterValues.center_frequency_hz).toBe(915000000);
+    expect(limitAmplifier.props.parameterValues.lo_frequency_hz).toBe(915000000);
+    expect(displayConsole.props.sharedParameterValues.rf_center_frequency).toBe(915000000);
+    expect(displayConsole.props.sharedParameterUnits.rf_center_frequency).toBe('MHz');
+    window.closeDisplayConsolePanel();
+
     const downconverter = window.createNode('rf_downconverter', 980, 420);
+    const secondDownconverter = window.createNode('rf_downconverter', 1180, 420);
     window.openDisplayConsolePanel(secondDisplayConsole.id);
     await flushRuntime();
     const controlPanel = document.querySelector(`[data-display-console-panel="${secondDisplayConsole.id}"]`);
     expect(controlPanel?.querySelector('[data-display-console-controls]')).not.toBeNull();
-    expect(controlPanel?.querySelector('[data-display-console-control-target]')?.value).toBe(downconverter.id);
-    expect(controlPanel?.querySelector('[data-display-console-mode-switch="input_mode"]')).not.toBeNull();
-    expect(controlPanel?.querySelector('[data-display-console-parameter="input_mode"]')?.getAttribute('type')).toBe('hidden');
-    expect(controlPanel?.querySelector('[data-display-console-parameter="lo_frequency_hz"]')).not.toBeNull();
+    expect(controlPanel?.querySelector('[data-display-console-control-target]')).toBeNull();
+    expect(controlPanel?.querySelectorAll('[data-display-console-control-component]')).toHaveLength(2);
+    const downconverterControls = controlPanel?.querySelector(`[data-display-console-control-component="${downconverter.id}"]`);
+    const secondDownconverterControls = controlPanel?.querySelector(`[data-display-console-control-component="${secondDownconverter.id}"]`);
+    expect(controlPanel?.querySelector('[data-display-console-shared-mode-switch="rf_downconverter_input_mode"]')).not.toBeNull();
+    expect(controlPanel?.querySelector('[data-display-console-shared-parameter="rf_downconverter_input_mode"]')?.getAttribute('type')).toBe('hidden');
+    expect(downconverterControls?.querySelector('[data-display-console-parameter="input_mode"]')).toBeNull();
+    expect(secondDownconverterControls?.querySelector('[data-display-console-parameter="input_mode"]')).toBeNull();
+    expect(downconverterControls?.querySelector('[data-display-console-parameter="lo_frequency_hz"]')).not.toBeNull();
     expect(controlPanel?.querySelector('[data-display-console-parameter="sample_1"]')).toBeNull();
-    controlPanel.querySelector('[data-display-console-mode-select="2"]')?.click();
-    expect(controlPanel.querySelector('[data-display-console-parameter="input_mode"]')?.value).toBe('2');
-    expect(controlPanel.querySelector('[data-display-console-mode-select="2"]')?.classList.contains('is-active')).toBe(true);
-    controlPanel.querySelector('[data-display-console-parameter="lo_frequency_hz"]').value = '980';
-    controlPanel.querySelector('[data-display-console-parameter-unit="lo_frequency_hz"]').value = 'MHz';
+    controlPanel?.querySelector('[data-display-console-shared-mode-select="2"]')?.click();
+    expect(controlPanel?.querySelector('[data-display-console-shared-parameter="rf_downconverter_input_mode"]')?.value).toBe('2');
+    expect(controlPanel?.querySelector('[data-display-console-shared-mode-select="2"]')?.classList.contains('is-active')).toBe(true);
+    downconverterControls.querySelector('[data-display-console-parameter="lo_frequency_hz"]').value = '980';
+    downconverterControls.querySelector('[data-display-console-parameter-unit="lo_frequency_hz"]').value = 'MHz';
+    secondDownconverterControls.querySelector('[data-display-console-parameter="lo_frequency_hz"]').value = '1.2';
+    secondDownconverterControls.querySelector('[data-display-console-parameter-unit="lo_frequency_hz"]').value = 'GHz';
     controlPanel.querySelector('[data-display-console-apply]')?.click();
     await flushRuntime();
     expect(downconverter.props.parameterValues.lo_frequency_hz).toBe(980000000);
     expect(downconverter.props.parameterValues.input_mode).toBe(2);
+    expect(secondDownconverter.props.parameterValues.input_mode).toBe(2);
     expect(downconverter.props.parameterUnits.lo_frequency_hz).toBe('MHz');
+    expect(secondDownconverter.props.parameterValues.lo_frequency_hz).toBe(1200000000);
+    expect(secondDownconverter.props.parameterUnits.lo_frequency_hz).toBe('GHz');
     expect(window.__GZ_SIM__.inited).toBe(false);
+    expect(secondDisplayConsole.props.sharedParameterValues.rf_downconverter_input_mode).toBe(2);
+
+    // A physical parameter fault changes the runtime value, not the display
+    // console's operator setpoint. Simulate that override here and confirm
+    // the console keeps showing the last setting made by its operator.
+    downconverter.props.parameterValues.input_mode = 1;
+    window.renderDisplayConsolePanel();
+    await flushRuntime();
+    expect(document.querySelector('[data-display-console-shared-parameter="rf_downconverter_input_mode"]')?.value).toBe('2');
+    expect(document.querySelector('[data-display-console-shared-mode-select="2"]')?.classList.contains('is-active')).toBe(true);
+    downconverter.props.parameterValues.input_mode = 2;
 
     window.closeDisplayConsolePanel();
     window.selectNode(downconverter.id);
@@ -2356,52 +2862,206 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('saves the complete four-input display-console time series', async () => {
+  it('shows each display console preset’s vector element names in parameter configuration', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
-    const sources = Array.from({ length: 4 }, (_, index) => window.createNode('signal_source', 180, 160 + index * 90));
+    const displayConsole = window.createNode('display_console_3', 420, 240);
+    window.selectNode(displayConsole.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+
+    const rows = Array.from(document.querySelectorAll('[data-display-console-vector-map] [data-vector-element-index]'));
+    expect(rows.map((row) => [row.querySelector('.pk')?.textContent, row.querySelector('[data-vector-parameter-name]')?.textContent])).toEqual([
+      ['元素 1', '下变频输出 1（I）'],
+      ['元素 2', '下变频输出 2（I）'],
+      ['元素 3', '上变频射频输出 1'],
+      ['元素 4', '上变频射频输出 2'],
+      ['元素 5', '频段编码'],
+      ['元素 6', '波形编码'],
+      ['元素 7', '调制方式编码']
+    ]);
+
+    wrapper.unmount();
+  });
+
+  it('maps display console 2’s two vector ports to separate rows and measurement points', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const sourceA = window.createNode('signal_source_rf', 140, 220);
+    const sourceB = window.createNode('signal_source_rf', 140, 420);
+    const displayConsole = window.createNode('display_console_2', 520, 280);
+    for (const source of [sourceA, sourceB]) {
+      source.props.outputFormat = '向量';
+      source.props.rfVectorLength = 7;
+    }
+    window.__GZ_STATE__.modelEdges.push(
+      { id: 'edge-console-a', sourceNodeId: sourceA.id, sourcePortIndex: 0, targetNodeId: displayConsole.id, targetPortIndex: 0 },
+      { id: 'edge-console-b', sourceNodeId: sourceB.id, sourcePortIndex: 0, targetNodeId: displayConsole.id, targetPortIndex: 1 }
+    );
+    window.__GZ_SIM__.actual.edgeStates = {
+      'edge-console-a': { lastOutput: [12e6, 2, 3, 4, 5, 6, 7] },
+      'edge-console-b': { lastOutput: [25e6, 12, 13, 14, 15, 16, 17] }
+    };
+
+    expect(window.getNodePorts(displayConsole).inputs).toEqual([
+      expect.objectContaining({ portId: 'console-input', dataType: 'vector', vectorLength: 7 }),
+      expect.objectContaining({ portId: 'console-input-2', dataType: 'vector', vectorLength: 7 })
+    ]);
+    window.renderModelNodes();
+    expect(document.querySelectorAll(`#b-${displayConsole.id} .node-port--input`)).toHaveLength(2);
+    window.selectNode(displayConsole.id);
+    window.setPropertyPanelTab('parameters');
+    await flushRuntime();
+    expect(Array.from(document.querySelectorAll('[data-display-console-vector-map]'),
+      (map) => map.querySelector('.display-console-vector-map__title')?.textContent)).toEqual([
+      '通道 A（向量长度 7）· 元素与参数对应关系',
+      '通道 B（向量长度 7）· 元素与参数对应关系'
+    ]);
+    window.openDisplayConsolePanel(displayConsole.id);
+    await flushRuntime();
+    const rows = Array.from(document.querySelectorAll('[data-display-console-table] tbody tr'));
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.querySelector('.display-console-table__column--center-frequency')?.textContent)).toEqual(['12', '25']);
+    expect(rows.map((row) => row.querySelector('.display-console-table__column--serial-number')?.textContent)).toEqual(['1', '2']);
+
+    const points = window.buildDiagnosticTestPointModel({ includeAllCanvases: true }).positions
+      .filter((point) => point.displayConsoleInput && point.nodeId === displayConsole.id);
+    expect(points.filter((point) => point.targetPortIndex === 0).map((point) => point.vectorIndex)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(points.filter((point) => point.targetPortIndex === 1).map((point) => point.vectorIndex)).toEqual([0, 1, 2, 4, 5, 6]);
+
+    window.__GZ_SIM__.componentOutputs = {
+      time: [0],
+      steps: [{ time: 0, actual: {
+        [sourceA.id]: { output: [12e6, 2, 3, 4, 5, 6, 7] },
+        [sourceB.id]: { output: [25e6, 12, 13, 14, 15, 16, 17] }
+      }, reference: {} }]
+    };
+    const result = await window.buildSimulationResultSnapshot();
+    const savedConsole = result.publicData.renderData.devices.find((device) => device.id === displayConsole.id);
+    expect(savedConsole.measurementPorts.inputs.map((port) => port.portId)).toEqual(['console-input', 'console-input-2']);
+    expect(savedConsole.channels['console-input.centerFrequency'].series[0].value).toBe(12e6);
+    expect(savedConsole.channels['console-input-2.centerFrequency'].series[0].value).toBe(25e6);
+
+    wrapper.unmount();
+  });
+
+  it('renders a shared parameter without a duplicate controls entry', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const displayConsole = window.createNode('display_console', 520, 260);
+    displayConsole.props.displayConfig = {
+      controls: [],
+      sharedParameters: [{
+        key: 'limit_lo_frequency',
+        label: '本振频率',
+        bindings: [{
+          componentType: 'rf_limit_amplify_downconvert_split8',
+          parameterKey: 'lo_frequency_hz'
+        }]
+      }]
+    };
+    const limitAmplifier = window.createNode('rf_limit_amplify_downconvert_split8', 260, 260);
+    window.openDisplayConsolePanel(displayConsole.id);
+    await flushRuntime();
+
+    expect(document.querySelector('[data-display-console-shared-parameter="limit_lo_frequency"]')).not.toBeNull();
+    expect(document.querySelector('[data-display-console-shared-targets="limit_lo_frequency"]')?.textContent)
+      .toContain(limitAmplifier.props.name);
+
+    wrapper.unmount();
+  });
+
+  it('shows controls for a component inside a subsystem canvas', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const displayConsole = window.createNode('display_console_2', 520, 260);
+    const subsystem = window.createNode('subsystem_block', 280, 260);
+    window.openSubsystemCanvas(subsystem.id);
+    const nestedDownconverter = window.createNode('rf_downconverter', 320, 260);
+    await flushRuntime();
+
+    window.navigateToCanvas('canvas-root');
+    window.openDisplayConsolePanel(displayConsole.id);
+    await flushRuntime();
+
+    expect(document.querySelector(
+      `[data-display-console-control-component="${nestedDownconverter.id}"]`
+    )).not.toBeNull();
+    expect(document.querySelector(
+      '[data-display-console-shared-targets="rf_downconverter_input_mode"]'
+    )?.textContent).toContain(nestedDownconverter.props.name);
+
+    wrapper.unmount();
+  });
+
+  it('saves the complete seven-input display-console time series', async () => {
+    const wrapper = await mountWorkbench();
+
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source_rf', 180, 260);
+    source.props.outputFormat = '向量';
+    source.props.rfVectorLength = 7;
     const displayConsole = window.createNode('display_console_1', 520, 260);
-    window.__GZ_STATE__.modelEdges.push(...sources.map((source, index) => ({
-      id: `edge-console-${index + 1}`,
+    window.__GZ_STATE__.modelEdges.push({
+      id: 'edge-console-vector',
       sourceNodeId: source.id,
       sourcePortIndex: 0,
       targetNodeId: displayConsole.id,
-      targetPortIndex: index
-    })));
+      targetPortIndex: 0
+    });
     window.__GZ_SIM__.componentOutputs = {
       time: [0, 0.1, 0.2],
       steps: [0, 0.1, 0.2].map((time, stepIndex) => ({
         time,
-        actual: Object.fromEntries(sources.map((source, inputIndex) => [
-          source.id,
-          { output: (inputIndex + 1) * 100 + stepIndex }
-        ])),
+        actual: { [source.id]: { output: Array.from({ length: 7 }, (_, inputIndex) =>
+          (inputIndex + 1) * 100 + stepIndex) } },
         reference: {}
       }))
     };
+
+    const consolePoints = window.buildDiagnosticTestPointModel({ includeAllCanvases: true }).positions
+      .filter((point) => point.displayConsoleInput && point.nodeId === displayConsole.id);
+    expect(consolePoints.map((point) => point.vectorIndex)).toEqual([1, 2, 3, 4, 5, 6]);
 
     const result = await window.buildSimulationResultSnapshot();
     const savedConsole = result.publicData.renderData.devices.find((device) => device.id === displayConsole.id);
 
     expect(savedConsole).toMatchObject({
       type: 'display_console',
+      measurementPorts: {
+        inputs: [expect.objectContaining({ portId: 'console-input' })]
+      },
       channels: {
         centerFrequency: { inputIndex: 0, connected: true, displayScale: 1e-6 },
         repetitionPeriod: { inputIndex: 1, connected: true, displayScale: 1e6 },
         pulseWidth: { inputIndex: 2, connected: true, displayScale: 1e6 },
-        amplitude: { inputIndex: 3, connected: true, displayScale: 1 }
+        amplitude: { inputIndex: 3, connected: true, displayScale: 1 },
+        band: { inputIndex: 4, connected: true, displayScale: 1 },
+        waveform: { inputIndex: 5, connected: true, displayScale: 1 },
+        modulation: { inputIndex: 6, connected: true, displayScale: 1 }
       }
     });
-    expect(savedConsole.channels.centerFrequency.series).toEqual([
+    expect(result.publicData.renderData.connections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'edge-console-vector', targetPort: 'console-input' })
+    ]));
+    expect(savedConsole.channels.centerFrequency.series.map(({ t, value }) => ({ t, value }))).toEqual([
       { t: 0, value: 100 },
       { t: 0.1, value: 101 },
       { t: 0.2, value: 102 }
     ]);
-    expect(savedConsole.channels.amplitude.series).toEqual([
+    expect(savedConsole.channels.amplitude.series.map(({ t, value }) => ({ t, value }))).toEqual([
       { t: 0, value: 400 },
       { t: 0.1, value: 401 },
       { t: 0.2, value: 402 }
+    ]);
+    expect(savedConsole.channels.modulation.series.map(({ t, value }) => ({ t, value }))).toEqual([
+      { t: 0, value: 700 },
+      { t: 0.1, value: 701 },
+      { t: 0.2, value: 702 }
     ]);
 
     wrapper.unmount();
@@ -2524,20 +3184,23 @@ describe('property panel interaction', () => {
     dispatchPointer(document, 'pointerup', { clientX: 90, clientY: 70 });
     expect(spectrumWindow?.style.left).not.toBe(initialLeft);
 
-    expect(spectrumWindow?.querySelector('[data-spectrum-config="fftSize"]')).toBeNull();
+    const dragHandle = spectrumWindow?.querySelector('[data-spectrum-drag-handle]');
+    expect(dragHandle).not.toBeNull();
+    const leftAfterHeaderDrag = spectrumWindow?.style.left;
+    dispatchPointer(dragHandle, 'pointerdown', { clientX: 90, clientY: 70 });
+    dispatchPointer(document, 'pointermove', { clientX: 150, clientY: 110 });
+    dispatchPointer(document, 'pointerup', { clientX: 150, clientY: 110 });
+    expect(spectrumWindow?.style.left).not.toBe(leftAfterHeaderDrag);
+
+    expect(spectrumWindow?.querySelector('[data-spectrum-config="fftSize"]')).not.toBeNull();
     expect(spectrumWindow?.textContent).toContain('显示与量程');
     expect(spectrumWindow?.querySelector('[data-spectrum-config="attenuation"]')).toBeNull();
     expect(spectrumWindow?.querySelector('[data-spectrum-config="preamp"]')).toBeNull();
     expect(spectrumWindow?.querySelector('[data-spectrum-config="markerFrequency"]')).toBeNull();
 
-    const editableSampleRate = spectrumWindow?.querySelector('[data-spectrum-config="sampleRateValue"]');
-    window.__GZ_SIM__.running = true;
-    editableSampleRate?.focus();
-    editableSampleRate.value = '63';
-    window.renderSpectrumInstrument();
-    expect(document.activeElement).toBe(editableSampleRate);
-    expect(document.querySelector('[data-spectrum-config="sampleRateValue"]')?.value).toBe('63');
-    window.__GZ_SIM__.running = false;
+    expect(spectrumWindow?.querySelector('[data-spectrum-config="sampleRateValue"]')).toBeNull();
+    expect(spectrumWindow?.querySelector('[data-spectrum-config="sampleRateUnit"]')).toBeNull();
+    expect(spectrumWindow?.querySelector('[data-spectrum-auto-sample-rate]')?.textContent).toMatch(/^64(?:\.0+)?Hz$/);
 
     const windowFunction = document.querySelector('[data-spectrum-config="windowFunction"]');
     expect(windowFunction?.tagName).toBe('SELECT');
@@ -2547,27 +3210,24 @@ describe('property panel interaction', () => {
     await flushRuntime();
     expect(document.querySelector('[data-spectrum-window]')?.dataset.spectrumWindowFunction).toBe('hamming');
 
-    const sampleRateValue = document.querySelector('[data-spectrum-config="sampleRateValue"]');
-    const sampleRateUnit = document.querySelector('[data-spectrum-config="sampleRateUnit"]');
-    expect(sampleRateValue?.value).toBe('64');
-    expect(sampleRateUnit?.value).toBe('Hz');
-    expect(Array.from(sampleRateUnit?.options ?? []).map((option) => option.value)).toContain('GHz');
-    expect(spectrumWindow?.textContent).toContain('RBW (MHz)');
-    expect(spectrumWindow?.textContent).toContain('VBW (MHz)');
+    expect(document.querySelector('[data-spectrum-auto-sample-rate]')?.textContent).toMatch(/^64(?:\.0+)?Hz$/);
 
     const frequencyRangeStart = document.querySelector('[data-spectrum-config="frequencyRangeStart"]');
     const frequencyRangeEnd = document.querySelector('[data-spectrum-config="frequencyRangeEnd"]');
-    const frequencyRangeUnit = document.querySelector('[data-spectrum-config="frequencyRangeUnit"]');
+    const frequencyRangeStartUnit = document.querySelector('[data-spectrum-config="frequencyRangeStartUnit"]');
+    const frequencyRangeEndUnit = document.querySelector('[data-spectrum-config="frequencyRangeEndUnit"]');
     const autoFrequencyRange = document.querySelector('[data-spectrum-config="autoFrequencyRange"]');
     expect(autoFrequencyRange?.value).toBe('off');
     expect(frequencyRangeStart?.disabled).toBe(false);
-    expect(Array.from(frequencyRangeUnit?.options ?? []).map((option) => option.value)).toContain('GHz');
+    expect(Array.from(frequencyRangeStartUnit?.options ?? []).map((option) => option.value)).toContain('GHz');
+    expect(Array.from(frequencyRangeEndUnit?.options ?? []).map((option) => option.value)).toContain('GHz');
     autoFrequencyRange.value = 'off';
     autoFrequencyRange.dispatchEvent(new Event('change', { bubbles: true }));
     await flushRuntime();
     const editableFrequencyRangeStart = document.querySelector('[data-spectrum-config="frequencyRangeStart"]');
     const editableFrequencyRangeEnd = document.querySelector('[data-spectrum-config="frequencyRangeEnd"]');
-    const editableFrequencyRangeUnit = document.querySelector('[data-spectrum-config="frequencyRangeUnit"]');
+    const editableFrequencyRangeStartUnit = document.querySelector('[data-spectrum-config="frequencyRangeStartUnit"]');
+    const editableFrequencyRangeEndUnit = document.querySelector('[data-spectrum-config="frequencyRangeEndUnit"]');
     expect(editableFrequencyRangeStart?.disabled).toBe(false);
     expect(editableFrequencyRangeStart?.value).toBe('0');
     expect(editableFrequencyRangeEnd?.value).toBe('32');
@@ -2580,13 +3240,15 @@ describe('property panel interaction', () => {
     expect(document.querySelector('[data-spectrum-config="frequencySpan"]')?.value).toBe('32');
     const centerFrequency = document.querySelector('[data-spectrum-config="centerFrequency"]');
     const frequencySpan = document.querySelector('[data-spectrum-config="frequencySpan"]');
-    const centerSpanUnit = document.querySelector('[data-spectrum-config="centerSpanUnit"]');
+    const centerFrequencyUnit = document.querySelector('[data-spectrum-config="centerFrequencyUnit"]');
+    const frequencySpanUnit = document.querySelector('[data-spectrum-config="frequencySpanUnit"]');
     centerFrequency.value = '12';
-    frequencySpan.value = '8';
-    centerSpanUnit.value = 'Hz';
-    centerSpanUnit.dispatchEvent(new Event('change', { bubbles: true }));
+    frequencySpan.value = '0.008';
+    centerFrequencyUnit.value = 'Hz';
+    frequencySpanUnit.value = 'kHz';
+    frequencySpanUnit.dispatchEvent(new Event('change', { bubbles: true }));
     await flushRuntime();
-    expect(spectrum.props.frequencyRange).toBe('8-16Hz');
+    expect(spectrum.props.frequencyRange).toBe('8Hz-16Hz');
     expect(document.querySelector('[data-spectrum-axis="x"]')?.textContent).toMatch(/8(?:\.0+)?Hz/);
     const startStopMode = document.querySelector('[data-spectrum-config="tuningMode"]');
     startStopMode.value = 'startStop';
@@ -2594,13 +3256,15 @@ describe('property panel interaction', () => {
     await flushRuntime();
     const restoredFrequencyRangeStart = document.querySelector('[data-spectrum-config="frequencyRangeStart"]');
     const restoredFrequencyRangeEnd = document.querySelector('[data-spectrum-config="frequencyRangeEnd"]');
-    const restoredFrequencyRangeUnit = document.querySelector('[data-spectrum-config="frequencyRangeUnit"]');
+    const restoredFrequencyRangeStartUnit = document.querySelector('[data-spectrum-config="frequencyRangeStartUnit"]');
+    const restoredFrequencyRangeEndUnit = document.querySelector('[data-spectrum-config="frequencyRangeEndUnit"]');
     restoredFrequencyRangeStart.value = '8';
     restoredFrequencyRangeEnd.value = '16';
-    restoredFrequencyRangeUnit.value = 'Hz';
-    restoredFrequencyRangeUnit.dispatchEvent(new Event('change', { bubbles: true }));
+    restoredFrequencyRangeStartUnit.value = 'Hz';
+    restoredFrequencyRangeEndUnit.value = 'Hz';
+    restoredFrequencyRangeEndUnit.dispatchEvent(new Event('change', { bubbles: true }));
     await flushRuntime();
-    expect(spectrum.props.frequencyRange).toBe('8-16Hz');
+    expect(spectrum.props.frequencyRange).toBe('8Hz-16Hz');
     const visibleFrequencies = Array.from(document.querySelectorAll('[data-spectrum-bin]'))
       .map((bin) => Number(bin.getAttribute('data-spectrum-frequency')));
     expect(visibleFrequencies.every((frequency) => frequency >= 8 && frequency <= 16)).toBe(true);
@@ -2694,6 +3358,330 @@ describe('property panel interaction', () => {
 
     expect(document.querySelector('[data-spectrum-peak-frequency]')?.textContent).toBe('4.0000GHz');
     expect(document.querySelector('[data-spectrum-marker]')?.textContent).toMatch(/^4\.0000GHz\s*\//);
+    wrapper.unmount();
+  });
+
+  it('formats spectrum peak and marker frequency in GHz for center/span tuning', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const spectrum = window.createNode('instrument_spectrum', 420, 240);
+    spectrum.props.sampleRate = '64GHz';
+    spectrum.props.fftSize = '64';
+    spectrum.props.frequencyRange = '0Hz-32000000000Hz';
+    spectrum.props.tuningMode = 'centerSpan';
+    spectrum.props.centerFrequencyUnit = 'GHz';
+    spectrum.props.frequencySpanUnit = 'GHz';
+    spectrum.props.autoFrequencyRange = 'off';
+    spectrum.props.windowFunction = 'Rectangular';
+    spectrum.props.markerFrequency = String(4e9);
+    window.__GZ_SIM__.actual.instrumentSamples[spectrum.id] = Array.from({ length: 64 }, (_, index) => ({
+      t: index / 64000000000,
+      actual: Math.sin(2 * Math.PI * 4 * index / 64)
+    }));
+
+    window.openSpectrumInstrument(spectrum.id);
+    await flushRuntime();
+
+    expect(document.querySelector('[data-spectrum-peak-frequency]')?.textContent).toBe('4.0000GHz');
+    expect(document.querySelector('[data-spectrum-marker]')?.textContent).toMatch(/^4\.0000GHz\s*\//);
+    wrapper.unmount();
+  });
+
+  it('lets the ordinary spectrum analyzer analyze the full I/Q envelope spectrum around its RF reference frequency', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const spectrum = window.createNode('instrument_spectrum', 420, 240);
+    spectrum.props.sampleRate = '64MHz';
+    spectrum.props.fftSize = '64';
+    spectrum.props.autoFrequencyRange = 'on';
+    spectrum.props.windowFunction = 'Rectangular';
+    window.__GZ_SIM__.actual.instrumentSamples[spectrum.id] = Array.from({ length: 64 }, (_, index) => {
+      const phase = 2 * Math.PI * 4 * index / 64;
+      return {
+        t: index / 64000000,
+        actual: {
+          i: Math.cos(phase),
+          q: Math.sin(phase),
+          referenceFrequencyHz: 20e9,
+          impedanceOhm: 50,
+          unit: 'V'
+        }
+      };
+    });
+
+    window.openSpectrumInstrument(spectrum.id);
+    await flushRuntime();
+
+    expect(document.querySelector('[data-spectrum-window]')).not.toBeNull();
+    expect(document.querySelector('[data-spectrum-config="vectorChannel"]')).toBeNull();
+    expect(document.querySelector('[data-spectrum-peak-frequency]')?.textContent).toBe('20.0040GHz');
+    const frequencies = Array.from(document.querySelectorAll('[data-spectrum-bin]'))
+      .map((bin) => Number(bin.getAttribute('data-spectrum-frequency')));
+    expect(frequencies).toContain(20.004e9);
+    wrapper.unmount();
+  });
+
+  it('draws up to 1024 complex-envelope FFT bins per trace', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const spectrum = window.createNode('instrument_spectrum', 420, 240);
+    // A persisted manual rate must not decimate complex-envelope I/Q data.
+    spectrum.props.sampleRate = '1Hz';
+    spectrum.props.fftSize = '1024';
+    spectrum.props.autoFrequencyRange = 'on';
+    spectrum.props.windowFunction = 'Rectangular';
+    window.__GZ_SIM__.actual.instrumentSamples[spectrum.id] = Array.from({ length: 1024 }, (_, index) => ({
+      t: index / 1e6,
+      actual: { i: 1, q: 0, referenceFrequencyHz: 20e9, impedanceOhm: 50, unit: 'V' }
+    }));
+
+    window.openSpectrumInstrument(spectrum.id);
+    await flushRuntime();
+
+    const points = document.querySelector('.spectrum-window__trace-line')?.getAttribute('points')?.trim().split(/\s+/) ?? [];
+    expect(points).toHaveLength(1024);
+    wrapper.unmount();
+  });
+
+  it('caps a complex-envelope spectrum trace at 1024 plotted points', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const spectrum = window.createNode('instrument_spectrum', 420, 240);
+    spectrum.props.sampleRate = '1MHz';
+    spectrum.props.fftSize = '2048';
+    spectrum.props.autoFrequencyRange = 'on';
+    spectrum.props.windowFunction = 'Rectangular';
+    window.__GZ_SIM__.actual.instrumentSamples[spectrum.id] = Array.from({ length: 2048 }, (_, index) => ({
+      t: index / 1e6,
+      actual: { i: 1, q: 0, referenceFrequencyHz: 20e9, impedanceOhm: 50, unit: 'V' }
+    }));
+
+    window.openSpectrumInstrument(spectrum.id);
+    await flushRuntime();
+
+    const points = document.querySelector('.spectrum-window__trace-line')?.getAttribute('points')?.trim().split(/\s+/) ?? [];
+    expect(points).toHaveLength(1024);
+    wrapper.unmount();
+  });
+
+  it('allows an absolute RF start/stop range to be edited for a complex-envelope spectrum analyzer', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const spectrum = window.createNode('instrument_spectrum', 420, 240);
+    spectrum.props.sampleRate = '64MHz';
+    spectrum.props.fftSize = '64';
+    spectrum.props.autoFrequencyRange = 'on';
+    spectrum.props.windowFunction = 'Rectangular';
+    window.__GZ_SIM__.actual.instrumentSamples[spectrum.id] = Array.from({ length: 64 }, (_, index) => ({
+      t: index / 64000000,
+      actual: { i: 1, q: 0, referenceFrequencyHz: 20e9, impedanceOhm: 50, unit: 'V' }
+    }));
+    window.openSpectrumInstrument(spectrum.id);
+    await flushRuntime();
+
+    const automatic = document.querySelector('[data-spectrum-config="autoFrequencyRange"]');
+    automatic.value = 'off';
+    automatic.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    const start = document.querySelector('[data-spectrum-config="frequencyRangeStart"]');
+    const end = document.querySelector('[data-spectrum-config="frequencyRangeEnd"]');
+    const startUnit = document.querySelector('[data-spectrum-config="frequencyRangeStartUnit"]');
+    const endUnit = document.querySelector('[data-spectrum-config="frequencyRangeEndUnit"]');
+    expect(start?.disabled).toBe(false);
+    start.value = '19';
+    end.value = '21';
+    startUnit.value = 'GHz';
+    endUnit.value = 'GHz';
+    end.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+
+    expect(spectrum.props.frequencyRange).toBe('19GHz-21GHz');
+    expect(document.querySelector('[data-spectrum-config="frequencyRangeStart"]')?.value).toBe('19');
+    expect(document.querySelector('[data-spectrum-config="frequencyRangeEnd"]')?.value).toBe('21');
+    wrapper.unmount();
+  });
+
+  it('draws -150 dBm outside the complex-envelope acquisition range', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const spectrum = window.createNode('instrument_spectrum', 420, 240);
+    Object.assign(spectrum.props, {
+      sampleRate: '64MHz',
+      fftSize: '64',
+      frequencyRange: '19GHz-21GHz',
+      autoFrequencyRange: 'off',
+      windowFunction: 'Rectangular'
+    });
+    window.__GZ_SIM__.actual.instrumentSamples[spectrum.id] = Array.from({ length: 64 }, (_, index) => {
+      const phase = 2 * Math.PI * 4 * index / 64;
+      return {
+        t: index / 64000000,
+        actual: { i: Math.cos(phase), q: Math.sin(phase), referenceFrequencyHz: 20e9 }
+      };
+    });
+
+    window.openSpectrumInstrument(spectrum.id);
+    await flushRuntime();
+
+    const bins = Array.from(document.querySelectorAll('[data-spectrum-bin]'));
+    [19e9, 21e9].forEach((frequency) => {
+      const bin = bins.find((item) => Number(item.getAttribute('data-spectrum-frequency')) === frequency);
+      expect(bin?.getAttribute('title')).toMatch(/-150(?:\.0+)?dBm/);
+    });
+
+    wrapper.unmount();
+  });
+
+  it('keeps a manually entered center/span range for a complex-envelope spectrum analyzer', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const spectrum = window.createNode('instrument_spectrum', 420, 240);
+    Object.assign(spectrum.props, {
+      sampleRate: '10MHz',
+      fftSize: '64',
+      autoFrequencyRange: 'on',
+      tuningMode: 'startStop',
+      centerFrequencyUnit: 'GHz',
+      frequencySpanUnit: 'GHz',
+      windowFunction: 'Rectangular'
+    });
+    window.__GZ_SIM__.actual.instrumentSamples[spectrum.id] = Array.from({ length: 64 }, (_, index) => ({
+      t: index / 10000000,
+      actual: { i: 1, q: 0, referenceFrequencyHz: 20e9, impedanceOhm: 50, unit: 'V' }
+    }));
+    window.openSpectrumInstrument(spectrum.id);
+    await flushRuntime();
+
+    const tuningMode = document.querySelector('[data-spectrum-config="tuningMode"]');
+    tuningMode.value = 'centerSpan';
+    tuningMode.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+
+    expect(spectrum.props.autoFrequencyRange).toBe('off');
+    const center = document.querySelector('[data-spectrum-config="centerFrequency"]');
+    const span = document.querySelector('[data-spectrum-config="frequencySpan"]');
+    const centerUnit = document.querySelector('[data-spectrum-config="centerFrequencyUnit"]');
+    const spanUnit = document.querySelector('[data-spectrum-config="frequencySpanUnit"]');
+    expect(center?.disabled).toBe(false);
+    expect(center?.value).toBe('20');
+    center.value = '20';
+    span.value = '0.00002';
+    centerUnit.value = 'GHz';
+    spanUnit.value = 'GHz';
+    span.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+
+    expect(spectrum.props.frequencyRange).toBe('19999990000Hz-20000010000Hz');
+    expect(document.querySelector('[data-spectrum-config="centerFrequency"]')?.value).toBe('20');
+    expect(document.querySelector('[data-spectrum-config="frequencySpan"]')?.value).toBe('0.00002');
+    wrapper.unmount();
+  });
+
+  it('lets the ordinary spectrum analyzer use automatic I/Q sampling in the local fallback runtime', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 260, 240);
+    const spectrum = window.createNode('instrument_spectrum', 540, 240);
+    Object.assign(source.props, {
+      signalDomain: 'rf',
+      outputFormat: '复数包络',
+      centerFrequency: '20',
+      centerFrequencyUnit: 'GHz',
+      power: '0',
+      powerUnit: 'dBm',
+      pulseWidth: '1',
+      pulseWidthUnit: 'ms',
+      pulsePeriod: '10',
+      pulsePeriodUnit: 'ms'
+    });
+    spectrum.props.sampleRate = '1MHz';
+    const canvas = window.getActiveCanvasRecord();
+    canvas.edges.push(window.makeTask5Edge(
+      'normal',
+      source.id,
+      spectrum.id,
+      0,
+      0,
+      window.getNodePorts(source).outputs[0],
+      window.getNodePorts(spectrum).inputs[0],
+      null
+    ));
+    window.renderEdges();
+
+    document.getElementById('sim-dur').value = '10';
+    document.getElementById('sim-dur-unit').value = 'us';
+    document.getElementById('sim-step').value = '1';
+    document.getElementById('sim-step-unit').value = 'us';
+    window.simInit(true);
+    for (let step = 0; step < 4; step += 1) window.simStep();
+    await flushRuntime();
+
+    const samples = window.__GZ_SIM__.actual.instrumentSamples[spectrum.id];
+    expect(samples).toHaveLength(4);
+    expect(samples[0]?.actual).toMatchObject({
+      i: expect.any(Number),
+      q: expect.any(Number),
+      referenceFrequencyHz: 20e9
+    });
+    window.openSpectrumInstrument(spectrum.id);
+    expect(document.querySelector('[data-spectrum-config="sampleRateValue"]')).toBeNull();
+    expect(document.querySelector('[data-spectrum-auto-sample-rate]')?.textContent).toMatch(/^1(?:\.0+)?MHz$/);
+    wrapper.unmount();
+  });
+
+  it('adds configured broadband noise to local complex-envelope I/Q samples', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const clean = window.createNode('signal_source', 260, 240);
+    const noisy = window.createNode('signal_source', 260, 340);
+    const base = {
+      signalDomain: 'rf',
+      outputFormat: '复数包络',
+      centerFrequency: '20',
+      centerFrequencyUnit: 'GHz',
+      power: '0',
+      powerUnit: 'dBm',
+      pulseWidth: '1',
+      pulseWidthUnit: 'ms',
+      pulsePeriod: '10',
+      pulsePeriodUnit: 'ms'
+    };
+    Object.assign(clean.props, base);
+    Object.assign(noisy.props, {
+      ...base,
+      noiseEnabled: 'on',
+      noiseSnr: '0',
+      noiseBandwidth: '1',
+      noiseBandwidthUnit: 'MHz'
+    });
+
+    const cleanOffPulse = window.resolveNodeOutput(clean.id, 0, 'actual', 5e-3, 0.1e-6, new Map(), new Set());
+    const noisyOffPulse = window.resolveNodeOutput(noisy.id, 0, 'actual', 5e-3, 0.1e-6, new Map(), new Set());
+
+    expect(cleanOffPulse).toMatchObject({ i: 0, q: 0, referenceFrequencyHz: 20e9 });
+    expect(noisyOffPulse).toMatchObject({ referenceFrequencyHz: 20e9 });
+    expect(Math.abs(noisyOffPulse.i) + Math.abs(noisyOffPulse.q)).toBeGreaterThan(0);
+    wrapper.unmount();
+  });
+
+  it('shows the correct power for a low-rate sine spectrum without bandwidth smoothing', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const spectrum = window.createNode('instrument_spectrum', 420, 240);
+    spectrum.props.sampleRate = '32Hz';
+    spectrum.props.fftSize = '32';
+    spectrum.props.frequencyRange = '0-5Hz';
+    spectrum.props.windowFunction = 'Rectangular';
+    window.__GZ_SIM__.actual.instrumentSamples[spectrum.id] = Array.from({ length: 32 }, (_, index) => ({
+      t: index / 32,
+      actual: Math.sin(2 * Math.PI * index / 32)
+    }));
+
+    window.openSpectrumInstrument(spectrum.id);
+    await flushRuntime();
+
+    expect(document.querySelector('[data-spectrum-peak-frequency]')?.textContent).toBe('1.0000Hz');
+    expect(document.querySelector('[data-spectrum-peak-amplitude]')?.textContent).toBe('10.00 dBm');
     wrapper.unmount();
   });
 
@@ -2800,4 +3788,5 @@ describe('property panel interaction', () => {
 
     wrapper.unmount();
   });
+
 });

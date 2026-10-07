@@ -17,7 +17,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-from backend.module_registry import ModuleRegistry
+from backend.module_registry import ModuleRegistry, clear_module_call_cache
 from backend.schemas import SimulationBackendError, ensure_mapping, ensure_number
 
 
@@ -221,6 +221,7 @@ class ComponentRegistrar:
                 module_path.unlink(missing_ok=True)
                 raise
         importlib.invalidate_caches()
+        clear_module_call_cache()
         try:
             registry = ModuleRegistry.from_manifest(self.manifest_path)
             # Prove that the registered entry can be imported and obeys the
@@ -234,6 +235,7 @@ class ComponentRegistrar:
                 self._atomic_write(self.manifest_path, original_manifest)
                 module_path.unlink(missing_ok=True)
             importlib.invalidate_caches()
+            clear_module_call_cache()
             raise
         return module_record
 
@@ -290,6 +292,7 @@ class ComponentRegistrar:
         for cached_path in (self.modules_dir / "__pycache__").glob(f"{module_id}.*.pyc"):
             cached_path.unlink(missing_ok=True)
         importlib.invalidate_caches()
+        clear_module_call_cache()
         try:
             registry = ModuleRegistry.from_manifest(self.manifest_path)
             registry.require(module_id).call(
@@ -304,6 +307,7 @@ class ComponentRegistrar:
             for cached_path in (self.modules_dir / "__pycache__").glob(f"{module_id}.*.pyc"):
                 cached_path.unlink(missing_ok=True)
             importlib.invalidate_caches()
+            clear_module_call_cache()
             raise
         return module_record
 
@@ -344,6 +348,7 @@ class ComponentRegistrar:
             if migrated:
                 self._atomic_write(self.manifest_path, json.dumps(destination_data, ensure_ascii=False, indent=2) + "\n")
         importlib.invalidate_caches()
+        clear_module_call_cache()
         return migrated
 
     def unregister(self, module_id):
@@ -371,6 +376,7 @@ class ComponentRegistrar:
                 raise
         sys.modules.pop(f"{self.import_package}.{module_id}", None)
         importlib.invalidate_caches()
+        clear_module_call_cache()
         return matching[0]
 
     def unregister_many(self, module_ids):
@@ -412,6 +418,7 @@ class ComponentRegistrar:
         for module_id in module_ids:
             sys.modules.pop(f"{self.import_package}.{module_id}", None)
         importlib.invalidate_caches()
+        clear_module_call_cache()
         return [records_by_id[module_id] for module_id in module_ids]
 
 

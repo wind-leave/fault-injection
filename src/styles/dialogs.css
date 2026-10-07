@@ -210,6 +210,12 @@
 .scope-window__group-label{font-size:10px;font-weight:900;color:#4f6f8e;white-space:nowrap;}
 .scope-window__segmented{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:center;gap:6px;min-width:0;}
 .scope-window__segmented--window{grid-template-columns:repeat(4,minmax(0,1fr));}
+.scope-window__control-group--custom-window{border-left-color:#8b5cf6;}
+.scope-window__custom-window{display:flex;align-items:center;gap:7px;min-width:0;color:#4f6f8e;font-size:10px;font-weight:900;}
+.scope-window__custom-window input,.scope-window__custom-window select{box-sizing:border-box;height:28px;padding:0 7px;border:1px solid #c6d7ea;border-radius:7px;background:#fff;color:#19334f;font:inherit;font-variant-numeric:tabular-nums;}
+.scope-window__custom-window input{width:min(180px,100%);flex:1 1 auto;min-width:0;}
+.scope-window__custom-window select{width:68px;flex:none;}
+.scope-window__custom-window input:focus,.scope-window__custom-window select:focus{outline:0;border-color:#4a9eff;box-shadow:0 0 0 3px rgba(47,115,255,.13);}
 .scope-window__segment{appearance:none;-webkit-appearance:none;min-width:0;height:28px;padding:0 9px;border:1px solid #dbe8f6;border-radius:999px;background:#fff;color:#486985;cursor:pointer;font-size:10px;font-weight:900;line-height:1;white-space:nowrap;transition:background 0.16s ease,color 0.16s ease,border-color 0.16s ease,box-shadow 0.16s ease;}
 .scope-window__segment:hover{border-color:#a6c8ff;background:#eef5ff;color:#0f62fe;}
 .scope-window__segment.is-active{border-color:#0f62fe;background:#0f62fe;color:#fff;box-shadow:0 6px 14px rgba(15,98,254,0.2);}

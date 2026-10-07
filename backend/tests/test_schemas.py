@@ -12,6 +12,21 @@ class SchemaValidationTests(unittest.TestCase):
 
         self.assertIs(result, package)
 
+    def test_accepts_subsystem_metadata_node_with_empty_runtime_fields(self):
+        package = valid_package()
+        package["nodes"].append({
+            "id": "flight-control-01",
+            "name": "飞控子系统",
+            "type": "subsystem_block",
+            "parameters": {},
+            "inputs": [],
+            "outputs": [],
+        })
+
+        result = validate_executable_package(package)
+
+        self.assertIs(result, package)
+
     def test_accepts_frontend_default_duration_limit(self):
         package = valid_package()
         package["simulationConfig"]["duration"] = 1000
@@ -29,10 +44,10 @@ class SchemaValidationTests(unittest.TestCase):
 
         self.assertIs(result, package)
 
-    def test_accepts_a_one_picosecond_step_size(self):
+    def test_accepts_a_one_hundredth_picosecond_step_size(self):
         package = valid_package()
-        package["simulationConfig"]["duration"] = 1e-11
-        package["simulationConfig"]["stepSize"] = 1e-12
+        package["simulationConfig"]["duration"] = 1e-13
+        package["simulationConfig"]["stepSize"] = 1e-14
 
         result = validate_executable_package(package)
 
@@ -76,6 +91,41 @@ class SchemaValidationTests(unittest.TestCase):
 
         self.assertEqual(context.exception.error_code, "INVALID_SCHEMA")
         self.assertEqual(context.exception.field, "nodes[0].parameters.value")
+
+    def test_accepts_an_rf_complex_envelope_source_contract(self):
+        package = valid_package()
+        package["nodes"][0]["outputs"] = [{
+            "name": "rf-out",
+            "dataType": "rf_complex_envelope",
+            "referenceFrequencyHz": 20e9,
+            "impedanceOhm": 50,
+            "unit": "V",
+        }]
+        package["nodes"][0]["parameters"]["value"] = {
+            "i": 1,
+            "q": 0,
+            "referenceFrequencyHz": 20e9,
+            "impedanceOhm": 50,
+            "unit": "V",
+        }
+
+        result = validate_executable_package(package)
+
+        self.assertIs(result, package)
+
+    def test_accepts_a_vector_of_rf_complex_envelopes_on_one_port(self):
+        package = valid_package()
+        package["nodes"][0]["outputs"] = [{
+            "name": "rf-out",
+            "dataType": "rf_complex_envelope",
+            "unit": "V",
+        }]
+        package["nodes"][0]["parameters"]["value"] = [
+            {"i": 1, "q": 0, "referenceFrequencyHz": 20e9},
+            {"i": 0, "q": 1, "referenceFrequencyHz": 21e9},
+        ]
+
+        self.assertIs(validate_executable_package(package), package)
 
     def test_rejects_duplicate_internal_model_ids(self):
         cases = []

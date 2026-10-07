@@ -18,13 +18,20 @@
               </select>
             </div>
           </div>
-          <div class="sim-field" style="border-right:none;margin-right:0;">
+          <div class="sim-field">
             <span class="sim-field-lbl">仿真步长</span>
             <div class="sim-time-control">
               <input class="sim-field-inp" id="sim-step" value="0.1" type="text" inputmode="decimal" aria-label="仿真步长数值">
               <select class="sim-time-unit" id="sim-step-unit" aria-label="仿真步长单位">
                 <option value="s" selected>s</option><option value="ms">ms</option><option value="us">µs</option><option value="ns">ns</option><option value="ps">ps</option>
               </select>
+            </div>
+          </div>
+          <div class="sim-field sim-field--request-steps" title="运行时每次向后端请求连续计算的仿真步数；范围为 1 至 100000。">
+            <span class="sim-field-lbl">单次请求步数</span>
+            <div class="sim-request-steps-control">
+              <input class="sim-field-inp" id="sim-request-steps" value="1000" type="number" inputmode="numeric" min="1" max="100000" step="1" aria-label="单次请求仿真步数">
+              <span class="sim-request-steps-unit">步</span>
             </div>
           </div>
         </div>
@@ -64,7 +71,6 @@
       <button type="button" class="canvas-tool" title="放大" data-canvas-command="zoom-in">＋</button>
       <button type="button" class="canvas-tool" title="缩小" data-canvas-command="zoom-out">－</button>
       <span class="canvas-tools__divider"></span>
-      <button type="button" class="canvas-tool" title="自动整理" data-canvas-command="auto-arrange">⇄</button>
       <div class="canvas-testpoint-tools" data-canvas-testpoint-tools></div>
       <span class="canvas-tools__spacer"></span>
       <button type="button" class="canvas-tool" title="撤销" data-canvas-command="undo" disabled>↶</button>
@@ -116,7 +122,6 @@
         <div class="canvas-group-actions">
           <button type="button" class="canvas-line-view__button" id="canvas-line-view-toggle" onclick="cycleCanvasLineView()">全部</button>
           <button type="button" class="canvas-wrap__button" id="canvas-wrap-selection" onclick="wrapSelectionIntoSubsystem()" disabled>封装为子系统</button>
-          <button type="button" class="canvas-arrange__button" onclick="autoArrangeCanvas()">一键整理</button>
         </div>
         <div class="canvas-mode">
           <span class="canvas-mode__label">当前连接</span>

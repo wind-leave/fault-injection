@@ -10,6 +10,7 @@ from backend.simulation_functions import (
     amplify_rf_power,
     amplify_rf_relay,
     amplify_rf_signal,
+    band_pass_fir_filter,
     band_pass_rf_filter,
     band_stop_rf_filter,
     clamp,
@@ -19,6 +20,7 @@ from backend.simulation_functions import (
     control_signal_amplitude_phase,
     control_excitation_power_split,
     dac_convert_rf,
+    deterministic_gaussian_noise,
     dequantize_bipolar_code,
     dbf_form_baseband_signal,
     deterministic_noise,
@@ -185,6 +187,28 @@ class SimulationFunctionsTests(unittest.TestCase):
             band_pass_rf_filter(1.0, 0.0, 0.0, output, 2.0, 1.0, 1.0),
             (0.0, output),
         )
+
+    def test_rf_fir_band_pass_filter_preserves_state_and_reports_actual_band(self):
+        state = {}
+        output = 0.0
+        metadata = {}
+        for index in range(256):
+            output, state, metadata = band_pass_fir_filter(
+                math.sin(2.0 * math.pi * 10.0 * index / 100.0),
+                center_frequency_hz=10.0,
+                bandwidth_hz=10.0,
+                dt=0.01,
+                state=state,
+            )
+
+        self.assertGreater(abs(output), 0.5)
+        self.assertEqual(metadata, {
+            "low_cutoff_hz": 5.0,
+            "high_cutoff_hz": 15.0,
+            "group_delay_samples": 64.0,
+        })
+        self.assertEqual(len(state["taps"]), 129)
+        self.assertEqual(len(state["input_history"]), 128)
 
     def test_rf_band_stop_filter_rejects_band_pass_component(self):
         cutoff_low = 1.0 / (4.0 * 3.141592653589793)
@@ -353,6 +377,11 @@ class SimulationFunctionsTests(unittest.TestCase):
         self.assertEqual(first, deterministic_noise(42, 3, 0.25))
         self.assertGreaterEqual(first, -1.0)
         self.assertLess(first, 1.0)
+
+    def test_gaussian_noise_is_repeatable_and_not_uniformly_bounded(self):
+        first = deterministic_gaussian_noise(42, 3, 0.25)
+        self.assertEqual(first, deterministic_gaussian_noise(42, 3, 0.25))
+        self.assertNotEqual(first, deterministic_gaussian_noise(42, 4, 0.25))
 
 
 if __name__ == "__main__":

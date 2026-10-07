@@ -15,13 +15,13 @@ def valid_package():
                 "type": "simulation_block",
                 "pythonBinding": {"moduleId": "passthrough", "entryFunction": "process"},
                 "parameters": {},
-                "inputs": [{"name": "input"}],
-                "outputs": [{"id": "socket03", "name": "output"}],
+                "inputs": [{"name": "input", "elementNames": ["输入"]}],
+                "outputs": [{"id": "socket03", "name": "output", "elementNames": ["输出"]}],
             },
             {
                 "id": "scope-1",
                 "type": "instrument_scope",
-                "inputs": [{"name": "CH1"}],
+                "inputs": [{"name": "CH1", "elementNames": ["输入"]}],
             },
         ],
         "edges": [

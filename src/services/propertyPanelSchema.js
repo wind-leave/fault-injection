@@ -3,6 +3,7 @@ import {
   formatRfVectorValues,
   getRfVectorValues,
   SIGNAL_DOMAINS,
+  normalizeRfModulation,
   normalizeSignalSourceProps
 } from './signalSourceDomainService.js';
 
@@ -46,8 +47,7 @@ const RF_MODULATION_OPTIONS = [
   { value: 'fm', label: '频率调制（FM）' },
   { value: 'pm', label: '相位调制（PM）' },
   { value: 'pulse', label: '脉冲调制' },
-  { value: 'digital', label: '数字调制' },
-  { value: 'noise', label: '噪声/干扰' }
+  { value: 'digital', label: '数字调制' }
 ];
 
 const MULTIMETER_MODE_OPTIONS = [
@@ -87,6 +87,21 @@ const PROPERTY_SCHEMAS = {
         label: '端口配置',
         fields: [
           { key: 'outputPortName', label: '输出端口名称', type: 'text', fallback: '输出' }
+        ]
+      },
+      {
+        label: '组件标识',
+        placement: 'overview',
+        domains: ['rf'],
+        fields: [
+          { key: 'componentId', label: '组件 ID', type: 'text' }
+        ]
+      },
+      {
+        label: '端口标识',
+        domains: ['rf'],
+        fields: [
+          { key: 'outputPortId', label: '输出端口 ID', type: 'text', fallback: 'signal' }
         ]
       },
       {
@@ -139,15 +154,22 @@ const PROPERTY_SCHEMAS = {
         label: '射频信号配置',
         domains: ['rf'],
         fields: [
-          { key: 'outputFormat', label: '输出格式', type: 'select', options: ['标量', '向量'], fallback: '标量', row: 'rf-output' },
-          { key: 'rfVectorLength', label: '向量长度', type: 'number', valueType: 'integer', min: RF_VECTOR_LENGTH_LIMITS.min, max: RF_VECTOR_LENGTH_LIMITS.max, fallback: 4, row: 'rf-vector-mode', rfOutputFormats: ['向量'] },
+          { key: 'outputFormat', label: '输出格式', type: 'select', options: ['标量', '向量', '复数包络'], fallback: '标量', row: 'rf-output' },
+          { key: 'rfComplexEnvelopeMode', label: '复数包络输出形态', type: 'select', options: [{ value: 'scalar', label: '单路' }, { value: 'vector', label: '向量' }], fallback: 'scalar', row: 'rf-complex-envelope-mode', rfOutputFormats: ['复数包络'] },
+          { key: 'rfVectorLength', label: '向量长度', type: 'number', valueType: 'integer', min: RF_VECTOR_LENGTH_LIMITS.min, max: RF_VECTOR_LENGTH_LIMITS.max, fallback: 4, row: 'rf-vector-mode', rfOutputFormats: ['向量', '复数包络'], rfComplexVectorOnly: true },
           { key: 'rfVectorConfigMode', label: '配置方式', type: 'select', options: [{ value: 'batch', label: '集中配置' }, { value: 'item', label: '逐项配置' }], fallback: 'batch', row: 'rf-vector-mode', rfOutputFormats: ['向量'] },
           { key: 'rfVectorValues', label: '向量幅度系数', type: 'rfVectorValues', fallback: '1, 1, 1, 1', rfOutputFormats: ['向量'] },
           { key: 'centerFrequencyUnit', label: '\u9891\u7387\u5355\u4f4d', type: 'select', options: ['Hz', 'kHz', 'MHz', 'GHz'], fallback: 'GHz', row: 'rf-frequency', order: 2 },
           { key: 'centerFrequency', label: '中心频率', type: 'text', fallback: '', row: 'rf-frequency' },
-          { key: 'power', label: '功率', type: 'text', fallback: '', row: 'rf-power' },
+          // dBm is logarithmic, so valid RF levels commonly fall below zero
+          // (for example -30 dBm).  Keep the value unrestricted by a minimum.
+          { key: 'power', label: '功率', type: 'number', step: 'any', fallback: '', row: 'rf-power' },
           { key: 'powerUnit', label: '功率单位', type: 'select', options: ['dBm', 'W', 'mW'], fallback: 'dBm', row: 'rf-power' },
-          { key: 'modulation', label: '调制方式', type: 'select', options: RF_MODULATION_OPTIONS, fallback: 'cw', row: 'rf-modulation' },
+          { key: 'modulation', label: '调制方式', type: 'select', options: RF_MODULATION_OPTIONS, fallback: 'cw', row: 'rf-modulation', excludeRfOutputFormats: ['复数包络'] },
+          { key: 'noiseEnabled', label: '叠加噪声', type: 'select', options: [{ value: 'off', label: '关闭' }, { value: 'on', label: '开启' }], fallback: 'off', row: 'rf-noise-switch' },
+          { key: 'noiseSnr', label: '噪声信噪比 (dB)', type: 'number', step: 'any', fallback: '20', row: 'rf-noise', order: 1, rfNoiseEnabled: ['on'] },
+          { key: 'noiseBandwidth', label: '噪声带宽', type: 'text', fallback: '1', row: 'rf-noise', order: 2, rfNoiseEnabled: ['on'] },
+          { key: 'noiseBandwidthUnit', label: '单位', type: 'select', options: ['Hz', 'kHz', 'MHz', 'GHz'], fallback: 'MHz', row: 'rf-noise', order: 3, rfNoiseEnabled: ['on'] },
           { key: 'modulationDepth', label: '调制度 (%)', type: 'text', fallback: '', row: 'rf-modulation-parameter', rfModulations: ['am'] },
           { key: 'frequencyDeviation', label: '频偏', type: 'text', fallback: '', row: 'rf-modulation-parameter', rfModulations: ['fm'] },
           { key: 'phaseDeviation', label: '相偏 (°)', type: 'text', fallback: '', row: 'rf-modulation-parameter', rfModulations: ['pm'] },
@@ -332,6 +354,9 @@ function normalizeMultimeterMeasurementMode(value) {
 }
 
 function getFieldValue(node, field) {
+  if (field.key === 'componentId') {
+    return node?.id ?? '';
+  }
   const raw = node?.props?.[field.key];
   if (field.valueType === 'signs') {
     return normalizeSigns(raw ?? field.fallback, node?.props?.[field.inputCountKey] ?? 2).join(' ');
@@ -550,7 +575,8 @@ function renderField(node, field, helpers = {}) {
   if (field.type === 'number') {
     const min = field.min == null ? '' : ` min="${escape(field.min)}"`;
     const max = field.max == null ? '' : ` max="${escape(field.max)}"`;
-    return `<div class="props-field"><label>${escape(label)}</label><input id="${id}" type="number"${min}${max} value="${escape(value)}"></div>`;
+    const step = field.step == null ? '' : ` step="${escape(field.step)}"`;
+    return `<div class="props-field"><label>${escape(label)}</label><input id="${id}" type="number"${min}${max}${step} value="${escape(value)}"></div>`;
   }
 
   if (field.type === 'readonly') {
@@ -562,11 +588,15 @@ function renderField(node, field, helpers = {}) {
 
 function renderFieldsInRows(node, fields, helpers) {
   const waveType = WAVE_TYPE_ALIASES[node?.props?.waveType] || node?.props?.waveType || 'sine';
-  const rfModulation = node?.props?.modulation || 'cw';
+  const rfModulation = normalizeRfModulation(node?.props?.modulation);
+  const rfNoiseEnabled = String(node?.props?.noiseEnabled || 'off').trim().toLowerCase();
   const visibleFields = fields.filter((field) => (
     (!field.waveTypes || field.waveTypes.includes(waveType))
     && (!field.rfModulations || field.rfModulations.includes(rfModulation))
+    && (!field.rfNoiseEnabled || field.rfNoiseEnabled.includes(rfNoiseEnabled))
     && (!field.rfOutputFormats || field.rfOutputFormats.includes(node?.props?.outputFormat || '标量'))
+    && (!field.rfComplexVectorOnly || node?.props?.outputFormat !== '复数包络' || node?.props?.rfComplexEnvelopeMode === 'vector')
+    && (!field.excludeRfOutputFormats || !field.excludeRfOutputFormats.includes(node?.props?.outputFormat || '标量'))
   ));
   const rows = [];
   const consumed = new Set();
@@ -606,9 +636,34 @@ function isSchemaGroupInPlacement(group, placement) {
   return (group.placement || 'parameters') === placement;
 }
 
-export function getComponentPropertySchema(type) {
+export function getComponentPropertySchema(type, templateId = '') {
   const schema = PROPERTY_SCHEMAS[type];
-  return schema ? deepClone(schema) : null;
+  if (!schema) return null;
+  const result = deepClone(schema);
+  if (type === 'signal_source' && templateId === 'XHFSQ') {
+    const hiddenFields = new Set(['signalName', 'signalId', 'unit', 'description']);
+    result.groups.forEach((group) => {
+      group.fields = group.fields.filter((field) => !hiddenFields.has(field.key)).map((field) => {
+        if (field.key === 'componentId') {
+          return { key: 'generatorComponentId', label: '组件 ID', type: 'readonly', fallback: 'XHFSQ' };
+        }
+        if (field.key === 'outputPortId' || field.key === 'outputFormat') {
+          return { ...field, type: 'readonly' };
+        }
+        return field;
+      });
+    });
+  }
+  return result;
+}
+
+function propertyNodeForRender(node, schema) {
+  if (schema.type !== 'signal_source') return node;
+  const props = normalizeSignalSourceProps(node?.props ?? {});
+  if (node?.templateId === 'XHFSQ') {
+    Object.assign(props, { signalDomain: 'rf', outputFormat: '复数包络', outputPortId: 'XHFSQ_X1' });
+  }
+  return { ...node, props };
 }
 
 export function renderPropertyFieldsFromSchema(node, schema, helpers = {}) {
@@ -617,9 +672,7 @@ export function renderPropertyFieldsFromSchema(node, schema, helpers = {}) {
   }
 
   const escape = helpers.escapeHtml || escapeHtml;
-  const nodeForRender = schema.type === 'signal_source'
-    ? { ...node, props: normalizeSignalSourceProps(node?.props ?? {}) }
-    : node;
+  const nodeForRender = propertyNodeForRender(node, schema);
   const domain = nodeForRender?.props?.signalDomain;
 
   return schema.groups
@@ -638,9 +691,7 @@ export function renderPropertyOverviewFieldsFromSchema(node, schema, helpers = {
   }
 
   const escape = helpers.escapeHtml || escapeHtml;
-  const nodeForRender = schema.type === 'signal_source'
-    ? { ...node, props: normalizeSignalSourceProps(node?.props ?? {}) }
-    : node;
+  const nodeForRender = propertyNodeForRender(node, schema);
   const domain = nodeForRender?.props?.signalDomain;
 
   return schema.groups

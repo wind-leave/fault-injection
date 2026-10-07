@@ -85,7 +85,17 @@ export function getFaultSlotVectorLength(slot = {}) {
     .map(Number)
     .find(Number.isFinite);
   const type = String(slot.dataType ?? slot.type ?? slot.format ?? '').trim().toLowerCase();
-  const isVector = ['vector', 'array', '向量', '数组'].includes(type) || Number.isFinite(vectorLength);
+  const isScalar = ['scalar', 'number', 'float', 'int', 'integer', 'boolean', 'bool', '标量', '数值', '浮点'].includes(type);
+  const isVectorType = ['vector', 'array', 'list', 'tuple', 'sequence', 'number[]', '向量', '数组'].includes(type);
+  // Length metadata may be retained from an earlier interface declaration.
+  // An explicitly scalar port must never turn into a vector injection target
+  // merely because that stale metadata is greater than one.
+  const isVector = !isScalar && (
+    isVectorType
+    || Array.isArray(slot.shape)
+    || Array.isArray(parsedLiteral)
+    || (!type && Number.isFinite(vectorLength))
+  );
   return isVector && Number.isInteger(vectorLength) && vectorLength > 1 ? vectorLength : 0;
 }
 
@@ -779,6 +789,146 @@ export function createFaultBindingRecord(options = {}) {
     active: options.active ?? true,
     injectedFault: payload
   };
+}
+
+function faultInstanceTargetId(instance = {}) {
+  return instance.targetId
+    || instance.target?.targetId
+    || instance.target?.id
+    || instance.targetNodeId
+    || instance.targetEdgeId
+    || '';
+}
+
+function faultInstanceTargetKind(instance = {}, target = {}) {
+  const kind = instance.targetKind || instance.target?.targetKind || instance.target?.kind || '';
+  if (kind === 'edge' || kind === 'wire' || kind === 'line') {
+    return 'edge';
+  }
+  if (kind === 'node' || kind === 'component' || kind === 'module') {
+    return 'node';
+  }
+  return inferTargetKind(target);
+}
+
+function isActiveFaultInstance(instance = {}) {
+  return Boolean(instance) && instance.active !== false && instance.enabled !== false;
+}
+
+function bindingMatchesFaultInstance(binding = {}, instance = {}) {
+  const bindingInstanceId = binding.instanceId || binding.injectedFault?.instanceId || '';
+  if (bindingInstanceId && instance.instanceId && bindingInstanceId === instance.instanceId) {
+    return true;
+  }
+
+  const bindingFaultId = faultModelIdOf(binding);
+  const instanceFaultId = instance.faultTypeId || instance.faultModelId || instance.modelId || instance.faultId || '';
+  const bindingSlotId = binding.slotId || binding.targetSlotId || binding.injectedFault?.slotId || '';
+  const instanceSlotId = instance.slotId || instance.targetSlotId || '';
+  return Boolean(bindingFaultId && instanceFaultId && bindingFaultId === instanceFaultId)
+    && (!bindingSlotId || !instanceSlotId || bindingSlotId === instanceSlotId);
+}
+
+function fallbackFaultModelFromInstance(instance = {}) {
+  const id = instance.faultTypeId || instance.faultModelId || instance.modelId || instance.faultId || '';
+  return {
+    id,
+    name: instance.displayName || instance.name || id,
+    displayName: instance.displayName || instance.name || id,
+    layer: instance.layer || 'electrical',
+    runtimeBehavior: instance.runtimeBehavior || '',
+    modelClass: instance.modelClass || instance.faultClass || '',
+    defaultParameters: clone(instance.parameters || {})
+  };
+}
+
+/**
+ * Older exports (and authored packages) may retain a top-level fault instance
+ * without retaining its target's runtime binding.  The D matrix can use that
+ * instance directly, whereas the property panel reads target.faultBindings.
+ * Rebuild only the missing bindings so both views are restored consistently.
+ */
+export function restoreFaultBindingsFromInstances(snapshot = {}, faultModels = []) {
+  const nextSnapshot = clone(snapshot || {});
+  const instances = list(nextSnapshot.faultInstances).filter(isActiveFaultInstance);
+  if (!instances.length) {
+    return nextSnapshot;
+  }
+
+  const modelsById = new Map();
+  list(faultModels).forEach((model) => {
+    const id = model?.id || model?.faultTypeId || model?.modelId || '';
+    if (id) {
+      modelsById.set(id, model);
+    }
+  });
+
+  const restoreTarget = (target, targetKind) => {
+    if (!target?.id) {
+      return target;
+    }
+
+    const matchingInstances = instances.filter((instance) => (
+      faultInstanceTargetId(instance) === target.id
+      && faultInstanceTargetKind(instance, target) === targetKind
+    ));
+    if (!matchingInstances.length) {
+      return target;
+    }
+
+    const bindings = list(target.faultBindings);
+    const restoredBindings = [...bindings];
+    matchingInstances.forEach((instance) => {
+      if (restoredBindings.some((binding) => bindingMatchesFaultInstance(binding, instance))) {
+        return;
+      }
+
+      const faultId = instance.faultTypeId || instance.faultModelId || instance.modelId || instance.faultId || '';
+      const model = modelsById.get(faultId) || fallbackFaultModelFromInstance(instance);
+      const payload = createRuntimePayloadFromInstance({ model, instance });
+      restoredBindings.push(createFaultBindingRecord({
+        target,
+        targetKind,
+        model,
+        instance,
+        payload,
+        bindingId: instance.bindingId || `${instance.instanceId || faultId || 'fault'}::${target.id}::${instance.slotId || ''}`
+      }));
+    });
+
+    if (restoredBindings.length === bindings.length) {
+      return target;
+    }
+
+    const activeBindings = restoredBindings.filter((binding) => binding?.active !== false);
+    return {
+      ...target,
+      faultBindings: restoredBindings,
+      ...(target.injectedFault || !activeBindings.length
+        ? {}
+        : { injectedFault: clone(activeBindings[0].injectedFault) })
+    };
+  };
+
+  const restoreTargets = (targets, targetKind) => list(targets)
+    .map((target) => restoreTarget(target, targetKind));
+
+  nextSnapshot.modelNodes = restoreTargets(nextSnapshot.modelNodes, 'node');
+  nextSnapshot.modelEdges = restoreTargets(nextSnapshot.modelEdges, 'edge');
+  if (nextSnapshot.canvases && typeof nextSnapshot.canvases === 'object' && !Array.isArray(nextSnapshot.canvases)) {
+    Object.entries(nextSnapshot.canvases).forEach(([canvasId, canvas]) => {
+      if (!canvas || typeof canvas !== 'object' || Array.isArray(canvas)) {
+        return;
+      }
+      nextSnapshot.canvases[canvasId] = {
+        ...canvas,
+        nodes: restoreTargets(canvas.nodes, 'node'),
+        edges: restoreTargets(canvas.edges, 'edge')
+      };
+    });
+  }
+
+  return nextSnapshot;
 }
 
 export function createRuntimeFaultBindingWithAdapter(options = {}) {

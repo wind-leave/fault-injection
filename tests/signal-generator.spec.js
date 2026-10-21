@@ -36,30 +36,80 @@ describe('XHFSQ signal generator', () => {
       .some((field) => field.key === 'signalName')).toBe(true);
     expect(fields.find((field) => field.key === 'outputFormat').type).toBe('readonly');
     expect(fields.find((field) => field.key === 'outputPortId').type).toBe('readonly');
-    expect(fields.find((field) => field.key === 'rfComplexEnvelopeMode').options)
-      .toEqual(expect.arrayContaining([{ value: 'scalar', label: '单路' }, { value: 'vector', label: '向量' }]));
+    expect(fields.some((field) => ['rfComplexEnvelopeMode', 'rfVectorLength'].includes(field.key)))
+      .toBe(false);
   });
 
-  it('exports scalar and vector envelopes through XHFSQ_X1', () => {
+  it('infers scalar and vector output shapes from the connected input port', () => {
     const defaults = COMPONENT_REGISTRY.XHFSQ.defaults;
-    for (const mode of ['scalar', 'vector']) {
+    for (const length of [0, 1, 2, 3, 4, 32, 65]) {
       const pkg = buildBackendExecutablePackage({
         modelNodes: [{
-          id: `generator-${mode}`,
+          id: 'generator',
           type: 'signal_source',
           templateId: 'XHFSQ',
-          props: { ...defaults, rfComplexEnvelopeMode: mode, rfVectorLength: 4 }
+          props: { ...defaults, rfComplexEnvelopeMode: 'vector', rfVectorLength: 99 }
+        }, {
+          id: 'receiver', type: 'simulation_block',
+          props: { requiresPower: false },
+          inputs: [{ name: 'input', dataType: 'rf_complex_envelope',
+            ...(length ? { collectionKind: 'vector', vectorLength: length } : {}) }]
         }],
-        modelEdges: []
+        modelEdges: [{ id: 'edge', sourceNodeId: 'generator', sourcePortIndex: 0,
+          targetNodeId: 'receiver', targetPortIndex: 0 }]
       });
       expect(pkg.nodes[0].outputs[0]).toMatchObject({
         id: 'XHFSQ_X1',
         dataType: 'rf_complex_envelope'
       });
-      expect(pkg.nodes[0].outputs[0].vectorLength).toBe(mode === 'vector' ? 4 : undefined);
-      expect(pkg.nodes[0].outputs[0].collectionKind).toBe(mode === 'vector' ? 'vector' : undefined);
+      expect(pkg.nodes[0].outputs[0].vectorLength).toBe(length || undefined);
+      expect(pkg.nodes[0].outputs[0].collectionKind).toBe(length ? 'vector' : undefined);
       expect(pkg.nodes[0].parameters.rfComplexEnvelopeVectorLength)
-        .toBe(mode === 'vector' ? 4 : undefined);
+        .toBe(length || undefined);
+    }
+  });
+
+  it('infers the internal two-element port through a subsystem boundary', () => {
+    const port = { name: '复数包络输入', dataType: 'rf_complex_envelope',
+      collectionKind: 'vector', vectorLength: 2 };
+    const state = {
+      rootCanvasId: 'root',
+      canvases: {
+        root: {
+          id: 'root', nodes: [
+            { id: 'generator', type: 'signal_source', templateId: 'XHFSQ',
+              props: { ...COMPONENT_REGISTRY.XHFSQ.defaults, rfVectorLength: 99 } },
+            { id: 'subsystem', type: 'subsystem_block', targetCanvasId: 'child',
+              props: { interface: { inputs: [{ id: 'input-1', ...port, order: 0 }], outputs: [] } } }
+          ],
+          edges: [{ id: 'generator-subsystem', sourceNodeId: 'generator', sourcePortIndex: 0,
+            targetNodeId: 'subsystem', targetPortIndex: 0 }]
+        },
+        child: {
+          id: 'child', parentSubsystemNodeId: 'subsystem', nodes: [
+            { id: 'boundary-in', type: 'subsystem_in_port',
+              props: { interfacePortId: 'input-1', order: 0, ...port } },
+            { id: 'receiver', type: 'simulation_block', props: { requiresPower: false },
+              inputs: [{ ...port }] }
+          ],
+          edges: [{ id: 'boundary-receiver', sourceNodeId: 'boundary-in', sourcePortIndex: 0,
+            targetNodeId: 'receiver', targetPortIndex: 0, subsystemBoundaryMapping: true }]
+        }
+      }
+    };
+
+    for (const includeSubsystemNodes of [false, true]) {
+      const pkg = buildBackendExecutablePackage({ ...state, includeSubsystemNodes });
+      if (!includeSubsystemNodes) {
+        expect(pkg.edges).toEqual(expect.arrayContaining([
+          expect.objectContaining({ sourceNodeId: 'generator', targetNodeId: 'receiver' })
+        ]));
+      }
+      expect(pkg.nodes.find((node) => node.id === 'generator').outputs[0]).toMatchObject({
+        collectionKind: 'vector', vectorLength: 2
+      });
+      expect(pkg.nodes.find((node) => node.id === 'generator').parameters.rfComplexEnvelopeVectorLength)
+        .toBe(2);
     }
   });
 
@@ -88,16 +138,12 @@ describe('XHFSQ signal generator', () => {
       expect(document.getElementById(`prop-${key}`)).toBeNull();
     }
     document.querySelector('[data-props-tab="parameters"]').click();
-    const modeField = document.getElementById('prop-rfComplexEnvelopeMode');
-    expect(modeField).not.toBeNull();
-    modeField.value = 'vector';
-    modeField.dispatchEvent(new Event('change', { bubbles: true }));
-    expect(generator.props.rfComplexEnvelopeMode).toBe('vector');
-    expect(window.getNodePorts(generator).outputs[0].vectorLength).toBe(4);
+    expect(document.getElementById('prop-rfComplexEnvelopeMode')).toBeNull();
+    expect(document.getElementById('prop-rfVectorLength')).toBeNull();
+    expect(window.getNodePorts(generator).outputs[0].vectorLength).toBeUndefined();
     expect(generator.props.outputFormat).toBe('复数包络');
     expect(generator.props.outputPortId).toBe('XHFSQ_X1');
     window.saveSelectedNode();
-    expect(generator.props.rfComplexEnvelopeMode).toBe('vector');
     expect(generator.props.outputPortId).toBe('XHFSQ_X1');
 
     state.canvases['canvas-second'] = window.__GZ_CANVAS_STATE__.createEmptyCanvasRecord(
@@ -121,7 +167,7 @@ describe('XHFSQ signal generator', () => {
     window.doCreateBlankWorkspace();
 
     const generator = window.createNode('XHFSQ', 180, 220);
-    const filter = window.createNode('DZDK_A', 480, 220);
+    const filter = window.createNode('rf_complex_envelope_gain', 480, 220);
     window.__GZ_STATE__.modelEdges.push({
       id: 'edge-generator-filter',
       lineType: 'normal',
@@ -140,7 +186,7 @@ describe('XHFSQ signal generator', () => {
         id: 'edge-generator-filter',
         sourceDeviceId: 'XHFSQ',
         sourcePort: 'XHFSQ_X1',
-        targetDeviceId: 'DZDK_A'
+        targetDeviceId: 'rf_complex_envelope_gain'
       })
     ]));
     expect(result.privateData.executableModel.nodes).toEqual(expect.arrayContaining([

@@ -641,7 +641,10 @@ export function getComponentPropertySchema(type, templateId = '') {
   if (!schema) return null;
   const result = deepClone(schema);
   if (type === 'signal_source' && templateId === 'XHFSQ') {
-    const hiddenFields = new Set(['signalName', 'signalId', 'unit', 'description']);
+    const hiddenFields = new Set([
+      'signalName', 'signalId', 'unit', 'description',
+      'rfComplexEnvelopeMode', 'rfVectorLength'
+    ]);
     result.groups.forEach((group) => {
       group.fields = group.fields.filter((field) => !hiddenFields.has(field.key)).map((field) => {
         if (field.key === 'componentId') {

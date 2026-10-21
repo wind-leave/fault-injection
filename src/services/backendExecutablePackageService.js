@@ -358,6 +358,38 @@ function alignScopeInputsWithConnectedSignals(nodes, edges) {
   });
 }
 
+function alignSignalGeneratorOutputsWithTargetPorts(nodes, edges) {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  for (const node of nodes) {
+    if (node.componentId !== 'XHFSQ') continue;
+    const shapes = edges
+      .filter((edge) => edge.sourceNodeId === node.id && edge.lineType !== 'power')
+      .map((edge) => {
+        const target = nodesById.get(edge.targetNodeId);
+        const port = target?.inputs?.[edge.targetPortIndex];
+        const length = Number(port?.vectorLength);
+        return port?.collectionKind === 'vector' && Number.isInteger(length) && length > 0
+          ? length : 0;
+      });
+    const length = shapes[0] ?? 0;
+    if (shapes.some((item) => item !== length)) {
+      throw new Error('信号发生器连接的输入端口需要相同的输出形态和向量长度');
+    }
+    const output = node.outputs[0];
+    if (!output) continue;
+    delete output.collectionKind;
+    delete output.vectorLength;
+    delete node.parameters.rfVectorLength;
+    delete node.parameters.rfComplexEnvelopeVectorLength;
+    delete node.parameters.value;
+    if (length > 0) {
+      output.collectionKind = 'vector';
+      output.vectorLength = length;
+      node.parameters.rfComplexEnvelopeVectorLength = length;
+    }
+  }
+}
+
 function normalizePowerPorts(ports = []) {
   return Array.isArray(ports)
     ? ports.map((port, index) => ({
@@ -1178,6 +1210,9 @@ export function buildBackendExecutablePackage(state = {}) {
   const edges = presentationEdges.filter((edge) => (
     nodeIds.has(String(edge?.sourceNodeId)) && nodeIds.has(String(edge?.targetNodeId))
   ));
+  // Infer from executable endpoints: presentation edges can end at a
+  // subsystem shell, which has no executable input-port declaration.
+  alignSignalGeneratorOutputsWithTargetPorts(nodes, normalizedEdges);
   alignScopeInputsWithConnectedSignals(nodes, edges);
   const edgeIds = new Set(edges.map((edge) => edge.id));
   return {

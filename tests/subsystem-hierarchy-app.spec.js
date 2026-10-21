@@ -269,6 +269,143 @@ describe('subsystem hierarchy app integration', () => {
     expect(document.querySelector('#pd')?.textContent).not.toContain('内部控制组件');
   });
 
+  it('binds a protocol fault from an output boundary segment to its external wire', async () => {
+    mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+    const subsystem = window.createNode('subsystem_block', 420, 240);
+    const scope = window.createNode('instrument_scope', 760, 240);
+    window.openSubsystemCanvas(subsystem.id);
+    const internalSource = window.createNode('signal_source', 320, 240);
+    internalSource.props.amplitude = '2';
+    internalSource.props.frequency = '1';
+    window.goToRootCanvas();
+    const state = window.__GZ_STATE__;
+    const rootCanvas = state.canvases['canvas-root'];
+    const externalEdge = {
+      id: 'subsystem-output-to-scope', lineType: 'normal',
+      sourceNodeId: subsystem.id, sourcePortIndex: 0,
+      targetNodeId: scope.id, targetPortIndex: 0
+    };
+    rootCanvas.edges.push(externalEdge);
+    window.renderModelNodes();
+    window.openSubsystemCanvas(subsystem.id);
+    await flushRuntime();
+    const childCanvas = state.canvases[subsystem.targetCanvasId];
+    const segment = childCanvas.edges.find((edge) => edge.subsystemBoundaryMapping && edge.linkedExternalEdgeId === externalEdge.id);
+    expect(segment).toBeTruthy();
+    const injector = window.createNode('protocol_fault_injector', 560, 440);
+    expect(window.beginLayeredFaultBinding(injector.id)).toBe(true);
+    const segmentPath = document.querySelector(`.edge-path[data-edge-id="${segment.id}"]`);
+    expect(segmentPath).not.toBeNull();
+    dispatchPointer(segmentPath, 'pointerup');
+    const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    expect(dialog).not.toBeNull();
+    dialog.querySelector('[data-layered-fault-option="model"][data-layered-fault-option-value="data_cutoff"]').click();
+    dialog.querySelector('[data-layered-fault-confirm]').click();
+    await flushRuntime();
+
+    expect(rootCanvas.edges.find((edge) => edge.id === externalEdge.id)?.injectedFault)
+      .toMatchObject({ runtimeBehavior: 'data_cutoff' });
+    expect(state.faultInstances).toContainEqual(expect.objectContaining({ targetId: externalEdge.id }));
+    expect(childCanvas.edges.find((edge) => edge.id === segment.id)?.injectedFault).toBeUndefined();
+
+    const refreshedSegment = document.querySelector(`.edge-path[data-edge-id="${segment.id}"]`);
+    dispatchClick(refreshedSegment);
+    window.setPropertyPanelTab('testpoints');
+    await flushRuntime();
+    document.querySelector('[data-add-edge-testpoint]').click();
+    await flushRuntime();
+    const externalPoint = state.manualDiagnosticTestPoints.find((point) => point.edgeId === externalEdge.id);
+    expect(externalPoint).toBeDefined();
+    expect(externalPoint.detects).toContain(state.faultInstances.find((item) => item.targetId === externalEdge.id).faultTypeId);
+
+    window.goToRootCanvas();
+    const executable = window.__GZ_BACKEND_SIMULATION__.buildExecutablePackage(state);
+    expect(executable.faultInstances).toContainEqual(expect.objectContaining({
+      targetId: executable.edges.find((edge) => edge.targetNodeId === scope.id)?.id,
+      faultType: 'signal_cutoff'
+    }));
+    window.simInit(true);
+    for (let step = 0; step < 4; step += 1) window.simStep();
+    const actual = window.__GZ_SIM__.actual.scopeSamples[scope.id]?.ch1 ?? [];
+    expect(actual).toHaveLength(4);
+    expect(actual.every((sample) => Math.abs(sample.actual) < 1e-6)).toBe(true);
+  });
+
+  it.each([
+    ['physical', 'physical_fault_injector', 'degradation', { scale: 0.5, start: 0, duration: '' }, 'parameter_degradation'],
+    ['electrical', 'electrical_fault_injector', 'attenuation', { attenuation_db: 6, start: 0, duration: '' }, 'signal_attenuation'],
+    ['protocol', 'protocol_fault_injector', 'data_cutoff', { start: 0, duration: '' }, 'signal_cutoff']
+  ])('applies a %s fault to a component or wire inside a subsystem', async (
+    layer, injectorType, mathModel, parameters, executableType
+  ) => {
+    mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 180, 220);
+    const subsystem = window.createNode('subsystem_block', 440, 220);
+    const scope = window.createNode('instrument_scope', 760, 220);
+    source.props.amplitude = '0.2';
+    source.props.frequency = '1';
+    const state = window.__GZ_STATE__;
+    state.sysLoaded = true;
+    const root = state.canvases['canvas-root'];
+    window.openSubsystemCanvas(subsystem.id);
+    const child = state.canvases[subsystem.targetCanvasId];
+    const block = window.createNode('simulation_block', 430, 220);
+    block.props.moduleType = 'control';
+    block.props.requiresPower = false;
+    block.props.modelParameters = [{ key: 'controller_gain', name: '控制增益', targetField: 'params.controller_gain' }];
+    if (layer === 'protocol') {
+      const downstream = window.createNode('gain_block', 650, 220);
+      connectCanvasNodes(child, 'internal-block-to-gain', block.id, downstream.id);
+      window.renderModelNodes();
+    }
+    window.goToRootCanvas();
+    connectCanvasNodes(root, 'source-to-subsystem', source.id, subsystem.id);
+    connectCanvasNodes(root, 'subsystem-to-scope', subsystem.id, scope.id);
+    window.simInit(true);
+    for (let step = 0; step < 4; step += 1) window.simStep();
+    const baseline = window.__GZ_SIM__.actual.scopeSamples[scope.id].ch1;
+    expect(baseline.some((sample) => Math.abs(sample.actual) > 0.001)).toBe(true);
+
+    window.openSubsystemCanvas(subsystem.id);
+    const injector = window.createNode(injectorType, 650, 420);
+    const target = layer === 'protocol'
+      ? child.edges.find((edge) => edge.id === 'internal-block-to-gain')
+      : block;
+    const slot = layer === 'physical'
+      ? window.getLayeredFaultSlotsForTarget(block).find((item) => item.layer === layer && item.parameterKey === 'controller_gain')
+      : layer === 'electrical'
+        ? window.getLayeredFaultSlotsForTarget(block).find((item) => item.layer === layer && item.variableRole === 'output')
+        : window.getLayeredFaultSlotsForTarget(target).find((item) => item.layer === layer);
+    expect(slot).toBeDefined();
+    const bound = window.bindLayeredFaultInjectorToTarget(injector.id, {
+      targetKind: layer === 'protocol' ? 'edge' : 'node',
+      targetId: target.id,
+      slotId: slot.id,
+      mathModel,
+      parameters
+    });
+    expect(bound).toMatchObject({ ok: true, targetId: target.id });
+    expect(state.faultInstances).toContainEqual(expect.objectContaining({ targetId: target.id, layer }));
+
+    window.goToRootCanvas();
+    const pkg = window.__GZ_BACKEND_SIMULATION__.buildExecutablePackage(state);
+    const executableFault = pkg.faultInstances.find((fault) => fault.faultType === executableType);
+    expect(executableFault).toBeDefined();
+    expect(layer === 'protocol'
+      ? pkg.edges.some((edge) => edge.id === executableFault.targetId && edge.sourceNodeId === block.id)
+      : executableFault.targetId === block.id).toBe(true);
+    window.simInit(true);
+    for (let step = 0; step < 4; step += 1) window.simStep();
+    const actual = window.__GZ_SIM__.actual.scopeSamples[scope.id].ch1;
+    const largestBaseline = Math.max(...baseline.map((sample) => Math.abs(sample.actual)));
+    const largestActual = Math.max(...actual.map((sample) => Math.abs(sample.actual)));
+    expect(largestActual).toBeLessThan(layer === 'protocol' ? 1e-6 : largestBaseline * 0.8);
+  });
+
   it('shows an internal subsystem output on a connected display console', async () => {
     mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -861,6 +998,75 @@ describe('subsystem hierarchy app integration', () => {
     const faultOption = document.querySelector('[data-edge-testpoint-fault="child-sensor-bias"]');
     expect(faultOption).not.toBeNull();
     expect(faultOption?.closest('[data-edge-testpoint-component]')?.textContent).toContain('内部传感器');
+  });
+
+  it('automatically associates faults with internal and external subsystem test points', async () => {
+    mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+    const state = window.__GZ_STATE__;
+    const internalFault = { modelId: 'internal-physical-fault', layer: 'physical', active: true };
+    const externalFault = { modelId: 'external-protocol-fault', layer: 'protocol', active: true };
+    const root = state.canvases['canvas-root'];
+    root.nodes = [
+      { id: 'source', type: 'signal_source', props: { name: '外部源' } },
+      { id: 'subsystem', type: 'subsystem_block', targetCanvasId: 'child', props: {
+        name: '子系统', interface: {
+          inputs: [{ id: 'input', order: 0, componentNodeId: 'internal-a', componentPortIndex: 0 }],
+          outputs: [{ id: 'output', order: 0, componentNodeId: 'internal-b', componentPortIndex: 0 }]
+        }
+      } },
+      { id: 'scope', type: 'instrument_scope', props: { name: '外部接收器' } }
+    ];
+    root.edges = [
+      { id: 'outside-input', sourceNodeId: 'source', targetNodeId: 'subsystem', targetPortIndex: 0, injectedFault: externalFault },
+      { id: 'outside-output', sourceNodeId: 'subsystem', targetNodeId: 'scope', sourcePortIndex: 0 }
+    ];
+    state.canvases.child = {
+      id: 'child', parentSubsystemNodeId: 'subsystem', viewport: { scale: 1, offsetX: 0, offsetY: 0 },
+      nodes: [
+        { id: 'boundary-in', type: 'subsystem_in_port', props: { interfacePortId: 'input', order: 0 } },
+        { id: 'internal-a', type: 'simulation_block', props: { name: '内部组件 A' }, injectedFault: internalFault,
+          faultBindings: [{ faultModelId: 'internal-physical-fault', layer: 'physical', propagationMode: 'localParameter', canPropagate: false, active: true, injectedFault: internalFault }] },
+        { id: 'internal-b', type: 'simulation_block', props: { name: '内部组件 B' } },
+        { id: 'boundary-out', type: 'subsystem_out_port', props: { interfacePortId: 'output', order: 0 } }
+      ],
+      edges: [
+        { id: 'inside-input', sourceNodeId: 'boundary-in', targetNodeId: 'internal-a', subsystemBoundaryMapping: true, subsystemBoundaryRole: 'input', linkedExternalEdgeId: 'outside-input' },
+        { id: 'inside-wire', sourceNodeId: 'internal-a', targetNodeId: 'internal-b' },
+        { id: 'inside-output', sourceNodeId: 'internal-b', targetNodeId: 'boundary-out', subsystemBoundaryMapping: true, subsystemBoundaryRole: 'output', linkedExternalEdgeId: 'outside-output' }
+      ]
+    };
+    state.modelNodes = root.nodes;
+    state.modelEdges = root.edges;
+    state.nodes = root.nodes;
+    state.edges = root.edges;
+
+    const internalPoint = window.addDiagnosticTestPointFromEdge('inside-wire').point;
+    const externalPoint = window.addDiagnosticTestPointFromEdge('outside-output').point;
+    expect(window.addDiagnosticTestPointFromEdge('inside-output')).toMatchObject({
+      ok: true, existed: true, point: expect.objectContaining({ pointId: externalPoint.pointId, edgeId: 'outside-output' })
+    });
+    expect(internalPoint.detects).toEqual(expect.arrayContaining(['external-protocol-fault', 'internal-physical-fault']));
+    expect(externalPoint.detects).toEqual(expect.arrayContaining(['external-protocol-fault', 'internal-physical-fault']));
+    expect(window.addDiagnosticTestPoint(internalPoint.pointId)).toBe(true);
+    expect(window.addDiagnosticTestPoint(externalPoint.pointId)).toBe(true);
+    const globalPoints = window.buildDiagnosticTestPointModel({ includeAllCanvases: true }).installed;
+    expect(globalPoints.find((point) => point.pointId === internalPoint.pointId)?.detects)
+      .toContain('external-protocol-fault');
+    expect(globalPoints.find((point) => point.pointId === externalPoint.pointId)?.detects)
+      .toContain('internal-physical-fault');
+    const laterFault = { modelId: 'later-electrical-fault', layer: 'electrical', active: true };
+    const internalB = state.canvases.child.nodes.find((node) => node.id === 'internal-b');
+    internalB.injectedFault = laterFault;
+    internalB.faultBindings = [{ faultModelId: laterFault.modelId, layer: 'electrical', active: true, injectedFault: laterFault }];
+    const refreshedPoints = window.buildDiagnosticTestPointModel({ includeAllCanvases: true }).installed;
+    expect(refreshedPoints.find((point) => point.pointId === externalPoint.pointId)?.detects)
+      .toContain('later-electrical-fault');
+    expect(refreshedPoints.find((point) => point.pointId === internalPoint.pointId)?.detects)
+      .not.toContain('later-electrical-fault');
+    const executable = window.__GZ_BACKEND_SIMULATION__.buildExecutablePackage(state);
+    expect(executable.reportedNodeIds).toEqual(expect.arrayContaining(['internal-a', 'internal-b']));
   });
 
   it('keeps subsystem fault target component and wire names in the top-level knowledge graph', async () => {
@@ -1882,6 +2088,107 @@ describe('subsystem hierarchy app integration', () => {
       .toMatchObject({ vectorLength: 2, vectorElementNames: ['横滚', '新俯仰'] });
   });
 
+  it('inherits complex-envelope input and output contracts and connects them outside the subsystem', async () => {
+    mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const subsystem = window.createNode('subsystem_block', 420, 320);
+    window.openSubsystemCanvas(subsystem.id);
+    const internal = window.createNode('simulation_block', 360, 220);
+    const contract = {
+      type: '复数包络',
+      dataType: 'rf_complex_envelope',
+      referenceFrequencyHz: 990000000,
+      impedanceOhm: 75,
+      unit: 'V'
+    };
+    internal.props.inputs = [{ id: 'rf-in', name: '射频输入', ...contract }];
+    internal.props.outputs = [{ id: 'rf-out', name: '射频输出', ...contract }];
+    window.renderModelNodes();
+    window.goToRootCanvas();
+
+    const state = window.__GZ_STATE__;
+    const input = subsystem.props.interface.inputs[0];
+    const output = subsystem.props.interface.outputs[0];
+    for (const port of [input, output]) {
+      expect(port).toMatchObject(contract);
+    }
+    const shellPorts = window.getNodePorts(subsystem);
+    expect(shellPorts.inputs[0].meta).toMatchObject(contract);
+    expect(shellPorts.outputs[0].meta).toMatchObject(contract);
+    const boundaryNodes = state.canvases[subsystem.targetCanvasId].nodes.filter((node) =>
+      ['rf-in', 'rf-out'].includes(node.props?.interfacePortId)
+    );
+    expect(boundaryNodes).toHaveLength(2);
+    boundaryNodes.forEach((node) => expect(node.props).toMatchObject({
+      portType: '复数包络',
+      dataType: 'rf_complex_envelope',
+      referenceFrequencyHz: 990000000,
+      impedanceOhm: 75,
+      unit: 'V'
+    }));
+
+    const source = window.createNode('simulation_block', 160, 240);
+    source.props.inputs = [];
+    source.props.outputs = [{ id: 'external-out', name: '外部输出', ...contract }];
+    const target = window.createNode('simulation_block', 720, 240);
+    target.props.inputs = [{ id: 'external-in', name: '外部输入', ...contract }];
+    target.props.outputs = [];
+    window.renderModelNodes();
+    const click = { stopPropagation() {} };
+    window.handlePortClick(click, source.id, 'output', 0);
+    window.handlePortClick(click, subsystem.id, 'input', 0);
+    window.handlePortClick(click, subsystem.id, 'output', 0);
+    window.handlePortClick(click, target.id, 'input', 0);
+
+    expect(state.canvases['canvas-root'].edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceNodeId: source.id, targetNodeId: subsystem.id }),
+      expect.objectContaining({ sourceNodeId: subsystem.id, targetNodeId: target.id })
+    ]));
+    const incoming = state.canvases['canvas-root'].edges.find((edge) => edge.targetNodeId === subsystem.id);
+    const outgoing = state.canvases['canvas-root'].edges.find((edge) => edge.sourceNodeId === subsystem.id);
+    expect(incoming.targetPortMeta).toMatchObject({
+      type: 'rf_complex_envelope', referenceFrequencyHz: 990000000, impedanceOhm: 75, unit: 'V'
+    });
+    expect(outgoing.sourcePortMeta).toMatchObject({
+      type: 'rf_complex_envelope', referenceFrequencyHz: 990000000, impedanceOhm: 75, unit: 'V'
+    });
+  });
+
+  it('preserves complex-envelope contracts when wrapping a connected component', async () => {
+    mount(App, { attachTo: document.body });
+    await flushRuntime();
+
+    const contract = {
+      type: '复数包络', dataType: 'rf_complex_envelope',
+      referenceFrequencyHz: 915000000, impedanceOhm: 50, unit: 'V'
+    };
+    const source = window.createNode('simulation_block', 120, 220);
+    source.props.inputs = [];
+    source.props.outputs = [{ name: '源输出', ...contract }];
+    const internal = window.createNode('simulation_block', 400, 220);
+    internal.props.inputs = [{ name: '内部输入', ...contract }];
+    internal.props.outputs = [{ name: '内部输出', ...contract }];
+    const target = window.createNode('simulation_block', 720, 220);
+    target.props.inputs = [{ name: '目标输入', ...contract }];
+    target.props.outputs = [];
+    const root = window.__GZ_STATE__.canvases['canvas-root'];
+    connectCanvasNodes(root, 'rf-wrap-input', source.id, internal.id);
+    connectCanvasNodes(root, 'rf-wrap-output', internal.id, target.id);
+
+    window.selectNode(internal.id);
+    const subsystem = window.wrapSelectionIntoSubsystem();
+    expect(subsystem).not.toBeNull();
+    expect(subsystem.props.interface.inputs.find((port) => port.componentPortName.includes('内部输入')))
+      .toMatchObject(contract);
+    expect(subsystem.props.interface.outputs.find((port) => port.componentPortName.includes('内部输出')))
+      .toMatchObject(contract);
+    expect(root.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceNodeId: source.id, targetNodeId: subsystem.id }),
+      expect.objectContaining({ sourceNodeId: subsystem.id, targetNodeId: target.id })
+    ]));
+  });
+
   it('keeps separate internal paths for automatic ports sharing one direction and id', async () => {
     mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -2166,6 +2473,63 @@ describe('subsystem hierarchy app integration', () => {
     const samples = window.__GZ_SIM__?.actual?.scopeSamples?.[scopeNode.id]?.ch1 ?? [];
     expect(samples.length).toBeGreaterThan(0);
     expect(samples.some((sample) => Math.abs(sample.actual) > 0.01)).toBe(true);
+  });
+
+  it('cuts off the signal on a subsystem output wire bound to a protocol fault', async () => {
+    mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.__GZ_STATE__.sysLoaded = true;
+
+    window.createNode('signal_source', 180, 220);
+    window.createNode('subsystem_block', 440, 240);
+    window.createNode('instrument_scope', 760, 240);
+    window.createNode('protocol_fault_injector', 360, 440);
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    const rootCanvas = state.canvases['canvas-root'];
+    const source = rootCanvas.nodes.find((node) => node.type === 'signal_source');
+    const subsystem = rootCanvas.nodes.find((node) => node.type === 'subsystem_block');
+    const scope = rootCanvas.nodes.find((node) => node.type === 'instrument_scope');
+    const injector = rootCanvas.nodes.find((node) => node.type === 'protocol_fault_injector');
+    source.props.amplitude = '2';
+    source.props.frequency = '1';
+
+    window.selectNode(subsystem.id);
+    await flushRuntime();
+    document.getElementById('subsystem-input-count').value = '1';
+    document.getElementById('subsystem-output-count').value = '1';
+    window.syncSubsystemInterfaceCounts();
+    window.saveSelectedNode();
+    await flushRuntime();
+
+    connectCanvasNodes(rootCanvas, 'source-to-subsystem', source.id, subsystem.id);
+    connectCanvasNodes(rootCanvas, 'subsystem-to-scope', subsystem.id, scope.id);
+    const childCanvas = state.canvases[subsystem.targetCanvasId];
+    const childInput = childCanvas.nodes.find((node) => node.type === 'subsystem_in_port');
+    const childOutput = childCanvas.nodes.find((node) => node.type === 'subsystem_out_port');
+    connectCanvasNodes(childCanvas, 'child-pass-through', childInput.id, childOutput.id);
+
+    window.simInit(true);
+    for (let step = 0; step < 4; step += 1) window.simStep();
+    const baseline = window.__GZ_SIM__.actual.scopeSamples[scope.id]?.ch1 ?? [];
+    expect(baseline.some((sample) => Math.abs(sample.actual) > 0.01)).toBe(true);
+
+    const bound = window.bindLayeredFaultInjectorToTarget(injector.id, {
+      targetKind: 'edge', targetId: 'subsystem-to-scope', mathModel: 'data_cutoff'
+    });
+    expect(bound).toMatchObject({ ok: true, targetId: 'subsystem-to-scope' });
+
+    const pkg = window.__GZ_BACKEND_SIMULATION__.buildExecutablePackage(state);
+    expect(pkg.faultInstances).toContainEqual(expect.objectContaining({
+      targetId: pkg.edges.find((edge) => edge.targetNodeId === scope.id)?.id,
+      faultType: 'signal_cutoff'
+    }));
+
+    window.simInit(true);
+    for (let step = 0; step < 4; step += 1) window.simStep();
+    const actual = window.__GZ_SIM__.actual.scopeSamples[scope.id]?.ch1 ?? [];
+    expect(actual.every((sample) => Math.abs(sample.actual) < 1e-6)).toBe(true);
   });
 
   it('propagates a signal through the second subsystem input boundary back to the parent scope', async () => {

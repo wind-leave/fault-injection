@@ -44,7 +44,7 @@ def _json_bytes(payload):
 def _practice_identity_field(payload, field, required=False):
     """Normalize an external practice-task identifier.
 
-    Inspection tasks require both identifiers; troubleshooting keeps them
+    Inspection and power-on self-test tasks require both identifiers; troubleshooting keeps them
     optional for existing clients. Supplied values are retained until submit.
     """
     if field not in payload:

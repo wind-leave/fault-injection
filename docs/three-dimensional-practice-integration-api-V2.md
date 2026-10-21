@@ -202,13 +202,13 @@ POST /api/practice/session/{practiceSessionId}/submit
 | `measurementPorts.*[].elementNames` | 该端口被设置测点的元素名称；向量端口保存选中的向量元素名，标量端口保存组件“参数配置”中设置的端口元素名；同一端口存在多个测点时合并、去重并保持首次出现顺序 |
 | `renderData.connections` | 三维端用于构建连接关系的公开数据；不会保留连接到测量仪器的关系 |
 | `initialSimulationResult` | 当前含故障模型的静态初始仿真结果 |
-| `initialSimulationResult.physicalMeasurements` | 初始物理测点的完整逐时间步数据；测点含 `pointCode`、`pointId`、`pointName`、`channel`、`sourceDeviceId`、`sourcePort` 和 `samples`。向量端口的测点必须绑定一个具体元素，并附带元素名称字段 |
-| `initialSimulationResult.virtualMeasurements` | 初始虚拟测点的完整逐时间步数据；字段与物理测点相同 |
+| `initialSimulationResult.physicalMeasurements` | 初始物理测点的时序数据；测点含 `pointCode`、`pointId`、`pointName`、`channel`、`sourceDeviceId`、`sourcePort` 和 `samples`。向量端口的测点必须绑定一个具体元素，并附带元素名称字段 |
+| `initialSimulationResult.virtualMeasurements` | 初始虚拟测点的时序数据；字段与物理测点相同 |
 | `sourceVectorElementName` | 同一元素在源组件输出端口中的语义名称 |
 | `targetVectorElementName` | 同一元素在目标组件输入端口中的语义名称；若输入端未单独命名，则与源端名称相同 |
 | `sourceElementName` | 源组件在参数配置中为该标量输出端口设置的元素名称 |
 | `targetElementName` | 目标组件在参数配置中为该标量输入端口设置的元素名称；未单独配置时可沿用源端名称 |
-| `*.samples[]` | 单个仿真时间步的公开数据，仅含 `time` 和故障模型的 `actual` 标量值；无效元素值写为 null；不含参考值、阈值或状态判定 |
+| `*.samples[]` | 公开的 `time` 和故障模型 `actual`；`actual` 可为标量或复数包络 `{ i, q, referenceFrequencyHz }`。连续不变区间只保留首尾样本，分别标记 `constantRangeBoundary: "start"` 和 `"end"`；单个样本区间标记 `"single"`。无效值写为 null；不含参考值、阈值或状态判定 |
 
 子系统边界测点按公开拓扑归属：当测点位于子系统内部组件与外部组件之间的连线上时，边界侧端口声明保存在 `subsystem_block` 组件上，而不是内部实际采样组件上。内部组件仍用于计算和读取仿真值。
 
@@ -309,21 +309,25 @@ POST /api/practice/session/{practiceSessionId}/submit
 | `privateData.displayConsoleControls` | `displayConsoleControls` |
 | `privateData.diagnosticConditions` | `diagnosticConditions` |
 
-三维端在 `targetFaultIds` 为非空数组或 `targetFaultId` 为非空字符串时创建实践任务；未选择实践故障的导出包仍可用于展示仿真结果，但不能直接创建后端实践会话。
+排故任务在 `targetFaultIds` 为非空数组或 `targetFaultId` 为非空字符串时创建实践会话；未选择实践故障的导出包仍可用于展示仿真结果，但不能直接创建排故实践会话。内外舱检查和通电自检任务无需故障任务包，按下节指定类型与学员、任务标识即可创建。
 
 ## 4. 创建实践任务
 
-实践任务分为五种类型，由创建请求中的 `practiceType` 指定：
+实践任务分为七种类型，由创建请求中的 `practiceType` 指定：
 
 | `practiceType` | 说明 | 执行协议 |
 | --- | --- | --- |
 | `troubleshooting` | 排故操作，默认类型 | 完全沿用原有仿真、D 矩阵、动作及综合评分流程 |
-| `inspection1` | 第一类检查操作 | 不提交步骤，最终提交后固定返回 100 分 |
-| `inspection2` | 第二类检查操作 | 仅按后端内部预置的动作序号路径评分 |
-| `inspection3` | 第三类检查操作 | 不提交步骤，最终提交后固定返回 100 分 |
-| `inspection4` | 第四类检查操作 | 仅按后端内部预置的动作序号路径评分 |
+| `inspection1` | 外舱检查训练 | 不提交步骤，最终提交后固定返回 100 分 |
+| `inspection2` | 外舱检查考试 | 仅按后端内部预置的动作序号路径评分 |
+| `inspection3` | 内舱检查训练 | 不提交步骤，最终提交后固定返回 100 分 |
+| `inspection4` | 内舱检查考试 | 仅按后端内部预置的动作序号路径评分 |
+| `powerOnSelfTestTraining` | 通电自检训练 | 与内外舱检查训练一致，不提交步骤，最终提交后固定返回 100 分 |
+| `powerOnSelfTestExam` | 通电自检考试 | 每步提交 `actionNumber` 和布尔值 `isCorrect`；先核对顺序，再计算操作正确性得分 |
 
 未提供 `practiceType` 时按 `troubleshooting` 处理，旧三维客户端不受影响。第二、第四类检查任务的最优动作序号路径由后端内部维护，创建请求不提交、会话响应也不返回该路径。第一、第三类检查任务不记录实践步骤，最终提交时固定返回 100 分。
+
+通电自检训练同样不记录步骤动作。通电自检考试的标准顺序由后端固定为 `1、2、3、4、5`，创建请求不提交、会话响应也不返回该路径。满分 100 分，五步等分，每步满分 20 分；具体规则见第 5.0.1 节。
 
 ### 4.1 接口
 
@@ -368,12 +372,12 @@ POST /api/practice/session
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `practiceType` | string | 否 | `troubleshooting`、`inspection1`、`inspection2`、`inspection3` 或 `inspection4`；缺省为 `troubleshooting` |
+| `practiceType` | string | 否 | `troubleshooting`、`inspection1`、`inspection2`、`inspection3`、`inspection4`、`powerOnSelfTestTraining` 或 `powerOnSelfTestExam`；缺省为 `troubleshooting` |
 | `simulationPackage` | object | 是 | `privateData.executableModel` |
 | `connectionBindings` | array | 否 | `privateData.connectionBindings`；后端据此将一次公开连线更换应用到全部私有可执行边。省略或传空数组时从 `simulationPackage.connectionBindings` 读取；旧导出包若两处都没有映射，需要重新导出或显式传入映射 |
 | `dMatrix` | object | 是 | `privateData.dMatrix` |
-| `studentid` | string/number | 检查任务必填 | 学员标识；排故任务在最终 `evaluationReport` 中以 `studentId` 返回，检查任务在最终响应顶层以 `studentId` 返回 |
-| `jobid` | string/number | 检查任务必填 | 外部实践任务标识；排故任务在最终 `evaluationReport` 中以 `jobId` 返回，检查任务在最终响应顶层以 `jobId` 返回 |
+| `studentid` | string/number | 检查及通电自检任务必填 | 学员标识；排故任务在最终 `evaluationReport` 中以 `studentId` 返回，检查及通电自检任务在最终响应顶层以 `studentId` 返回 |
+| `jobid` | string/number | 检查及通电自检任务必填 | 外部实践任务标识；排故任务在最终 `evaluationReport` 中以 `jobId` 返回，检查及通电自检任务在最终响应顶层以 `jobId` 返回 |
 | `targetFaultId` | string | 单故障兼容字段 | `privateData.targetFaultId`；未提供时后端使用 `targetFaultIds[0]` |
 | `targetFaultIds` | array | 是 | `privateData.targetFaultIds`；仅供后端根据 D 矩阵映射出正确的组件、连线 ID 集合并评分。诊断阶段会基于 D 矩阵中的全部故障同时考虑单故障与多故障组合。 |
 | `initialRecommendedPath` | object | 否 | `privateData.initialRecommendedPath`；其 `keySteps` 是关键评分步骤，后端会自动据此生成测点与维修动作的关键节点；缺省时后端根据 D 矩阵生成 |
@@ -385,7 +389,7 @@ POST /api/practice/session
 | `resourceLimits` | object | 否 | 最大动作数量等资源限制 |
 | `actionRules` | object | 否 | 更换动作安全规则，例如是否要求断电 |
 
-上表中除 `practiceType`、`studentid`、`jobid`、`lifecycle` 和 `resourceLimits` 外的任务数据仅适用于 `troubleshooting`。创建任一检查任务时必须提交类型、学员标识和外部任务标识，例如：
+上表中除 `practiceType`、`studentid`、`jobid`、`lifecycle` 和 `resourceLimits` 外的任务数据仅适用于 `troubleshooting`。创建任一检查或通电自检任务时必须提交类型、学员标识和外部任务标识，例如：
 
 ```json
 {
@@ -395,7 +399,19 @@ POST /api/practice/session
 }
 ```
 
-检查任务创建成功后返回：
+通电自检考试创建示例：
+
+```json
+{
+  "practiceType": "powerOnSelfTestExam",
+  "studentid": "student-20260001",
+  "jobid": "job-power-on-self-test-001"
+}
+```
+
+通电自检训练使用相同结构，将 `practiceType` 改为 `powerOnSelfTestTraining`。
+
+检查及通电自检任务创建成功后返回相同结构，`practiceType` 与请求一致，不创建仿真会话。例如：
 
 ```json
 {
@@ -406,7 +422,7 @@ POST /api/practice/session
 }
 ```
 
-创建实践会话时，后端使用 `simulationPackage` 中的组件、连线和测点拓扑，以及 `dMatrix`
+创建排故实践会话时，后端使用 `simulationPackage` 中的组件、连线和测点拓扑，以及 `dMatrix`
 中的故障位置、可检测关系和维修目标，重新构建该会话独立持有的知识图谱。客户端不需要提交
 预先生成的 `knowledgeGraph`。会话图谱包含 `OUTPUTS_TO`、`INPUTS_TO`、`OBSERVES`、
 `DETECTABILITY`、`OCCURS_ON` 和 `RESOLVED_BY_REPLACING` 等关系。
@@ -437,7 +453,7 @@ POST /api/practice/session
 
 ## 5. 提交学生实践动作
 
-### 5.0 检查任务动作
+### 5.0 检查及通电自检任务动作
 
 `inspection2` 和 `inspection4` 不使用后续的排故动作结构。三维端每完成一步，只提交该动作的整数序号：
 
@@ -457,7 +473,36 @@ POST /api/practice/session
 
 第二、第四类检查任务的动作总数固定。后端按提交位置与该类型内部预置的最优序号路径逐项比较，仅对错序位置扣分；每个位置等分 100 分。最终提交时，已接收动作数必须与内部路径长度一致。
 
-`inspection1` 和 `inspection3` 不需要、也不接受动作提交。三维端创建任务后，应直接调用最终提交接口。
+`inspection1`、`inspection3` 和 `powerOnSelfTestTraining` 不需要、也不接受动作提交。三维端负责训练引导，在训练完成后直接调用最终提交接口。
+
+#### 5.0.1 通电自检考试动作与评分
+
+`powerOnSelfTestExam` 的每步请求在动作序号之外必须增加操作正确性字段：
+
+```json
+{
+  "actionNumber": 1,
+  "isCorrect": true
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `actionNumber` | positive integer | 是 | 本次实际完成的操作序号；不能传布尔值、字符串或小数 |
+| `isCorrect` | boolean | 是 | 由三维端判断该次操作是否正确；只能传 JSON `true` 或 `false`，不接受 `0`、`1`、字符串或 `null` |
+
+后端按消息接收位置与标准顺序 `1、2、3、4、5` 比较，不对收到的序号排序。每步先判断顺序，再计算操作正确性：
+
+| 该位置序号是否正确 | `isCorrect` | 该步得分 |
+| --- | --- | ---: |
+| 是 | `true` | 20 分 |
+| 是 | `false` | 10 分 |
+| 否 | `true` | 0 分 |
+| 否 | `false` | 0 分 |
+
+最终总分为五步得分之和。全部顺序正确但操作均不正确时为 50 分；全部错序时，无论操作是否正确均为 0 分。例如依次收到 `(1,true)、(3,true)、(2,false)、(4,false)、(5,true)`，总分为 `20+0+0+10+20=50` 分。
+
+成功动作响应仍只有 `{"status":"success"}`。缺少或错误类型的 `isCorrect` 返回 `400 INVALID_SCHEMA`，`field` 为 `isCorrect`，该消息不计入已接收步骤。最终提交前必须恰好接收五步，不足或超出五步时拒绝提交。通电自检考试新增字段只适用于该类型，原内外舱检查考试继续仅提交 `actionNumber`，评分规则保持原样。
 
 ### 5.1 接口
 
@@ -667,11 +712,11 @@ POST /api/practice/session/{practiceSessionId}/action
 }
 ```
 
-`simulationResult` 与导出包的 `initialSimulationResult` 使用相同结构：按物理、虚拟测点分别返回来源信息和完整的 `{ time, actual }` 时序数据，并额外返回当前 `diagnosticContext.values`，以便三维端确认本次重跑所用工况。不返回原始 `curves`、`componentOutputs`、`events` 或 `metrics`。
+`simulationResult` 与导出包的 `initialSimulationResult` 使用相同的测点时序表示：按物理、虚拟测点分别返回来源信息和 `{ time, actual }` 样本；复数包络保留 I/Q 与参考频率，连续不变区间使用 `constantRangeBoundary` 的起点和终点表示。响应还返回当前 `diagnosticContext.values`，以便三维端确认本次重跑所用工况。不返回原始 `curves`、`componentOutputs`、`events` 或 `metrics`。
 
 ## 6. 提交最终实践结果
 
-对于 `inspection2` 和 `inspection4`，请求体使用空对象 `{}`。后端完成顺序评分后返回创建任务时提交的学员标识、外部任务标识和总分，不返回综合评估报告，例如：
+对于 `inspection2`、`inspection4` 和 `powerOnSelfTestExam`，请求体使用空对象 `{}`。后端完成相应评分后返回创建任务时提交的学员标识、外部任务标识和总分，不返回综合评估报告或每步得分，例如：
 
 ```json
 {
@@ -686,7 +731,7 @@ POST /api/practice/session/{practiceSessionId}/action
 }
 ```
 
-对于 `inspection1` 和 `inspection3`，同样提交空对象 `{}`，无需预先提交任何动作，后端返回创建任务时提交的两个标识及固定分数：
+对于 `inspection1`、`inspection3` 和 `powerOnSelfTestTraining`，同样提交空对象 `{}`，无需预先提交任何动作，后端返回创建任务时提交的两个标识及固定分数：
 
 ```json
 {
@@ -748,7 +793,7 @@ POST /api/practice/session/{practiceSessionId}/submit
 
 提交成功后，后端自动将实践任务标记为已提交，计算评分并移除实践会话及其关联仿真会话。该 `practiceSessionId` 不能再用于动作、查询或重复提交。最终提交响应不包含 `runId` 和 `metrics`；`resultDelivery` 仅用于确认向学生服务投递结果的状态。
 
-五类任务最终提交后均向学生服务回调。发送到学生服务的 body 仅包含外层 `studentId`、`jobId` 和 `evaluationReport`；不发送 `practiceSessionId` 或 `simulationSessionId`，且报告内不重复包含身份字段。四类检查任务的 `evaluationReport` 包含 `totalScore`、`submittedAt` 和 `totalDurationSeconds`，例如：
+七类任务最终提交后均向学生服务回调。发送到学生服务的 body 仅包含外层 `studentId`、`jobId` 和 `evaluationReport`；不发送 `practiceSessionId` 或 `simulationSessionId`，且报告内不重复包含身份字段。四类检查及两类通电自检任务的 `evaluationReport` 沿用 `totalScore`、`submittedAt` 和 `totalDurationSeconds`，不新增分项评分或操作正确性字段，例如：
 
 ```json
 {
@@ -762,7 +807,7 @@ POST /api/practice/session/{practiceSessionId}/submit
 }
 ```
 
-其中 `inspection1`、`inspection3` 的 `totalScore` 固定为 `100.0`；`inspection2`、`inspection4` 按动作顺序评分。`submittedAt` 为后端最终提交时间（UTC ISO 8601），`totalDurationSeconds` 为服务端从创建任务到最终提交的总用时，单位为秒，四舍五入至整数。回调地址默认为 `http://127.0.0.1:9000/student/practice/result`，可通过 `PRACTICE_RESULT_CALLBACK_URL` 配置；未配置时 `resultDelivery.status` 为 `skipped`，投递失败时为 `failed`。
+其中 `inspection1`、`inspection3`、`powerOnSelfTestTraining` 的 `totalScore` 固定为 `100.0`；`inspection2`、`inspection4` 按动作顺序评分；`powerOnSelfTestExam` 按第 5.0.1 节先核对顺序，再计算操作正确性得分。`submittedAt` 为后端最终提交时间（UTC ISO 8601），`totalDurationSeconds` 为服务端从创建任务到最终提交的总用时，单位为秒，四舍五入至整数。回调地址默认为 `http://127.0.0.1:9000/student/practice/result`，可通过 `PRACTICE_RESULT_CALLBACK_URL` 配置；未配置时 `resultDelivery.status` 为 `skipped`，投递失败时为 `failed`。
 
 ## 7. `evaluationReport` 完整评估报告
 

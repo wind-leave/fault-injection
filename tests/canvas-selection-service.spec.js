@@ -1,14 +1,57 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyNodeSelection,
+  chooseCanvasEdgeForClick,
   clearCanvasSelectionState,
   getEdge,
+  rankCanvasEdgesByClientPoint,
   getNode,
   markTopologyDirty,
   normalizeSelectedNodeIds
 } from '../src/services/canvasSelectionService.js';
 
 describe('canvas selection service', () => {
+  it('ranks nearby wires by their actual path instead of SVG stacking order', () => {
+    const line = (id, y) => ({
+      dataset: { edgeId: id },
+      getTotalLength: () => 300,
+      getPointAtLength: (length) => ({ x: length, y }),
+      getBoundingClientRect: () => ({ left: 0, right: 300, top: y, bottom: y, width: 300, height: 0 })
+    });
+
+    const ranked = rankCanvasEdgesByClientPoint([
+      line('topmost-but-farther', 108),
+      line('nearest', 101)
+    ], { clientX: 157, clientY: 102, stagePoint: { x: 157, y: 102 }, scale: 1, threshold: 14 });
+
+    expect(ranked.map((item) => item.id)).toEqual(['nearest', 'topmost-but-farther']);
+    expect(ranked[0].distance).toBeCloseTo(1);
+  });
+
+  it('keeps the hit tolerance in screen pixels when the canvas is zoomed', () => {
+    const path = {
+      dataset: { edgeId: 'edge-1' },
+      getTotalLength: () => 200,
+      getPointAtLength: (length) => ({ x: length, y: 0 })
+    };
+
+    expect(rankCanvasEdgesByClientPoint([path], {
+      clientX: 50, clientY: 6,
+      stagePoint: { x: 100, y: 12 }, scale: 0.5, threshold: 8
+    })).toEqual([{ id: 'edge-1', distance: 6 }]);
+  });
+
+  it('cycles through nearly overlapping wires on repeated clicks', () => {
+    const nearby = [{ id: 'edge-a', distance: 1 }, { id: 'edge-b', distance: 3 }];
+    const first = { x: 100, y: 80, time: 1000 };
+    expect(chooseCanvasEdgeForClick(nearby, {}, first)).toBe('edge-a');
+    expect(chooseCanvasEdgeForClick(nearby, { ...first, id: 'edge-a' }, {
+      x: 102, y: 81, time: 1300
+    })).toBe('edge-b');
+    expect(chooseCanvasEdgeForClick(nearby, { ...first, id: 'edge-b' }, {
+      x: 102, y: 81, time: 3000
+    })).toBe('edge-a');
+  });
   function createState() {
     return {
       step: 3,

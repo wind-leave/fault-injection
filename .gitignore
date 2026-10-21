@@ -7,5 +7,7 @@ dist/
 __pycache__/
 *.pyc
 component-data/
-/tmp/
+tmp/
+.uv-cache/
+.ruff_cache/
 /student-practice-result-body-*.json

@@ -58,7 +58,7 @@ S.activeCanvasId='canvas-root';
 S.canvasTrail=['canvas-root'];
 S.canvases={};
 
-const CANVAS_STAGE={width:2400,height:1500,minScale:0.3,maxScale:1.8,nodePadding:24,nodeMinY:24};
+const CANVAS_STAGE={minX:0,minY:0,width:2400,height:1500,minScale:0.3,maxScale:1.8,nodePadding:24,nodeMinY:24};
 const CANVAS_STAGE_DEFAULT_SIZE={width:2400,height:1500};
 const CANVAS_STAGE_EXPANSION={step:480,edgeThreshold:144,trailingSpace:320};
 const POINTER_DRAG_THRESHOLD=6;
@@ -323,7 +323,7 @@ function syncRuntimeSignalSourceOutputFromProps(node){
 }
 
 function getRuntimeAdjustedSignalSourceProps(node){
-  const props=normalizeSignalSourcePropsRuntime(node.props||{});
+  const props=getSignalGeneratorEffectiveProps(node,normalizeSignalSourcePropsRuntime(node.props||{}));
   if(props.signalDomain!=='digital'){return props;}
   const runtimeValue=SIM?.signalSourceOutputs?.[node.id]?.value;
   if(runtimeValue==null){return props;}
@@ -1315,13 +1315,11 @@ function applyNodeGeometry(node){
     }
   }
   expandCanvasStageForBounds({
-    x:Math.max(CANVAS_STAGE.nodePadding,node.x),
-    y:Math.max(CANVAS_STAGE.nodeMinY,node.y),
+    x:node.x,
+    y:node.y,
     width:node.w,
     height:node.h
   });
-  node.x=clamp(node.x,CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-node.w-CANVAS_STAGE.nodePadding);
-  node.y=clamp(node.y,CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-node.h-CANVAS_STAGE.nodePadding);
 }
 
 function pruneInvalidEdgesForNode(node){
@@ -1548,7 +1546,7 @@ function getSubsystemBoundaryNodeId(subsystemNodeId,role,portId){
 function createSubsystemBoundaryNode(subsystemNode,role,item,index,existingNode=null,duplicateId=false){
   const type=role==='input'?'subsystem_in_port':'subsystem_out_port';
   const meta=COMPONENT_LIBRARY[type];
-  const defaultX=role==='input'?64:(CANVAS_STAGE.width-meta.width-64);
+  const defaultX=role==='input'?64:(CANVAS_STAGE.minX+CANVAS_STAGE.width-meta.width-64);
   const defaultY=160+(index*92);
   return {
     id:existingNode?.id||getSubsystemBoundaryNodeId(subsystemNode.id,role,duplicateId?`${item.id}-${index}`:item.id),
@@ -1563,6 +1561,7 @@ function createSubsystemBoundaryNode(subsystemNode,role,item,index,existingNode=
       interfacePortId:item.id,
       interfaceRole:role,
       portType:item.type,
+      collectionKind:item.collectionKind,
       vectorLength:item.vectorLength,
       vectorElementNames:Array.isArray(item.vectorElementNames)?[...item.vectorElementNames]:undefined,
       elementNames:Array.isArray(item.elementNames)?[...item.elementNames]:undefined,
@@ -1618,7 +1617,9 @@ function getExistingSubsystemInterfaceIdentityMap(node,canvas,role,items){
 }
 
 function getSubsystemDerivedPortType(port){
-  const raw=port?.meta?.type||port?.type||port?.dataType||'标量';
+  const candidates=[port?.meta?.dataType,port?.dataType,port?.meta?.type,port?.type];
+  const raw=candidates.find(value=>normalizePortType(value)==='rf_complex_envelope')
+    ||port?.meta?.type||port?.type||port?.meta?.dataType||port?.dataType||'标量';
   const aliases={scalar:'标量',vector:'向量',matrix:'矩阵',boolean:'布尔',event:'事件',rf_complex_envelope:'复数包络','rf-complex-envelope':'复数包络'};
   const normalized=aliases[String(raw).toLowerCase()]||raw;
   return PORT_FORMATS.includes(normalized)?normalized:'标量';
@@ -1628,11 +1629,12 @@ function getSubsystemComplexEnvelopeContract(port){
   if(getSubsystemDerivedPortType(port)!=='复数包络'){
     return {};
   }
-  const source=port?.meta||port||{};
+  const source={...(port||{}),...(port?.meta||{})};
   const referenceFrequencyHz=Number(source.referenceFrequencyHz);
   const impedanceOhm=Number(source.impedanceOhm);
   return {
     dataType:'rf_complex_envelope',
+    ...(source.collectionKind==='vector'?{collectionKind:'vector'}:{}),
     ...(Number.isFinite(referenceFrequencyHz)&&referenceFrequencyHz>=0?{referenceFrequencyHz}:{}),
     impedanceOhm:Number.isFinite(impedanceOhm)&&impedanceOhm>0?impedanceOhm:50,
     unit:String(source.unit||'V').trim()||'V'
@@ -1644,7 +1646,7 @@ function getSubsystemDerivedPortLabel(port,direction,index){
 }
 
 function getSubsystemDerivedElementFields(port){
-  const source=port?.meta||port||{};
+  const source={...(port||{}),...(port?.meta||{})};
   const sourceVectorNames=Array.isArray(source.vectorElementNames)?source.vectorElementNames:[];
   const vectorLength=Math.max(0,Number.parseInt(source.vectorLength,10)||sourceVectorNames.length||0);
   if(vectorLength){
@@ -1760,6 +1762,7 @@ function syncAutomaticSubsystemBoundaryMappings(node,canvas){
       sourcePortIndex:0,
       targetPortIndex:item.componentPortIndex||0,
       subsystemBoundaryMapping:true,
+      subsystemBoundaryRole:'input',
       interfacePortId:item.id,
       ...(externalEdge?{linkedExternalEdgeId:externalEdge.id}:{})
     });
@@ -1776,6 +1779,7 @@ function syncAutomaticSubsystemBoundaryMappings(node,canvas){
       sourcePortIndex:item.componentPortIndex||0,
       targetPortIndex:0,
       subsystemBoundaryMapping:true,
+      subsystemBoundaryRole:'output',
       interfacePortId:item.id,
       ...(externalEdge?{linkedExternalEdgeId:externalEdge.id}:{})
     });
@@ -2054,6 +2058,17 @@ function getEdge(id){
   return S.modelEdges.find(edge=>edge.id===id);
 }
 
+function getEdgeAcrossWorkbenchCanvases(id){
+  if(!id){return null;}
+  const activeEdge=getEdge(id);
+  if(activeEdge){return activeEdge;}
+  for(const canvas of Object.values(S.canvases||{})){
+    const edge=(canvas?.edges||[]).find(item=>item?.id===id);
+    if(edge){return edge;}
+  }
+  return null;
+}
+
 function getLayerLabel(layer){
   return LAYER_LABELS[layer]||layer||'未分类';
 }
@@ -2276,40 +2291,34 @@ function clearCanvasSelection(){
   renderPropertyPanel(null);
 }
 
+function findNearbyEdgesByClientPoint(clientX,clientY,threshold=14){
+  const paths=document.querySelectorAll('.edge-path[data-edge-id]');
+  const rank=window.__GZ_CANVAS_SELECTION__?.rankCanvasEdgesByClientPoint;
+  return rank?rank(paths,{
+    clientX,clientY,
+    stagePoint:clientToStagePoint(clientX,clientY),
+    scale:S.canvasScale,
+    threshold
+  }):[];
+}
+
 function findNearestEdgeIdByClientPoint(clientX,clientY,threshold=14){
-  const paths=[...document.querySelectorAll('.edge-path[data-edge-id]')];
-  if(paths.length===0){return '';}
-  const point=clientToStagePoint(clientX,clientY);
-  const stageThreshold=threshold/Math.max(S.canvasScale,0.001);
-  let nearestId='';
-  let nearestDistance=Infinity;
+  return findNearbyEdgesByClientPoint(clientX,clientY,threshold)[0]?.id||'';
+}
 
-  paths.forEach(path=>{
-    if(typeof path.getTotalLength!=='function'||typeof path.getPointAtLength!=='function') return;
-    const bounds=path.getBoundingClientRect?.();
-    if(bounds&&(bounds.width>0||bounds.height>0)&&(
-      clientX<bounds.left-threshold||clientX>bounds.right+threshold||
-      clientY<bounds.top-threshold||clientY>bounds.bottom+threshold
-    )) return;
-    const total=path.getTotalLength();
-    const sampleStep=Math.max(8,total/18);
-    for(let cursor=0;cursor<=total;cursor+=sampleStep){
-      const pos=path.getPointAtLength(Math.min(cursor,total));
-      const distance=Math.hypot(pos.x-point.x,pos.y-point.y);
-      if(distance<nearestDistance){
-        nearestDistance=distance;
-        nearestId=path.dataset.edgeId||'';
-      }
-    }
-    const last=path.getPointAtLength(total);
-    const lastDistance=Math.hypot(last.x-point.x,last.y-point.y);
-    if(lastDistance<nearestDistance){
-      nearestDistance=lastDistance;
-      nearestId=path.dataset.edgeId||'';
-    }
-  });
-
-  return nearestDistance<=stageThreshold?nearestId:'';
+const EDGE_CLICK_CYCLE={x:NaN,y:NaN,time:0,id:''};
+function selectEdgeFromClientEvent(event,fallbackId=''){
+  const nearby=findNearbyEdgesByClientPoint(event.clientX,event.clientY);
+  const time=Date.now();
+  const choose=window.__GZ_CANVAS_SELECTION__?.chooseCanvasEdgeForClick;
+  const edgeId=choose?choose(nearby,EDGE_CLICK_CYCLE,{
+    x:event.clientX,y:event.clientY,time
+  },fallbackId):fallbackId;
+  EDGE_CLICK_CYCLE.x=event.clientX;
+  EDGE_CLICK_CYCLE.y=event.clientY;
+  EDGE_CLICK_CYCLE.time=time;
+  EDGE_CLICK_CYCLE.id=edgeId;
+  if(edgeId){selectEdge(edgeId);}
 }
 
 function getConfigurableNodes(){
@@ -2333,35 +2342,54 @@ function syncCanvasStageDimensions(){
   if(stage){
     stage.style.width=`${CANVAS_STAGE.width}px`;
     stage.style.height=`${CANVAS_STAGE.height}px`;
+    stage.style.setProperty('--canvas-content-shift-x',`${-CANVAS_STAGE.minX}px`);
+    stage.style.setProperty('--canvas-content-shift-y',`${-CANVAS_STAGE.minY}px`);
   }
-  document.getElementById('edge-layer')?.setAttribute('viewBox',`0 0 ${CANVAS_STAGE.width} ${CANVAS_STAGE.height}`);
-  document.getElementById('canvas-edge-control-layer')?.setAttribute('viewBox',`0 0 ${CANVAS_STAGE.width} ${CANVAS_STAGE.height}`);
+  const viewBox=`${CANVAS_STAGE.minX} ${CANVAS_STAGE.minY} ${CANVAS_STAGE.width} ${CANVAS_STAGE.height}`;
+  document.getElementById('edge-layer')?.setAttribute('viewBox',viewBox);
+  document.getElementById('canvas-edge-control-layer')?.setAttribute('viewBox',viewBox);
 }
 
 function resetCanvasStageSize(){
+  CANVAS_STAGE.minX=0;
+  CANVAS_STAGE.minY=0;
   CANVAS_STAGE.width=CANVAS_STAGE_DEFAULT_SIZE.width;
   CANVAS_STAGE.height=CANVAS_STAGE_DEFAULT_SIZE.height;
   syncCanvasStageDimensions();
 }
 
-function expandCanvasStageForBounds({x=0,y=0,width=0,height=0}={}){
+function expandCanvasStageForBounds({x=0,y=0,width=0,height=0,expandLeading=false}={}){
+  const left=x-CANVAS_STAGE.nodePadding;
+  const top=y-CANVAS_STAGE.nodePadding;
   const right=x+width+CANVAS_STAGE.nodePadding;
   const bottom=y+height+CANVAS_STAGE.nodePadding;
   let changed=false;
-  if(right>=CANVAS_STAGE.width-CANVAS_STAGE_EXPANSION.edgeThreshold){
-    const required=right+CANVAS_STAGE_EXPANSION.trailingSpace;
-    CANVAS_STAGE.width=Math.max(
-      CANVAS_STAGE.width+CANVAS_STAGE_EXPANSION.step,
-      Math.ceil(required/CANVAS_STAGE_EXPANSION.step)*CANVAS_STAGE_EXPANSION.step
-    );
+  if(left<(expandLeading?CANVAS_STAGE.minX+CANVAS_STAGE_EXPANSION.edgeThreshold:CANVAS_STAGE.minX)){
+    const nextMinX=Math.min(CANVAS_STAGE.minX-CANVAS_STAGE_EXPANSION.step,
+      Math.floor((left-CANVAS_STAGE_EXPANSION.trailingSpace)/CANVAS_STAGE_EXPANSION.step)*CANVAS_STAGE_EXPANSION.step);
+    CANVAS_STAGE.width+=CANVAS_STAGE.minX-nextMinX;
+    CANVAS_STAGE.minX=nextMinX;
     changed=true;
   }
-  if(bottom>=CANVAS_STAGE.height-CANVAS_STAGE_EXPANSION.edgeThreshold){
+  if(top<(expandLeading?CANVAS_STAGE.minY+CANVAS_STAGE_EXPANSION.edgeThreshold:CANVAS_STAGE.minY)){
+    const nextMinY=Math.min(CANVAS_STAGE.minY-CANVAS_STAGE_EXPANSION.step,
+      Math.floor((top-CANVAS_STAGE_EXPANSION.trailingSpace)/CANVAS_STAGE_EXPANSION.step)*CANVAS_STAGE_EXPANSION.step);
+    CANVAS_STAGE.height+=CANVAS_STAGE.minY-nextMinY;
+    CANVAS_STAGE.minY=nextMinY;
+    changed=true;
+  }
+  if(right>=CANVAS_STAGE.minX+CANVAS_STAGE.width-CANVAS_STAGE_EXPANSION.edgeThreshold){
+    const required=right+CANVAS_STAGE_EXPANSION.trailingSpace;
+    const nextMaxX=Math.max(CANVAS_STAGE.minX+CANVAS_STAGE.width+CANVAS_STAGE_EXPANSION.step,
+      Math.ceil(required/CANVAS_STAGE_EXPANSION.step)*CANVAS_STAGE_EXPANSION.step);
+    CANVAS_STAGE.width=nextMaxX-CANVAS_STAGE.minX;
+    changed=true;
+  }
+  if(bottom>=CANVAS_STAGE.minY+CANVAS_STAGE.height-CANVAS_STAGE_EXPANSION.edgeThreshold){
     const required=bottom+CANVAS_STAGE_EXPANSION.trailingSpace;
-    CANVAS_STAGE.height=Math.max(
-      CANVAS_STAGE.height+CANVAS_STAGE_EXPANSION.step,
-      Math.ceil(required/CANVAS_STAGE_EXPANSION.step)*CANVAS_STAGE_EXPANSION.step
-    );
+    const nextMaxY=Math.max(CANVAS_STAGE.minY+CANVAS_STAGE.height+CANVAS_STAGE_EXPANSION.step,
+      Math.ceil(required/CANVAS_STAGE_EXPANSION.step)*CANVAS_STAGE_EXPANSION.step);
+    CANVAS_STAGE.height=nextMaxY-CANVAS_STAGE.minY;
     changed=true;
   }
   if(changed){
@@ -2386,10 +2414,16 @@ function expandCanvasStageForViewportPan(nextOffsetX,nextOffsetY){
   const viewport=getCanvasViewport();
   if(!viewport){return false;}
   const scale=Math.max(S.canvasScale||1,0.001);
-  return expandCanvasStageForBounds({
+  const leadingChanged=expandCanvasStageForBounds({
+    x:-nextOffsetX/scale+CANVAS_STAGE.nodePadding,
+    y:-nextOffsetY/scale+CANVAS_STAGE.nodePadding,
+    expandLeading:true
+  });
+  const trailingChanged=expandCanvasStageForBounds({
     x:(viewport.clientWidth-nextOffsetX)/scale-CANVAS_STAGE.nodePadding,
     y:(viewport.clientHeight-nextOffsetY)/scale-CANVAS_STAGE.nodePadding
   });
+  return leadingChanged||trailingChanged;
 }
 
 function getEdgeLabel(edge){
@@ -2464,6 +2498,10 @@ function buildEdgePortMeta(port){
     collectionKind:port.collectionKind??port.meta?.collectionKind,
     vectorLength:port.vectorLength??port.meta?.vectorLength,
     vectorElementNames:port.vectorElementNames??port.meta?.vectorElementNames,
+    elementNames:port.elementNames??port.meta?.elementNames,
+    referenceFrequencyHz:port.referenceFrequencyHz??port.meta?.referenceFrequencyHz,
+    impedanceOhm:port.impedanceOhm??port.meta?.impedanceOhm,
+    unit:port.unit??port.meta?.unit,
     default:port.meta?.default??null
   };
 }
@@ -2611,6 +2649,40 @@ function unbindPythonBinding(nodeId=''){
   toast(`已解除 ${node.props.name} 的 Python 绑定${removedEdges?`，并移除 ${removedEdges} 条无效连线`:''}`,'s');
 }
 
+function getSignalGeneratorConnectionShape(node){
+  if(node?.templateId!=='XHFSQ') return null;
+  const edge=S.modelEdges.find(item=>item.sourceNodeId===node.id&&item.lineType!=='power');
+  if(!edge) return {mode:'scalar',length:0};
+  const target=S.modelNodes.find(item=>item.id===edge.targetNodeId);
+  const index=Number(edge.targetPortIndex)||0;
+  const port=target?.props?.interface?.inputs?.[index]
+    ||target?.ports?.inputs?.[index]
+    ||target?.pythonBinding?.portMapping?.inputs?.[index]
+    ||target?.props?.inputs?.[index]
+    ||target?.inputs?.[index]
+    ||edge.targetPortMeta
+    ||{};
+  const meta=buildEdgePortMeta(port);
+  const length=Number(meta.vectorLength);
+  const vector=meta.collectionKind==='vector'||normalizePortType(meta.type)==='vector'
+    ||normalizePortType(meta.type)==='rf_complex_envelope'&&length>0;
+  return vector&&Number.isInteger(length)&&length>0
+    ?{mode:'vector',length}
+    :{mode:'scalar',length:0};
+}
+
+function getSignalGeneratorEffectiveProps(node,props){
+  const shape=getSignalGeneratorConnectionShape(node);
+  return shape
+    ?{...props,rfComplexEnvelopeMode:shape.mode,...(shape.length?{rfVectorLength:shape.length}:{})}
+    :props;
+}
+
+function getSignalSourceOutputVectorLength(node,props){
+  const shape=getSignalGeneratorConnectionShape(node);
+  return shape?.mode==='vector'?shape.length:getRfVectorLengthRuntime(props.rfVectorLength);
+}
+
 function getNodePorts(node){
   if(!node){return {inputs:[],outputs:[]};}
   if(node.type==='flow_block'&&isPythonBoundFlowBlock(node)){
@@ -2642,7 +2714,7 @@ function getNodePorts(node){
     };
   }
   if(node.type==='signal_source'){
-    const props=normalizeSignalSourcePropsRuntime(node.props||{});
+    const props=getSignalGeneratorEffectiveProps(node,normalizeSignalSourcePropsRuntime(node.props||{}));
     if(node.templateId==='XHFSQ'){
       Object.assign(props,{signalDomain:'rf',outputFormat:'复数包络',outputPortId:'XHFSQ_X1'});
     }
@@ -2659,7 +2731,7 @@ function getNodePorts(node){
         portId:props.outputPortId||'signal',
         label:props.outputPortName||props.outputFormat||'输出',
         dataType:complexEnvelope?'rf_complex_envelope':(vector?'vector':'scalar'),
-        ...(vector||complexEnvelopeVector?{vectorLength:getRfVectorLengthRuntime(props.rfVectorLength)}:{}),
+        ...(vector||complexEnvelopeVector?{vectorLength:getSignalSourceOutputVectorLength(node,props)}:{}),
         ...(complexEnvelope?{
           ...(complexEnvelopeVector?{collectionKind:'vector'}:{}),
           referenceFrequencyHz:Math.max(parseRfRate(centerFrequencyText,0),0),
@@ -2682,7 +2754,8 @@ function getNodePorts(node){
         key:`input-${index}`,
         label:`输入 ${index+1} · ${item.name} / ${item.type}`,
         kind:'input',
-        side:item.side==='right'?'right':'left'
+        side:item.side==='right'?'right':'left',
+        meta:item
       })),
       outputs:getSimulationFlatOutputs(node.props).map((item,index)=>({
         key:`${item.kind}-${item.index}`,
@@ -2834,23 +2907,25 @@ function clampCanvasOffset(){
   const edgeGap=72;
 
   if(scaledWidth<=width-edgeGap*2){
-    S.canvasOffsetX=Math.round((width-scaledWidth)/2);
+    S.canvasOffsetX=Math.round((width-scaledWidth)/2-CANVAS_STAGE.minX*S.canvasScale);
   }else{
-    S.canvasOffsetX=clamp(S.canvasOffsetX,width-scaledWidth-edgeGap,edgeGap);
+    S.canvasOffsetX=clamp(S.canvasOffsetX,width-(CANVAS_STAGE.minX+CANVAS_STAGE.width)*S.canvasScale-edgeGap,edgeGap-CANVAS_STAGE.minX*S.canvasScale);
   }
 
   if(scaledHeight<=height-edgeGap*2){
-    S.canvasOffsetY=Math.round((height-scaledHeight)/2);
+    S.canvasOffsetY=Math.round((height-scaledHeight)/2-CANVAS_STAGE.minY*S.canvasScale);
   }else{
-    S.canvasOffsetY=clamp(S.canvasOffsetY,height-scaledHeight-edgeGap,edgeGap);
+    S.canvasOffsetY=clamp(S.canvasOffsetY,height-(CANVAS_STAGE.minY+CANVAS_STAGE.height)*S.canvasScale-edgeGap,edgeGap-CANVAS_STAGE.minY*S.canvasScale);
   }
 }
 
 function applyCanvasTransform(){
   const stage=getCanvasStage();
   if(stage){
-    stage.style.left=`${S.canvasOffsetX/S.canvasScale}px`;
-    stage.style.top=`${S.canvasOffsetY/S.canvasScale}px`;
+    // CSS zoom also scales SVG strokes. Keep the invisible wire target 28px wide on screen.
+    stage.style.setProperty('--edge-hit-width',`${28/Math.max(S.canvasScale||1,0.001)}px`);
+    stage.style.left=`${S.canvasOffsetX/S.canvasScale+CANVAS_STAGE.minX}px`;
+    stage.style.top=`${S.canvasOffsetY/S.canvasScale+CANVAS_STAGE.minY}px`;
     stage.style.zoom=String(S.canvasScale);
     stage.style.transform='none';
   }
@@ -3189,7 +3264,7 @@ function renderEdges(){
     hit.dataset.edgeId=edge.id;
     hit.addEventListener('click',event=>{
       event.stopPropagation();
-      selectEdge(edge.id);
+      selectEdgeFromClientEvent(event,edge.id);
     });
     edgeGroup.appendChild(hit);
 
@@ -3200,7 +3275,7 @@ function renderEdges(){
     path.dataset.edgeId=edge.id;
     path.addEventListener('click',event=>{
       event.stopPropagation();
-      selectEdge(edge.id);
+      selectEdgeFromClientEvent(event,edge.id);
     });
     edgeGroup.appendChild(path);
 
@@ -3344,6 +3419,15 @@ function handlePortClick(event,nodeId,direction,index){
     window.getNodePorts?.(sourceNode)||getNodePorts(sourceNode));
   const sourceMeta=buildEdgePortMeta(sourcePort);
   const targetMeta=buildEdgePortMeta(port);
+  if(sourceNode?.templateId==='XHFSQ'
+    &&!S.modelEdges.some(edge=>edge.sourceNodeId===sourceNode.id&&edge.lineType!=='power')
+    &&normalizePortType(targetMeta.type)==='rf_complex_envelope'){
+    const targetLength=Number(targetMeta.vectorLength);
+    const targetIsVector=targetMeta.collectionKind==='vector';
+    sourceMeta.collectionKind=targetIsVector?'vector':undefined;
+    sourceMeta.vectorLength=targetIsVector&&Number.isInteger(targetLength)&&targetLength>0
+      ?targetLength:undefined;
+  }
   const sourceVector=normalizePortType(sourceMeta.type)==='vector'||sourceMeta.collectionKind==='vector';
   const targetVector=normalizePortType(targetMeta.type)==='vector'||targetMeta.collectionKind==='vector';
   if(normalizePortType(sourceMeta.type)==='rf_complex_envelope'
@@ -3770,14 +3854,14 @@ function createNode(type,rawX,rawY){
   }
   const size=nodeType==='simulation_block'?getSimulationNodeSize(props):{width:meta.width,height:meta.height};
   expandCanvasStageForBounds({
-    x:Math.max(CANVAS_STAGE.nodePadding,Math.round(rawX-size.width/2)),
-    y:Math.max(CANVAS_STAGE.nodeMinY,Math.round(rawY-size.height/2)),
+    x:Math.round(rawX-size.width/2),
+    y:Math.round(rawY-size.height/2),
     width:size.width,
     height:size.height
   });
   const point={
-    x:clamp(Math.round(rawX-size.width/2),CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-size.width-CANVAS_STAGE.nodePadding),
-    y:clamp(Math.round(rawY-size.height/2),CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-size.height-CANVAS_STAGE.nodePadding)
+    x:Math.round(rawX-size.width/2),
+    y:Math.round(rawY-size.height/2)
   };
   const node={
     id:`node-${++S.nodeSeq}`,
@@ -3908,7 +3992,7 @@ function bindCanvasInteractions(){
     if(edgeInteractive){return;}
     const edgeId=findNearestEdgeIdByClientPoint(event.clientX,event.clientY);
     if(edgeId){
-      selectEdge(edgeId);
+      selectEdgeFromClientEvent(event,edgeId);
       return;
     }
     if(S.pendingConnection){
@@ -3959,8 +4043,8 @@ function bindCanvasInteractions(){
       const nextX=Math.round(NODE_DRAG.originX+deltaX);
       const nextY=Math.round(NODE_DRAG.originY+deltaY);
       expandCanvasStageForNode(node,nextX,nextY);
-      node.x=clamp(nextX,CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-node.w-CANVAS_STAGE.nodePadding);
-      node.y=clamp(nextY,CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-node.h-CANVAS_STAGE.nodePadding);
+      node.x=nextX;
+      node.y=nextY;
       scheduleNodePositionUpdate(node);
       if(typeof window.scheduleCanvasEdgeRender==='function'){
         window.scheduleCanvasEdgeRender({nodeIds:[node.id]});
@@ -6389,7 +6473,7 @@ function computeRfSourceSignal(node,time){
   if(isRfComplexEnvelopeOutput(props)){
     const envelope=computeRfComplexEnvelopeSource(node,time);
     return props.rfComplexEnvelopeMode==='vector'
-      ?Array.from({length:getRfVectorLengthRuntime(props.rfVectorLength)},()=>({...envelope}))
+      ?Array.from({length:getSignalSourceOutputVectorLength(node,props)},()=>({...envelope}))
       :envelope;
   }
   const power=parseRfPowerPeakVoltage(props.power,props.powerUnit);
@@ -6502,6 +6586,11 @@ function applyPhysicalFaultNode(node,inputValue,time,modeKey){
     return inputValue+noiseAt(getNodeSeed(node.id),SIM.stepIndex,time)*0.22;
   }
   return inputValue;
+}
+
+function resolveSourceSignal(node,modeKey,time){
+  const value=computeSourceSignal(node,time);
+  return modeKey==='actual'?applyElectricalFault(node,0,value,time):value;
 }
 
 function flipBitValue(value){
@@ -6693,7 +6782,7 @@ function resolveNodeOutputs(nodeId,modeKey,time,dt,cache,visiting){
   let resolved={outputs:[0],middleValues:[]};
 
   if(node.type==='signal_source'){
-    resolved={outputs:[computeSourceSignal(node,time)],middleValues:[]};
+    resolved={outputs:[resolveSourceSignal(node,modeKey,time)],middleValues:[]};
   }else if(node.type==='flow_block'){
     resolved=isPythonBoundFlowBlock(node)
       ?executeBoundFlowBlock(node,nodeState,inputValues,modeKey,time,dt)
@@ -6911,18 +7000,12 @@ function getSpectrumWindowCoefficient(kind,index,size){
 
 function parseSpectrumFrequencyRange(value,sampleRate){
   const nyquist=Math.max(Number(sampleRate)||0,0)/2;
-  const raw=String(value||'').trim();
-  const defaultUnit=/ghz/i.test(raw)?1000000000:/mhz/i.test(raw)?1000000:/khz/i.test(raw)?1000:1;
-  const values=Array.from(raw.replace(/\s*[-~]\s*/g,',').matchAll(/\d+(?:\.\d+)?(?:\s*(?:g|m|k)?hz)?/gi))
-    .map(match=>{
-      const item=match[0];
-      const unit=/ghz/i.test(item)?1000000000:/mhz/i.test(item)?1000000:/khz/i.test(item)?1000:/hz/i.test(item)?1:defaultUnit;
-      return parseScalar(item,NaN)*unit;
-    })
-    .filter(Number.isFinite);
-  const min=clamp(values.length>1?Math.min(values[0],values[1]):0,0,nyquist);
-  const max=clamp(values.length>1?Math.max(values[0],values[1]):(values[0]??nyquist),min,nyquist);
-  return {min,max:max>min?max:nyquist};
+  const values=parseSpectrumFrequencyValues(value);
+  const min=Math.max(values.length>1?Math.min(values[0],values[1]):0,0);
+  const max=Math.max(values.length>1?Math.max(values[0],values[1]):(values[0]??nyquist),0);
+  // The display range is a user setting. A real-valued capture only contains
+  // FFT bins up to Nyquist, but that limit must not rewrite manual tuning.
+  return max>min?{min,max}:{min:0,max:nyquist};
 }
 
 function isComplexEnvelopeSpectrumMode(node,values=[]){
@@ -6975,14 +7058,7 @@ function parseComplexEnvelopeFrequencyRange(value,referenceFrequencyHz,sampleRat
   }
   const raw=String(value||'').trim();
   if(!raw){return fallback;}
-  const defaultUnit=/ghz/i.test(raw)?1000000000:/mhz/i.test(raw)?1000000:/khz/i.test(raw)?1000:1;
-  const values=Array.from(raw.replace(/\s*[-~]\s*/g,',').matchAll(/\d+(?:\.\d+)?(?:\s*(?:g|m|k)?hz)?/gi))
-    .map(match=>{
-      const item=match[0];
-      const unit=/ghz/i.test(item)?1000000000:/mhz/i.test(item)?1000000:/khz/i.test(item)?1000:/hz/i.test(item)?1:defaultUnit;
-      return parseScalar(item,NaN)*unit;
-    })
-    .filter(Number.isFinite);
+  const values=parseSpectrumFrequencyValues(raw);
   if(values.length<2){return fallback;}
   // 手动频率范围是仪器显示设置，不应被包络采样带宽静默改写。
   // 超出 referenceFrequencyHz ± Fs/2 的部分没有可用 FFT bin，会显示
@@ -7003,6 +7079,22 @@ function getSpectrumFrequencyMultiplier(unit){
   return unit==='GHz'?1000000000:unit==='MHz'?1000000:unit==='kHz'?1000:1;
 }
 
+function parseSpectrumFrequencyValues(value){
+  const raw=String(value??'').trim();
+  const defaultUnit=getSpectrumFrequencyUnit(raw,'Hz');
+  // A minus after e/E belongs to the exponent, not the range separator.
+  return raw.split(/(?<![eE])\s*[-~]\s*/).map(part=>{
+    const match=part.trim().match(/^((?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)\s*((?:g|m|k)?hz)?$/i);
+    if(!match){return NaN;}
+    return Number(match[1])*getSpectrumFrequencyMultiplier(getSpectrumFrequencyUnit(match[2],defaultUnit));
+  }).filter(Number.isFinite);
+}
+
+function formatSpectrumInputNumber(value){
+  const number=Number(value);
+  return Number.isFinite(number)?String(Number(number.toPrecision(15))):'0';
+}
+
 function getSpectrumFrequencyDisplayUnit(...values){
   const magnitude=Math.max(...values.map(value=>Math.abs(Number(value)||0)));
   if(magnitude>=1000000000){return 'GHz';}
@@ -7015,6 +7107,10 @@ function formatSpectrumFrequency(value,unit=getSpectrumFrequencyDisplayUnit(valu
   return `${formatScopeMetric(Number(value)/getSpectrumFrequencyMultiplier(unit))}${unit}`;
 }
 
+function formatSpectrumAxisFrequency(value,unit){
+  return `${formatSpectrumInputNumber(Number(value)/getSpectrumFrequencyMultiplier(unit))}${unit}`;
+}
+
 function formatSpectrumFrequencyFixed(value,unit,fractionDigits=4){
   const frequency=Number(value);
   if(!Number.isFinite(frequency)){return '--';}
@@ -7024,12 +7120,12 @@ function formatSpectrumFrequencyFixed(value,unit,fractionDigits=4){
 function formatSpectrumFrequencyRange(start,end){
   const unit=getSpectrumFrequencyDisplayUnit(start,end);
   const multiplier=getSpectrumFrequencyMultiplier(unit);
-  return `${Number((start/multiplier).toFixed(9))}-${Number((end/multiplier).toFixed(9))}${unit}`;
+  return `${formatSpectrumInputNumber(start/multiplier)}-${formatSpectrumInputNumber(end/multiplier)}${unit}`;
 }
 
 function splitSpectrumFrequencyValue(value,fallbackValue='0',fallbackUnit='Hz'){
   const raw=String(value??'').trim();
-  const numberMatch=raw.match(/\d+(?:\.\d+)?/);
+  const numberMatch=raw.match(/^(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?/i);
   return {
     value:numberMatch?.[0]||fallbackValue,
     unit:getSpectrumFrequencyUnit(raw,fallbackUnit)
@@ -7037,19 +7133,19 @@ function splitSpectrumFrequencyValue(value,fallbackValue='0',fallbackUnit='Hz'){
 }
 
 function splitSpectrumFrequencyRange(value){
-  const raw=String(value??'').replace(/\s*[-~]\s*/g,',');
+  const raw=String(value??'');
   const fallbackUnit=getSpectrumFrequencyUnit(raw,'kHz');
-  const matches=Array.from(raw.matchAll(/\d+(?:\.\d+)?(?:\s*(?:g|m|k)?hz)?/gi));
+  const matches=raw.split(/(?<![eE])\s*[-~]\s*/);
   const toDisplayValue=(rawValue,fallbackValue)=>{
     const value=splitSpectrumFrequencyValue(rawValue,fallbackValue,fallbackUnit);
     return {
-      value:String(Number(parseScalar(value.value,Number(fallbackValue)).toFixed(9))),
+      value:formatSpectrumInputNumber(parseScalar(value.value,Number(fallbackValue))),
       unit:value.unit||fallbackUnit
     };
   };
   return {
-    start:toDisplayValue(matches[0]?.[0],'0'),
-    end:toDisplayValue(matches[1]?.[0],'16')
+    start:toDisplayValue(matches[0],'0'),
+    end:toDisplayValue(matches[1],'16')
   };
 }
 
@@ -7192,7 +7288,7 @@ function buildSpectrumAnalysis(values,options={}){
     return {bins,peak,fftSize,configuredFftSize,windowType,sampleCount,sampleRate,frequencyRange,referenceFrequencyHz,isComplexEnvelope:true};
   }
   const startBin=Math.max(0,Math.ceil(frequencyRange.min*fftSize/sampleRate));
-  const endBin=Math.max(startBin,Math.min(Math.floor(frequencyRange.max*fftSize/sampleRate),Math.floor(fftSize/2)));
+  const endBin=Math.min(Math.floor(frequencyRange.max*fftSize/sampleRate),Math.floor(fftSize/2));
   // 峰值测量必须覆盖频段内的每一个 FFT bin，不能因曲线显示点数有限而遗漏窄带信号。
   const fullBins=[];
   for(let bin=startBin;bin<=endBin;bin+=1){
@@ -7210,10 +7306,19 @@ function buildSpectrumAnalysis(values,options={}){
       magnitude:sampleCount?(bin===0?1:2)*Math.sqrt(real*real+imag*imag)/Math.max(windowSum,1e-9):0
     });
   }
+  const capturedBins=fullBins.slice();
+  const nyquist=sampleRate/2;
+  const nyquistTolerance=Math.max(Math.abs(nyquist),Math.abs(frequencyRange.max))*1e-12;
+  if(frequencyRange.max>nyquist+nyquistTolerance){
+    if(frequencyRange.min>nyquist+nyquistTolerance){
+      fullBins.push({bin:null,frequency:frequencyRange.min,magnitude:0,outsideAcquisition:true});
+    }
+    fullBins.push({bin:null,frequency:frequencyRange.max,magnitude:0,outsideAcquisition:true});
+  }
   const maximum=Math.max(...fullBins.map(item=>item.magnitude),0);
   fullBins.forEach(item=>{item.normalized=maximum?item.magnitude/maximum:0;});
   const peak=sampleCount>=4
-    ?fullBins.reduce((current,item)=>item.magnitude>(current?.magnitude??-1)?item:current,null)
+    ?capturedBins.reduce((current,item)=>item.magnitude>(current?.magnitude??-1)?item:current,null)
     :null;
 
   // 频谱窗口逐点显示所选频段内的全部 FFT bin；不再为曲线绘制做分桶压缩。
@@ -10610,9 +10715,10 @@ createNode = function(type,rawX,rawY){
   const props=cloneDefaults(meta.defaults);
   props.name=`中间变量赋值块 ${getNodeTypeCount(type)}`;
   const point={
-    x:clamp(Math.round(rawX-meta.width/2),CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-meta.width-CANVAS_STAGE.nodePadding),
-    y:clamp(Math.round(rawY-meta.height/2),CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-meta.height-CANVAS_STAGE.nodePadding)
+    x:Math.round(rawX-meta.width/2),
+    y:Math.round(rawY-meta.height/2)
   };
+  expandCanvasStageForBounds({x:point.x,y:point.y,width:meta.width,height:meta.height});
   S.modelNodes.push({
     id:`node-${++S.nodeSeq}`,
     type,
@@ -11079,7 +11185,7 @@ function resolveCanvasNodeOutputs(canvasId,nodeId,modeKey,time,dt,context){
     });
   let resolved={outputs:[0],middleValues:[]};
   if(node.type==='signal_source'){
-    resolved={outputs:[computeSourceSignal(node,time)],middleValues:[]};
+    resolved={outputs:[resolveSourceSignal(node,modeKey,time)],middleValues:[]};
   }else if(node.type==='flow_block'){
     resolved=isPythonBoundFlowBlock(node)
       ?executeBoundFlowBlock(node,nodeState,inputValues,modeKey,time,dt)
@@ -11336,7 +11442,7 @@ function resolveNodeOutputsInCanvas(nodeId,canvasId,modeKey,time,dt,cache,visiti
   let resolved={outputs:[0],middleValues:[]};
 
   if(node.type==='signal_source'){
-    resolved={outputs:[computeSourceSignal(node,time)],middleValues:[]};
+    resolved={outputs:[resolveSourceSignal(node,modeKey,time)],middleValues:[]};
   }else if(node.type==='subsystem_block'){
     resolved=resolveSubsystemBlockOutputs(node,modeKey,time,dt,cache,visiting);
   }else if(node.type==='subsystem_in_port'){
@@ -12583,6 +12689,7 @@ getNodePorts = function(node){
         meta:{
           type:props.portType||'标量',
           dataType:props.dataType,
+          collectionKind:props.collectionKind,
           vectorLength:props.vectorLength,
           vectorElementNames:props.vectorElementNames,
           elementNames:props.elementNames,
@@ -12604,6 +12711,7 @@ getNodePorts = function(node){
         meta:{
           type:props.portType||'标量',
           dataType:props.dataType,
+          collectionKind:props.collectionKind,
           vectorLength:props.vectorLength,
           vectorElementNames:props.vectorElementNames,
           elementNames:props.elementNames,
@@ -12905,7 +13013,7 @@ function getTask5PortLabel(node,direction,index,fallback=''){
 }
 
 function normalizeTask5InterfaceType(type){
-  return PORT_FORMATS.includes(type)?type:'标量';
+  return getSubsystemDerivedPortType({type});
 }
 
 function computeTask5SelectionBounds(nodes){
@@ -13145,8 +13253,8 @@ function wrapSelectionIntoSubsystem(){
   const subsystemNode={
     id:`node-${++S.nodeSeq}`,
     type:'subsystem_block',
-    x:clamp(Math.round((selectionBounds.left+selectionBounds.right-subsystemMeta.width)/2),CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-subsystemMeta.width-CANVAS_STAGE.nodePadding),
-    y:clamp(Math.round((selectionBounds.top+selectionBounds.bottom-subsystemMeta.height)/2),CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-subsystemMeta.height-CANVAS_STAGE.nodePadding),
+    x:Math.round((selectionBounds.left+selectionBounds.right-subsystemMeta.width)/2),
+    y:Math.round((selectionBounds.top+selectionBounds.bottom-subsystemMeta.height)/2),
     w:subsystemMeta.width,
     h:subsystemMeta.height,
     props:subsystemProps,
@@ -13160,6 +13268,8 @@ function wrapSelectionIntoSubsystem(){
       id:`input-${index+1}`,
       name:getTask5PortLabel(targetNode,'input',edge.targetPortIndex||0,`输入 ${index+1}`),
       type:normalizeTask5InterfaceType(targetMeta?.type),
+      ...getSubsystemDerivedElementFields(targetMeta),
+      ...getSubsystemComplexEnvelopeContract(targetMeta),
       order:index,
       edge
     };
@@ -13177,6 +13287,8 @@ function wrapSelectionIntoSubsystem(){
         sourceMeta,
         name:getTask5PortLabel(sourceNode,'output',edge.sourcePortIndex||0,`输出 ${outputGroups.size+1}`),
         type:normalizeTask5InterfaceType(sourceMeta?.type),
+        ...getSubsystemDerivedElementFields(sourceMeta),
+        ...getSubsystemComplexEnvelopeContract(sourceMeta),
         edges:[]
       });
     }
@@ -13190,6 +13302,8 @@ function wrapSelectionIntoSubsystem(){
         id:`output-${index+1}`,
         name:group.name,
         type:group.type,
+        ...getSubsystemDerivedElementFields(group.sourceMeta),
+        ...getSubsystemComplexEnvelopeContract(group.sourceMeta),
         order:index
       })),
       '输出',
@@ -13431,8 +13545,9 @@ function unwrapSelectedSubsystem(nodeId=S.selBlk){
   const translation=getUnwrappedNodeTranslation(restoredNodes,subsystemNode);
   restoredNodes.forEach(node=>{
     applyNodeGeometry(node);
-    node.x=clamp((node.x||0)+translation.x,CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-node.w-CANVAS_STAGE.nodePadding);
-    node.y=clamp((node.y||0)+translation.y,CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-node.h-CANVAS_STAGE.nodePadding);
+    node.x=(node.x||0)+translation.x;
+    node.y=(node.y||0)+translation.y;
+    expandCanvasStageForNode(node,node.x,node.y);
   });
 
   const parentEdges=(parentCanvas.edges||[]).map(edge=>cloneDefaults(edge));
@@ -14388,6 +14503,10 @@ Object.assign(window,{
       collectionKind:port.collectionKind??meta.collectionKind,
       vectorLength:port.vectorLength??meta.vectorLength,
       vectorElementNames:port.vectorElementNames??meta.vectorElementNames,
+      elementNames:port.elementNames??meta.elementNames,
+      referenceFrequencyHz:port.referenceFrequencyHz??meta.referenceFrequencyHz,
+      impedanceOhm:port.impedanceOhm??meta.impedanceOhm,
+      unit:port.unit??meta.unit,
       default:meta.default??null
     };
   };
@@ -14522,7 +14641,11 @@ Object.assign(window,{
         element.dataset.edgeId=edge.id;
         element.addEventListener('click',event=>{
           event.stopPropagation();
-          selectEdge(element.dataset.edgeId);
+          if(element.classList.contains('edge-label')){
+            selectEdge(element.dataset.edgeId);
+          }else{
+            selectEdgeFromClientEvent(event,element.dataset.edgeId);
+          }
         });
         return element;
       };
@@ -14771,11 +14894,12 @@ Object.assign(window,{
       const group=grouped.get(layerIndex).sort((a,b)=>a.y-b.y||a.x-b.x);
       const x=96+visualIndex*245;
       const totalHeight=group.reduce((sum,node)=>sum+(node.h||90),0)+(group.length-1)*46;
-      let y=Math.max(CANVAS_STAGE.nodeMinY+26,Math.round((CANVAS_STAGE.height-totalHeight)/2));
+      let y=Math.max(CANVAS_STAGE.minY+CANVAS_STAGE.nodeMinY+26,
+        Math.round(CANVAS_STAGE.minY+(CANVAS_STAGE.height-totalHeight)/2));
       group.forEach(node=>{
         applyNodeGeometry(node);
-        node.x=clamp(x,48,CANVAS_STAGE.width-(node.w||160)-48);
-        node.y=clamp(y,CANVAS_STAGE.nodeMinY+18,CANVAS_STAGE.height-(node.h||90)-42);
+        node.x=clamp(x,CANVAS_STAGE.minX+48,CANVAS_STAGE.minX+CANVAS_STAGE.width-(node.w||160)-48);
+        node.y=clamp(y,CANVAS_STAGE.minY+CANVAS_STAGE.nodeMinY+18,CANVAS_STAGE.minY+CANVAS_STAGE.height-(node.h||90)-42);
         y+=Math.max(node.h||90,90)+46;
       });
     });
@@ -15524,20 +15648,10 @@ Object.assign(window,{
     const frequencyRange=splitSpectrumFrequencyRange(automaticFrequencyRange
       ?formatSpectrumFrequencyRange(analysis.frequencyRange.min,analysis.frequencyRange.max)
       :node.props.frequencyRange||'0-16kHz');
-    const frequencyRangeMin=complexEnvelopeMode
-      ?0
-      :0;
-    const frequencyRangeMax=complexEnvelopeMode
-      ?Number.MAX_SAFE_INTEGER
-      :analysis.sampleRate/2;
     const frequencyUnitOptions=['Hz','kHz','MHz','GHz'];
     ['start','end'].forEach(key=>{
-      const multiplier=getSpectrumFrequencyMultiplier(frequencyRange[key].unit);
-      const value=Math.max(
-        frequencyRangeMin/multiplier,
-        Math.min(parseScalar(frequencyRange[key].value,0),frequencyRangeMax/multiplier)
-      );
-      frequencyRange[key].value=String(Number(value.toFixed(9)));
+      const value=Math.max(0,parseScalar(frequencyRange[key].value,0));
+      frequencyRange[key].value=formatSpectrumInputNumber(value);
     });
     const frequencyRangeStartHz=parseScalar(frequencyRange.start.value,0)*getSpectrumFrequencyMultiplier(frequencyRange.start.unit);
     const frequencyRangeEndHz=parseScalar(frequencyRange.end.value,0)*getSpectrumFrequencyMultiplier(frequencyRange.end.unit);
@@ -15614,31 +15728,31 @@ Object.assign(window,{
             </svg>
           </div>
           <div class="spectrum-window__axis spectrum-window__axis--x" data-spectrum-axis="x" aria-hidden="true">
-          <span>${escapeHtml(formatSpectrumFrequency(analysis.frequencyRange.min,frequencyRange.end.unit))}</span><span>${escapeHtml(formatSpectrumFrequency(analysis.frequencyRange.max,frequencyRange.end.unit))}</span>
+          <span>${escapeHtml(formatSpectrumAxisFrequency(analysis.frequencyRange.min,displayFrequencyUnit))}</span><span>${escapeHtml(formatSpectrumAxisFrequency(analysis.frequencyRange.max,displayFrequencyUnit))}</span>
           </div>
-          <span class="spectrum-window__axis-title spectrum-window__axis-title--x">频率（${escapeHtml(frequencyRange.end.unit)}）</span>
+          <span class="spectrum-window__axis-title spectrum-window__axis-title--x">频率（${escapeHtml(displayFrequencyUnit)}）</span>
         </div>
         <div class="spectrum-window__config spectrum-window__config--analysis">
           <div class="spectrum-window__config-title">分析设置</div>
           <label>操作方式<select data-spectrum-config="tuningMode">${buildSelectOptions([{value:'startStop',label:'起始 / 截止'},{value:'centerSpan',label:'中心 / 跨度'}],tuningMode)}</select></label>
           <label>FFT / 缓存点数<input type="number" min="16" max="1048576" step="1" data-spectrum-config="fftSize" value="${escapeHtml(node.props.fftSize||(complexEnvelopeMode?'100000':'1024'))}"></label>
-          ${tuningMode==='startStop'?`<label class="spectrum-window__config-range">频率范围
+          ${tuningMode==='startStop'?`<div class="spectrum-window__config-range">频率范围
             <span class="spectrum-window__measurement spectrum-window__measurement--range">
-              <input type="text" inputmode="decimal" aria-label="起始频率数值" data-spectrum-config="frequencyRangeStart" value="${escapeHtml(String(Number((frequencyRangeStartHz/getSpectrumFrequencyMultiplier(startFrequencyUnit)).toFixed(9))))}"${automaticFrequencyRange?' disabled':''}>
+              <input type="text" inputmode="decimal" aria-label="起始频率数值" data-spectrum-config="frequencyRangeStart" value="${escapeHtml(formatSpectrumInputNumber(frequencyRangeStartHz/getSpectrumFrequencyMultiplier(startFrequencyUnit)))}"${automaticFrequencyRange?' disabled':''}>
               <select aria-label="起始频率单位" data-spectrum-config="frequencyRangeStartUnit"${automaticFrequencyRange?' disabled':''}>${buildSelectOptions(frequencyUnitOptions,startFrequencyUnit)}</select>
               <span aria-hidden="true">~</span>
-              <input type="text" inputmode="decimal" aria-label="终止频率数值" data-spectrum-config="frequencyRangeEnd" value="${escapeHtml(String(Number((frequencyRangeEndHz/getSpectrumFrequencyMultiplier(endFrequencyUnit)).toFixed(9))))}"${automaticFrequencyRange?' disabled':''}>
+              <input type="text" inputmode="decimal" aria-label="终止频率数值" data-spectrum-config="frequencyRangeEnd" value="${escapeHtml(formatSpectrumInputNumber(frequencyRangeEndHz/getSpectrumFrequencyMultiplier(endFrequencyUnit)))}"${automaticFrequencyRange?' disabled':''}>
               <select aria-label="终止频率单位" data-spectrum-config="frequencyRangeEndUnit"${automaticFrequencyRange?' disabled':''}>${buildSelectOptions(frequencyUnitOptions,endFrequencyUnit)}</select>
             </span>
-          </label>`:`<label class="spectrum-window__config-range">中心频率 / 跨度
+          </div>`:`<div class="spectrum-window__config-range">中心频率 / 跨度
             <span class="spectrum-window__measurement spectrum-window__measurement--range">
-              <input type="text" inputmode="decimal" aria-label="中心频率" data-spectrum-config="centerFrequency" value="${escapeHtml(String(Number(centerFrequency.toFixed(9))))}"${automaticFrequencyRange?' disabled':''}>
+              <input type="text" inputmode="decimal" aria-label="中心频率" data-spectrum-config="centerFrequency" value="${escapeHtml(formatSpectrumInputNumber(centerFrequency))}"${automaticFrequencyRange?' disabled':''}>
               <select aria-label="中心频率单位" data-spectrum-config="centerFrequencyUnit"${automaticFrequencyRange?' disabled':''}>${buildSelectOptions(frequencyUnitOptions,centerFrequencyUnit)}</select>
               <span aria-hidden="true">/</span>
-              <input type="text" inputmode="decimal" aria-label="频率跨度" data-spectrum-config="frequencySpan" value="${escapeHtml(String(Number(frequencySpan.toFixed(9))))}"${automaticFrequencyRange?' disabled':''}>
+              <input type="text" inputmode="decimal" aria-label="频率跨度" data-spectrum-config="frequencySpan" value="${escapeHtml(formatSpectrumInputNumber(frequencySpan))}"${automaticFrequencyRange?' disabled':''}>
               <select aria-label="频率跨度单位" data-spectrum-config="frequencySpanUnit"${automaticFrequencyRange?' disabled':''}>${buildSelectOptions(frequencyUnitOptions,frequencySpanUnit)}</select>
             </span>
-          </label>`}
+          </div>`}
           <label>自动调谐<select data-spectrum-config="autoFrequencyRange">${buildSelectOptions([{value:'on',label:'开启（锁定峰值）'},{value:'off',label:'关闭'}],node.props.autoFrequencyRange||'off')}</select></label>
           <label>窗函数<select data-spectrum-config="windowFunction">${buildSelectOptions([{value:'Hann',label:'Hann'},{value:'Hamming',label:'Hamming'},{value:'Blackman',label:'Blackman'},{value:'Rectangular',label:'Rectangular'}],node.props.windowFunction||'Hann')}</select></label>
           <label>采样率<span class="spectrum-window__measurement"><output data-spectrum-auto-sample-rate>${escapeHtml(formatSpectrumFrequency(sampleRate))}</output></span></label>
@@ -15703,6 +15817,13 @@ Object.assign(window,{
     });
     windowEl.querySelectorAll('[data-spectrum-config]').forEach(input=>{
       input.addEventListener('keydown',event=>event.stopPropagation());
+      if(input.matches('input[type="text"]')){
+        input.addEventListener('pointerdown',event=>{
+          if(event.button!==0||typeof input.setPointerCapture!=='function'){return;}
+          // Keep a text drag owned by its input even after the pointer leaves the analyzer.
+          input.setPointerCapture(event.pointerId);
+        });
+      }
       input.addEventListener('change',()=>{
         const key=input.dataset.spectrumConfig;
         if(key==='tuningMode'){
@@ -15714,7 +15835,7 @@ Object.assign(window,{
             // Preserve the range currently shown by automatic tuning as the
             // manual starting point.  Otherwise a stale 0-16 kHz default is
             // rendered after the mode switch and overwrites RF center/span.
-            const currentRange=getSpectrumFrequencyRangeForAnalysis(node,sampleRate,values);
+            const currentRange=analysis.frequencyRange;
             node.props.autoFrequencyRange='off';
             node.props.frequencyRange=formatSpectrumFrequencyRange(currentRange.min,currentRange.max);
           }
@@ -15738,27 +15859,10 @@ Object.assign(window,{
           const spanMultiplier=getSpectrumFrequencyMultiplier(spanUnit);
           if(Number.isFinite(center)&&Number.isFinite(span)&&span>0){
             const requestedSpanHz=span*spanMultiplier;
-            if(complexEnvelopeMode){
-              // The I/Q analyzer's frequency axis is absolute RF frequency.
-              // Its current analysis range is merely the *previous* user
-              // setting, not a legal tuning boundary.  Clamping against it
-              // made every center/span edit snap back to that previous range.
-              const centerHz=Math.max(0,center*centerMultiplier);
-              const start=Number((Math.max(0,centerHz-requestedSpanHz/2)).toFixed(9));
-              const end=Number((start+requestedSpanHz).toFixed(9));
-              node.props.frequencyRange=`${start}Hz-${end}Hz`;
-            }else{
-              const rangeMin=0;
-              const rangeMax=Math.max(sampleRate/2,0);
-              const availableSpan=Math.max(rangeMax-rangeMin,0);
-              if(availableSpan>0){
-                const spanHz=Math.min(requestedSpanHz,availableSpan);
-                const centerHz=clamp(center*centerMultiplier,rangeMin+spanHz/2,rangeMax-spanHz/2);
-                const start=Number((centerHz-spanHz/2).toFixed(9));
-                const end=Number((centerHz+spanHz/2).toFixed(9));
-                node.props.frequencyRange=`${start}Hz-${end}Hz`;
-              }
-            }
+            const centerHz=Math.max(0,center*centerMultiplier);
+            const start=Number(formatSpectrumInputNumber(Math.max(0,centerHz-requestedSpanHz/2)));
+            const end=Number(formatSpectrumInputNumber(start+requestedSpanHz));
+            node.props.frequencyRange=`${start}Hz-${end}Hz`;
           }
           node.props.centerFrequencyUnit=centerUnit;
           node.props.frequencySpanUnit=spanUnit;
@@ -15825,8 +15929,8 @@ Object.assign(window,{
         windowEl.dataset.spectrumRange=`${currentAnalysis.frequencyRange.min}-${currentAnalysis.frequencyRange.max}`;
         const rangeLabels=windowEl.querySelectorAll('[data-spectrum-axis="x"] span');
         const automaticUnit=currentFrequencyUnit;
-        rangeLabels[0]&&(rangeLabels[0].textContent=formatSpectrumFrequency(currentAnalysis.frequencyRange.min,automaticUnit));
-        rangeLabels[1]&&(rangeLabels[1].textContent=formatSpectrumFrequency(currentAnalysis.frequencyRange.max,automaticUnit));
+        rangeLabels[0]&&(rangeLabels[0].textContent=formatSpectrumAxisFrequency(currentAnalysis.frequencyRange.min,automaticUnit));
+        rangeLabels[1]&&(rangeLabels[1].textContent=formatSpectrumAxisFrequency(currentAnalysis.frequencyRange.max,automaticUnit));
         const centerSpanMode=String(node.props.tuningMode||'startStop')==='centerSpan';
         const axisTitle=windowEl.querySelector('.spectrum-window__axis-title--x');
         if(axisTitle){axisTitle.textContent=`频率（${automaticUnit}）`;}
@@ -15835,15 +15939,15 @@ Object.assign(window,{
           const span=windowEl.querySelector('[data-spectrum-config="frequencySpan"]');
           const centerUnit=windowEl.querySelector('[data-spectrum-config="centerFrequencyUnit"]')?.value||automaticUnit;
           const spanUnit=windowEl.querySelector('[data-spectrum-config="frequencySpanUnit"]')?.value||automaticUnit;
-          if(center){center.value=String(Number((((currentAnalysis.frequencyRange.min+currentAnalysis.frequencyRange.max)/2)/getSpectrumFrequencyMultiplier(centerUnit)).toFixed(9)));}
-          if(span){span.value=String(Number(((currentAnalysis.frequencyRange.max-currentAnalysis.frequencyRange.min)/getSpectrumFrequencyMultiplier(spanUnit)).toFixed(9)));}
+          if(center){center.value=formatSpectrumInputNumber(((currentAnalysis.frequencyRange.min+currentAnalysis.frequencyRange.max)/2)/getSpectrumFrequencyMultiplier(centerUnit));}
+          if(span){span.value=formatSpectrumInputNumber((currentAnalysis.frequencyRange.max-currentAnalysis.frequencyRange.min)/getSpectrumFrequencyMultiplier(spanUnit));}
         }else{
           const rangeStart=windowEl.querySelector('[data-spectrum-config="frequencyRangeStart"]');
           const rangeEnd=windowEl.querySelector('[data-spectrum-config="frequencyRangeEnd"]');
           const startUnit=windowEl.querySelector('[data-spectrum-config="frequencyRangeStartUnit"]')?.value||automaticUnit;
           const endUnit=windowEl.querySelector('[data-spectrum-config="frequencyRangeEndUnit"]')?.value||automaticUnit;
-          if(rangeStart){rangeStart.value=String(Number((currentAnalysis.frequencyRange.min/getSpectrumFrequencyMultiplier(startUnit)).toFixed(9)));}
-          if(rangeEnd){rangeEnd.value=String(Number((currentAnalysis.frequencyRange.max/getSpectrumFrequencyMultiplier(endUnit)).toFixed(9)));}
+          if(rangeStart){rangeStart.value=formatSpectrumInputNumber(currentAnalysis.frequencyRange.min/getSpectrumFrequencyMultiplier(startUnit));}
+          if(rangeEnd){rangeEnd.value=formatSpectrumInputNumber(currentAnalysis.frequencyRange.max/getSpectrumFrequencyMultiplier(endUnit));}
         }
       }
       const currentPeakFrequency=currentAnalysis.peak?.frequency;
@@ -16328,7 +16432,7 @@ Object.assign(window,{
   }
 
   function getSelectedPropertyTarget(){
-    if(S.selEdge){return getEdge(S.selEdge);}
+    if(S.selEdge){return getEdgeAcrossWorkbenchCanvases(S.selEdge);}
     if(S.selBlk){return getNode(S.selBlk);}
     return null;
   }
@@ -19404,14 +19508,14 @@ Object.assign(window,{
       if(!tab||tab.disabled||!S.selEdge){return;}
       queueMicrotask(()=>{
         if(S.propertyPanelTab!=='testpoints'){return;}
-        const edge=getEdge(S.selEdge);
+        const edge=getEdgeAcrossWorkbenchCanvases(S.selEdge);
         renderEdgeTestPointPanel(edge);
       });
     });
   }
 
   function saveSelectedEdgeMetadata(){
-    const edge=getEdge(S.selEdge)||findEdgeAcrossWorkbenchCanvases(S.selEdge);
+    const edge=getEdgeAcrossWorkbenchCanvases(S.selEdge);
     if(!edge){return;}
     const value=(id)=>document.getElementById(id)?.value?.trim()||'';
     edge.lineType=value('prop-edge-line-type')||edge.lineType||'normal';
@@ -19446,7 +19550,7 @@ Object.assign(window,{
   }
 
   function saveSelectedEdgeName(){
-    const edge=getEdge(S.selEdge)||findEdgeAcrossWorkbenchCanvases(S.selEdge);
+    const edge=getEdgeAcrossWorkbenchCanvases(S.selEdge);
     const input=document.getElementById('prop-edge-label');
     if(!edge||!input){return;}
     edge.label=input.value.trim();
@@ -23949,12 +24053,6 @@ function decorateDataflowEdges(){
       if(!selectedNodes.length){return;}
       event.preventDefault();
       let [deltaX,deltaY]=direction;
-      if(deltaX<0){
-        deltaX=Math.max(deltaX,CANVAS_STAGE.nodePadding-Math.min(...selectedNodes.map(node=>node.x)));
-      }
-      if(deltaY<0){
-        deltaY=Math.max(deltaY,CANVAS_STAGE.nodeMinY-Math.min(...selectedNodes.map(node=>node.y)));
-      }
       if(!deltaX&&!deltaY){return;}
       runWithHistory('移动组件',()=>{
         selectedNodes.forEach(node=>expandCanvasStageForNode(node,node.x+deltaX,node.y+deltaY));
@@ -24776,7 +24874,7 @@ function decorateDataflowEdges(){
   }
 
   function getTargetVisualPoint(target){
-    if(!target){return {x:CANVAS_STAGE.width/2,y:CANVAS_STAGE.height/2};}
+    if(!target){return {x:CANVAS_STAGE.minX+CANVAS_STAGE.width/2,y:CANVAS_STAGE.minY+CANVAS_STAGE.height/2};}
     if(target.sourceNodeId&&target.targetNodeId){
       const source=getNode(target.sourceNodeId);
       const targetNode=getNode(target.targetNodeId);
@@ -24824,8 +24922,8 @@ function decorateDataflowEdges(){
     const size=type==='simulation_block'?getSimulationNodeSize(props):{width:meta.width,height:meta.height};
     const verticalOffset=(index-(total-1)/2)*92;
     const point={
-      x:clamp(Math.round(targetPoint.x-size.width-140),CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-size.width-CANVAS_STAGE.nodePadding),
-      y:clamp(Math.round(targetPoint.y-size.height/2+verticalOffset),CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-size.height-CANVAS_STAGE.nodePadding)
+      x:Math.round(targetPoint.x-size.width-140),
+      y:Math.round(targetPoint.y-size.height/2+verticalOffset)
     };
     const node={
       id:`node-${++S.nodeSeq}`,
@@ -25097,8 +25195,8 @@ function decorateDataflowEdges(){
       ?targetPoint.y-height-72+(sameTargetCount%3)*88
       :targetPoint.y-height/2+(sameTargetCount%3)*88;
     return {
-      x:clamp(Math.round(baseX),CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-width-CANVAS_STAGE.nodePadding),
-      y:clamp(Math.round(baseY),CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-height-CANVAS_STAGE.nodePadding),
+      x:Math.round(baseX),
+      y:Math.round(baseY),
       w:width,
       h:height
     };
@@ -25194,8 +25292,8 @@ function decorateDataflowEdges(){
     const box=target
       ?getFaultTagPosition({id,visualInjection:{}},target)
       :{
-        x:clamp(Math.round((x||CANVAS_STAGE.width/2)-102),CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-204-CANVAS_STAGE.nodePadding),
-        y:clamp(Math.round((y||CANVAS_STAGE.height/2)-38),CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-76-CANVAS_STAGE.nodePadding),
+        x:Math.round((x??(CANVAS_STAGE.minX+CANVAS_STAGE.width/2))-102),
+        y:Math.round((y??(CANVAS_STAGE.minY+CANVAS_STAGE.height/2))-38),
         w:204,
         h:76
       };
@@ -25911,8 +26009,8 @@ function decorateDataflowEdges(){
       width:tag.w||204,
       height:tag.h||76
     });
-    tag.x=clamp(Math.round(FAULT_TAG_DRAG.originX+dx/(S.canvasScale||1)),CANVAS_STAGE.nodePadding,CANVAS_STAGE.width-(tag.w||204)-CANVAS_STAGE.nodePadding);
-    tag.y=clamp(Math.round(FAULT_TAG_DRAG.originY+dy/(S.canvasScale||1)),CANVAS_STAGE.nodeMinY,CANVAS_STAGE.height-(tag.h||76)-CANVAS_STAGE.nodePadding);
+    tag.x=Math.round(FAULT_TAG_DRAG.originX+dx/(S.canvasScale||1));
+    tag.y=Math.round(FAULT_TAG_DRAG.originY+dy/(S.canvasScale||1));
     updateFaultTagElementPosition(el,tag);
     renderVisualFaultInjectionLinks();
   }
@@ -25943,6 +26041,7 @@ function decorateDataflowEdges(){
     ensureFaultTags().filter(visualRecordBelongsToActiveCanvas).forEach(tag=>{
       applyFaultTagBoxSize(tag);
       if(!tag.expanded){return;}
+      expandCanvasStageForBounds({x:tag.x||0,y:tag.y||0,width:tag.w||204,height:tag.h||76});
       const el=document.createElement('div');
       el.className=`fault-tag-card${S.selFaultTag===tag.id?' is-selected':''}`;
       el.id=`visual-${tag.id}`;
@@ -26060,7 +26159,7 @@ function decorateDataflowEdges(){
       layer=stage.ownerDocument.createElementNS('http://www.w3.org/2000/svg','svg');
       layer.id='canvas-edge-control-layer';
       layer.setAttribute('class','canvas-edge-control-layer');
-      layer.setAttribute('viewBox',`0 0 ${CANVAS_STAGE.width} ${CANVAS_STAGE.height}`);
+      layer.setAttribute('viewBox',`${CANVAS_STAGE.minX} ${CANVAS_STAGE.minY} ${CANVAS_STAGE.width} ${CANVAS_STAGE.height}`);
       layer.setAttribute('preserveAspectRatio','none');
       layer.setAttribute('aria-hidden','true');
     }
@@ -31504,7 +31603,10 @@ function decorateDataflowEdges(){
   window.installDiagnosticTestPoint=window.addDiagnosticTestPoint;
 
   window.addDiagnosticTestPointFromEdge=function(edgeId,options={}){
-    const edge=getActiveDiagnosticEdges().find(item=>item.id===edgeId)||getRuntimeEdges().find(item=>item.id===edgeId);
+    const selectedEdge=getActiveDiagnosticEdges().find(item=>item.id===edgeId)||getRuntimeEdges().find(item=>item.id===edgeId);
+    const edge=selectedEdge?.subsystemBoundaryMapping&&selectedEdge.linkedExternalEdgeId
+      ?getRuntimeEdges().find(item=>item.id===selectedEdge.linkedExternalEdgeId)||selectedEdge
+      :selectedEdge;
     if(!edge) return {ok:false,reason:'edge-not-found',edgeId};
     const state=getState();
     const manual=getManualDiagnosticPoints();
@@ -32872,7 +32974,15 @@ function decorateDataflowEdges(){
   }
 
   function getRuntimeEdge(id){
-    return getState().modelEdges?.find(edge=>edge.id===id)||null;
+    const state=getState();
+    const activeEdge=state.modelEdges?.find(edge=>edge.id===id);
+    if(activeEdge?.subsystemBoundaryMapping){
+      const externalEdge=getLinkedExternalEdgeForSubsystemMapping(activeEdge);
+      if(externalEdge){return externalEdge;}
+    }
+    return activeEdge||Object.values(state.canvases||{})
+      .flatMap(canvas=>arr(canvas?.edges))
+      .find(edge=>edge?.id===id)||null;
   }
 
   function getRuntimeNodeName(id){
@@ -33790,12 +33900,13 @@ function decorateDataflowEdges(){
     if(event.target?.closest?.('[data-layered-fault-binding-dialog],[data-layered-fault-bind]')) return;
     event.preventDefault();
     event.stopPropagation();
-    if(!canBindLayeredFaultInjectorToTarget(injector,target)){
+    const bindingTarget=getTargetKind(target)==='edge'?getRuntimeEdge(target.id)||target:target;
+    if(!canBindLayeredFaultInjectorToTarget(injector,bindingTarget)){
       if(typeof toast==='function') toast('该故障层与目标对象能力不匹配','w');
       showLayeredFaultBindingTargets(injector);
       return;
     }
-    openLayeredFaultBindingDialog(injector,target);
+    openLayeredFaultBindingDialog(injector,bindingTarget);
   }
 
   function attachLayeredFaultTargetHandlers(el,target){
@@ -35150,7 +35261,7 @@ function decorateDataflowEdges(){
     }
     const ports=previousGetNodePorts(node);
     if(node?.type==='signal_source'){
-      const props=normalizeSignalSourcePropsRuntime(node.props||{});
+      const props=getSignalGeneratorEffectiveProps(node,normalizeSignalSourcePropsRuntime(node.props||{}));
       const complexEnvelope=props.signalDomain==='rf'&&isRfComplexEnvelopeOutput(props);
       const complexEnvelopeVector=complexEnvelope&&props.rfComplexEnvelopeMode==='vector';
       return {
@@ -35162,7 +35273,7 @@ function decorateDataflowEdges(){
             dataType:'rf_complex_envelope',
             ...(complexEnvelopeVector?{
               collectionKind:'vector',
-              vectorLength:getRfVectorLengthRuntime(props.rfVectorLength)
+              vectorLength:getSignalSourceOutputVectorLength(node,props)
             }:{})
           }:{}),
           ...(node.props?.signalDomain==='rf'&&index===0

@@ -35,7 +35,7 @@ describe('diagnostic testpoint workbench contract', () => {
     expect(runtime).toContain("const includeAllCanvases=options.includeAllCanvases===true;");
     expect(runtime).toContain('if(!includeAllCanvases){');
     expect(runtime).toContain('points=points.filter(point=>diagnosticPointBelongsToActiveCanvas(point,runtimeEdges,runtimeNodes));');
-    expect(runtime).toContain('const pointModel=window.buildDiagnosticTestPointModel({includeAllCanvases:true});');
+    expect(runtime).toContain('window.buildDiagnosticTestPointModel({includeAllCanvases:true})');
     expect(runtime).toContain('function findDataflowNode(nodeId)');
   });
 

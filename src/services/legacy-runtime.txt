@@ -4259,7 +4259,7 @@ function renderPropertyPanel(node){
           <div class="props-help">${isProtocolInjectableEdge(node)?'当前连线可注入协议层故障。':'当前选中的是一条独立连线，可直接删除，不影响其他模块。'}</div>
         </div>
         <div class="props-actions">
-          ${isProtocolInjectableEdge(node)?`<button class="props-secondary props-protocol-action" onclick="openProtocolFaultImport()">${protocolFault?'更换协议故障':'导入协议故障'}</button>`:''}
+          ${isProtocolInjectableEdge(node)?`<button class="props-secondary props-protocol-action" onclick="window.openProtocolFaultImport()">${protocolFault?'更换协议故障':'导入协议故障'}</button>`:''}
           <button class="props-danger" onclick="deleteSelectedEdge()">删除连线</button>
         </div>
       </div>`;
@@ -4889,21 +4889,7 @@ function renderProtocolInjectModal(){
 }
 
 function openProtocolFaultImport(){
-  const edge=getEdge(S.selEdge);
-  if(!isProtocolInjectableEdge(edge)){
-    toast('请选择可注入协议层故障的连线','w');
-    return;
-  }
-  S.protocolInjectTargetId=edge.id;
-  if(edge.injectedFault&&getImportedFaultModel(edge.injectedFault.modelId)){
-    S.protocolInjectSelectionMode='imported';
-    S.protocolInjectSelectionId=edge.injectedFault.modelId;
-  }else{
-    S.protocolInjectSelectionMode='';
-    S.protocolInjectSelectionId='';
-  }
-  renderProtocolInjectModal();
-  openOv('ov-proto');
+  return window.openSelectedEdgeProtocolFaultDialog();
 }
 
 function confirmProtocolFaultInjection(){
@@ -7907,7 +7893,7 @@ function renderPropertyPanel(node){
           <div class="props-help">${isProtocolInjectableEdge(node)?'当前连线可注入协议层故障。':'当前选中的是一条独立连线，可直接删除，不影响其他模块。'}</div>
         </div>
         <div class="props-actions">
-          ${isProtocolInjectableEdge(node)?`<button class="props-secondary props-protocol-action" onclick="openProtocolFaultImport()">${protocolFault?'更换协议故障':'导入协议故障'}</button>`:''}
+          ${isProtocolInjectableEdge(node)?`<button class="props-secondary props-protocol-action" onclick="window.openProtocolFaultImport()">${protocolFault?'更换协议故障':'导入协议故障'}</button>`:''}
           <button class="props-danger" onclick="deleteSelectedEdge()">删除连线</button>
         </div>
       </div>`;
@@ -17042,7 +17028,7 @@ Object.assign(window,{
         </div>
         <div class="props-actions">
           <button type="button" class="props-save" onclick="window.savePropertyPanelTarget()">保存连线</button>
-          ${isProtocolInjectableEdge(edge)?`<button type="button" class="props-secondary props-protocol-action" onclick="openProtocolFaultImport()">注入协议故障</button>`:''}
+          ${isProtocolInjectableEdge(edge)?`<button type="button" class="props-secondary props-protocol-action" onclick="window.openProtocolFaultImport()">注入协议故障</button>`:''}
           <button type="button" class="props-danger" onclick="deleteSelectedEdge()">删除连线</button>
         </div>
       </div>`;
@@ -17072,7 +17058,7 @@ Object.assign(window,{
         </div>
         <div class="props-actions">
           <button type="button" class="props-save" onclick="window.savePropertyPanelTarget()">保存连线</button>
-          ${isProtocolInjectableEdge(edge)?`<button type="button" class="props-secondary props-protocol-action" onclick="openProtocolFaultImport()">注入协议故障</button>`:''}
+          ${isProtocolInjectableEdge(edge)?`<button type="button" class="props-secondary props-protocol-action" onclick="window.openProtocolFaultImport()">注入协议故障</button>`:''}
           <button type="button" class="props-danger" onclick="deleteSelectedEdge()">删除连线</button>
         </div>
       </div>`;
@@ -17197,9 +17183,9 @@ Object.assign(window,{
   const FAULT_SLOT_CONFIG_LAYERS=['physical','electrical','protocol'];
   const FAULT_SLOT_CONFIG_LABELS={physical:'物理层',electrical:'电气层',protocol:'协议层'};
   const FAULT_SLOT_CONFIG_MODELS={
-    physical:['degradation'],
-    electrical:['attenuation','data_cutoff'],
-    protocol:['attenuation','data_cutoff']
+    physical:['step','freeze','intermittent'],
+    electrical:['bias','freeze','drift','step','gaussian_noise','uniform_white_noise','gaussian_colored_noise'],
+    protocol:['bias','freeze','drift','step','gaussian_noise','uniform_white_noise','gaussian_colored_noise']
   };
 
   function list(value){
@@ -17875,24 +17861,24 @@ Object.assign(window,{
   }
 
   function openPropertyPanelTargetFaultDialog(){
-    if(typeof window.openTargetFaultActivationDialog==='function') return window.openTargetFaultActivationDialog();
     const target=getSelectedPropertyTarget();
     if(!target) return false;
+    if(!isEdgeTarget(target)) return window.openComponentLayeredFaultDialog(target.id);
+    if(typeof window.openTargetFaultActivationDialog==='function') return window.openTargetFaultActivationDialog();
     openPropertyPanelFallbackFaultDialog(target);
     return true;
   }
   window.openPropertyPanelTargetFaultDialog=openPropertyPanelTargetFaultDialog;
 
   function hidesDirectFaultInjectionAction(target){
-    return target?.type==='simulation_block'
-      ||window.__GZ_COMPONENT_REGISTRY__?.[target?.type]?.group==='electrical';
+    return isSubsystemFaultTarget(target)||window.isLayeredFaultInjectorType?.(target?.type);
   }
 
   function renderFaults(target){
     const targetKind=isEdgeTarget(target)?'edge':'node';
     const bindings=activeFaultBindingsForPanel(target);
     const injectButton=isEdgeTarget(target)
-      ?(isProtocolInjectableEdge(target)?'<button type="button" class="props-secondary props-protocol-action" onclick="openProtocolFaultImport()">注入协议故障</button>':'')
+      ?(isProtocolInjectableEdge(target)?'<button type="button" class="props-secondary props-protocol-action" onclick="window.openProtocolFaultImport()">注入协议故障</button>':'')
       :(!target.type?.startsWith('instrument_')&&!hidesDirectFaultInjectionAction(target)?'<button type="button" class="props-secondary props-fault-action" data-open-property-fault-dialog>注入故障</button>':'');
     const body=bindings.length
       ?bindings.map((binding,index)=>renderFaultBinding(binding,target,targetKind,index)).join('')
@@ -25718,6 +25704,9 @@ function decorateDataflowEdges(){
       protocol:'\u534f\u8bae\u5c42'
     };
     const runtimeLabelMap={
+      gaussian_noise:'独立高斯噪声',
+      uniform_white_noise:'均匀分布白噪声',
+      gaussian_colored_noise:'高斯有色噪声',
       bias:'\u504f\u5dee\u6545\u969c',
       stuck:'\u5361\u6b7b\u6545\u969c',
       freeze:'\u5361\u6b7b\u6545\u969c',
@@ -27274,6 +27263,9 @@ function decorateDataflowEdges(){
 
   function getFaultRuntimeLabel(value){
     return ({
+      gaussian_noise:'独立高斯噪声',
+      uniform_white_noise:'均匀分布白噪声',
+      gaussian_colored_noise:'高斯有色噪声',
       bias:'\u504f\u5dee\u6545\u969c',
       stuck:'\u5361\u6b7b\u6545\u969c',
       freeze:'\u5361\u6b7b\u6545\u969c',
@@ -30080,6 +30072,9 @@ function decorateDataflowEdges(){
       ||'';
     if(!value) return '';
     const labels={
+      gaussian_noise:'独立高斯噪声',
+      uniform_white_noise:'均匀分布白噪声',
+      gaussian_colored_noise:'高斯有色噪声',
       bias:'偏差故障',
       stuck:'卡死故障',
       freeze:'卡死故障',
@@ -32890,7 +32885,7 @@ function decorateDataflowEdges(){
       layerLabel:'物理层',
       label:'物理层注入',
       faultType:'模型参数故障',
-      defaultModel:'degradation',
+      defaultModel:'step',
       targetKind:'node'
     },
     electrical_fault_injector:{
@@ -32898,7 +32893,7 @@ function decorateDataflowEdges(){
       layerLabel:'电气层',
       label:'电气层注入',
       faultType:'连续信号故障',
-      defaultModel:'attenuation',
+      defaultModel:'bias',
       targetKind:'any'
     },
     protocol_fault_injector:{
@@ -32906,7 +32901,7 @@ function decorateDataflowEdges(){
       layerLabel:'协议层',
       label:'协议层注入',
       faultType:'数字协议故障',
-      defaultModel:'attenuation',
+      defaultModel:'bias',
       targetKind:'edge'
     }
   };
@@ -33028,9 +33023,9 @@ function decorateDataflowEdges(){
 
   const COMPONENT_FAULT_LAYERS=['physical','electrical','protocol'];
   const COMPONENT_LAYER_MODELS={
-    physical:['degradation'],
-    electrical:['attenuation','data_cutoff'],
-    protocol:['attenuation','data_cutoff']
+    physical:['step','freeze','intermittent'],
+    electrical:['bias','freeze','drift','step','gaussian_noise','uniform_white_noise','gaussian_colored_noise'],
+    protocol:['bias','freeze','drift','step','gaussian_noise','uniform_white_noise','gaussian_colored_noise']
   };
 
   function plainText(value,fallback=''){
@@ -33460,6 +33455,8 @@ function decorateDataflowEdges(){
   }
 
   function defaultLayeredFaultParameters(layer,mathModel){
+    const noise=window.__GZ_FAULT_INJECTION_RUNTIME__?.getNoiseFaultDefinitions?.().find(model=>model.id===mathModel);
+    if(noise) return cloneValue(noise.defaultParameters);
     if(mathModel==='data_cutoff'){
       return {start:0,duration:''};
     }
@@ -33477,8 +33474,11 @@ function decorateDataflowEdges(){
     if(mathModel==='step'){
       return {targetValue:0,start:0,duration:''};
     }
+    if(mathModel==='intermittent'){
+      return {value:0,period:1,duty:0.5,start:0,duration:''};
+    }
     if(mathModel==='freeze'||mathModel==='stale'){
-      return {start:0};
+      return {start:0,duration:''};
     }
     if(mathModel==='delay'){
       return {delay_steps:3,start:0,duration:''};
@@ -33489,14 +33489,14 @@ function decorateDataflowEdges(){
     if(mathModel==='bias'){
       return {bias:0.1,start:0,duration:''};
     }
-    if(mathModel==='noise'||layer==='electrical'){
-      return {std:0.08,start:0,duration:'',noise_type:'gaussian'};
-    }
-    if(mathModel==='tamper'||layer==='protocol'){
-      return {scale:1.5,bias:0,start:0,duration:''};
-    }
     if(mathModel==='drift'){
       return {rate:0.006,start:0,duration:''};
+    }
+    if(mathModel==='noise'){
+      return {std:0.08,start:0,duration:'',noise_type:'gaussian'};
+    }
+    if(mathModel==='tamper'){
+      return {scale:1.5,bias:0,start:0,duration:''};
     }
     return {bias:0.1,start:0,duration:''};
   }
@@ -33517,6 +33517,7 @@ function decorateDataflowEdges(){
       layer,
       layerKey:layer,
       modelClass:model.modelClass,
+      ...(model.faultCategory?{faultCategory:model.faultCategory}:{}),
       runtimeBehavior:mathModel,
       slotId:primarySlot?.id||'',
       slotName:primarySlot?.name||'',
@@ -33552,6 +33553,7 @@ function decorateDataflowEdges(){
       layer:payload.layer,
       layerKey:payload.layerKey,
       runtimeBehavior:payload.runtimeBehavior,
+      ...(payload.faultCategory?{faultCategory:payload.faultCategory}:{}),
       parameters:cloneValue(payload.parameters||{}),
       targetKind:payload.targetKind,
       targetId:target.id,
@@ -33611,6 +33613,7 @@ function decorateDataflowEdges(){
       ...(arr(payload.targetFields).length?{targetFields:cloneValue(payload.targetFields)}:{}),
       ...(arr(payload.parameterKeys).length?{parameterKeys:cloneValue(payload.parameterKeys)}:{}),
       displayName:model.name||payload.name||payload.modelId,
+      ...(payload.faultCategory?{faultCategory:payload.faultCategory}:{}),
       parameters:cloneValue(payload.parameters||{}),
       ...(payload.vectorInjectionScope?{vectorInjectionScope:payload.vectorInjectionScope}:{}),
       ...(payload.vectorInjectionScope==='item'?{vectorIndex:payload.vectorIndex??0}:{}),
@@ -33716,8 +33719,11 @@ function decorateDataflowEdges(){
   }
 
   function bindLayeredFaultInjectorToTarget(injectorId,options={}){
+    return bindLayeredFaultToTarget(getRuntimeNode(injectorId),options);
+  }
+
+  function bindLayeredFaultToTarget(injector,options={}){
     const state=getState();
-    const injector=arr(state.modelNodes).find(node=>node.id===injectorId);
     if(!injector||!isLayeredFaultInjectorType(injector.type)){
       return {ok:false,reason:'injector-not-found'};
     }
@@ -33744,8 +33750,10 @@ function decorateDataflowEdges(){
       .filter((slot,index,items)=>items.findIndex(item=>item.id===slot.id)===index);
     const slot=selectedSlots[0]||compatibleSlots[0];
     const mathModel=options.mathModel||config.defaultModel;
-    const availableModels=getLayeredMathModelsForSlot(layer,slot);
-    if(!selectedSlots.every(selectedSlot=>getLayeredMathModelsForSlot(layer,selectedSlot).some(item=>item.value===mathModel))){
+    const availableModels=getLayeredMathModelsForSlot(layer,slot,options.faultCategory);
+    // Retain executable preset tasks authored with the previous electrical models.
+    const legacyElectricalModel=!options.faultCategory&&layer==='electrical'&&['attenuation','data_cutoff'].includes(mathModel);
+    if(!legacyElectricalModel&&!selectedSlots.every(selectedSlot=>getLayeredMathModelsForSlot(layer,selectedSlot,options.faultCategory).some(item=>item.value===mathModel))){
       return {ok:false,reason:'unsupported-math-model',layer,mathModel};
     }
     const model={
@@ -33754,6 +33762,7 @@ function decorateDataflowEdges(){
       layer,
       layerKey:layer,
       modelClass:options.modelClass||config.faultType,
+      ...(options.faultCategory?{faultCategory:options.faultCategory}:{}),
       runtimeBehavior:mathModel,
       defaultParameters:cloneValue(options.parameters||defaultLayeredFaultParameters(layer,mathModel)),
       vectorInjectionScope:options.vectorInjectionScope,
@@ -34014,7 +34023,7 @@ function decorateDataflowEdges(){
   }
 
   function removeLayeredFaultBindingDialog(){
-    document.querySelectorAll('[data-layered-fault-binding-dialog]').forEach(el=>{
+    document.querySelectorAll('[data-layered-fault-binding-dialog],[data-component-fault-layer-dialog]').forEach(el=>{
       if(typeof el.__layeredFaultDragCleanup==='function') el.__layeredFaultDragCleanup();
       el.remove();
     });
@@ -34090,29 +34099,44 @@ function decorateDataflowEdges(){
   }
 
   function getLayeredMathModels(layer){
+    const noiseModels=(window.__GZ_FAULT_INJECTION_RUNTIME__?.getNoiseFaultDefinitions?.()||[])
+      .map(model=>({value:model.id,label:model.name}));
     if(layer==='physical'){
       return [
-        {value:'degradation',label:'衰减模型'}
-      ];
-    }
-    if(layer==='protocol'){
-      return [
-        {value:'attenuation',label:'衰减模型'},
-        {value:'data_cutoff',label:'通断模型'}
+        {value:'step',label:'状态突变'},
+        {value:'freeze',label:'信号阻塞'},
+        {value:'intermittent',label:'间歇故障'}
       ];
     }
     return [
-      {value:'attenuation',label:'信号衰减'},
-      {value:'data_cutoff',label:'数据通断'}
+      {value:'bias',label:'偏差'},
+      {value:'freeze',label:'卡位'},
+      {value:'drift',label:'渐变'},
+      {value:'step',label:'突变'},
+      ...noiseModels
     ];
   }
 
-  function getLayeredMathModelsForSlot(layer,slot){
+  const FAULT_CATEGORIES=[
+    {value:'analog',label:'模拟量故障',models:[{value:'bias',label:'偏差'},{value:'freeze',label:'卡位'},{value:'drift',label:'渐变'},{value:'step',label:'突变'}]},
+    {value:'state',label:'状态量故障',models:[{value:'step',label:'状态突变'},{value:'freeze',label:'信号阻塞'},{value:'intermittent',label:'间歇故障'}]},
+    {value:'communication',label:'通信层故障',models:[{value:'delay',label:'通信延迟'},{value:'dropout',label:'随机丢包'},{value:'tamper',label:'报文篡改'},{value:'data_cutoff',label:'通信中断'}]}
+  ];
+
+  function getLayeredMathModelsForSlot(layer,slot,category){
+    // Categories describe signal behaviour independently of the injection layer.
+    // Old slot allowedModels describe the former layer-based menu, not categories.
+    if(category!==undefined) return FAULT_CATEGORIES.find(item=>item.value===category)?.models||[];
     const models=getLayeredMathModels(layer);
     const allowed=arr(slot?.allowedModels);
     if(!allowed.length) return models;
-    const filtered=models.filter(model=>allowed.includes(model.value));
-    return filtered.length?filtered:models;
+    const noiseTypes=layer==='physical'?[]:(window.__GZ_FAULT_INJECTION_RUNTIME__?.getNoiseFaultDefinitions?.()||[]).map(model=>model.id);
+    const originalModels=models.filter(model=>!noiseTypes.includes(model.value));
+    const allowedOriginalModels=originalModels.filter(model=>allowed.includes(model.value));
+    // Apply the existing fallback before adding noise, so stale model IDs
+    // cannot turn a previously complete fault list into a noise-only list.
+    const retainedModels=allowedOriginalModels.length?allowedOriginalModels:originalModels;
+    return models.filter(model=>retainedModels.includes(model)||noiseTypes.includes(model.value));
   }
 
   function findLayeredSlot(slots,slotId){
@@ -34186,13 +34210,17 @@ function decorateDataflowEdges(){
     const state=dialog?.__layeredFaultDialogState;
     if(!state) return;
     const selectedSlot=findLayeredSlot(state.slots,getLayeredDropdownValue(dialog,'slot'));
-    const nextModels=getLayeredMathModelsForSlot(state.config.layer,selectedSlot);
+    const nextModels=getLayeredMathModelsForSlot(state.config.layer,selectedSlot,dialog.querySelector('[data-layered-fault-category]').value);
     state.modelOptions=nextModels;
     const current=getLayeredDropdownValue(dialog,'model');
-    const nextValue=nextModels.some(model=>model.value===current)?current:(nextModels[0]?.value||state.config.defaultModel);
+    const nextValue=nextModels.some(model=>model.value===current)?current:(nextModels[0]?.value||'');
     const modelHost=dialog.querySelector('[data-layered-fault-model-host]');
     if(modelHost) modelHost.innerHTML=renderLayeredDropdown('model',nextValue,nextModels);
-    refreshLayeredFaultDialogParameters(dialog);
+    if(nextModels.length) refreshLayeredFaultDialogParameters(dialog);
+    else dialog.querySelector('[data-layered-fault-params]').innerHTML='';
+    dialog.querySelector('[data-layered-fault-confirm]').disabled=!nextModels.length;
+    dialog.querySelector('[data-layered-fault-config]').hidden=!nextModels.length;
+    dialog.querySelector('[data-layered-fault-noise-section]').hidden=!nextModels.length;
     refreshLayeredFaultVectorInjectionControls(dialog);
   }
 
@@ -34328,11 +34356,29 @@ function decorateDataflowEdges(){
     const params=getDialogParameters(layer,mathModel);
     const fields=Object.entries(params).map(([key,value])=>`
       <label class="layered-fault-dialog__field">
-        <span>${escapeHtml(getFaultParameterLabel(key))}</span>
+        <span>${escapeHtml(mathModel==='tamper'&&key==='scale'?'报文数值倍率':getFaultParameterLabel(key))}</span>
         ${renderFaultParameterControl(key,value,'data-layered-fault-param')}
       </label>
     `).join('');
-    host.innerHTML=fields;
+    const isNoise=(window.__GZ_FAULT_INJECTION_RUNTIME__?.getNoiseFaultDefinitions?.()||[]).some(model=>model.id===mathModel);
+    host.innerHTML=fields+(isNoise?'<div class="props-help" style="grid-column:1/-1" data-noise-additive-help>以“原信号 + 噪声”叠加注入；各通道独立采样，相同随机种子可复现。</div>':'');
+  }
+
+  function refreshLayeredNoiseFields(dialog){
+    const host=dialog.querySelector('[data-layered-noise-params]');
+    const type=dialog.querySelector('[data-layered-noise-type]').value;
+    const definition=window.__GZ_FAULT_INJECTION_RUNTIME__?.getNoiseFaultDefinitions?.().find(model=>model.id===type);
+    const previous=readLayeredDialogParameters(host);
+    host.innerHTML=Object.entries(definition?.defaultParameters||{})
+      .filter(([key])=>!['start','duration'].includes(key))
+      .map(([key,value])=>`<label class="layered-fault-dialog__field"><span>${escapeHtml(getFaultParameterLabel(key))}</span>${renderFaultParameterControl(key,previous[key]??value,'data-layered-fault-param')}</label>`).join('');
+  }
+
+  function readLayeredNoiseParameters(dialog){
+    if(!dialog.querySelector('[data-layered-noise-enabled]').checked) return {};
+    const values=readLayeredDialogParameters(dialog.querySelector('[data-layered-noise-params]'));
+    return {noiseEnabled:1,noiseType:dialog.querySelector('[data-layered-noise-type]').value,
+      ...Object.fromEntries(Object.entries(values).map(([key,value])=>[`noise${key[0].toUpperCase()}${key.slice(1)}`,value]))};
   }
 
   function readLayeredDialogParameters(host){
@@ -34364,7 +34410,79 @@ function decorateDataflowEdges(){
     return selectedIds.map(slotId=>findLayeredSlot(slots,slotId)).filter(Boolean);
   }
 
-  function openLayeredFaultBindingDialog(injector,target){
+  function openSelectedEdgeProtocolFaultDialog(){
+    const edge=getRuntimeEdge(S.selEdge);
+    const injector={
+      id:`protocol-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
+      type:'protocol_fault_injector'
+    };
+    if(!canBindLayeredFaultInjectorToTarget(injector,edge)){
+      if(typeof toast==='function') toast('请选择可注入协议层故障的连线','w');
+      return false;
+    }
+    cancelLayeredFaultBinding();
+    // Use the palette's binding dialog without adding an unbound canvas block.
+    openLayeredFaultBindingDialog(injector,edge,options=>bindLayeredFaultToTarget(injector,options));
+    return true;
+  }
+
+  function openComponentLayeredFaultDialog(nodeId){
+    const target=getRuntimeNode(nodeId);
+    if(!target||isSubsystemFaultTarget(target)||isLayeredFaultInjectorType(target.type)||target.type?.startsWith('instrument_')) return false;
+    cancelLayeredFaultBinding();
+    removeLayeredFaultBindingDialog();
+    const layers=[
+      {key:'electrical',label:'电气层故障',description:'选择故障类型、配置故障模式，并按需叠加噪声。',empty:'该组件暂无可注入的电气层变量，请先配置并保存故障槽位。'},
+      {key:'physical',label:'物理层故障',description:'选择故障类型、配置故障模式，并按需叠加噪声。',empty:'该组件暂无可注入的物理层参数，请先配置并保存故障槽位。'}
+    ];
+    const dialog=document.createElement('div');
+    dialog.className='layered-fault-dialog';
+    dialog.dataset.componentFaultLayerDialog='true';
+    dialog.setAttribute('role','dialog');
+    dialog.setAttribute('aria-label','选择故障层级');
+    dialog.innerHTML=`
+      <div class="layered-fault-dialog__head" data-layered-fault-dialog-handle>
+        <div>
+          <div class="layered-fault-dialog__eyebrow">注入故障</div>
+          <strong>选择故障层级</strong>
+        </div>
+        <button type="button" data-component-fault-layer-close aria-label="关闭">×</button>
+      </div>
+      <div class="layered-fault-dialog__body">
+        <div class="layered-fault-dialog__target">
+          <span>目标组件</span>
+          <b>${escapeHtml(getTargetDisplayName(target))}</b>
+        </div>
+        ${layers.map(layer=>{
+          const available=canBindLayeredFaultInjectorToTarget({type:`${layer.key}_fault_injector`},target);
+          return `<button type="button" class="target-fault-choice component-fault-layer-choice" data-component-fault-layer="${layer.key}"${available?'':' disabled'}>
+            <span>${layer.label}</span>
+            <small>${available?layer.description:layer.empty}</small>
+          </button>`;
+        }).join('')}
+      </div>`;
+    dialog.querySelector('[data-component-fault-layer-close]').addEventListener('click',closeLayeredFaultBindingDialog);
+    dialog.addEventListener('keydown',event=>{
+      if(event.key==='Escape') closeLayeredFaultBindingDialog();
+    });
+    dialog.querySelectorAll('[data-component-fault-layer]').forEach(button=>{
+      button.addEventListener('click',()=>{
+        const layer=button.dataset.componentFaultLayer;
+        const injector={
+          id:`${layer}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
+          type:`${layer}_fault_injector`
+        };
+        if(!canBindLayeredFaultInjectorToTarget(injector,getRuntimeNode(nodeId))) return;
+        openLayeredFaultBindingDialog(injector,target,options=>bindLayeredFaultToTarget(injector,options));
+      });
+    });
+    makeLayeredFaultBindingDialogDraggable(dialog);
+    document.body.appendChild(dialog);
+    (dialog.querySelector('[data-component-fault-layer]:not(:disabled)')||dialog.querySelector('[data-component-fault-layer-close]')).focus();
+    return true;
+  }
+
+  function openLayeredFaultBindingDialog(injector,target,bindFault=options=>bindLayeredFaultInjectorToTarget(injector.id,options)){
     const config=getLayeredFaultInjectorConfig(injector.type);
     if(!config) return;
     const slots=getLayeredFaultSlotsForTarget(target).filter(slot=>slot.layer===config.layer);
@@ -34376,13 +34494,13 @@ function decorateDataflowEdges(){
     // Prefer a vector signal so its injection scope is immediately visible;
     // users can still switch to any other compatible slot in the dialog.
     const initialSlot=slots.find(slot=>getLayeredFaultVectorLength(target,slot)>1)||slots[0];
-    const models=getLayeredMathModelsForSlot(config.layer,initialSlot);
+    const models=[];
     const slotFieldLabel=config.layer==='protocol'&&getTargetKind(target)==='edge'?'协议链路/报文':'关联参数/信号';
     dialog.innerHTML=`
       <div class="layered-fault-dialog__head" data-layered-fault-dialog-handle>
         <div>
           <div class="layered-fault-dialog__eyebrow">${escapeHtml(config.layerLabel)}注入</div>
-          <strong>确认绑定目标</strong>
+          <strong>配置故障注入</strong>
         </div>
         <button type="button" data-layered-fault-cancel aria-label="取消绑定">×</button>
       </div>
@@ -34391,6 +34509,15 @@ function decorateDataflowEdges(){
           <span>目标对象</span>
           <b>${escapeHtml(getTargetDisplayName(target))}</b>
         </div>
+        <label class="layered-fault-dialog__field">
+          <span>01 · 故障类型</span>
+          <select data-layered-fault-category aria-label="故障类型" required>
+            <option value="" disabled selected>请选择故障类型</option>
+            ${FAULT_CATEGORIES.map(item=>`<option value="${item.value}">${item.label}</option>`).join('')}
+          </select>
+        </label>
+        <section class="layered-fault-dialog__section" data-layered-fault-config hidden>
+        <div class="layered-fault-dialog__section-title">02 · 故障模式与参数</div>
         ${config.layer==='physical'
           ?renderLayeredPhysicalParameterSelection(slots,initialSlot.id)
           :`<label class="layered-fault-dialog__field">
@@ -34400,17 +34527,31 @@ function decorateDataflowEdges(){
               </div>
             </label>`}
         <label class="layered-fault-dialog__field">
-          <span>数学模型</span>
+          <span>故障模式</span>
           <div data-layered-fault-model-host>
-            ${renderLayeredDropdown('model',models[0]?.value||config.defaultModel,models)}
+            ${renderLayeredDropdown('model','',models)}
           </div>
         </label>
         <div class="layered-fault-dialog__params" data-layered-fault-params></div>
+        <p class="props-help">时间单位为秒；持续时间留空表示持续注入。</p>
         <div data-layered-fault-vector-host>${renderLayeredFaultVectorInjectionControls(target,initialSlot)}</div>
+        </section>
+        <section class="layered-fault-dialog__section" data-layered-fault-noise-section hidden>
+          <div class="layered-fault-dialog__section-title">03 · 噪声叠加（可选）</div>
+          <label class="layered-fault-dialog__noise-toggle"><input type="checkbox" data-layered-noise-enabled>叠加噪声</label>
+          <div data-layered-noise-config hidden>
+            <label class="layered-fault-dialog__field"><span>噪声类型</span><select data-layered-noise-type aria-label="噪声类型">
+              <option value="gaussian_noise">高斯噪声</option><option value="uniform_white_noise">白噪声</option><option value="gaussian_colored_noise">有色噪声</option>
+            </select></label>
+            <div class="layered-fault-dialog__params" data-layered-noise-params></div>
+            <p class="props-help" data-noise-additive-help>在故障结果上叠加噪声，共用故障开始时间和持续时间；随机种子可复现噪声。</p>
+          </div>
+        </section>
+        <p class="layered-fault-dialog__error" role="alert" data-layered-fault-error hidden></p>
       </div>
       <div class="layered-fault-dialog__actions">
         <button type="button" data-layered-fault-cancel>取消</button>
-        <button type="button" class="primary" data-layered-fault-confirm>确认绑定</button>
+        <button type="button" class="primary" data-layered-fault-confirm disabled>确认注入</button>
       </div>
     `;
     const paramsHost=dialog.querySelector('[data-layered-fault-params]');
@@ -34421,7 +34562,15 @@ function decorateDataflowEdges(){
       slotOptions:slots.map(slot=>({value:slot.id,label:getLayeredFaultSlotOptionLabel(slot)})),
       modelOptions:models
     };
-    renderDialogParameterFields(paramsHost,config.layer,getLayeredDropdownValue(dialog,'model')||models[0]?.value||config.defaultModel);
+    dialog.setAttribute('role','dialog');
+    dialog.setAttribute('aria-label',`${config.layerLabel}故障注入`);
+    dialog.querySelector('[data-layered-fault-category]').addEventListener('change',()=>refreshLayeredFaultDialogModels(dialog));
+    dialog.querySelector('[data-layered-noise-enabled]').addEventListener('change',event=>{
+      dialog.querySelector('[data-layered-noise-config]').hidden=!event.target.checked;
+      if(event.target.checked&&!dialog.querySelector('[data-layered-noise-params]').children.length) refreshLayeredNoiseFields(dialog);
+    });
+    dialog.querySelector('[data-layered-noise-type]').addEventListener('change',()=>refreshLayeredNoiseFields(dialog));
+    dialog.addEventListener('keydown',event=>{if(event.key==='Escape'){cancelLayeredFaultBinding();closeLayeredFaultBindingDialog();}});
     syncLayeredFaultVectorInjectionControls(dialog);
     makeLayeredFaultBindingDialogDraggable(dialog);
     dialog.addEventListener('click',event=>{
@@ -34440,6 +34589,8 @@ function decorateDataflowEdges(){
     });
     dialog.querySelector('[data-layered-fault-confirm]')?.addEventListener('click',event=>{
       event.preventDefault();
+      const faultCategory=dialog.querySelector('[data-layered-fault-category]').value;
+      if(!faultCategory) return;
       const selectedSlots=config.layer==='physical'
         ?readLayeredPhysicalParameterSlots(dialog,slots)
         :[findLayeredSlot(slots,getLayeredDropdownValue(dialog,'slot')||slots[0].id)];
@@ -34449,29 +34600,52 @@ function decorateDataflowEdges(){
       }
       const selectedSlot=selectedSlots[0];
       const slotId=selectedSlot.id;
-      const availableModels=getLayeredMathModelsForSlot(config.layer,selectedSlot);
+      const availableModels=getLayeredMathModelsForSlot(config.layer,selectedSlot,faultCategory);
       const mathModel=getLayeredDropdownValue(dialog,'model')||availableModels[0]?.value||config.defaultModel;
       const vectorOptions=readLayeredFaultVectorInjectionOptions(dialog);
       if(dialog.querySelector('[data-layered-fault-vector]')&&vectorOptions.vectorIndices.length===0){
         if(typeof toast==='function') toast('请至少选择一路向量数据','w');
         return;
       }
-      const result=bindLayeredFaultInjectorToTarget(injector.id,{
+      const parameters={...readLayeredDialogParameters(paramsHost),...readLayeredNoiseParameters(dialog)};
+      const invalid=Object.entries(parameters).some(([key,value])=>{
+        if(key==='noiseType'||(key==='duration'&&value==='')) return false;
+        if(value===''||!Number.isFinite(Number(value))) return true;
+        if(['start','duration','std','amplitude','noiseStd','noiseAmplitude','delay_steps'].includes(key)&&Number(value)<0) return true;
+        if(['duty','drop_rate'].includes(key)&&(Number(value)<0||Number(value)>1)) return true;
+        if(key==='noiseAlpha'&&Math.abs(Number(value))>=1) return true;
+        if(key==='period'&&Number(value)<=0) return true;
+        return ['delay_steps','seed','noiseSeed'].includes(key)&&!Number.isInteger(Number(value));
+      });
+      if(invalid){
+        const error=dialog.querySelector('[data-layered-fault-error]');
+        error.textContent='请输入有效数值：时间和幅值不能为负，概率需在 0–1 之间，周期需大于 0，相关系数需在 -1 与 1 之间，延迟步数和随机种子需为整数。';
+        error.hidden=false;
+        return;
+      }
+      const result=bindFault({
         targetKind:getTargetKind(target),
         targetId:target.id,
         slotId,
         slotIds:selectedSlots.map(slot=>slot.id),
         mathModel,
-        parameters:readLayeredDialogParameters(paramsHost),
+        faultCategory,
+        modelClass:FAULT_CATEGORIES.find(item=>item.value===faultCategory)?.label,
+        parameters,
         ...vectorOptions
       });
       if(result?.ok){
         cancelLayeredFaultBinding();
         closeLayeredFaultBindingDialog();
         if(typeof toast==='function') toast('故障已绑定到目标对象','s');
+      }else{
+        const error=dialog.querySelector('[data-layered-fault-error]');
+        error.textContent='注入失败，请检查所选目标、参数和故障模式。';
+        error.hidden=false;
       }
     });
     document.body.appendChild(dialog);
+    dialog.querySelector('[data-layered-fault-category]').focus();
   }
 
   function renderLayeredFaultInjectorControls(){
@@ -34657,6 +34831,9 @@ function decorateDataflowEdges(){
     getLayeredFaultSlotsForTarget,
     canBindLayeredFaultInjectorToTarget,
     bindLayeredFaultInjectorToTarget,
+    openProtocolFaultImport,
+    openSelectedEdgeProtocolFaultDialog,
+    openComponentLayeredFaultDialog,
     beginLayeredFaultBinding,
     cancelLayeredFaultBinding,
     showLayeredFaultBindingTargets,

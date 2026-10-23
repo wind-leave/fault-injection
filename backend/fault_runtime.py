@@ -1,5 +1,6 @@
 import copy
 import hashlib
+from backend.noise_runtime import NOISE_FAULT_TYPES, sample_noise
 
 
 class FaultRuntime:
@@ -8,6 +9,7 @@ class FaultRuntime:
         self.edge_state = {}
         self.frozen_parameters = {}
         self.frozen_signals = {}
+        self.noise_state = {}
         self.started_fault_ids = set()
         self.ended_fault_ids = set()
         self.disconnected_edge_ids = set()
@@ -136,6 +138,10 @@ class FaultRuntime:
             # A hold fault must retain the whole frame, including reference
             # frequency and impedance metadata, rather than one I/Q component.
             return self._frozen_signal_value(fault, target_id, target_field, result)
+        if fault_type in {"sensor_bias", "parameter_bias", "parameter_drift", "parameter_step", "intermittent", "data_tamper", "random_packet_loss", "link_delay"} | NOISE_FAULT_TYPES:
+            result["i"] = self._apply_signal_fault(fault, target_id, f"{target_field}.i", value["i"], time)
+            result["q"] = self._apply_signal_fault(fault, target_id, f"{target_field}.q", value["q"], time)
+            return result
         return result
 
     @staticmethod
@@ -189,7 +195,34 @@ class FaultRuntime:
             for item_index, item in enumerate(value)
         ]
 
+    def _with_noise_overlay(self, fault, target_id, target_field, value, time):
+        params = fault.get("parameters") or {}
+        enabled = str(params.get("noiseEnabled", 0)).lower() in {"1", "true", "on"}
+        noise_type = params.get("noiseType")
+        if not enabled or noise_type not in NOISE_FAULT_TYPES:
+            return value
+        noise_params = {
+            key: params[f"noise{key[0].upper()}{key[1:]}"]
+            for key in ("mean", "std", "amplitude", "alpha", "seed")
+            if f"noise{key[0].upper()}{key[1:]}" in params
+        }
+        stream = f"{target_id}/{fault.get('faultId', '')}/{target_field}/overlay"
+        if self._is_complex_envelope(value):
+            return {**value, **{
+                key: float(value[key]) + sample_noise(noise_type, noise_params, time, f"{stream}/{key}", self.noise_state)
+                for key in ("i", "q")
+            }}
+        return float(value) + sample_noise(noise_type, noise_params, time, stream, self.noise_state)
+
     def _apply_signal_fault(self, fault, target_id, target_field, value, time):
+        # Lists recurse through this wrapper so only selected lanes receive noise.
+        if isinstance(value, list):
+            return self._apply_signal_fault_base(fault, target_id, target_field, value, time)
+        base_fault = {**fault, "parameters": {**(fault.get("parameters") or {}), "noiseEnabled": 0}}
+        result = self._apply_signal_fault_base(base_fault, target_id, target_field, value, time)
+        return self._with_noise_overlay(fault, target_id, target_field, result, time)
+
+    def _apply_signal_fault_base(self, fault, target_id, target_field, value, time):
         if isinstance(value, list):
             return self._apply_vector_fault(
                 fault,
@@ -206,6 +239,29 @@ class FaultRuntime:
         params = fault.get("parameters") or {}
         fault_type = fault.get("faultType")
         result = float(value)
+        if fault_type == "data_tamper":
+            return result * float(params.get("scale", 1.0)) + float(params.get("bias", 0.0))
+        if fault_type == "link_delay":
+            stream = (str(fault.get("faultId", "")), target_id, target_field)
+            state = self.edge_state.setdefault(stream, {})
+            queue = state.setdefault("queue", [])
+            queue.append(result)
+            steps = max(0, int(params.get("delaySteps", params.get("delay_steps", 1))))
+            result = queue.pop(0) if len(queue) > steps else state.get("last", 0.0)
+            state["last"] = result
+            return result
+        if fault_type == "random_packet_loss":
+            stream = (str(fault.get("faultId", "")), target_id, target_field)
+            previous = self.frozen_signals.get(stream, 0.0)
+            rate = min(1.0, max(0.0, float(params.get("drop_rate", 0.08))))
+            dropped = (self._bounded_noise(params.get("seed", 1), fault.get("faultId", ""), time) + 1) / 2 <= rate
+            if dropped:
+                return 0.0 if params.get("strategy") == "zero" else previous
+            self.frozen_signals[stream] = result
+            return result
+        if fault_type in NOISE_FAULT_TYPES:
+            stream = f"{target_id}/{fault.get('faultId', '')}/{target_field}"
+            return result + sample_noise(fault_type, params, time, stream, self.noise_state)
         # Keep the original output-level physical fault behaviour for legacy
         # packages that do not name a concrete signal field.
         if fault_type == "motor_efficiency_loss":
@@ -246,6 +302,8 @@ class FaultRuntime:
             elapsed = max(0.0, time - start)
             if (elapsed % period) / period >= duty:
                 return result
+            if "value" in params:
+                return float(params["value"])
             mode = str(params.get("mode", "hold")).strip().lower()
             if mode in {"bias", "add"}:
                 return result + float(params.get("bias", 0.0))
@@ -265,6 +323,13 @@ class FaultRuntime:
         return result
 
     def _apply_parameter_fault(self, fault, parameter_key, target_field, value, time):
+        if isinstance(value, list):
+            return self._apply_parameter_fault_base(fault, parameter_key, target_field, value, time)
+        base_fault = {**fault, "parameters": {**(fault.get("parameters") or {}), "noiseEnabled": 0}}
+        result = self._apply_parameter_fault_base(base_fault, parameter_key, target_field, value, time)
+        return self._with_noise_overlay(fault, fault.get("targetId", ""), target_field, result, time)
+
+    def _apply_parameter_fault_base(self, fault, parameter_key, target_field, value, time):
         if isinstance(value, list):
             return self._apply_vector_fault(
                 fault,
@@ -297,6 +362,13 @@ class FaultRuntime:
                 f"{fault.get('faultId', '')}:{target_field}",
                 time,
             ) * abs(float(params.get("std", 0.0)))
+        if fault_type in NOISE_FAULT_TYPES:
+            stream = f"{fault.get('targetId', '')}/{fault.get('faultId', '')}/{target_field}"
+            return result + sample_noise(fault_type, params, time, stream, self.noise_state)
+        if fault_type in {"intermittent", "data_tamper", "random_packet_loss", "link_delay", "signal_cutoff"}:
+            return self._apply_signal_fault(
+                fault, fault.get("targetId", ""), target_field, result, time
+            )
         return result
 
     def apply_node_input(self, node_id, input_name, value, time):
@@ -372,10 +444,15 @@ class FaultRuntime:
             if fault_type == "link_loss":
                 result = copy.deepcopy(state.get("last", result))
             elif fault_type == "link_delay":
-                queue = state.setdefault("queue", [])
+                delay_states = state.setdefault("fault_delays", {})
+                delay_state = delay_states.setdefault(str(fault.get("faultId", "")), {})
+                queue = delay_state.setdefault("queue", [])
                 queue.append(copy.deepcopy(result))
-                delay_steps = int((fault.get("parameters") or {}).get("delaySteps", 1))
-                result = queue.pop(0) if len(queue) > delay_steps else copy.deepcopy(state.get("last", result))
+                delay_steps = max(0, int((fault.get("parameters") or {}).get("delaySteps", (fault.get("parameters") or {}).get("delay_steps", 1))))
+                result = queue.pop(0) if len(queue) > delay_steps else copy.deepcopy(delay_state.get("last", result))
+                delay_state["last"] = copy.deepcopy(result)
+                result = self._apply_vector_fault(fault, edge_id, "edge", result, time,
+                    lambda field, item: self._with_noise_overlay(fault, edge_id, field, item, time)) if isinstance(result, list) else self._with_noise_overlay(fault, edge_id, "edge", result, time)
             else:
                 result = self._apply_signal_fault(fault, edge_id, "edge", result, time)
         state["last"] = copy.deepcopy(result)

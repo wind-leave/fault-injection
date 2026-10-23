@@ -1,3 +1,14 @@
+import { NOISE_FAULT_DEFINITIONS, NOISE_FAULT_TYPES, sampleNoise } from './noiseFaultRuntime.js';
+import noisePythonSource from '../../backend/noise_runtime.py?raw';
+
+export function getNoiseFaultDefinitions() { return NOISE_FAULT_DEFINITIONS; }
+
+function noiseStreamForOptions(options) {
+  const payload = options.injectedFault || options.faultModel || {};
+  return options.noiseStream ?? [payload.targetId, payload.instanceId || payload.modelId || payload.id,
+    payload.targetField, options.seed, options.vectorIndex].join('/');
+}
+
 export const FAULT_LAYER_LABELS = Object.freeze({
   physical: '物理层',
   electrical: '电气层',
@@ -349,17 +360,43 @@ function complexEnvelopeAttenuationScale(params = {}) {
 
 /**
  * Applies the frontend layered-fault subset to a complete I/Q frame.
- * Supported behaviours intentionally match the layered injectors:
- * attenuation, data_cutoff and freeze.  Other scalar-only behaviours are
- * left untouched so a future fault cannot silently corrupt an I/Q frame.
+ * Signal faults change I/Q only; metadata and independent channel state survive.
  */
+function overlayNoiseParameters(params) {
+  return Object.fromEntries(['mean', 'std', 'amplitude', 'alpha', 'seed'].map((key) => [key, params[`noise${key[0].toUpperCase()}${key.slice(1)}`]]));
+}
+
+function hasNoiseOverlay(params, time) {
+  return asBoolean(params.noiseEnabled, false) && NOISE_FAULT_TYPES.includes(params.noiseType) && isFaultActive(params, time);
+}
+
 export function applyComplexEnvelopeFault(value, options = {}) {
+  const params = options.params ?? resolveFaultParameters(options.faultModel ?? {}, options.injectedFault ?? {});
+  // Each vector lane manages its own overlay and state in the core evaluator.
+  if (isComplexEnvelopeVector(value)) return applyComplexEnvelopeFaultCore(value, options);
+  const state = options.state ?? {};
+  const result = applyComplexEnvelopeFaultCore(value, { ...options, state, params: { ...params, noiseEnabled: 0 } });
+  if (!isComplexEnvelopeSample(result) || !hasNoiseOverlay(params, asNumber(options.time, 0))) {
+    delete state.overlayNoise;
+    return result;
+  }
+  state.overlayNoise ??= {};
+  const stream = `${noiseStreamForOptions(options)}/overlay`;
+  return { ...result,
+    i: result.i + sampleNoise(params.noiseType, overlayNoiseParameters(params), options.time ?? 0, `${stream}/i`, state.overlayNoise),
+    q: result.q + sampleNoise(params.noiseType, overlayNoiseParameters(params), options.time ?? 0, `${stream}/q`, state.overlayNoise)
+  };
+}
+
+function applyComplexEnvelopeFaultCore(value, options = {}) {
   if (isComplexEnvelopeVector(value)) {
     const state = options.state ?? {};
     state.lanes = Array.isArray(state.lanes) ? state.lanes : [];
     return value.map((envelope, index) => {
       state.lanes[index] = isPlainObject(state.lanes[index]) ? state.lanes[index] : {};
-      return applyComplexEnvelopeFault(envelope, { ...options, state: state.lanes[index] });
+      return applyComplexEnvelopeFault(envelope, {
+        ...options, state: state.lanes[index], noiseStream: `${noiseStreamForOptions(options)}/lane/${index}`
+      });
     });
   }
   if (!isComplexEnvelopeSample(value)) {
@@ -380,6 +417,7 @@ export function applyComplexEnvelopeFault(value, options = {}) {
   state.lastFaultGap = false;
 
   if (!behavior || !isFaultActive(params, time)) {
+    delete state.noiseStreams;
     state.previousComplexEnvelope = cloneComplexEnvelopeSample(input);
     state.holdComplexEnvelope = cloneComplexEnvelopeSample(input);
     state.hasComplexHoldValue = false;
@@ -411,10 +449,40 @@ export function applyComplexEnvelopeFault(value, options = {}) {
     return cloneComplexEnvelopeSample(state.holdComplexEnvelope);
   }
 
+  if (['additive_bias', 'parameter_bias', 'parameter_drift', 'parameter_step', 'intermittent', 'fixed_delay', 'packet_loss', 'tamper'].includes(behavior)) {
+    state.components ??= { i: {}, q: {} };
+    return {
+      ...input,
+      i: applyScalarFault(input.i, { ...options, behavior, params, state: state.components.i }),
+      q: applyScalarFault(input.q, { ...options, behavior, params, state: state.components.q })
+    };
+  }
+
+  if (NOISE_FAULT_TYPES.includes(behavior)) {
+    const stream = noiseStreamForOptions(options);
+    return { ...input,
+      i: input.i + sampleNoise(behavior, params, time, `${stream}/i`, state),
+      q: input.q + sampleNoise(behavior, params, time, `${stream}/q`, state)
+    };
+  }
+
   return input;
 }
 
 export function applyScalarFault(value, options = {}) {
+  const params = options.params ?? resolveFaultParameters(options.faultModel ?? {}, options.injectedFault ?? {});
+  const state = options.state ?? {};
+  const result = applyScalarFaultCore(value, { ...options, state, params: { ...params, noiseEnabled: 0 } });
+  if (!hasNoiseOverlay(params, asNumber(options.time, 0))) {
+    delete state.overlayNoise;
+    return result;
+  }
+  state.overlayNoise ??= {};
+  return result + sampleNoise(params.noiseType, overlayNoiseParameters(params), options.time ?? 0,
+    `${noiseStreamForOptions(options)}/overlay`, state.overlayNoise);
+}
+
+function applyScalarFaultCore(value, options = {}) {
   const faultModel = options.faultModel ?? {};
   const injectedFault = options.injectedFault ?? {};
   const params = options.params ?? resolveFaultParameters(faultModel, injectedFault);
@@ -432,6 +500,7 @@ export function applyScalarFault(value, options = {}) {
   state.lastFaultGap = false;
 
   if (!behavior || !isFaultActive(params, time)) {
+    delete state.noiseStreams;
     state.previousValue = input;
     state.holdValue = input;
     return input;
@@ -440,6 +509,10 @@ export function applyScalarFault(value, options = {}) {
   if (behavior === 'parameter_bias' || behavior === 'additive_bias') {
     const offset = asNumber(readParam(params, ['offset', 'delta_p', 'bias'], 0), 0);
     return input + offset;
+  }
+
+  if (NOISE_FAULT_TYPES.includes(behavior)) {
+    return input + sampleNoise(behavior, params, time, noiseStreamForOptions(options), state);
   }
 
   if (behavior === 'scale') {
@@ -527,14 +600,14 @@ export function applyScalarFault(value, options = {}) {
   }
 
   if (behavior === 'intermittent') {
-    const period = Math.max(asNumber(params.period, 4), dt);
+    const period = Math.max(asNumber(params.period, 4), 1e-9);
     const duty = clamp(asNumber(params.duty, 0.25), 0, 1);
     const phase = ((time - asNumber(params.start, 0)) % period) / period;
-    if (phase > duty) {
+    if (phase >= duty) {
       state.previousValue = input;
       return input;
     }
-    const inner = params.inner_fault_type || params.inner_kind || 'noise';
+    const inner = params.inner_fault_type || params.inner_kind || (params.value !== undefined ? 'parameter_step' : 'noise');
     return applyScalarFault(input, {
       ...options,
       behavior: inner === 'bias' ? 'additive_bias' : inner,
@@ -899,6 +972,7 @@ export function applyScalarFaultBindings(value, options = {}) {
       time: options.time,
       dt: options.dt,
       stepIndex: options.stepIndex,
+      noiseStream: `${target.id}/${stateKey}/${options.noiseStream || ''}/${options.vectorIndex ?? ''}`,
       seed: asNumber(options.seed, 1) + index
     });
 
@@ -954,7 +1028,8 @@ export function applyComplexEnvelopeFaultBindings(value, options = {}) {
       params: binding.parameters,
       behavior,
       state: bucket.bindingStates[stateKey],
-      time: options.time
+      time: options.time,
+      noiseStream: `${target.id}/${stateKey}/${options.noiseStream || ''}`
     });
 
     if (bucket.bindingStates[stateKey].lastDropout) {
@@ -1245,6 +1320,7 @@ export function buildFaultPythonModuleSpec(faultModel = {}) {
   const params = resolveFaultParameters(faultModel);
   const source = [
     'import json',
+    ...(NOISE_FAULT_TYPES.includes(behavior) ? [noisePythonSource, '_NOISE_STATE = {}'] : []),
     '',
     `PARAMS = json.loads(${JSON.stringify(JSON.stringify(params))})`,
     `KIND = ${JSON.stringify(kind)}`,
@@ -1263,6 +1339,9 @@ export function buildFaultPythonModuleSpec(faultModel = {}) {
     '        return value',
     '    if duration not in (None, "") and time > start + _num(duration):',
     '        return value',
+    ...(NOISE_FAULT_TYPES.includes(behavior) ? [
+      '    return value + sample_noise(KIND, PARAMS, time, "module", _NOISE_STATE)'
+    ] : []),
     '    if KIND in ("bias", "parameter_bias", "additive_bias"):',
     '        return value + _num(PARAMS.get("offset", PARAMS.get("delta_p", PARAMS.get("bias", 0.0))))',
     '    if KIND == "scale":',

@@ -1,48 +1,87 @@
 import { normalizeSignalSourceProps } from './signalSourceDomainService.js';
+import { NOISE_FAULT_DEFINITIONS } from './noiseFaultRuntime.js';
 
 export const FAULT_MATH_MODEL_DEFINITIONS = Object.freeze({
   physical: [
     {
-      id: 'degradation',
-      name: '衰减模型',
-      formula: 'p_fault = p * scale(t)',
-      defaultParameters: { scale: 0.85, start: 0, duration: '' }
+      id: 'step',
+      name: '状态突变',
+      formula: 'p_fault = targetValue',
+      defaultParameters: { targetValue: 0, start: 0, duration: '' }
+    },
+    {
+      id: 'freeze',
+      name: '信号阻塞',
+      formula: 'p_fault = p(start)',
+      defaultParameters: { start: 0, duration: '' }
+    },
+    {
+      id: 'intermittent',
+      name: '间歇故障',
+      formula: 'p_fault = ((t - start) % period < period * duty) ? value : p',
+      defaultParameters: { value: 0, period: 1, duty: 0.5, start: 0, duration: '' }
     }
   ],
   electrical: [
     {
-      id: 'attenuation',
-      name: '信号衰减',
-      formula: 'y_fault = y * 10 ^ (-attenuation_db / 20)',
-      defaultParameters: { attenuation_db: 6, start: 0, duration: '' }
+      id: 'bias',
+      name: '偏差',
+      formula: 'y_fault = y + bias',
+      defaultParameters: { bias: 0.1, start: 0, duration: '' }
     },
     {
-      id: 'data_cutoff',
-      name: '数据通断',
-      formula: 'y_fault = 0',
+      id: 'freeze',
+      name: '卡位',
+      formula: 'y_fault = y(start)',
       defaultParameters: { start: 0, duration: '' }
-    }
+    },
+    {
+      id: 'drift',
+      name: '渐变',
+      formula: 'y_fault = y + rate * (t - start)',
+      defaultParameters: { rate: 0.006, start: 0, duration: '' }
+    },
+    {
+      id: 'step',
+      name: '突变',
+      formula: 'y_fault = targetValue',
+      defaultParameters: { targetValue: 0, start: 0, duration: '' }
+    },
+    ...NOISE_FAULT_DEFINITIONS
   ],
   protocol: [
     {
-      id: 'attenuation',
-      name: '衰减模型',
-      formula: 'payload_fault = payload * scale',
-      defaultParameters: { scale: 0.5, start: 0, duration: '' }
+      id: 'bias',
+      name: '偏差',
+      formula: 'payload_fault = payload + bias',
+      defaultParameters: { bias: 0.1, start: 0, duration: '' }
     },
     {
-      id: 'data_cutoff',
-      name: '通断模型',
-      formula: 'payload_fault = 0',
+      id: 'freeze',
+      name: '卡位',
+      formula: 'payload_fault = payload(start)',
       defaultParameters: { start: 0, duration: '' }
-    }
+    },
+    {
+      id: 'drift',
+      name: '渐变',
+      formula: 'payload_fault = payload + rate * (t - start)',
+      defaultParameters: { rate: 0.006, start: 0, duration: '' }
+    },
+    {
+      id: 'step',
+      name: '突变',
+      formula: 'payload_fault = targetValue',
+      defaultParameters: { targetValue: 0, start: 0, duration: '' }
+    },
+    ...NOISE_FAULT_DEFINITIONS
   ]
 });
 
 const EDGE_ELECTRICAL_MODELS = Object.freeze(
   FAULT_MATH_MODEL_DEFINITIONS.electrical.map((model) => model.id)
 );
-const EDGE_PROTOCOL_MODELS = Object.freeze(['attenuation', 'data_cutoff']);
+const EDGE_PROTOCOL_MODELS = Object.freeze(FAULT_MATH_MODEL_DEFINITIONS.protocol.map((model) => model.id));
 const FAULT_LAYERS = Object.freeze(['physical', 'electrical', 'protocol']);
 const NODE_LAYER_MODELS = Object.freeze({
   physical: FAULT_MATH_MODEL_DEFINITIONS.physical.map((model) => model.id),

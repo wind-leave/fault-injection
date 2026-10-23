@@ -18,6 +18,18 @@ import {
 } from '../src/services/faultInjectionService.js';
 
 describe('faultInjectionService', () => {
+  it('alternates a physical parameter between its fault value and nominal value', () => {
+    const params = { value: 0, period: 2, duty: 0.25, start: 1, duration: 4 };
+    const apply = (time, overrides = {}) => applyScalarFault(8, {
+      behavior: 'intermittent', params: { ...params, ...overrides }, time, state: {}
+    });
+    expect([0, 1, 1.5, 2, 3, 3.5, 5.5].map((time) => apply(time))).toEqual([8, 0, 8, 8, 0, 8, 8]);
+    expect(apply(1, { duty: 0 })).toBe(8);
+    expect(apply(2, { duty: 1, value: 3 })).toBe(3);
+    expect(apply(1.03125, { period: 0.125, duty: 0.5 })).toBe(0);
+    expect(apply(1.09375, { period: 0.125, duty: 0.5 })).toBe(8);
+  });
+
   it('maps every PDF-derived catalog entry to an executable runtime behavior and Python wrapper', () => {
     faultCatalog.faultTypes.forEach((faultModel) => {
       const behavior = getFaultRuntimeBehavior(faultModel);
@@ -510,6 +522,43 @@ describe('faultInjectionService', () => {
       time: 0,
       state: {}
     })).toEqual({ ...envelope, i: 0, q: 0 });
+  });
+
+  it.each([
+    ['bias', { bias: 2 }, 5, -2],
+    ['drift', { rate: 2 }, 5, -2],
+    ['step', { targetValue: 2 }, 2, 2]
+  ])('applies electrical %s to I/Q components only within its active window', (behavior, parameters, i, q) => {
+    const envelope = { i: 3, q: -4, referenceFrequencyHz: 20e9, impedanceOhm: 50 };
+    const apply = (time) => applyComplexEnvelopeFault(envelope, {
+      behavior, params: { ...parameters, start: 1, duration: 2 }, time, state: {}
+    });
+    expect(apply(0)).toEqual(envelope);
+    expect(apply(2)).toEqual({ ...envelope, i, q });
+    expect(apply(4)).toEqual(envelope);
+    expect(envelope.i).toBe(3);
+  });
+
+  it.each([
+    ['bias', { bias: 0.5 }, [1.5, 2.5, -2.5, 4.5]],
+    ['freeze', {}, [1, 2, -3, 4]],
+    ['drift', { rate: 0.5 }, [1.5, 2.5, -2.5, 4.5]],
+    ['step', { targetValue: 0.5 }, [0.5, 0.5, 0.5, 0.5]]
+  ])('applies protocol %s to the complete I/Q message within its time window', (runtimeBehavior, parameters, expected) => {
+    const frames = [
+      { i: 1, q: 2, referenceFrequencyHz: 20e9 },
+      { i: -3, q: 4, referenceFrequencyHz: 21e9 }
+    ];
+    const stateBucket = {};
+    const target = { id: 'wire', faultBindings: [{ bindingId: 'protocol-fault', layer: 'protocol', runtimeBehavior,
+      parameters: { ...parameters, start: 1, duration: 2 }, active: true }] };
+    const apply = (time, value = frames) => applyComplexEnvelopeFaultBindings(value, { target, stateBucket, time });
+    expect(apply(0)).toEqual(frames);
+    const actual = apply(2);
+    expect(actual.flatMap((frame) => [frame.i, frame.q])).toEqual(expected);
+    expect(actual.map((frame) => frame.referenceFrequencyHz)).toEqual([20e9, 21e9]);
+    if (runtimeBehavior === 'freeze') expect(apply(2.5, frames.map((frame) => ({ ...frame, i: 50, q: 60 })))).toEqual(frames);
+    expect(apply(4)).toEqual(frames);
   });
 
   it('holds a complete I/Q frame and applies protocol bindings frame-wise', () => {

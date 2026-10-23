@@ -2,12 +2,18 @@ const FAULT_PARAMETER_LABELS = {
   value: '注入值',
   bias: '偏置值',
   std: '噪声标准差',
+  mean: '噪声均值',
+  alpha: '相关系数 α (-1＜α＜1)',
   seed: '随机种子',
   start: '开始时间',
   duration: '持续时间',
   mode: '写入方式',
   rate: '漂移速率',
   step: '突变量',
+  targetValue: '目标值',
+  target_value: '目标值',
+  period: '故障周期 (s)',
+  duty: '故障占空比 (0–1)',
   scale: '衰减系数',
   attenuation_db: '衰减量 (dB)',
   attenuationDb: '衰减量 (dB)',
@@ -22,10 +28,19 @@ const FAULT_PARAMETER_LABELS = {
   frequency: '频率',
   threshold: '阈值',
   hold_value: '保持值',
-  fault_value: '故障值'
+  fault_value: '故障值',
+  noiseEnabled: '叠加噪声',
+  noiseType: '叠加噪声类型',
+  noiseMean: '噪声均值',
+  noiseStd: '噪声标准差',
+  noiseAmplitude: '白噪声幅值',
+  noiseAlpha: '噪声相关系数 α',
+  noiseSeed: '噪声随机种子'
 };
 
 const FAULT_PARAMETER_CHOICES = {
+  noiseEnabled: [{value: 0, label: '不叠加'}, {value: 1, label: '叠加'}],
+  noiseType: [{value: 'gaussian_noise', label: '高斯噪声'}, {value: 'uniform_white_noise', label: '白噪声'}, {value: 'gaussian_colored_noise', label: '有色噪声'}],
   mode: [
     { value: 'overwrite', label: '覆盖写入' },
     { value: 'add', label: '叠加' },

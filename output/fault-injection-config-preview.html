@@ -1,0 +1,102 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>故障注入配置预览</title><link rel="stylesheet" href="/src/styles/tokens.css"><link rel="stylesheet" href="/src/styles/base.css"><link rel="stylesheet" href="/src/styles/components.css"><style>body{padding:16px;box-sizing:border-box}.layered-fault-dialog{position:relative;top:0!important;left:0!important;right:auto!important;width:min(560px,100%);max-height:calc(100vh - 32px);margin:auto}body{zoom:.65}.layered-fault-dialog{max-height:none;width:560px}.layered-fault-dialog__params{grid-template-columns:1fr 1fr}</style><div class="layered-fault-dialog" data-layered-fault-binding-dialog="true" role="dialog" aria-label="电气层故障注入">
+      <div class="layered-fault-dialog__head" data-layered-fault-dialog-handle="">
+        <div>
+          <div class="layered-fault-dialog__eyebrow">电气层注入</div>
+          <strong>配置故障注入</strong>
+        </div>
+        <button type="button" data-layered-fault-cancel="" aria-label="取消绑定">×</button>
+      </div>
+      <div class="layered-fault-dialog__body">
+        <div class="layered-fault-dialog__target">
+          <span>目标对象</span>
+          <b>飞控姿态传感器</b>
+        </div>
+        <label class="layered-fault-dialog__field">
+          <span>01 · 故障类型</span>
+          <select data-layered-fault-category="" aria-label="故障类型" required="">
+            <option value="" disabled="">请选择故障类型</option>
+            <option value="analog" selected="">模拟量故障</option><option value="state">状态量故障</option><option value="communication">通信层故障</option>
+          </select>
+        </label>
+        <section class="layered-fault-dialog__section" data-layered-fault-config="">
+        <div class="layered-fault-dialog__section-title">02 · 故障模式与参数</div>
+        <label class="layered-fault-dialog__field">
+              <span>关联参数/信号</span>
+              <div data-layered-fault-slot-host="">
+                
+      <details class="layered-fault-select" data-layered-fault-dropdown="slot">
+        <summary data-layered-fault-dropdown-button="slot">
+          <span data-layered-fault-dropdown-label="slot">角速度信号</span>
+          <span class="layered-fault-select__caret">⌄</span>
+        </summary>
+        <div class="layered-fault-select__menu">
+          
+            <button type="button" data-layered-fault-option="slot" data-layered-fault-option-value="electrical:rate" aria-selected="true">角速度信号</button>
+          
+        </div>
+        <input type="hidden" data-layered-fault-slot="" value="electrical:rate">
+      </details>
+    
+              </div>
+            </label>
+        <label class="layered-fault-dialog__field">
+          <span>故障模式</span>
+          <div data-layered-fault-model-host="">
+      <details class="layered-fault-select" data-layered-fault-dropdown="model">
+        <summary data-layered-fault-dropdown-button="model">
+          <span data-layered-fault-dropdown-label="model">偏差</span>
+          <span class="layered-fault-select__caret">⌄</span>
+        </summary>
+        <div class="layered-fault-select__menu">
+          
+            <button type="button" data-layered-fault-option="model" data-layered-fault-option-value="bias" aria-selected="true">偏差</button>
+          
+            <button type="button" data-layered-fault-option="model" data-layered-fault-option-value="freeze" aria-selected="false">卡位</button>
+          
+            <button type="button" data-layered-fault-option="model" data-layered-fault-option-value="drift" aria-selected="false">渐变</button>
+          
+            <button type="button" data-layered-fault-option="model" data-layered-fault-option-value="step" aria-selected="false">突变</button>
+          
+        </div>
+        <input type="hidden" data-layered-fault-model="" value="bias">
+      </details>
+    </div>
+        </label>
+        <div class="layered-fault-dialog__params" data-layered-fault-params="">
+      <label class="layered-fault-dialog__field">
+        <span>偏置值</span>
+        <input data-layered-fault-param="bias" value="0.1" aria-label="偏置值">
+      </label>
+    
+      <label class="layered-fault-dialog__field">
+        <span>开始时间</span>
+        <input data-layered-fault-param="start" value="0" aria-label="开始时间">
+      </label>
+    
+      <label class="layered-fault-dialog__field">
+        <span>持续时间</span>
+        <input data-layered-fault-param="duration" value="" aria-label="持续时间">
+      </label>
+    </div>
+        <p class="props-help">时间单位为秒；持续时间留空表示持续注入。</p>
+        <div data-layered-fault-vector-host=""></div>
+        </section>
+        <section class="layered-fault-dialog__section" data-layered-fault-noise-section="">
+          <div class="layered-fault-dialog__section-title">03 · 噪声叠加（可选）</div>
+          <label class="layered-fault-dialog__noise-toggle"><input type="checkbox" data-layered-noise-enabled="" checked="">叠加噪声</label>
+          <div data-layered-noise-config="">
+            <label class="layered-fault-dialog__field"><span>噪声类型</span><select data-layered-noise-type="" aria-label="噪声类型">
+              <option value="gaussian_noise">高斯噪声</option><option value="uniform_white_noise">白噪声</option><option value="gaussian_colored_noise" selected="">有色噪声</option>
+            </select></label>
+            <div class="layered-fault-dialog__params" data-layered-noise-params=""><label class="layered-fault-dialog__field"><span>噪声均值</span><input data-layered-fault-param="mean" value="0" aria-label="噪声均值"></label><label class="layered-fault-dialog__field"><span>噪声标准差</span><input data-layered-fault-param="std" value="0.1" aria-label="噪声标准差"></label><label class="layered-fault-dialog__field"><span>相关系数 α (-1＜α＜1)</span><input data-layered-fault-param="alpha" value="0.9" aria-label="相关系数 α (-1＜α＜1)"></label><label class="layered-fault-dialog__field"><span>随机种子</span><input data-layered-fault-param="seed" value="1" aria-label="随机种子"></label></div>
+            <p class="props-help" data-noise-additive-help="">在故障结果上叠加噪声，共用故障开始时间和持续时间；随机种子可复现噪声。</p>
+          </div>
+        </section>
+        <p class="layered-fault-dialog__error" role="alert" data-layered-fault-error="" hidden=""></p>
+      </div>
+      <div class="layered-fault-dialog__actions">
+        <button type="button" data-layered-fault-cancel="">取消</button>
+        <button type="button" class="primary" data-layered-fault-confirm="">确认注入</button>
+      </div>
+    </div></html>
+

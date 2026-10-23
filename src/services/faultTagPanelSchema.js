@@ -5,6 +5,9 @@ const LAYER_LABELS = {
 };
 
 const RUNTIME_LABELS = {
+  gaussian_noise: '独立高斯噪声',
+  uniform_white_noise: '均匀分布白噪声',
+  gaussian_colored_noise: '高斯有色噪声',
   bias: '偏差故障',
   stuck: '卡死故障',
   freeze: '卡死故障',
@@ -16,6 +19,8 @@ const RUNTIME_LABELS = {
 };
 
 const PARAMETER_LABELS = {
+  mean: '噪声均值',
+  alpha: '相关系数 α',
   scale: '篡改倍率',
   bias: '偏置值',
   value: '故障值',

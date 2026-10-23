@@ -300,13 +300,16 @@ describe('subsystem hierarchy app integration', () => {
     expect(segmentPath).not.toBeNull();
     dispatchPointer(segmentPath, 'pointerup');
     const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    const category = dialog.querySelector('[data-layered-fault-category]');
+    category.value = 'analog';
+    category.dispatchEvent(new Event('change', { bubbles: true }));
     expect(dialog).not.toBeNull();
-    dialog.querySelector('[data-layered-fault-option="model"][data-layered-fault-option-value="data_cutoff"]').click();
+    dialog.querySelector('[data-layered-fault-option="model"][data-layered-fault-option-value="step"]').click();
     dialog.querySelector('[data-layered-fault-confirm]').click();
     await flushRuntime();
 
     expect(rootCanvas.edges.find((edge) => edge.id === externalEdge.id)?.injectedFault)
-      .toMatchObject({ runtimeBehavior: 'data_cutoff' });
+      .toMatchObject({ runtimeBehavior: 'step' });
     expect(state.faultInstances).toContainEqual(expect.objectContaining({ targetId: externalEdge.id }));
     expect(childCanvas.edges.find((edge) => edge.id === segment.id)?.injectedFault).toBeUndefined();
 
@@ -324,7 +327,7 @@ describe('subsystem hierarchy app integration', () => {
     const executable = window.__GZ_BACKEND_SIMULATION__.buildExecutablePackage(state);
     expect(executable.faultInstances).toContainEqual(expect.objectContaining({
       targetId: executable.edges.find((edge) => edge.targetNodeId === scope.id)?.id,
-      faultType: 'signal_cutoff'
+      faultType: 'parameter_step'
     }));
     window.simInit(true);
     for (let step = 0; step < 4; step += 1) window.simStep();
@@ -334,9 +337,9 @@ describe('subsystem hierarchy app integration', () => {
   });
 
   it.each([
-    ['physical', 'physical_fault_injector', 'degradation', { scale: 0.5, start: 0, duration: '' }, 'parameter_degradation'],
-    ['electrical', 'electrical_fault_injector', 'attenuation', { attenuation_db: 6, start: 0, duration: '' }, 'signal_attenuation'],
-    ['protocol', 'protocol_fault_injector', 'data_cutoff', { start: 0, duration: '' }, 'signal_cutoff']
+    ['physical', 'physical_fault_injector', 'step', { targetValue: 0.5, start: 0, duration: '' }, 'parameter_step'],
+    ['electrical', 'electrical_fault_injector', 'step', { targetValue: 0, start: 0, duration: '' }, 'parameter_step'],
+    ['protocol', 'protocol_fault_injector', 'step', { targetValue: 0, start: 0, duration: '' }, 'parameter_step']
   ])('applies a %s fault to a component or wire inside a subsystem', async (
     layer, injectorType, mathModel, parameters, executableType
   ) => {
@@ -2516,14 +2519,14 @@ describe('subsystem hierarchy app integration', () => {
     expect(baseline.some((sample) => Math.abs(sample.actual) > 0.01)).toBe(true);
 
     const bound = window.bindLayeredFaultInjectorToTarget(injector.id, {
-      targetKind: 'edge', targetId: 'subsystem-to-scope', mathModel: 'data_cutoff'
+      targetKind: 'edge', targetId: 'subsystem-to-scope', mathModel: 'step'
     });
     expect(bound).toMatchObject({ ok: true, targetId: 'subsystem-to-scope' });
 
     const pkg = window.__GZ_BACKEND_SIMULATION__.buildExecutablePackage(state);
     expect(pkg.faultInstances).toContainEqual(expect.objectContaining({
       targetId: pkg.edges.find((edge) => edge.targetNodeId === scope.id)?.id,
-      faultType: 'signal_cutoff'
+      faultType: 'parameter_step'
     }));
 
     window.simInit(true);

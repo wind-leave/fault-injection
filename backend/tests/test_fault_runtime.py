@@ -4,6 +4,88 @@ from backend.fault_runtime import FaultRuntime
 
 
 class FaultRuntimeTests(unittest.TestCase):
+    def test_protocol_faults_apply_to_complete_vector_messages(self):
+        cases = [
+            ("sensor_bias", {"bias": 0.5}, [1.5, 2.5]),
+            ("signal_stuck", {}, [1.0, 2.0]),
+            ("parameter_drift", {"rate": 0.5}, [1.5, 2.5]),
+            ("parameter_step", {"targetValue": 0.5}, [0.5, 0.5]),
+        ]
+        for fault_type, parameters, expected in cases:
+            with self.subTest(fault_type=fault_type):
+                runtime = FaultRuntime([{
+                    "faultId": "protocol-fault", "faultType": fault_type, "targetId": "wire",
+                    "injectionForm": "protocol-bus", "targetField": "can.payload",
+                    "vectorInjectionScope": "item", "vectorIndex": 1,
+                    "startTime": 1.0, "duration": 2.0, "parameters": parameters,
+                }])
+                self.assertEqual(runtime.apply_edge_value("wire", [1.0, 2.0], 0), [1.0, 2.0])
+                self.assertEqual(runtime.apply_edge_value("wire", [1.0, 2.0], 2), expected)
+                if fault_type == "signal_stuck":
+                    self.assertEqual(runtime.apply_edge_value("wire", [50.0, 60.0], 2.5), [1.0, 2.0])
+                self.assertEqual(runtime.apply_edge_value("wire", [1.0, 2.0], 4), [1.0, 2.0])
+
+    def test_electrical_fault_types_transform_scalars_and_complex_envelopes(self):
+        envelope = {"i": 3.0, "q": -4.0, "referenceFrequencyHz": 20e9, "impedanceOhm": 50}
+        cases = [
+            ("sensor_bias", {"bias": 2.0}, 5.0, -2.0),
+            ("signal_stuck", {}, 3.0, -4.0),
+            ("parameter_drift", {"rate": 2.0}, 5.0, -2.0),
+            ("parameter_step", {"targetValue": 2.0}, 2.0, 2.0),
+        ]
+        for fault_type, parameters, expected_i, expected_q in cases:
+            with self.subTest(fault_type=fault_type):
+                runtime = FaultRuntime([{
+                    "faultId": "electrical-fault",
+                    "faultType": fault_type,
+                    "targetId": "rf-module",
+                    "targetField": "outputs.envelope",
+                    "startTime": 1.0,
+                    "duration": 2.0,
+                    "parameters": parameters,
+                }])
+                self.assertEqual(runtime.apply_node_output("rf-module", envelope, 0, "envelope"), envelope)
+                actual = runtime.apply_node_output("rf-module", envelope, 2, "envelope")
+                self.assertEqual(actual, {**envelope, "i": expected_i, "q": expected_q})
+                scalar_runtime = FaultRuntime(runtime.fault_instances)
+                self.assertEqual(scalar_runtime.apply_node_output("rf-module", 3.0, 2, "envelope"), expected_i)
+                self.assertEqual(runtime.apply_node_output("rf-module", envelope, 4, "envelope"), envelope)
+                self.assertEqual(runtime.apply_node_output("rf-module", envelope, 2, "other"), envelope)
+
+    def test_intermittent_physical_parameters_alternate_and_recover(self):
+        fault = {
+            "faultId": "physical-intermittent",
+            "faultType": "intermittent",
+            "targetId": "controller",
+            "injectionForm": "module-variable",
+            "parameterKeys": ["gain", "bias"],
+            "startTime": 1.0,
+            "duration": 4.0,
+            "parameters": {"value": 0.0, "period": 2.0, "duty": 0.25},
+        }
+        runtime = FaultRuntime([fault])
+        nominal = {"gain": 8.0, "bias": 3.0}
+        for time, active in [(0, False), (1, True), (1.5, False), (2, False), (3, True), (3.5, False), (5.5, False)]:
+            with self.subTest(time=time):
+                self.assertEqual(
+                    runtime.apply_node_parameters("controller", nominal, time),
+                    {"gain": 0.0, "bias": 0.0} if active else nominal,
+                )
+        self.assertEqual(nominal, {"gain": 8.0, "bias": 3.0})
+
+    def test_intermittent_physical_fault_duty_cycle_extremes(self):
+        for duty, expected in [(0.0, 8.0), (1.0, 2.0)]:
+            with self.subTest(duty=duty):
+                runtime = FaultRuntime([{
+                    "faultId": "physical-intermittent",
+                    "faultType": "intermittent",
+                    "targetId": "controller",
+                    "injectionForm": "module-variable",
+                    "parameterKey": "gain",
+                    "parameters": {"value": 2.0, "period": 1.0, "duty": duty},
+                }])
+                self.assertEqual(runtime.apply_node_parameters("controller", {"gain": 8.0}, 0.5)["gain"], expected)
+
     def test_sensor_bias_applies_only_in_active_window(self):
         runtime = FaultRuntime([
             {

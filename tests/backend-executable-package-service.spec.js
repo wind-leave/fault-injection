@@ -1304,6 +1304,23 @@ describe('backendExecutablePackageService', () => {
     ]);
   });
 
+  it('exports the three physical fault types without converting intermittent values into steps', () => {
+    const modelNodes = [{ id: 'controller', type: 'simulation_block', props: {}, pythonBinding: { moduleId: 'attitude_pid' } }];
+    const faultInstances = [
+      { runtimeBehavior: 'step', parameters: { targetValue: 0.5 } },
+      { runtimeBehavior: 'freeze', parameters: {} },
+      { runtimeBehavior: 'intermittent', parameters: { value: 0, period: 1, duty: 0.5 } },
+      { runtimeBehavior: 'intermittent', parameters: { value: 0, targetValue: 0, period: 1, duty: 0.5 } }
+    ].map((fault, index) => ({
+      ...fault, instanceId: `physical-${index}`, layer: 'physical',
+      targetId: 'controller', injectionForm: 'module-variable', targetField: 'params.gain'
+    }));
+    const pkg = buildBackendExecutablePackage({ modelNodes, modelEdges: [], faultInstances });
+    expect(pkg.faultInstances.map((fault) => fault.faultType))
+      .toEqual(['parameter_step', 'parameter_freeze', 'intermittent', 'intermittent']);
+    expect(pkg.faultInstances[2].parameters).toMatchObject({ value: 0, period: 1, duty: 0.5 });
+  });
+
   it('exports degradation, freeze, and random physical models as parameter faults', () => {
     const pkg = buildBackendExecutablePackage({
       modelNodes: [

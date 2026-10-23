@@ -577,7 +577,17 @@ function normalizeFaultType(fault = {}) {
     || (injectionForm === 'module-variable'
       && Boolean(String(fault.parameterKey ?? fault.targetParameter ?? '').trim()));
 
+  if (['gaussian_noise', 'uniform_white_noise', 'gaussian_colored_noise'].includes(key)) return key;
+  // Preserve communication modes rather than inferring a mode from bias/scale.
+  if (key === 'tamper') return 'data_tamper';
+  if (key === 'dropout' || key === 'packet_loss') return 'random_packet_loss';
+  if (key === 'data_cutoff') return 'signal_cutoff';
+  if (key === 'delay' || key === 'fixed_delay') return 'link_delay';
+
   if (parameterFault) {
+    if (/intermittent/.test(key)) {
+      return 'intermittent';
+    }
     if (/degradation|degrade|scale/.test(key)) {
       return 'parameter_degradation';
     }
@@ -619,10 +629,10 @@ function normalizeFaultType(fault = {}) {
   if (/efficiency/.test(key)) {
     return 'motor_efficiency_loss';
   }
-  if (/physical_parameter_step|parameter_step/.test(key)) {
+  if (/^step$|physical_parameter_step|parameter_step/.test(key)) {
     return 'parameter_step';
   }
-  if (/physical_parameter_drift|parameter_drift/.test(key)) {
+  if (/^drift$|physical_parameter_drift|parameter_drift/.test(key)) {
     return 'parameter_drift';
   }
   if (/physical_parameter_bias|parameter_bias|parameter_scale/.test(key)) {

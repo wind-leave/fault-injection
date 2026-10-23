@@ -7,6 +7,16 @@ import { fileURLToPath } from 'node:url';
 import App from '../src/App.vue';
 import { __resetLegacyRuntimeForTests, restoreStoredWorkbench } from '../src/services/legacyRuntimeBootstrap.js';
 
+const noiseOptions = [['gaussian_noise', '独立高斯噪声'], ['uniform_white_noise', '均匀分布白噪声'], ['gaussian_colored_noise', '高斯有色噪声']];
+const noiseTypes = noiseOptions.map(([id]) => id);
+
+function chooseFaultCategory(dialog, category = dialog?.textContent.includes('物理层注入') ? 'state' : 'analog') {
+  if (!dialog) return;
+  const select = dialog.querySelector('[data-layered-fault-category]');
+  select.value = category;
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 function loadPublicPackage(fileName) {
   const testDir = path.dirname(fileURLToPath(import.meta.url));
   const targetPath = path.resolve(testDir, '..', 'public', 'model-packages', fileName);
@@ -138,7 +148,7 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('does not show a direct fault injection button for simulation or electrical components', async () => {
+  it('shows a fault injection button for simulation and electrical components', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
@@ -152,9 +162,106 @@ describe('property panel interaction', () => {
       document.querySelector('[data-props-tab="faults"]').click();
       await flushRuntime();
       expect(document.querySelector('.props-fault-panel')).not.toBeNull();
-      expect(document.querySelector('.props-fault-action')).toBeNull();
+      expect(document.querySelector('.props-fault-action')?.textContent).toBe('注入故障');
     }
 
+    wrapper.unmount();
+  });
+
+  it.each([
+    ['electrical', '电气层', 'bias', 'bias', 'outputs.torque'],
+    ['physical', '物理层', 'step', 'targetValue', 'params.gain']
+  ])('selects the %s fault page from the component inspector and confirms its binding', async (layer, label, model, parameter, targetField) => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const block = window.createNode('simulation_block', 320, 240);
+    block.props.name = '姿态控制组件';
+    block.props.modelParameters = [{ key: 'gain', name: '控制增益', targetField: 'params.gain' }];
+    block.props.outputs = [{ key: 'torque', name: '力矩指令', type: '标量' }];
+    block.props.faultInjection = { physical: ['gain'], electrical: ['torque'], protocol: [] };
+    window.selectNode(block.id);
+    window.setPropertyPanelTab('faults');
+    await flushRuntime();
+
+    const state = window.__GZ_STATE__;
+    const nodesBefore = [...state.modelNodes];
+    document.querySelector('[data-open-property-fault-dialog]').click();
+    await flushRuntime();
+
+    let chooser = document.querySelector('[data-component-fault-layer-dialog]');
+    expect(chooser).not.toBeNull();
+    expect(chooser.textContent).toContain('姿态控制组件');
+    expect([...chooser.querySelectorAll('[data-component-fault-layer]')]
+      .map((button) => [button.textContent.trim().split('\n')[0], button.disabled]))
+      .toEqual([['电气层故障', false], ['物理层故障', false]]);
+    expect(state.faultInstances || []).toHaveLength(0);
+    chooser.querySelector('[data-component-fault-layer-close]').click();
+    expect(document.querySelector('[data-component-fault-layer-dialog]')).toBeNull();
+    expect(state.modelNodes).toEqual(nodesBefore);
+
+    document.querySelector('[data-open-property-fault-dialog]').click();
+    chooser = document.querySelector('[data-component-fault-layer-dialog]');
+    chooser.querySelector(`[data-component-fault-layer="${layer}"]`).click();
+    await flushRuntime();
+
+    expect(document.querySelector('[data-component-fault-layer-dialog]')).toBeNull();
+    let dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    chooseFaultCategory(dialog);
+    expect(dialog.textContent).toContain(`${label}注入`);
+    expect(dialog.textContent).toContain('姿态控制组件');
+    expect(dialog.querySelector('[data-layered-fault-model]').value).toBe(model);
+    expect(state.modelNodes).toEqual(nodesBefore);
+    expect(state.faultInstances || []).toHaveLength(0);
+    dialog.querySelector('[data-layered-fault-cancel]').click();
+    expect(document.querySelector('[data-layered-fault-binding-dialog]')).toBeNull();
+    expect(state.faultInstances || []).toHaveLength(0);
+    expect(state.modelNodes).toEqual(nodesBefore);
+
+    document.querySelector('[data-open-property-fault-dialog]').click();
+    document.querySelector(`[data-component-fault-layer="${layer}"]`).click();
+    dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    chooseFaultCategory(dialog);
+    dialog.querySelector(`[data-layered-fault-param="${parameter}"]`).value = '0.5';
+    dialog.querySelector('[data-layered-fault-param="start"]').value = '1';
+    dialog.querySelector('[data-layered-fault-param="duration"]').value = '2';
+    dialog.querySelector('[data-layered-fault-confirm]').click();
+    await flushRuntime();
+
+    expect(document.querySelector('[data-layered-fault-binding-dialog]')).toBeNull();
+    expect(state.modelNodes).toEqual(nodesBefore);
+    expect(state.faultInstances).toContainEqual(expect.objectContaining({
+      targetKind: 'node', targetId: block.id, layer, runtimeBehavior: model, targetField,
+      parameters: expect.objectContaining({ [parameter]: 0.5, start: 1, duration: 2 })
+    }));
+    expect(block.faultBindings).toHaveLength(1);
+    expect(state.faultTags).toContainEqual(expect.objectContaining({ targetId: block.id, layer }));
+    wrapper.unmount();
+  });
+
+  it('disables undeclared component fault layers and enables them after slots are saved', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const block = window.createNode('simulation_block', 320, 240);
+    block.props.modelParameters = [{ key: 'gain', name: '控制增益' }];
+    block.props.outputs = [{ key: 'torque', name: '力矩指令', type: '标量' }];
+    block.props.faultInjection = { physical: [], electrical: ['torque'], protocol: [] };
+    window.selectNode(block.id);
+    window.setPropertyPanelTab('faults');
+    await flushRuntime();
+
+    document.querySelector('[data-open-property-fault-dialog]').click();
+    expect(document.querySelector('[data-component-fault-layer="physical"]').disabled).toBe(true);
+    expect(document.querySelector('[data-component-fault-layer="electrical"]').disabled).toBe(false);
+    expect(document.querySelector('[data-component-fault-layer="physical"]').textContent).toContain('请先配置并保存故障槽位');
+    document.querySelector('[data-component-fault-layer-close]').click();
+    setCheckboxValue('[data-fault-slot-layer="physical"][data-fault-slot-var="gain"]', true);
+    document.querySelector('[data-save-fault-slots]').click();
+    await flushRuntime();
+
+    document.querySelector('[data-open-property-fault-dialog]').click();
+    expect(document.querySelector('[data-component-fault-layer="physical"]').disabled).toBe(false);
+    document.querySelector('[data-component-fault-layer="physical"]').click();
+    expect(document.querySelector('[data-layered-fault-physical-slot]')?.value).toBe('physical:gain');
     wrapper.unmount();
   });
 
@@ -1144,8 +1251,8 @@ describe('property panel interaction', () => {
       targetKind: 'node',
       targetId: sensor.id,
       slotId: 'physical:parameter:bias',
-      mathModel: 'degradation',
-      parameters: { scale: 0.5, start: 0, duration: '' }
+      mathModel: 'step',
+      parameters: { targetValue: 0.5, start: 0, duration: '' }
     });
 
     expect(result.ok).toBe(true);
@@ -1153,14 +1260,18 @@ describe('property panel interaction', () => {
       expect.objectContaining({
         targetId: sensor.id,
         targetField: 'params.bias',
-        runtimeBehavior: 'degradation'
+        runtimeBehavior: 'step'
       })
     ]));
 
     wrapper.unmount();
   });
 
-  it('offers only degradation in the physical fault binding dialog', async () => {
+  it.each([
+    ['step', '状态突变', ['targetValue', 'start', 'duration'], 'parameter_step'],
+    ['freeze', '信号阻塞', ['start', 'duration'], 'parameter_freeze'],
+    ['intermittent', '间歇故障', ['value', 'period', 'duty', 'start', 'duration'], 'intermittent']
+  ])('offers the three state fault modes on the physical page and binds %s with its own parameters', async (model, label, fields, executableType) => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
@@ -1174,10 +1285,23 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    chooseFaultCategory(dialog);
     expect(dialog).not.toBeNull();
     expect([...dialog.querySelectorAll('[data-layered-fault-option="model"]')]
-      .map((option) => option.dataset.layeredFaultOptionValue)).toEqual(['degradation']);
-    expect(dialog.querySelector('[data-layered-fault-model]')?.value).toBe('degradation');
+      .map((option) => [option.dataset.layeredFaultOptionValue, option.textContent]))
+      .toEqual([['step', '状态突变'], ['freeze', '信号阻塞'], ['intermittent', '间歇故障']]);
+    expect(dialog.textContent).toContain('故障类型');
+    expect(dialog.querySelector('[data-layered-fault-model]')?.value).toBe('step');
+    dialog.querySelector(`[data-layered-fault-option="model"][data-layered-fault-option-value="${model}"]`).click();
+    expect(dialog.querySelector('[data-layered-fault-dropdown-label="model"]').textContent).toBe(label);
+    expect([...dialog.querySelectorAll('[data-layered-fault-param]')].map((input) => input.dataset.layeredFaultParam)).toEqual(fields);
+    dialog.querySelector('[data-layered-fault-confirm]').click();
+    await flushRuntime();
+    expect(window.__GZ_STATE__.faultInstances).toContainEqual(expect.objectContaining({
+      targetId: sensor.id, layer: 'physical', runtimeBehavior: model, targetField: 'params.scale'
+    }));
+    const pkg = window.__GZ_BACKEND_SIMULATION__.buildExecutablePackage(window.__GZ_STATE__);
+    expect(pkg.faultInstances).toContainEqual(expect.objectContaining({ faultType: executableType, targetId: sensor.id }));
     wrapper.unmount();
   });
 
@@ -1239,8 +1363,8 @@ describe('property panel interaction', () => {
       targetId: sensor.id,
       slotId: slots[0].id,
       slotIds: slots.map((slot) => slot.id),
-      mathModel: 'degradation',
-      parameters: { scale: 0.5, start: 0, duration: '' }
+      mathModel: 'step',
+      parameters: { targetValue: 0.5, start: 0, duration: '' }
     });
 
     expect(result.ok).toBe(true);
@@ -1250,7 +1374,7 @@ describe('property panel interaction', () => {
       slotIds: slots.map((slot) => slot.id),
       targetFields: slots.map((slot) => slot.targetField),
       parameterKeys: slots.map((slot) => slot.parameterKey),
-      parameters: expect.objectContaining({ scale: 0.5 })
+      parameters: expect.objectContaining({ targetValue: 0.5 })
     }));
 
     wrapper.unmount();
@@ -1347,16 +1471,100 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    chooseFaultCategory(dialog);
     expect(dialog).not.toBeNull();
     const slotOptions = dialog.querySelectorAll('[data-layered-fault-option="slot"]');
     expect(slotOptions).toHaveLength(1);
     expect(slotOptions[0].textContent).toBe('合力');
     expect([...dialog.querySelectorAll('[data-layered-fault-option="model"]')]
       .map((option) => option.dataset.layeredFaultOptionValue))
-      .toEqual(['attenuation', 'data_cutoff']);
-    expect(dialog.querySelector('[data-layered-fault-param="scale"]')).not.toBeNull();
+      .toEqual(['bias', 'freeze', 'drift', 'step']);
+    expect(dialog.querySelector('[data-layered-fault-param="bias"]')).not.toBeNull();
     expect(dialog.querySelector('[data-layered-fault-param="start"]')).not.toBeNull();
     expect(dialog.querySelector('[data-layered-fault-param="duration"]')).not.toBeNull();
+    wrapper.unmount();
+  });
+
+  it.each([
+    ['normal', 'bias', 'bias'],
+    ['can', 'freeze', null],
+    ['normal', 'drift', 'rate'],
+    ['can', 'step', 'targetValue']
+  ])('opens the shared protocol binding page from the %s edge inspector and binds %s', async (lineType, mathModel, parameter) => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 180, 220);
+    const sink = window.createNode('simulation_block', 480, 220);
+    sink.props.inputs = [{ name: '控制指令', type: '标量' }];
+    const state = window.__GZ_STATE__;
+    const edge = {
+      id: `edge-inspector-${lineType}`,
+      label: '控制指令链路',
+      lineType,
+      signalId: 'control.command',
+      sourceNodeId: source.id,
+      targetNodeId: sink.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0
+    };
+    state.modelEdges.push(edge);
+    window.renderModelNodes();
+    window.selectEdge(edge.id);
+    window.setPropertyPanelTab('faults');
+    await flushRuntime();
+
+    const nodesBefore = [...state.modelNodes];
+    expect(document.querySelector('.props-protocol-action').getAttribute('onclick')).toBe('window.openProtocolFaultImport()');
+    window.openProtocolFaultImport();
+    await flushRuntime();
+
+    let dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    chooseFaultCategory(dialog);
+    expect(dialog).not.toBeNull();
+    expect(dialog.textContent).toContain('协议层注入');
+    expect(dialog.textContent).toContain('控制指令链路');
+    expect([...dialog.querySelectorAll('[data-layered-fault-option="model"]')]
+      .map((option) => option.dataset.layeredFaultOptionValue)).toEqual(['bias', 'freeze', 'drift', 'step']);
+    expect(dialog.textContent).toContain('故障类型');
+    expect(dialog.textContent).not.toContain('衰减模型');
+    expect(dialog.textContent).not.toContain('通断模型');
+    expect(document.getElementById('ov-proto').classList.contains('open')).toBe(false);
+    expect(state.modelNodes).toEqual(nodesBefore);
+    expect(edge.faultBindings || []).toHaveLength(0);
+
+    dialog.querySelector('[data-layered-fault-cancel]').click();
+    await flushRuntime();
+    expect(document.querySelector('[data-layered-fault-binding-dialog]')).toBeNull();
+    expect(state.modelNodes).toEqual(nodesBefore);
+    expect(edge.faultBindings || []).toHaveLength(0);
+    expect(state.faultInstances || []).toHaveLength(0);
+    expect(state.selEdge).toBe(edge.id);
+
+    window.openProtocolFaultImport();
+    await flushRuntime();
+    dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    chooseFaultCategory(dialog);
+    dialog.querySelector(`[data-layered-fault-option="model"][data-layered-fault-option-value="${mathModel}"]`).click();
+    dialog.querySelector('[data-layered-fault-param="start"]').value = '1';
+    dialog.querySelector('[data-layered-fault-param="duration"]').value = '2';
+    if (parameter) dialog.querySelector(`[data-layered-fault-param="${parameter}"]`).value = '0.25';
+    dialog.querySelector('[data-layered-fault-confirm]').click();
+    await flushRuntime();
+
+    expect(document.querySelector('[data-layered-fault-binding-dialog]')).toBeNull();
+    expect(state.modelNodes).toEqual(nodesBefore);
+    expect(state.faultInstances).toContainEqual(expect.objectContaining({
+      targetKind: 'edge',
+      targetId: edge.id,
+      layer: 'protocol',
+      runtimeBehavior: mathModel,
+      parameters: expect.objectContaining({ start: 1, duration: 2, ...(parameter ? { [parameter]: 0.25 } : {}) })
+    }));
+    expect(edge.faultBindings).toHaveLength(1);
+    expect(state.faultTags).toContainEqual(expect.objectContaining({ targetId: edge.id, layer: 'protocol' }));
+    const pkg = window.__GZ_BACKEND_SIMULATION__.buildExecutablePackage(state);
+    expect(pkg.faultInstances).toContainEqual(expect.objectContaining({ targetId: edge.id,
+      faultType: { bias: 'sensor_bias', freeze: 'signal_stuck', drift: 'parameter_drift', step: 'parameter_step' }[mathModel] }));
     wrapper.unmount();
   });
 
@@ -1387,6 +1595,7 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    chooseFaultCategory(dialog);
     expect(dialog.querySelectorAll('[data-layered-fault-vector-item]')).toHaveLength(0);
     dialog.querySelector('[data-layered-fault-confirm]').click();
     await flushRuntime();
@@ -1400,7 +1609,167 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('uses an attenuation default when electrical attenuation is bound to a signal source output', async () => {
+  it.each([
+    ['bias', '偏差', ['bias', 'start', 'duration'], 'sensor_bias'],
+    ['freeze', '卡位', ['start', 'duration'], 'signal_stuck'],
+    ['drift', '渐变', ['rate', 'start', 'duration'], 'parameter_drift'],
+    ['step', '突变', ['targetValue', 'start', 'duration'], 'parameter_step']
+  ])('retains the electrical fault types and exports %s with its own parameters', async (model, label, fields, executableType) => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const sensor = window.createNode('simulation_block', 360, 220);
+    sensor.props.outputs = [{ key: 'torque', name: '力矩指令', type: '标量' }];
+    sensor.props.faultInjection = { physical: [], electrical: ['torque'], protocol: [] };
+    const injector = window.createNode('electrical_fault_injector', 160, 220);
+    await flushRuntime();
+    window.beginLayeredFaultBinding(injector.id);
+    document.querySelector(`#b-${sensor.id}`).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    chooseFaultCategory(dialog);
+    expect([...dialog.querySelectorAll('[data-layered-fault-option="model"]')]
+      .map((option) => [option.dataset.layeredFaultOptionValue, option.textContent]))
+      .toEqual([['bias', '偏差'], ['freeze', '卡位'], ['drift', '渐变'], ['step', '突变']]);
+    expect(dialog.textContent).toContain('故障类型');
+    expect(dialog.querySelector('[data-layered-fault-model]').value).toBe('bias');
+    dialog.querySelector(`[data-layered-fault-option="model"][data-layered-fault-option-value="${model}"]`).click();
+    expect(dialog.querySelector('[data-layered-fault-dropdown-label="model"]').textContent).toBe(label);
+    expect([...dialog.querySelectorAll('[data-layered-fault-param]')].map((input) => input.dataset.layeredFaultParam)).toEqual(fields);
+    dialog.querySelector('[data-layered-fault-confirm]').click();
+    await flushRuntime();
+    expect(window.__GZ_STATE__.faultInstances).toContainEqual(expect.objectContaining({
+      targetId: sensor.id, targetField: 'outputs.torque', layer: 'electrical', runtimeBehavior: model
+    }));
+    const pkg = window.__GZ_BACKEND_SIMULATION__.buildExecutablePackage(window.__GZ_STATE__);
+    expect(pkg.faultInstances).toContainEqual(expect.objectContaining({
+      targetId: sensor.id, targetField: 'outputs.torque', faultType: executableType
+    }));
+    wrapper.unmount();
+  });
+
+  it.each(['electrical', 'protocol'].flatMap((layer) => noiseOptions.map(([type, label]) => [layer, type, label])))
+  ('configures additive %s %s on an existing target and exports the exact noise type', async (layer, type, label) => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('simulation_block', 180, 220);
+    source.props.outputs = [{ key: 'torque', name: '力矩指令', type: '标量' }];
+    source.props.faultInjection = { physical: [], electrical: [{ key: 'torque', allowedModels: ['bias', 'freeze', 'drift', 'step'] }], protocol: [] };
+    const sink = window.createNode('simulation_block', 480, 220);
+    const edge = { id: 'existing-noise-edge', sourceNodeId: source.id, targetNodeId: sink.id, sourcePortIndex: 0, targetPortIndex: 0, lineType: 'normal',
+      faultSlots: [{ layer: 'protocol', allowedModels: ['attenuation', 'data_cutoff'] }] };
+    const state = window.__GZ_STATE__;
+    state.modelEdges.push(edge);
+    window.renderModelNodes();
+    if (layer === 'electrical') {
+      window.selectNode(source.id);
+      window.setPropertyPanelTab('faults');
+      document.querySelector('[data-open-property-fault-dialog]').click();
+      document.querySelector('[data-component-fault-layer="electrical"]').click();
+    } else {
+      window.selectEdge(edge.id);
+      window.openProtocolFaultImport();
+    }
+    const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    chooseFaultCategory(dialog);
+    expect(dialog.querySelectorAll('[data-layered-fault-option="model"]')).toHaveLength(4);
+    setCheckboxValue('[data-layered-noise-enabled]', true);
+    setFieldValue('[data-layered-noise-type]', type, 'change');
+    expect(dialog.querySelector('[data-noise-additive-help]').textContent).toContain('在故障结果上叠加噪声');
+    const noiseHost = dialog.querySelector('[data-layered-noise-params]');
+    expect(noiseHost.querySelector('[data-layered-fault-param="seed"]')).not.toBeNull();
+    expect(noiseHost.querySelector('[data-layered-fault-param="alpha"]') !== null).toBe(type === 'gaussian_colored_noise');
+    noiseHost.querySelector('[data-layered-fault-param="mean"]').value = '0.2';
+    noiseHost.querySelector('[data-layered-fault-param="seed"]').value = '17';
+    dialog.querySelector('[data-layered-fault-confirm]').click();
+    await flushRuntime();
+    const target = layer === 'electrical' ? source : edge;
+    expect(state.faultInstances).toContainEqual(expect.objectContaining({ targetId: target.id, layer, runtimeBehavior: 'bias',
+      parameters: expect.objectContaining({ bias: 0.1, noiseEnabled: 1, noiseType: type, noiseMean: 0.2, noiseSeed: 17 }) }));
+    const pkg = window.__GZ_BACKEND_SIMULATION__.buildExecutablePackage(state);
+    expect(pkg.faultInstances).toContainEqual(expect.objectContaining({ targetId: target.id, faultType: 'sensor_bias',
+      parameters: expect.objectContaining({ bias: 0.1, noiseEnabled: 1, noiseType: type, noiseMean: 0.2, noiseSeed: 17 }) }));
+    wrapper.unmount();
+  });
+
+  it.each([
+    ['electrical', ['attenuation', 'data_cutoff'], ['bias', 'freeze', 'drift', 'step']],
+    ['electrical', ['bias'], ['bias', 'freeze', 'drift', 'step']],
+    ['protocol', ['delay', 'dropout'], ['bias', 'freeze', 'drift', 'step']],
+    ['protocol', ['attenuation', 'data_cutoff'], ['bias', 'freeze', 'drift', 'step']],
+    ['protocol', ['bias'], ['bias', 'freeze', 'drift', 'step']]
+  ])('offers category modes on %s despite legacy slot models %j', async (layer, savedModels, originalModels) => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('simulation_block', 180, 220);
+    source.props.outputs = [{ key: 'torque', name: '力矩指令', type: '标量' }];
+    source.props.faultInjection = { physical: [], electrical: [{ key: 'torque', allowedModels: savedModels }], protocol: [] };
+    const sink = window.createNode('simulation_block', 480, 220);
+    const edge = { id: 'legacy-filter-edge', sourceNodeId: source.id, targetNodeId: sink.id, sourcePortIndex: 0, targetPortIndex: 0,
+      faultSlots: [{ layer: 'protocol', allowedModels: savedModels }] };
+    window.__GZ_STATE__.modelEdges.push(edge);
+    window.renderModelNodes();
+    if (layer === 'electrical') {
+      window.selectNode(source.id);
+      window.setPropertyPanelTab('faults');
+      document.querySelector('[data-open-property-fault-dialog]').click();
+      document.querySelector('[data-component-fault-layer="electrical"]').click();
+    } else {
+      window.selectEdge(edge.id);
+      window.openProtocolFaultImport();
+    }
+    const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    chooseFaultCategory(dialog);
+    expect([...dialog.querySelectorAll('[data-layered-fault-option="model"]')].map((option) => option.dataset.layeredFaultOptionValue))
+      .toEqual(originalModels);
+    expect(dialog.querySelector('[data-layered-fault-model]').value).toBe(originalModels[0]);
+    dialog.querySelector('[data-layered-fault-confirm]').click();
+    await flushRuntime();
+    expect(window.__GZ_STATE__.faultInstances).toContainEqual(expect.objectContaining({
+      targetId: layer === 'electrical' ? source.id : edge.id, layer, runtimeBehavior: originalModels[0]
+    }));
+    wrapper.unmount();
+  });
+
+  it.each(noiseTypes)('adds %s once to an electrical signal source output', async (type) => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 300, 220);
+    source.props.amplitude = '1';
+    source.props.frequency = '1';
+    const injector = window.createNode('electrical_fault_injector', 100, 220);
+    const slot = window.getLayeredFaultSlotsForTarget(source).find((item) => item.layer === 'electrical' && item.variableRole === 'output');
+    expect(window.bindLayeredFaultInjectorToTarget(injector.id, {
+      targetKind: 'node', targetId: source.id, slotId: slot.id, mathModel: type,
+      parameters: { mean: 0.25, std: 0, amplitude: 0, start: 0, duration: 1 }
+    }).ok).toBe(true);
+    const reference = window.resolveNodeOutput(source.id, 0, 'reference', 0.25, 0.1, new Map(), new Set());
+    const actual = window.resolveNodeOutput(source.id, 0, 'actual', 0.25, 0.1, new Map(), new Set());
+    expect(actual).toBeCloseTo(reference + 0.25);
+    wrapper.unmount();
+  });
+
+  it.each(noiseTypes)('adds %s once on a protocol connection', async (type) => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 180, 220);
+    source.props.amplitude = '1';
+    source.props.frequency = '1';
+    const gain = window.createNode('gain_block', 480, 220);
+    gain.props.gain = '1';
+    const injector = window.createNode('protocol_fault_injector', 300, 420);
+    const edge = { id: 'noise-protocol-runtime', lineType: 'normal', sourceNodeId: source.id, targetNodeId: gain.id, sourcePortIndex: 0, targetPortIndex: 0 };
+    window.__GZ_STATE__.modelEdges.push(edge);
+    const slot = window.getLayeredFaultSlotsForTarget(edge)[0];
+    expect(window.bindLayeredFaultInjectorToTarget(injector.id, {
+      targetKind: 'edge', targetId: edge.id, slotId: slot.id, mathModel: type,
+      parameters: { mean: 0.25, std: 0, amplitude: 0, start: 0, duration: 1 }
+    }).ok).toBe(true);
+    const reference = window.resolveNodeOutput(gain.id, 0, 'reference', 0.25, 0.1, new Map(), new Set());
+    const actual = window.resolveNodeOutput(gain.id, 0, 'actual', 0.25, 0.1, new Map(), new Set());
+    expect(actual).toBeCloseTo(reference + 0.25);
+    wrapper.unmount();
+  });
+
+  it('retains legacy attenuation preset support on a signal source output', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
@@ -1448,11 +1817,14 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    chooseFaultCategory(dialog);
     expect(dialog).not.toBeNull();
-    expect(dialog.textContent).toContain('信号衰减');
-    expect(dialog.textContent).toContain('数据通断');
+    expect(dialog.textContent).toContain('偏差');
+    expect(dialog.textContent).toContain('卡位');
+    expect(dialog.textContent).toContain('渐变');
+    expect(dialog.textContent).toContain('突变');
     expect([...dialog.querySelectorAll('[data-layered-fault-option="model"]')]
-      .map((option) => option.dataset.layeredFaultOptionValue)).toEqual(['attenuation', 'data_cutoff']);
+      .map((option) => option.dataset.layeredFaultOptionValue)).toEqual(['bias', 'freeze', 'drift', 'step']);
     expect(dialog.querySelector('[data-layered-fault-vector-scope]')).toBeNull();
     expect(dialog.querySelector('[data-layered-fault-vector-index]')).toBeNull();
     dialog.querySelector(`[data-layered-fault-option="slot"][data-layered-fault-option-value="${slot.id}"]`).click();
@@ -1502,6 +1874,7 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    chooseFaultCategory(dialog);
     const items = dialog.querySelectorAll('[data-layered-fault-vector-item]');
     expect(items).toHaveLength(4);
     expect(Array.from(items).map((item) => item.parentElement?.textContent.trim())).toEqual(routeNames);
@@ -1548,6 +1921,7 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    chooseFaultCategory(dialog);
     expect(dialog).not.toBeNull();
     expect(dialog.querySelectorAll('[data-layered-fault-vector-item]')).toHaveLength(0);
     wrapper.unmount();
@@ -1591,6 +1965,7 @@ describe('property panel interaction', () => {
     await flushRuntime();
 
     const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    chooseFaultCategory(dialog);
     expect(dialog?.textContent).toContain('result');
     expect(dialog?.textContent).not.toContain('输入 1');
     wrapper.unmount();

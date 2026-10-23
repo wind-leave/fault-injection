@@ -1394,39 +1394,67 @@ describe('flightModelPackageService', () => {
     expect(node.faultSlots.some((slot) => slot.slotId === 'physical:missing_gain')).toBe(false);
   });
 
-  it('limits physical-layer math models to degradation', () => {
+  it('defines state change, signal blocking, and intermittent physical faults', () => {
     const byId = Object.fromEntries(
       FAULT_MATH_MODEL_DEFINITIONS.physical.map((model) => [model.id, model])
     );
 
-    expect(Object.keys(byId)).toEqual(['degradation']);
-    expect(byId.degradation.formula).toBe('p_fault = p * scale(t)');
-    expect(byId.degradation.defaultParameters).toEqual({ scale: 0.85, start: 0, duration: '' });
+    expect(Object.keys(byId)).toEqual(['step', 'freeze', 'intermittent']);
+    expect(Object.values(byId).map((model) => model.name)).toEqual(['状态突变', '信号阻塞', '间歇故障']);
+    expect(byId.step.defaultParameters).toEqual({ targetValue: 0, start: 0, duration: '' });
+    expect(byId.freeze.defaultParameters).toEqual({ start: 0, duration: '' });
+    expect(byId.intermittent.defaultParameters).toEqual({ value: 0, period: 1, duty: 0.5, start: 0, duration: '' });
   });
 
-  it('limits electrical-layer math models to attenuation and cutoff', () => {
-    expect(FAULT_MATH_MODEL_DEFINITIONS.electrical).toEqual([
+  it('defines bias, freeze, drift, and step electrical faults', () => {
+    expect(FAULT_MATH_MODEL_DEFINITIONS.electrical.slice(0, 4)).toEqual([
       expect.objectContaining({
-        id: 'attenuation',
-        defaultParameters: { attenuation_db: 6, start: 0, duration: '' }
+        id: 'bias', name: '偏差',
+        defaultParameters: { bias: 0.1, start: 0, duration: '' }
       }),
       expect.objectContaining({
-        id: 'data_cutoff',
+        id: 'freeze', name: '卡位',
         defaultParameters: { start: 0, duration: '' }
+      }),
+      expect.objectContaining({
+        id: 'drift', name: '渐变',
+        defaultParameters: { rate: 0.006, start: 0, duration: '' }
+      }),
+      expect.objectContaining({
+        id: 'step', name: '突变',
+        defaultParameters: { targetValue: 0, start: 0, duration: '' }
       })
     ]);
   });
 
-  it('limits protocol-layer math models to attenuation and cutoff', () => {
-    expect(FAULT_MATH_MODEL_DEFINITIONS.protocol).toEqual([
+  it('replaces the protocol attenuation and cutoff models with bias, freeze, drift, and step', () => {
+    expect(FAULT_MATH_MODEL_DEFINITIONS.protocol.slice(0, 4)).toEqual([
       expect.objectContaining({
-        id: 'attenuation',
-        defaultParameters: { scale: 0.5, start: 0, duration: '' }
+        id: 'bias', name: '偏差',
+        defaultParameters: { bias: 0.1, start: 0, duration: '' }
       }),
       expect.objectContaining({
-        id: 'data_cutoff',
+        id: 'freeze', name: '卡位',
         defaultParameters: { start: 0, duration: '' }
+      }),
+      expect.objectContaining({
+        id: 'drift', name: '渐变',
+        defaultParameters: { rate: 0.006, start: 0, duration: '' }
+      }),
+      expect.objectContaining({
+        id: 'step', name: '突变',
+        defaultParameters: { targetValue: 0, start: 0, duration: '' }
       })
+    ]);
+    expect(FAULT_MATH_MODEL_DEFINITIONS.protocol.map((model) => model.id)).not.toContain('attenuation');
+    expect(FAULT_MATH_MODEL_DEFINITIONS.protocol.map((model) => model.id)).not.toContain('data_cutoff');
+  });
+
+  it.each(['electrical', 'protocol'])('adds the three additive noise forms to %s', (layer) => {
+    expect(FAULT_MATH_MODEL_DEFINITIONS[layer].slice(-3)).toEqual([
+      expect.objectContaining({ id: 'gaussian_noise', name: '独立高斯噪声', defaultParameters: expect.objectContaining({ std: 0.1, seed: 1 }) }),
+      expect.objectContaining({ id: 'uniform_white_noise', name: '均匀分布白噪声', defaultParameters: expect.objectContaining({ amplitude: 0.1, seed: 1 }) }),
+      expect.objectContaining({ id: 'gaussian_colored_noise', name: '高斯有色噪声', defaultParameters: expect.objectContaining({ std: 0.1, alpha: 0.9, seed: 1 }) })
     ]);
   });
 

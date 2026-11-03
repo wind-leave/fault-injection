@@ -373,8 +373,8 @@ export function createPythonSimulationComponent({
 
 export const COMPONENT_GROUPS = [
   { id: 'signals', label: '系统信号', icon: '信', tone: 'system', defaultOpen: true },
-  { id: 'electrical', label: '电气组件', icon: '电', tone: 'system', defaultOpen: true },
-  { id: 'simulation', label: '仿真组件', icon: '仿', tone: 'system', defaultOpen: true },
+  { id: 'electrical', label: '电气组件', icon: '电', tone: 'system', defaultOpen: true, componentsVisible: true, externalOnly: true },
+  { id: 'simulation', label: '仿真组件', icon: '仿', tone: 'system', defaultOpen: true, componentsVisible: true, externalOnly: true },
   { id: 'subsystem', label: '子系统', icon: '子', tone: 'system', defaultOpen: true },
   { id: 'faults', label: '故障组件', icon: '故', tone: 'fault', defaultOpen: true },
   { id: 'instruments', label: '测量仪器', icon: '测', tone: 'instrument', defaultOpen: true },
@@ -1347,7 +1347,7 @@ export const COMPONENT_REGISTRY = {
   subsystem_block: {
     type: 'subsystem_block',
     group: 'subsystem',
-    label: '子系统块',
+    label: '机架A',
     badge: '子系统',
     className: 'b-subsystem',
     width: 180,

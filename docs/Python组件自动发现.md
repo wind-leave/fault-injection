@@ -6,7 +6,7 @@
 
 ## 操作步骤
 
-1. 复制 `backend/auto_components/auto_linear_transform.py`，放在同一目录下，改为新的英文文件名，例如 `temperature_sensor.py`。
+1. 在 `backend/auto_components/` 新建一个英文文件名的 Python 文件，例如 `temperature_sensor.py`。默认目录仅保留 `__init__.py`，不预装自动组件。
 2. 修改文件顶部的 `COMPONENT` 字典，设置唯一的 `moduleId`、显示名称、分类、输入输出和参数。
 3. 在同一个文件里实现 `process` 计算函数。
 4. 重启 Python 后端，刷新平台页面。
@@ -49,12 +49,13 @@ def process(temperature=0.0, scale=1.0, bias=0.0):
 | 字段 | 规则 |
 | --- | --- |
 | Python 文件名 | 有效的 Python 标识符，不能以 `_` 开头；只扫描目录直属 `.py` 文件 |
-| `moduleId` | 有效的 Python 标识符，全后端唯一；省略时使用文件名（去掉 `.py`） |
+| `moduleId` | 非空组件 ID 字符串，允许 `"11"` 等数字字符串；省略时使用文件名。外部文件之间须唯一，与内置 ID 重复时需设置 `replacesBuiltin: True` |
+| `templateId` | 可选，前端组件标识，默认等于 `moduleId`；转换脚本保留原前端标识，供模型和显控台控制绑定匹配 |
 | `name` | 必填，组件在界面上的名称 |
 | `category` | 可选，默认“自动发现组件”；可直接填写新的分类名称 |
 | `group` | 可选，`simulation`（默认，仿真组件）或 `electrical`（电气组件） |
 | `paletteMenu` | 可选，二级菜单 ID；电气组件可用 `power-source`（电源模块）、`power-conversion`（电源变换），省略时按 `category` 创建分类 |
-| `replacesBuiltin` | 可选，默认 `False`；仅用于以相同 `moduleId` 替换现有内置电气组件，要求输入、输出的变量名及顺序、参数名集合保持一致 |
+| `replacesBuiltin` | 可选，默认 `False`；设为 `True` 时同 ID 外部仿真或电气模块优先于内置模块，没有同 ID 内置模块时按新增处理；不能替换界面注册的自定义后端模块。转换脚本默认自动设置 |
 | `entryFunction` | 可选，默认 `process`；必须是同文件顶层同步函数 |
 | `inputs` / `outputs` | 端口数组；可写变量名字符串，或包含 `varName`、`name`、`unit` 的字典；至少声明一个输入或输出，允许无输出的终端组件 |
 | `parameters` | 参数字典；每项包含 `default`，可选 `name`、`unit`、`min`、`max` |
@@ -65,7 +66,7 @@ def process(temperature=0.0, scale=1.0, bias=0.0):
 
 ## 外部电气组件
 
-`backend/auto_components/` 已提供以下四个可直接编辑的电气组件，与仿真组件共用 Docker 外部挂载目录：
+`backend/auto_components/` 当前为空组件目录（仅保留 `__init__.py`）。需要电气组件时，可运行内置组件转换脚本生成以下四个文件，再复制到该目录；它们与仿真组件共用 Docker 外部挂载目录：
 
 | 文件 | 电气组件分类 |
 | --- | --- |
@@ -74,11 +75,11 @@ def process(temperature=0.0, scale=1.0, bias=0.0):
 | `electrical_dc_boost.py` | 电源变换 → 直流升压模块 |
 | `electrical_ac_dc_matching.py` | 电源变换 → 直流匹配模块 |
 
-这些文件带有 `group: "electrical"` 和 `replacesBuiltin: True`，保留原有组件 ID 和端口顺序。后端使用外部文件的计算代码，前端在原组件位置显示外部声明，不重复生成组件。旧模型可继续使用原 ID；已有画布节点保留已保存的参数，新拖入的节点使用外部文件声明的默认参数。
+转换生成的这些文件带有 `group: "electrical"` 和 `replacesBuiltin: True`，保留原有组件 ID 和端口顺序。后端使用外部文件的计算代码，前端保留原组件标识并显示外部声明，不重复生成组件；内置条目隐藏。旧模型可继续使用原 ID；已有画布节点保留已保存的参数，新拖入的节点使用外部文件声明的默认参数。
 
 日常修改这些文件中的 `COMPONENT` 或 `process` 后，执行 `docker compose restart backend` 并刷新浏览器。删除文件或声明校验失败时，恢复使用镜像内置版本；声明失败会在组件库顶部显示原因。函数运行时异常仍会导致仿真报错，不会自动回退。首次部署本次功能需要执行一次 `docker compose up -d --build`。
 
-新增电气组件可复制上述文件，使用新的文件名和全局唯一的 `moduleId`，同时删除 `replacesBuiltin` 或将其设为 `False`。例如：
+新增电气组件可按下面的格式创建独立文件，使用新的文件名和全局唯一的 `moduleId`。仅用于新增时可省略 `replacesBuiltin` 或将其设为 `False`。例如：
 
 ```python
 COMPONENT = {
@@ -98,7 +99,7 @@ def process(voltage=0.0, ratio=2.0):
     return {"outputs": {"result": voltage * ratio}}
 ```
 
-省略 `paletteMenu` 并设置新的 `category`，可创建新的电气二级分类。上述组件通过信号端口接收和输出电压，无需额外供电端口，因此设置 `requiresPower: False`。修改现有组件接口时请新增 ID；相同 ID 的内置替换只允许保持原接口的计算和参数配置变更。
+省略 `paletteMenu` 并设置新的 `category`，可创建新的电气二级分类。上述组件通过信号端口接收和输出电压，无需额外供电端口，因此设置 `requiresPower: False`。外部同 ID 组件可以提供其他版本的接口和计算实现；模型中的端口、参数和连线必须与外部声明一致。已有画布节点不会自动改写接口，跨版本迁移时应同时导入匹配的模型。
 
 标量端口和参数使用 `type: "number"`（默认）；数值向量端口使用 `type: "vector"`，同时声明正整数 `vectorLength`。复数包络端口增加 `dataType: "rf_complex_envelope"`；如果同时为向量，平台会保留向量语义和路数。参数支持数值标量及 `type: "integer"`，可声明数值 `enum`；暂不支持向量参数，以匹配现有参数编辑器。
 
@@ -116,7 +117,7 @@ def process(voltage=0.0, ratio=2.0):
 
 ## 验证示例
 
-平台已附带“线性变换（自动发现）”：输入 `4`，默认增益 `2`、偏置 `0`，输出应为 `8`。将增益改为 `3`、偏置改为 `1`，输出应为 `13`。
+默认不附带计算组件。按上文创建温度传感器示例后，输入 `4`，默认比例系数 `1`、零偏 `0`，输出应为 `4`；将比例系数改为 `3`、零偏改为 `1`，输出应为 `13`。
 
 ```powershell
 python -m unittest backend.tests.test_component_discovery -v

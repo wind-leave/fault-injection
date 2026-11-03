@@ -228,12 +228,11 @@ class ModuleRegistry:
                 )
         registry = cls(modules)
         if discover:
-            from backend.component_discovery import REPLACEABLE_ELECTRICAL_MODULE_IDS, discover_components
+            from backend.component_discovery import discover_components
 
             replaceable_modules = {
                 module.module_id: module for module in modules
-                if module.module_id in REPLACEABLE_ELECTRICAL_MODULE_IDS
-                and module.import_path.startswith("backend.builtin_modules.")
+                if module.import_path.startswith("backend.builtin_modules.")
             }
             records, components, errors = discover_components(module_ids, replaceable_modules=replaceable_modules)
             for item in records:

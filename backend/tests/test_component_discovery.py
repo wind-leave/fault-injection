@@ -110,23 +110,35 @@ class ComponentDiscoveryTests(unittest.TestCase):
         (self.directory / "second.py").unlink()
         self.assertEqual(self.registry().require("electrical_dc_power_source").call({}, {})["outputs"]["dc_output"], 28)
 
-    def test_invalid_replacement_falls_back_to_builtin(self):
-        cases = [
-            {"moduleId": "electrical_dc_power_source", "group": "electrical", "outputs": ["renamed"]},
-            {"moduleId": "electrical_ground", "group": "electrical", "outputs": ["adjusted"]},
-            {"moduleId": "gain", "group": "electrical", "outputs": ["adjusted"]},
-            {"moduleId": "electrical_dc_power_source", "group": "simulation", "outputs": ["dc_output"]},
-        ]
-        for case in cases:
-            with self.subTest(case=case):
-                self.write_component(metadata={**self.metadata, **case, "replacesBuiltin": True})
+    def test_external_simulation_can_replace_builtin_interfaces_without_renaming_id(self):
+        for module_id in ("gain", "11"):
+            with self.subTest(module_id=module_id):
+                self.write_component(metadata={**self.metadata, "moduleId": module_id, "replacesBuiltin": True})
                 registry = self.registry()
-                self.assertEqual(len(registry.discovery_errors), 1)
-                self.assertEqual(registry.discovered_components, [])
-                self.assertEqual(registry.require("electrical_dc_power_source").call({}, {})["outputs"]["dc_output"], 28)
+                self.assertEqual(registry.discovery_errors, [])
+                module = registry.require(module_id)
+                self.assertEqual(module.import_path, "discovery_test_components.gain_component")
+                self.assertEqual(module.call({"signal": 4}, {})["outputs"]["adjusted"], 12)
+                self.assertEqual(registry.discovered_components[0]["templateId"], module_id)
+
+    def test_replacement_can_add_new_ids_but_cannot_override_custom_registered_modules(self):
+        self.write_component(metadata={**self.metadata, "replacesBuiltin": True})
+        self.assertEqual(self.registry().discovery_errors, [])
+        custom_manifest = self.root / "custom-manifest.json"
+        custom_manifest.write_text(json.dumps({"modules": [{
+            "moduleId": self.metadata["moduleId"], "importPath": "persistent_custom.gain",
+            "inputs": ["signal"], "outputs": ["adjusted"], "parameters": {},
+        }]}), encoding="utf-8")
+        registry = ModuleRegistry.from_manifests([ModuleRegistry.builtin_manifest_path(), custom_manifest], discover=True)
+        self.assertEqual(len(registry.discovery_errors), 1)
+        self.assertIn("custom module", registry.discovery_errors[0]["message"])
+        self.assertEqual(registry.require(self.metadata["moduleId"]).import_path, "persistent_custom.gain")
 
     def test_rejects_invalid_parameter_contracts_and_overlapping_arguments(self):
         cases = [
+            {**self.metadata, "moduleId": ""},
+            {**self.metadata, "moduleId": "__proto__"},
+            {**self.metadata, "templateId": ""},
             {**self.metadata, "group": "unknown"},
             {**self.metadata, "group": []},
             {**self.metadata, "replacesBuiltin": "true"},
@@ -194,22 +206,19 @@ class ComponentDiscoveryTests(unittest.TestCase):
             thread.join(timeout=5)
             server.server_close()
 
-    def test_shipped_external_electrical_modules_match_builtin_execution(self):
+    def test_empty_default_directory_preserves_builtin_execution(self):
         directory = Path(__file__).resolve().parents[1] / "auto_components"
         with patch.object(component_discovery, "COMPONENT_DIRECTORY", directory), patch.object(
             component_discovery, "COMPONENT_PACKAGE", "backend.auto_components"
         ):
             registry = self.registry()
         self.assertEqual(registry.discovery_errors, [])
+        self.assertEqual(registry.discovered_components, [])
         original = ModuleRegistry.from_builtin_manifest()
         for module_id in ("electrical_ac_power_source", "electrical_dc_power_source", "electrical_dc_boost", "electrical_ac_dc_matching"):
             with self.subTest(module_id=module_id):
                 module = registry.require(module_id)
-                self.assertEqual(module.import_path, f"backend.auto_components.{module_id}")
-                palette = next(item for item in registry.discovered_components if item["moduleId"] == module_id)
-                self.assertEqual(palette["group"], "electrical")
-                self.assertTrue(palette["replacesBuiltin"])
-                self.assertFalse(palette["requiresPower"])
+                self.assertEqual(module.import_path, f"backend.builtin_modules.{module_id}")
                 for time in (0, 0.01, 0.025):
                     inputs = {name: 28 for name in module.inputs}
                     self.assertEqual(module.call(inputs, {}, time=time), original.require(module_id).call(inputs, {}, time=time))

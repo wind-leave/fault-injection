@@ -179,7 +179,7 @@ describe('runtime display-console configuration', () => {
     expect(mountApp).toHaveBeenCalledWith('test-app', { runtimeConfigError: '配置提示' });
   });
 
-  it('renders external ports and columns and applies shared controls to actual canvas components', async () => {
+  it('renders external ports and columns and controls external canvas components using their original IDs', async () => {
     const { loadDisplayConsoleRuntimeConfig } = await import('../src/services/displayConsoleRuntimeConfig.js');
     const { initializeWorkbench } = await import('../src/bootstrap.js');
     const presets = {
@@ -213,9 +213,23 @@ describe('runtime display-console configuration', () => {
         mountApp: (App, props) => mount(App, { props, attachTo: document.body })
       });
       await nextTick();
+      const { COMPONENT_REGISTRY } = await import('../src/services/componentRegistry.js');
+      const { syncDiscoveredComponents } = await import('../src/services/discoveredComponentCatalogService.js');
+      syncDiscoveredComponents(['rf_four_output_source', 'rf_downconverter'].map((type) => {
+        const entry = COMPONENT_REGISTRY[type];
+        return {
+          moduleId: type, templateId: type, replacesBuiltin: true, group: 'simulation',
+          name: entry.label, category: '射频信号模型', paletteMenu: entry.simulationMenu,
+          fileName: entry.pythonBinding.fileName, entryFunction: entry.pythonBinding.entryFunction,
+          inputs: structuredClone(entry.ports.inputs), outputs: structuredClone(entry.ports.outputs),
+          parameters: structuredClone(entry.defaults.parameters), requiresPower: false, faultSlots: entry.faultSlots
+        };
+      }));
       window.doCreateBlankWorkspace();
       const source = window.createNode('rf_four_output_source', 100, 100);
       const converter = window.createNode('rf_downconverter', 400, 100);
+      expect(source.templateId).toBe('rf_four_output_source');
+      expect(converter.templateId).toBe('rf_downconverter');
       const consoleNode = window.createNode('display_console_9', 700, 100);
       const defaultConsole = window.createNode('display_console_10', 1000, 100);
       expect(window.getNodePorts(consoleNode).inputs.map((port) => port.portId)).toEqual(['console-input', 'console-input-2', 'console-input-3']);
@@ -246,6 +260,8 @@ describe('runtime display-console configuration', () => {
       expect(pkg.nodes[0].inputs[0]).toMatchObject({ id: 'external-vector', vectorLength: 8 });
     } finally {
       wrapper?.unmount();
+      const { syncDiscoveredComponents } = await import('../src/services/discoveredComponentCatalogService.js');
+      syncDiscoveredComponents([]);
       const { __resetLegacyRuntimeForTests } = await import('../src/services/legacyRuntimeBootstrap.js');
       __resetLegacyRuntimeForTests();
       window.localStorage.clear();

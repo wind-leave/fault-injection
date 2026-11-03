@@ -38,25 +38,97 @@ class ConvertBuiltinComponentsTests(unittest.TestCase):
         before = {path.name: path.read_bytes() for path in self.source_dir.iterdir()}
         report = self.convert()
         self.assertEqual(report["summary"]["generated"], 1)
-        path = self.output_dir / "auto_gain.py"
+        path = self.output_dir / "gain.py"
         source = path.read_text(encoding="utf-8")
         self.assertLess(source.index("from __future__"), source.index("COMPONENT ="))
         self.assertIn('return {"result": signal * gain}', source)
         record, palette = _read_component(path, "backend.auto_components")
-        self.assertEqual(record["moduleId"], "auto_gain")
+        self.assertEqual(record["moduleId"], "gain")
+        self.assertEqual(palette["templateId"], "gain")
+        self.assertTrue(palette["replacesBuiltin"])
         self.assertEqual(record["parameters"]["gain"]["default"], 2)
         self.assertEqual(palette["inputs"][0]["varName"], "signal")
         self.assertEqual(before, {path.name: path.read_bytes() for path in self.source_dir.iterdir()})
 
+    def test_preserves_numeric_module_id_and_original_frontend_template_id(self):
+        self.record["moduleId"] = "11"
+        (self.source_dir / "manifest.json").write_text(json.dumps({"modules": [self.record]}), encoding="utf-8")
+        report = convert_components(self.root, self.output_dir, frontend={"11": {"templateId": "legacy_component_11"}})
+        self.assertEqual(report["summary"]["failed"], 0, report)
+        item = report["components"][0]
+        self.assertEqual(item["moduleId"], "11")
+        record, palette = _read_component(self.output_dir / item["fileName"], "backend.auto_components")
+        self.assertEqual(record["moduleId"], "11")
+        self.assertEqual(palette["templateId"], "legacy_component_11")
+        self.assertFalse(item["fileName"][0].isdigit())
+
+    def test_explicit_prefix_remains_available_for_generating_distinct_components(self):
+        report = self.convert(prefix="auto_")
+        self.assertEqual(report["summary"]["failed"], 0)
+        record, palette = _read_component(self.output_dir / "auto_gain.py", "backend.auto_components")
+        self.assertEqual(record["moduleId"], "auto_gain")
+        self.assertEqual(palette["templateId"], "auto_gain")
+        self.assertFalse(palette["replacesBuiltin"])
+
     def test_repeat_run_is_unchanged_and_customized_destination_is_not_overwritten(self):
         self.convert()
         self.assertEqual(self.convert()["summary"]["unchanged"], 1)
-        path = self.output_dir / "auto_gain.py"
+        path = self.output_dir / "gain.py"
         modified = path.read_text(encoding="utf-8") + "# manually edited\n"
         path.write_text(modified, encoding="utf-8")
         self.assertEqual(self.convert()["summary"]["skipped"], 1)
         self.assertEqual(path.read_text(encoding="utf-8"), modified)
         self.assertEqual(self.convert(overwrite=True)["summary"]["generated"], 1)
+
+    def test_disabled_entry_is_excluded_even_when_selected_with_overwrite(self):
+        self.record["autoConvert"] = False
+        (self.source_dir / "manifest.json").write_text(json.dumps({"modules": [self.record]}), encoding="utf-8")
+        report = self.convert(selected=["gain"], overwrite=True)
+        self.assertEqual(report["summary"]["excluded"], 1)
+        self.assertEqual(report["summary"]["failed"], 0)
+        self.assertEqual(report["summary"]["generated"], 0)
+        self.assertFalse((self.output_dir / "gain.py").exists())
+        existing = self.output_dir / "gain.py"
+        existing.write_text("# manually maintained existing component\n", encoding="utf-8")
+        report = self.convert(selected=["gain"], overwrite=True)
+        self.assertEqual(report["components"][0]["status"], "excluded")
+        self.assertEqual(existing.read_text(encoding="utf-8"), "# manually maintained existing component\n")
+
+    def test_new_simulation_entry_is_enabled_by_default_after_existing_entries_are_disabled(self):
+        self.record["autoConvert"] = False
+        new_record = {**copy.deepcopy(self.record), "moduleId": "new_simulation", "importPath": "backend.builtin_modules.new_simulation"}
+        new_record.pop("autoConvert")
+        (self.source_dir / "new_simulation.py").write_text(self.source, encoding="utf-8")
+        (self.source_dir / "manifest.json").write_text(json.dumps({"modules": [self.record, new_record]}), encoding="utf-8")
+        report = self.convert()
+        self.assertEqual(report["summary"]["excluded"], 1)
+        self.assertEqual(report["summary"]["generated"], 1)
+        self.assertEqual(report["summary"]["failed"], 0)
+        self.assertFalse((self.output_dir / "gain.py").exists())
+        record, palette = _read_component(self.output_dir / "new_simulation.py", "backend.auto_components")
+        self.assertEqual(record["moduleId"], "new_simulation")
+        self.assertEqual(palette["group"], "simulation")
+
+    def test_invalid_conversion_flag_is_reported_without_generating_component(self):
+        for invalid in ("false", 0, None):
+            with self.subTest(autoConvert=invalid):
+                self.record["autoConvert"] = invalid
+                (self.source_dir / "manifest.json").write_text(json.dumps({"modules": [self.record]}), encoding="utf-8")
+                report = self.convert()
+                self.assertEqual(report["summary"]["failed"], 1)
+                self.assertIn("autoConvert must be true or false", report["components"][0]["error"])
+                self.assertFalse((self.output_dir / "gain.py").exists())
+
+    @unittest.skipUnless(shutil.which("node"), "Node.js is required to read the real frontend registry")
+    def test_current_policy_converts_only_four_electrical_entries(self):
+        report = convert_components(PROJECT_ROOT, self.output_dir)
+        expected = {"electrical_ac_power_source", "electrical_dc_power_source", "electrical_dc_boost", "electrical_ac_dc_matching"}
+        generated = {item["originalModuleId"] for item in report["components"] if item["status"] == "generated"}
+        manifest = json.loads((PROJECT_ROOT / "backend/builtin_modules/manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(generated, expected)
+        self.assertEqual(report["summary"]["excluded"], len(manifest["modules"]) - 4)
+        self.assertEqual(report["summary"]["failed"], 0)
+        self.assertEqual({path.name for path in self.output_dir.glob("*.py") if not path.name.startswith("_")}, {f"{module_id}.py" for module_id in expected})
 
     def test_preserves_builtin_and_custom_menus_for_simulation_and_electrical_components(self):
         cases = [
@@ -72,7 +144,7 @@ class ConvertBuiltinComponentsTests(unittest.TestCase):
             with self.subTest(template=template):
                 report = convert_components(self.root, self.output_dir, frontend={"gain": template}, overwrite=True)
                 self.assertEqual(report["summary"]["failed"], 0, report)
-                _, palette = _read_component(self.output_dir / "auto_gain.py", "backend.auto_components")
+                _, palette = _read_component(self.output_dir / "gain.py", "backend.auto_components")
                 self.assertEqual(palette["group"], template.get("group", "simulation"))
                 self.assertEqual(palette["paletteMenu"], template.get("paletteMenu", template.get("simulationMenu", "")))
                 self.assertEqual(palette["category"], template.get("category", template.get("paletteMenuLabel", template.get("simulationMenuLabel", "内置组件转换"))))
@@ -84,7 +156,7 @@ class ConvertBuiltinComponentsTests(unittest.TestCase):
             overrides={"gain": {"paletteMenu": "my-models", "category": "我的模型"}},
         )
         self.assertEqual(report["summary"]["failed"], 0, report)
-        _, palette = _read_component(self.output_dir / "auto_gain.py", "backend.auto_components")
+        _, palette = _read_component(self.output_dir / "gain.py", "backend.auto_components")
         self.assertEqual((palette["paletteMenu"], palette["category"]), ("my-models", "我的模型"))
 
     def test_reports_unregistered_source_and_rejects_unknown_selection_or_source_output(self):
@@ -100,7 +172,7 @@ class ConvertBuiltinComponentsTests(unittest.TestCase):
         report = convert_components(self.root, self.output_dir, frontend={"gain": {"inputs": [{"varName": "other"}]}})
         self.assertEqual(report["summary"]["failed"], 1)
         self.assertIn("disagree", report["components"][0]["error"])
-        self.assertFalse((self.output_dir / "auto_gain.py").exists())
+        self.assertFalse((self.output_dir / "gain.py").exists())
 
     def test_rewrites_relative_helpers_and_preserves_function_body(self):
         source = 'from __future__ import annotations\nfrom .helper import scale\n\ndef process(signal):\n    return {"result": scale(signal)}\n'
@@ -139,16 +211,25 @@ class ConvertBuiltinComponentsTests(unittest.TestCase):
                 self.assertEqual((exported[module_id]["paletteMenu"], exported[module_id]["category"]), menu)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is required to read the real frontend registry")
-    def test_all_current_builtins_convert_and_match_original_execution(self):
+    def test_all_builtin_conversion_contracts_match_original_execution_when_enabled(self):
         source_root = PROJECT_ROOT / "backend" / "builtin_modules"
         hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in source_root.iterdir() if path.is_file()}
         frontend = read_frontend_metadata(PROJECT_ROOT)
         package = self.root / "converted_test_components"
-        report = convert_components(PROJECT_ROOT, package, frontend=frontend)
+        # Keep coverage of scalar/vector/RF interfaces by enabling the entries
+        # only in a temporary manifest; the project's conversion policy stays intact.
+        enabled_root = self.root / "all-enabled"
+        copied_source = enabled_root / "backend" / "builtin_modules"
+        shutil.copytree(source_root, copied_source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        enabled_manifest = json.loads((copied_source / "manifest.json").read_text(encoding="utf-8"))
+        for item in enabled_manifest["modules"]:
+            item["autoConvert"] = True
+        (copied_source / "manifest.json").write_text(json.dumps(enabled_manifest), encoding="utf-8")
+        report = convert_components(enabled_root, package, frontend=frontend)
         originals = ModuleRegistry.from_builtin_manifest()
         self.assertEqual(report["summary"]["failed"], 0, report)
         self.assertEqual(report["summary"]["generated"], len(originals.modules))
-        records, palettes, errors = discover_components(originals.modules, directory=package, package="converted_test_components")
+        records, palettes, errors = discover_components(originals.modules, directory=package, package="converted_test_components", replaceable_modules=originals.modules)
         self.assertEqual(errors, [])
         self.assertEqual(len(records), len(originals.modules))
         by_id = {record["moduleId"]: record for record in records}
@@ -175,27 +256,27 @@ class ConvertBuiltinComponentsTests(unittest.TestCase):
                         actual = converted.call(copy.deepcopy(inputs), {}, time=time, dt=0.02, state=new_state)
                         self.assertEqual(actual, expected)
                         old_state, new_state = expected["state"], actual["state"]
-            rf = definitions["auto_rf_complex_envelope_limiter"]
+            rf = definitions["rf_complex_envelope_limiter"]
             self.assertEqual(rf["inputs"][0]["dataType"], "rf_complex_envelope")
             self.assertEqual(rf["inputs"][0]["collectionKind"], "vector")
             self.assertEqual(rf["inputs"][0]["vectorLength"], 4)
-            self.assertEqual(by_id["auto_rf_downconverter"]["parameters"]["input_mode"]["enum"], [1, 2])
-            self.assertEqual(definitions["auto_electrical_ground"]["outputs"], [])
-            self.assertEqual(definitions["auto_electrical_dc_power_source"]["group"], "electrical")
-            self.assertEqual(definitions["auto_electrical_dc_power_source"]["paletteMenu"], "power-source")
-            self.assertFalse(definitions["auto_electrical_dc_power_source"]["requiresPower"])
-            self.assertEqual(definitions["auto_electrical_dc_boost"]["paletteMenu"], "power-conversion")
+            self.assertEqual(by_id["rf_downconverter"]["parameters"]["input_mode"]["enum"], [1, 2])
+            self.assertEqual(definitions["electrical_ground"]["outputs"], [])
+            self.assertEqual(definitions["electrical_dc_power_source"]["group"], "electrical")
+            self.assertEqual(definitions["electrical_dc_power_source"]["paletteMenu"], "power-source")
+            self.assertFalse(definitions["electrical_dc_power_source"]["requiresPower"])
+            self.assertEqual(definitions["electrical_dc_boost"]["paletteMenu"], "power-conversion")
             for module_id, template in frontend.items():
-                converted_id = "auto_" + module_id
+                converted_id = module_id
                 if converted_id not in definitions:
                     continue
                 with self.subTest(menu=module_id):
                     self.assertEqual(definitions[converted_id]["paletteMenu"], template["paletteMenu"])
                     self.assertEqual(definitions[converted_id]["category"], template["category"])
-            self.assertEqual(definitions["auto_rf_complex_envelope_limiter"]["paletteMenu"], "rf-signal")
-            self.assertEqual(definitions["auto_rf_complex_envelope_limiter"]["category"], "射频信号模型")
-            self.assertEqual(definitions["auto_scalar_to_vector4"]["paletteMenu"], "signal-processing")
-            self.assertEqual(definitions["auto_scalar_to_vector4"]["category"], "信号处理模型")
+            self.assertEqual(definitions["rf_complex_envelope_limiter"]["paletteMenu"], "rf-signal")
+            self.assertEqual(definitions["rf_complex_envelope_limiter"]["category"], "射频信号模型")
+            self.assertEqual(definitions["scalar_to_vector4"]["paletteMenu"], "signal-processing")
+            self.assertEqual(definitions["scalar_to_vector4"]["category"], "信号处理模型")
         finally:
             clear_module_call_cache()
             sys.path.pop(0)

@@ -15,7 +15,7 @@ export function useDiscoveredComponentCatalog() {
 
 export function syncDiscoveredComponents(components) {
   // Build everything first so a malformed response cannot partially replace the palette.
-  const entries = {};
+  const entries = Object.create(null);
   const originals = new Map();
   for (const component of components) {
     const group = component.group ?? 'simulation';
@@ -23,16 +23,21 @@ export function syncDiscoveredComponents(components) {
       throw new Error(`不支持的组件分组：${group}`);
     }
     const replacing = component.replacesBuiltin === true;
-    const type = replacing ? component.moduleId : `discovered_${component.moduleId}`;
-    const original = replacing ? replacedTemplates.get(type) ?? COMPONENT_REGISTRY[type] : null;
-    if (replacing && (group !== 'electrical' || original?.group !== 'electrical'
-      || original?.pythonBinding?.moduleId !== component.moduleId)) {
-      throw new Error(`无法替换内置电气组件：${component.moduleId}`);
+    const type = component.templateId || component.moduleId;
+    if (typeof type !== 'string' || !type.trim() || ['__proto__', 'constructor', 'prototype'].includes(type)) {
+      throw new Error(`组件标识无效：${type}`);
     }
-    if (entries[type] || (!replacing && COMPONENT_REGISTRY[type] && !registeredTypes.has(type))) {
+    const existing = replacedTemplates.get(type) ?? COMPONENT_REGISTRY[type];
+    const original = existing && (!registeredTypes.has(type) || replacedTemplates.has(type)) ? existing : null;
+    if (original && (!replacing || !['simulation', 'electrical'].includes(original.group)
+      || original.pythonBinding?.sourceKind !== 'builtin'
+      || original.pythonBinding.moduleId !== component.moduleId)) {
+      throw new Error(`无法替换组件：${component.moduleId}`);
+    }
+    if (entries[type]) {
       throw new Error(`组件标识重复：${component.moduleId}`);
     }
-    if (replacing) originals.set(type, original);
+    if (original) originals.set(type, original);
     const electrical = group === 'electrical';
     entries[type] = createPythonSimulationComponent({
       type,
@@ -61,6 +66,8 @@ export function syncDiscoveredComponents(components) {
       sourceKind: 'builtin',
       palette: {
         ...(original?.palette || { repeatable: true }),
+        source: 'external',
+        visible: true,
         icon: component.icon || (electrical ? '电' : '仿'),
         iconClass: electrical ? 'electrical' : 'simulation'
       }

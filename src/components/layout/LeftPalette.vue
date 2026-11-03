@@ -28,7 +28,11 @@ const paletteMenuSections = computed(() => {
   void authoredCatalog.components.length;
   void discoveredCatalog.components;
   const groups = getPaletteGroups();
-  const groupComponents = (groupId) => groups.find((group) => group.id === groupId)?.components ?? [];
+  const groupComponents = (groupId) => {
+    const group = groups.find((item) => item.id === groupId);
+    if (group?.componentsVisible === false) return [];
+    return (group?.components ?? []).filter((component) => !group.externalOnly || component.palette?.source === 'external');
+  };
   return {
     electrical: getElectricalMenuSections(groupComponents('electrical')),
     simulation: getSimulationMenuSections(groupComponents('simulation'))

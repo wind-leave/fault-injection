@@ -31,7 +31,7 @@ docker compose ps
 
 Compose 现在默认挂载两个宿主机目录：`backend/auto_components/`（Python 自动组件）和 `public/config/`（显控台运行时 JSON）。两个目录必须存在，缺失时启动会报错，避免把空目录误当成已安装的配置。首次安装本次功能仍须执行一次 `docker compose up -d --build`；之后按下文编辑外部文件即可。
 
-Python 自动组件目录同时支持仿真组件和电气组件：`COMPONENT.group` 默认 `simulation`，设为 `electrical` 则进入电气组件库。目录中已提供交流电源、直流电源、直流升压、直流匹配四个外部电气组件文件，保留原组件 ID，修改后重启后端并刷新页面即可生效。离线交付或切换 `GZ_AUTO_COMPONENTS_DIR` 时，应同时复制这四个 `.py` 文件。外部文件缺失或声明校验失败时使用内置版本，校验失败会显示提示；运行时异常不自动回退。声明格式及新增步骤见 [Python 组件自动发现](Python组件自动发现.md#外部电气组件)。
+Python 自动组件目录同时支持仿真组件和电气组件：`COMPONENT.group` 默认 `simulation`，设为 `electrical` 则进入电气组件库。默认目录仅保留 `__init__.py`，不预装外部组件。需要时可转换或自行添加仿真、电气组件，修改后重启后端并刷新页面即可生效。离线交付或切换 `GZ_AUTO_COMPONENTS_DIR` 时，应完整复制实际使用的组件及公共计算文件。外部文件缺失或声明校验失败时回退到隐藏的内置计算版本，校验失败会显示提示；运行时异常不自动回退。声明格式及新增步骤见 [Python 组件自动发现](Python组件自动发现.md#外部电气组件)。
 
 打开：
 
@@ -69,7 +69,7 @@ Compose 已配置 `host.docker.internal` 的主机映射。学生服务仍须监
 
 ### 3.1 新增和更新 Python 组件
 
-在 `GZ_AUTO_COMPONENTS_DIR` 指向的目录中添加带 `COMPONENT` 声明及计算函数的 `.py` 文件，参照 [Python 组件自动发现](Python组件自动发现.md)。默认目录已附带 `__init__.py` 和线性变换示例，迁移时一起保留。
+在 `GZ_AUTO_COMPONENTS_DIR` 指向的目录中添加带 `COMPONENT` 声明及计算函数的 `.py` 文件，参照 [Python 组件自动发现](Python组件自动发现.md)。默认目录仅包含 `__init__.py`，可在没有计算组件时正常启动；迁移时保留该文件，并按需添加组件文件。
 
 新增、修改或删除文件后，在 Compose 目录执行：
 
@@ -150,7 +150,7 @@ JSON 现在覆盖 `displayConsoleConfig.js` 的全部四个数据导出，顶层
 }
 ```
 
-自动发现组件在前端的类型为 `discovered_<moduleId>`，例如 `discovered_auto_linear_transform`；其参数键与 `COMPONENT.parameters` 的键一致。控制目标按类型匹配已放入各画布的仿真组件；尚未放入画布或参数键不存在的目标不会生成控件。新增组件后，先重启后端，再刷新页面加载配置及组件目录。
+自动发现组件在前端的类型为 `COMPONENT.templateId`，省略时等于原 `moduleId`，不再添加 `discovered_` 前缀；其参数键与 `COMPONENT.parameters` 的键一致。控制目标按类型匹配已放入各画布的仿真组件；尚未放入画布或参数键不存在的目标不会生成控件。新增组件后，先重启后端，再刷新页面加载配置及组件目录。
 
 文件缺失、读取超时、JSON 语法或结构错误（如重复端口/输入/列 ID、列索引超出输入维度、预设引用不存在的公共字段）时，四部分配置整体回退到内置默认值（七个元素、16 列、七个显控台），页面顶部显示可关闭的错误提示，不会只应用半份配置。修正文件后刷新即可恢复。可访问 `http://127.0.0.1:8080/config/display-console.json` 核对实际内容。
 
@@ -227,12 +227,7 @@ docker image save -o docker-images.tar gz-fault-frontend:local gz-fault-backend:
 ├── compose.yaml
 ├── .env
 ├── backend/
-│   ├── __init__.py
-│   ├── auto_linear_transform.py
-│   ├── electrical_ac_power_source.py
-│   ├── electrical_dc_power_source.py
-│   ├── electrical_dc_boost.py
-│   └── electrical_ac_dc_matching.py
+│   └── __init__.py           # 按需在此目录直接添加组件 .py
 └── public/
     └── display-console.json
 ```

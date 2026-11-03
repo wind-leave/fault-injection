@@ -14,16 +14,19 @@ from pathlib import Path
 COMPONENT_DIRECTORY = Path(__file__).parent / "auto_components"
 COMPONENT_PACKAGE = "backend.auto_components"
 CONTEXT_ARGUMENTS = {"time", "dt", "state"}
-# These public electrical templates have stable IDs shared with saved models.
-REPLACEABLE_ELECTRICAL_MODULE_IDS = frozenset({
-    "electrical_ac_power_source", "electrical_dc_power_source",
-    "electrical_dc_boost", "electrical_ac_dc_matching",
-})
 
 
 def _identifier(value, field):
     if not isinstance(value, str) or not value.isidentifier() or keyword.iskeyword(value):
         raise ValueError(f"{field} must be a Python identifier")
+    return value
+
+
+def _component_id(value, field):
+    if (not isinstance(value, str) or not value.strip() or value != value.strip()
+            or any(ord(character) < 32 for character in value)
+            or value in {"__proto__", "constructor", "prototype"}):
+        raise ValueError(f"{field} must be a non-empty component ID")
     return value
 
 
@@ -140,7 +143,8 @@ def _read_component(path, package):
     metadata = ast.literal_eval(declarations[0])
     if not isinstance(metadata, dict):
         raise ValueError("COMPONENT must be a literal dictionary")
-    module_id = _identifier(metadata.get("moduleId", path.stem), "moduleId")
+    module_id = _component_id(metadata.get("moduleId", path.stem), "moduleId")
+    template_id = _component_id(metadata.get("templateId", module_id), "templateId")
     label = metadata.get("name")
     if not isinstance(label, str) or not label.strip():
         raise ValueError("COMPONENT.name is required")
@@ -182,7 +186,7 @@ def _read_component(path, package):
         raise ValueError("paletteMenu must be a string")
     category = str(metadata.get("category", "自动发现组件"))
     component = {
-        "moduleId": module_id, "fileName": path.name, "entryFunction": entry_name,
+        "moduleId": module_id, "templateId": template_id, "fileName": path.name, "entryFunction": entry_name,
         "name": label.strip(), "category": category, "group": group,
         "paletteMenu": palette_menu, "replacesBuiltin": replaces_builtin,
         "description": str(metadata.get("description", "")), "icon": str(metadata.get("icon", "仿")),
@@ -218,13 +222,8 @@ def discover_components(existing_ids=(), directory=None, package=None, replaceab
             if module_id in discovered_ids:
                 raise ValueError(f"duplicate moduleId: {module_id}")
             if component["replacesBuiltin"]:
-                original = replaceable_modules.get(module_id)
-                if original is None or component["group"] != "electrical":
-                    raise ValueError("replacesBuiltin requires an existing builtin electrical module")
-                if (tuple(record["inputs"]) != original.inputs
-                        or tuple(record["outputs"]) != original.outputs
-                        or set(record["parameters"]) != set(original.parameters)):
-                    raise ValueError("builtin replacement must preserve inputs, outputs and parameter names; use a new moduleId for interface changes")
+                if module_id in known and module_id not in replaceable_modules:
+                    raise ValueError("replacesBuiltin cannot replace a registered custom module")
             elif module_id in known:
                 raise ValueError(f"duplicate moduleId: {record['moduleId']}")
             discovered_ids.add(module_id)

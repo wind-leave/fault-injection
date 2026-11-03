@@ -12,5 +12,12 @@ tmp/
 .ruff_cache/
 /student-practice-result-body-*.json
 .env
-output/
+output/*
+!output/docker-delivery/
+output/docker-delivery/*
+!output/docker-delivery/compose.yaml
+!output/docker-delivery/.env
+!output/docker-delivery/README.md
+!output/docker-delivery/backend/
+!output/docker-delivery/public/
 /docker-images*.tar

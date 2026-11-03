@@ -3,6 +3,7 @@
 Run from any directory: python <project>/tools/convert_builtin_components.py
 No packages are downloaded. Node.js reads the existing frontend port contracts;
 Python's standard library copies source and emits/validates literal metadata.
+Manifest records with autoConvert=false are excluded; new records default to enabled.
 """
 
 import argparse
@@ -10,6 +11,7 @@ import ast
 import copy
 import importlib.util
 import json
+import keyword
 import os
 from pathlib import Path
 import pprint
@@ -44,7 +46,8 @@ for (const item of Object.values(COMPONENT_REGISTRY)) {
   const menu = menus[item.group]?.find(section => section.id === menuId)
     || (item.group === 'electrical' ? getElectricalMenuSections([item]) : getSimulationMenuSections([item]))[0];
   definitions[moduleId] = {
-    name: item.label, description: item.description || item.title || '',
+    name: item.label, templateId: item.templateId || item.type,
+    description: item.description || item.title || '',
     group: item.group, paletteMenu: menu?.id,
     category: menu?.label || item.defaults?.moduleType,
     icon: item.palette?.icon || '仿',
@@ -89,6 +92,8 @@ def build_metadata(record, template, new_id):
     warnings = []
     metadata = {
         "moduleId": new_id,
+        "templateId": template.get("templateId", new_id) if new_id == record["moduleId"] else new_id,
+        "replacesBuiltin": new_id == record["moduleId"],
         "name": template.get("name", record["moduleId"]),
         "category": template.get("category") or template.get("paletteMenuLabel") or template.get("simulationMenuLabel") or "内置组件转换",
         "group": template.get("group", "simulation"),
@@ -170,15 +175,15 @@ def add_declaration(source, metadata, source_package):
     return generated.rstrip() + "\n"
 
 
-def convert_components(root=PROJECT_ROOT, output_dir=None, selected=None, prefix="auto_", overwrite=False,
+def convert_components(root=PROJECT_ROOT, output_dir=None, selected=None, prefix="", overwrite=False,
                        frontend=None, overrides=None, node="node"):
     root = Path(root).resolve()
     source_dir = root / "backend" / "builtin_modules"
     output_dir = Path(output_dir or root / "output" / "converted_components").resolve()
     if output_dir.is_relative_to(source_dir.resolve()):
         raise ValueError("output directory must be outside builtin_modules")
-    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", prefix):
-        raise ValueError("prefix must start with an ASCII letter and contain only letters, digits, underscores")
+    if prefix and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", prefix):
+        raise ValueError("non-empty prefix must start with an ASCII letter and contain only letters, digits, underscores")
     records = json.loads((source_dir / "manifest.json").read_text(encoding="utf-8"))["modules"]
     frontend = read_frontend_metadata(root, node) if frontend is None else frontend
     overrides = overrides or {}
@@ -196,7 +201,8 @@ def convert_components(root=PROJECT_ROOT, output_dir=None, selected=None, prefix
     if not init_path.exists():
         init_path.write_text('"""Generated auto-discovered components."""\n', encoding="utf-8")
     report = {"source": str(source_dir), "output": str(output_dir), "components": [], "unregisteredFiles": []}
-    used_ids = set(known_ids)
+    used_ids = set()
+    used_files = set()
     registered_files = set()
     for record in records:
         module_id = record["moduleId"]
@@ -209,17 +215,31 @@ def convert_components(root=PROJECT_ROOT, output_dir=None, selected=None, prefix
         report["components"].append(item)
         temporary_path = None
         try:
+            auto_convert = record.get("autoConvert", True)
+            if type(auto_convert) is not bool:
+                raise ValueError("manifest autoConvert must be true or false")
+            if not auto_convert:
+                item.update(status="excluded", reason="autoConvert is false in manifest; automatic conversion is disabled")
+                continue
             relative = import_path.removeprefix("backend.builtin_modules.")
             if not import_path.startswith("backend.builtin_modules.") or any(not part.isidentifier() for part in relative.split(".")):
                 raise ValueError("importPath must point inside backend.builtin_modules")
             source_path = source_dir.joinpath(*relative.split(".")).with_suffix(".py")
             if not source_path.resolve().is_relative_to(source_dir.resolve()):
                 raise ValueError("source resolves outside builtin_modules")
-            new_id = prefix + re.sub(r"[^A-Za-z0-9_]", "_", module_id)
-            if new_id in used_ids:
+            new_id = prefix + re.sub(r"[^A-Za-z0-9_]", "_", module_id) if prefix else module_id
+            if new_id in used_ids or (prefix and new_id in known_ids):
                 raise ValueError(f"generated moduleId conflicts: {new_id}")
             used_ids.add(new_id)
-            target = output_dir / f"{new_id}.py"
+            # Module IDs are public strings, not Python module names (e.g. "11").
+            # Only the file name needs to be a valid, discoverable Python name.
+            file_stem = new_id if new_id.isidentifier() and not keyword.iskeyword(new_id) and not new_id.startswith("_") else source_path.stem
+            if not file_stem.isidentifier() or keyword.iskeyword(file_stem) or file_stem.startswith("_"):
+                file_stem = "component_" + re.sub(r"[^A-Za-z0-9_]", "_", new_id)
+            if file_stem in used_files:
+                raise ValueError(f"generated file name conflicts: {file_stem}.py")
+            used_files.add(file_stem)
+            target = output_dir / f"{file_stem}.py"
             if target.is_symlink():
                 raise ValueError("destination is a symbolic link; refusing to replace it")
             item.update(moduleId=new_id, fileName=target.name)
@@ -253,16 +273,16 @@ def convert_components(root=PROJECT_ROOT, output_dir=None, selected=None, prefix
         for path in sorted(source_dir.glob("*.py")) if not path.name.startswith("_") and path.name not in registered_files
     ]
     report["summary"] = {status: sum(item["status"] == status for item in report["components"])
-                         for status in ("generated", "unchanged", "skipped", "failed")}
+                         for status in ("generated", "unchanged", "skipped", "excluded", "failed")}
     (output_dir / "conversion-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return report
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--module", action="append", dest="selected", help="manifest module ID; repeat to select multiple (default: all)")
+    parser.add_argument("--module", action="append", dest="selected", help="manifest module ID; repeat to select multiple; autoConvert=false entries remain excluded (default: all enabled entries)")
     parser.add_argument("--output-dir", type=Path, help="default: <project>/output/converted_components; use backend/auto_components to activate")
-    parser.add_argument("--id-prefix", default="auto_", help="new module ID/file prefix (default: auto_)")
+    parser.add_argument("--id-prefix", default="", help="optional prefix for new IDs; by default preserve original moduleId and templateId")
     parser.add_argument("--overwrite", action="store_true", help="replace existing generated files; default is to keep them")
     parser.add_argument("--frontend-json", type=Path, help="pre-exported frontend metadata; avoids invoking Node.js")
     parser.add_argument("--overrides", type=Path, help="JSON mapping module ID to corrected frontend metadata")

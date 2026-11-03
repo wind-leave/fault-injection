@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import LeftPalette from '../src/components/layout/LeftPalette.vue';
+import { COMPONENT_REGISTRY } from '../src/services/componentRegistry.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -87,19 +88,10 @@ describe('left palette taxonomy', () => {
       'signal_source_rf'
     ]);
     expect(wrapper.find('[data-palette-group="signal-ops"]').exists()).toBe(false);
-    expect(groupBody(wrapper, 'electrical').find('[data-electrical-menu-section="power-source"]').text()).toContain('电源模块');
-    expect(groupBody(wrapper, 'electrical').find('[data-electrical-menu-section="power-conversion"]').text()).toContain('电能变换');
-    expect(groupComponents(wrapper, 'electrical')).toEqual([
-      'electrical_ac_power_source',
-      'electrical_dc_power_source',
-      'electrical_dc_boost',
-      'electrical_ac_dc_matching'
-    ]);
-    expect(groupComponents(wrapper, 'simulation')).toEqual([
-      'airspeed_sensor',
-      'barometer_sensor'
-    ]);
-    expect(groupBody(wrapper, 'simulation').text()).toContain('空速传感器');
+    expect(groupBody(wrapper, 'electrical').find('[data-electrical-menu-section]').exists()).toBe(false);
+    expect(groupComponents(wrapper, 'electrical')).toEqual([]);
+    expect(groupComponents(wrapper, 'simulation')).toEqual([]);
+    expect(groupBody(wrapper, 'simulation').find('[data-simulation-menu-section]').exists()).toBe(false);
     expect(groupBody(wrapper, 'simulation').find('[data-open-component-authoring]').exists()).toBe(false);
     expect(groupComponents(wrapper, 'subsystem')).toEqual([
       'subsystem_block',
@@ -117,6 +109,7 @@ describe('left palette taxonomy', () => {
     expect(groupBody(wrapper, 'faults').text()).not.toContain('新增故障');
     expect(groupComponents(wrapper, 'instruments')).toEqual([
       'instrument_scope',
+      'XHFSQ',
       'instrument_spectrum',
       'instrument_multimeter'
     ]);
@@ -165,9 +158,10 @@ describe('left palette taxonomy', () => {
     const wrapper = mountPalette();
     const entries = groupBody(wrapper, 'subsystem').findAll('.citem-draggable');
 
-    expect(entries.map((entry) => entry.find('.citem-label').text())).toEqual([
-      '子系统块', '子系统块 2', '子系统块 3', '子系统块 4'
-    ]);
+    expect(entries.map((entry) => entry.find('.citem-label').text())).toEqual(
+      ['subsystem_block', 'subsystem_block_2', 'subsystem_block_3', 'subsystem_block_4']
+        .map((type) => COMPONENT_REGISTRY[type].label)
+    );
     entries.slice(1).forEach((entry, index) => {
       const dataTransfer = createDragDataTransfer();
       const dragStart = new Event('dragstart', { bubbles: true, cancelable: true });
@@ -234,7 +228,7 @@ describe('left palette taxonomy', () => {
     wrapper.unmount();
   });
 
-  it('treats each electrical component as a one-time palette entry', async () => {
+  it('keeps electrical components hidden after create and delete events', async () => {
     const wrapper = mountPalette();
 
     window.dispatchEvent(new CustomEvent('gz:palette-component-created', {
@@ -247,12 +241,12 @@ describe('left palette taxonomy', () => {
       detail: { paletteKey: 'electrical_dc_boost' }
     }));
     await wrapper.vm.$nextTick();
-    expect(groupComponents(wrapper, 'electrical')).toContain('electrical_dc_boost');
+    expect(groupComponents(wrapper, 'electrical')).toEqual([]);
 
     wrapper.unmount();
   });
 
-  it('restores consumed simulation and display-console templates for a new blank workspace', async () => {
+  it('keeps simulation templates hidden while restoring display consoles for a new workspace', async () => {
     const wrapper = mountPalette();
 
     window.dispatchEvent(new CustomEvent('gz:palette-component-created', {
@@ -267,13 +261,13 @@ describe('left palette taxonomy', () => {
 
     window.dispatchEvent(new CustomEvent('gz:palette-components-reset'));
     await wrapper.vm.$nextTick();
-    expect(wrapper.find('[data-component="airspeed_sensor"]').exists()).toBe(true);
+    expect(groupComponents(wrapper, 'simulation')).toEqual([]);
     expect(wrapper.find('[data-component="display_console_1"]').exists()).toBe(true);
 
     wrapper.unmount();
   });
 
-  it('removes only the created component entry from the palette', async () => {
+  it('keeps simulation components hidden without affecting signal-source dragging', async () => {
     const wrapper = mountPalette();
 
     window.dispatchEvent(new CustomEvent('gz:palette-component-created', {
@@ -281,8 +275,8 @@ describe('left palette taxonomy', () => {
     }));
     await wrapper.vm.$nextTick();
 
-    expect(groupComponents(wrapper, 'simulation')).toEqual(['barometer_sensor']);
-    expect(groupBody(wrapper, 'simulation').find('.simulation-menu-section__count').text()).toBe('1');
+    expect(groupComponents(wrapper, 'simulation')).toEqual([]);
+    expect(groupBody(wrapper, 'simulation').find('.simulation-menu-section').exists()).toBe(false);
     expect(wrapper.find('[data-palette-group="signal-ops"]').exists()).toBe(false);
 
     window.dispatchEvent(new CustomEvent('gz:palette-component-created', {
@@ -295,18 +289,14 @@ describe('left palette taxonomy', () => {
       detail: { paletteKey: 'airspeed_sensor' }
     }));
     await wrapper.vm.$nextTick();
-    expect(groupComponents(wrapper, 'simulation')).toEqual([
-      'airspeed_sensor',
-      'barometer_sensor'
-    ]);
-    expect(groupBody(wrapper, 'simulation').find('.simulation-menu-section__count').text()).toBe('2');
+    expect(groupComponents(wrapper, 'simulation')).toEqual([]);
 
     const dataTransfer = createDragDataTransfer();
     const dragStart = new Event('dragstart', { bubbles: true, cancelable: true });
     Object.defineProperty(dragStart, 'dataTransfer', { value: dataTransfer });
-    wrapper.find('[data-component="airspeed_sensor"]').element.dispatchEvent(dragStart);
-    expect(dataTransfer.getData('text/plain')).toBe('airspeed_sensor');
-    expect(dataTransfer.getData('application/x-gz-palette-key')).toBe('airspeed_sensor');
+    wrapper.find('[data-component="signal_source"]').element.dispatchEvent(dragStart);
+    expect(dataTransfer.getData('text/plain')).toBe('signal_source');
+    expect(dataTransfer.getData('application/x-gz-palette-key')).toBe('signal_source');
 
     wrapper.unmount();
   });

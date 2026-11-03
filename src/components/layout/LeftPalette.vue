@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive } from 'vue';
 import { getElectricalMenuSections, getPaletteGroups, getSimulationMenuSections } from '../../services/componentRegistry.js';
 import { useAuthoredComponentCatalog } from '../../services/authoredComponentCatalogService.js';
-import { loadDiscoveredComponents, useDiscoveredComponentCatalog } from '../../services/discoveredComponentCatalogService.js';
+import { useDiscoveredComponentCatalog } from '../../services/discoveredComponentCatalogService.js';
 
 defineProps({
   collapsed: {
@@ -205,10 +205,11 @@ function handleLineToolClick(component) {
       </button>
     </div>
     <div v-show="!collapsed" class="lscroll">
-      <div class="discovered-component-status" data-testid="discovered-component-status">
-        <button type="button" :disabled="discoveredCatalog.loading" @click="loadDiscoveredComponents()">
-          {{ discoveredCatalog.loading ? '正在加载组件…' : '刷新自动组件' }}
-        </button>
+      <div
+        v-if="discoveredCatalog.error || discoveredCatalog.errors.length"
+        class="discovered-component-status"
+        data-testid="discovered-component-status"
+      >
         <p v-if="discoveredCatalog.error" role="status">{{ discoveredCatalog.error }}</p>
         <p v-for="error in discoveredCatalog.errors" :key="error.fileName" role="status">
           {{ error.fileName }}：{{ error.message }}
@@ -305,6 +306,5 @@ function handleLineToolClick(component) {
 
 <style scoped>
 .discovered-component-status { padding: 8px 10px; border-bottom: 1px solid var(--border); }
-.discovered-component-status button { font: inherit; font-size: 12px; cursor: pointer; }
 .discovered-component-status p { margin: 6px 0 0; font-size: 12px; overflow-wrap: anywhere; }
 </style>

@@ -184,7 +184,7 @@ describe('discovered component catalog', () => {
     } finally { wrapper.unmount(); }
   });
 
-  it('preserves existing components when the backend fails and shows an actionable retry', async () => {
+  it('preserves existing components and displays errors without a refresh button when the backend fails', async () => {
     syncDiscoveredComponents([component]);
     const wrapper = mount(LeftPalette);
     try {
@@ -192,10 +192,7 @@ describe('discovered component catalog', () => {
       await flushPromises();
       expect(wrapper.text()).toContain('HTTP 503');
       expect(COMPONENT_REGISTRY.discovered_test_auto_gain).toBeDefined();
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response()));
-      await wrapper.get('[data-testid="discovered-component-status"] button').trigger('click');
-      await flushPromises();
-      expect(useDiscoveredComponentCatalog().error).toBe('');
+      expect(wrapper.get('[data-testid="discovered-component-status"]').find('button').exists()).toBe(false);
     } finally { wrapper.unmount(); }
   });
 

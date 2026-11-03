@@ -12,7 +12,7 @@
 4. 重启 Python 后端，刷新平台页面。
 5. 在左侧“仿真组件”或“电气组件”的对应分类中找到新组件，拖入画布、连线并运行仿真。`group` 默认为 `simulation`，设置为 `electrical` 时进入电气组件库。
 
-安装本次平台更新时，需要更新后端文件，并重新构建/部署前端。此后按本流程新增组件不需要重新构建前端。Docker Compose 默认将宿主机 `backend/auto_components/` 只读挂载到容器内同名包目录，也可在 `.env` 中设置 `GZ_AUTO_COMPONENTS_DIR` 使用其他宿主机目录。因此日常添加或修改 `.py` 后只需执行 `docker compose restart backend` 并刷新页面，无需重新构建镜像，具体见 [Docker 部署说明](Docker部署说明.md)。文件新增、修改、删除后均需要重启后端；“刷新自动组件”按钮只重新读取后端启动时的扫描结果，不会热加载 Python 代码。
+安装本次平台更新时，需要更新后端文件，并重新构建/部署前端。此后按本流程新增组件不需要重新构建前端。Docker Compose 默认将宿主机 `backend/auto_components/` 只读挂载到容器内同名包目录，也可在 `.env` 中设置 `GZ_AUTO_COMPONENTS_DIR` 使用其他宿主机目录。因此日常添加或修改 `.py` 后只需执行 `docker compose restart backend` 并刷新页面，无需重新构建镜像，具体见 [Docker 部署说明](Docker部署说明.md)。文件新增、修改、删除后均需要重启后端并刷新页面；平台在页面加载时自动读取后端启动时的扫描结果，不会热加载 Python 代码。
 
 ## 可直接使用的示例
 

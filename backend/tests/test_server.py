@@ -131,8 +131,15 @@ class SimulationBackendServerTests(unittest.TestCase):
         connection.close()
         return response.status, json.loads(response_body)
 
+    def test_health_endpoint_is_ready_without_creating_sessions(self):
+        status, result = self._get("/healthz")
+        self.assertEqual(status, 200)
+        self.assertEqual(result, {"status": "ok"})
+        self.assertEqual(SimulationBackendHandler.sessions, {})
+        self.assertEqual(SimulationBackendHandler.practice_sessions, {})
+
     def test_sequence_practice_types_return_student_and_job_ids(self):
-        for practice_type in ("inspection2", "inspection4"):
+        for practice_type, action_count in (("inspection2", 17), ("inspection4", 33)):
             with self.subTest(practice_type=practice_type):
                 status, created = self._post(
                     "/api/practice/session",
@@ -146,7 +153,7 @@ class SimulationBackendServerTests(unittest.TestCase):
                 session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
                 self.assertFalse(hasattr(session, "optimal_action_sequence"))
 
-                for action_number in (1, 2, 3, 4, 5):
+                for action_number in range(1, action_count + 1):
                     action_status, action_result = self._post(
                         f"/api/practice/session/{created['practiceSessionId']}/action",
                         {"actionNumber": action_number},
@@ -212,7 +219,10 @@ class SimulationBackendServerTests(unittest.TestCase):
                     self.assertEqual(status, 200)
                     session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
                     if practice_type in ("inspection2", "inspection4", "powerOnSelfTestExam"):
-                        for action_number in (1, 3, 2, 4, 5):
+                        action_count = {"inspection2": 17, "inspection4": 33, "powerOnSelfTestExam": 12}[practice_type]
+                        action_numbers = list(range(1, action_count + 1))
+                        action_numbers[1:3] = [3, 2]
+                        for action_number in action_numbers:
                             action = {"actionNumber": action_number}
                             if practice_type == "powerOnSelfTestExam":
                                 action["isCorrect"] = action_number != 4
@@ -228,9 +238,9 @@ class SimulationBackendServerTests(unittest.TestCase):
                     )
                     self.assertEqual(status, 200)
                     expected_score = {
-                        "inspection2": 60.0,
-                        "inspection4": 60.0,
-                        "powerOnSelfTestExam": 50.0,
+                        "inspection2": 88.235,
+                        "inspection4": 93.939,
+                        "powerOnSelfTestExam": 79.167,
                     }.get(practice_type, 100.0)
                     self.assertEqual(submitted["totalScore"], expected_score)
                     self.assertEqual(set(submitted), {"studentId", "jobId", "totalScore", "resultDelivery"})
@@ -290,9 +300,9 @@ class SimulationBackendServerTests(unittest.TestCase):
     def test_power_on_self_test_exam_gates_correctness_score_on_step_order(self):
         for first_action, expected_score in (
             ({"actionNumber": 1, "isCorrect": True}, 100.0),
-            ({"actionNumber": 1, "isCorrect": False}, 90.0),
-            ({"actionNumber": 2, "isCorrect": True}, 80.0),
-            ({"actionNumber": 2, "isCorrect": False}, 80.0),
+            ({"actionNumber": 1, "isCorrect": False}, 95.833),
+            ({"actionNumber": 2, "isCorrect": True}, 91.667),
+            ({"actionNumber": 2, "isCorrect": False}, 91.667),
         ):
             with self.subTest(first_action=first_action):
                 status, created = self._post("/api/practice/session", {
@@ -306,7 +316,7 @@ class SimulationBackendServerTests(unittest.TestCase):
                 self.assertNotIn("optimalActionSequence", created)
                 session_id = created["practiceSessionId"]
                 actions = [first_action] + [
-                    {"actionNumber": number, "isCorrect": True} for number in (2, 3, 4, 5)
+                    {"actionNumber": number, "isCorrect": True} for number in range(2, 13)
                 ]
                 for action in actions:
                     action_status, result = self._post(f"/api/practice/session/{session_id}/action", action)
@@ -326,9 +336,9 @@ class SimulationBackendServerTests(unittest.TestCase):
 
     def test_power_on_self_test_exam_score_extremes(self):
         for numbers, is_correct, expected_score in (
-            ((1, 2, 3, 4, 5), False, 50.0),
-            ((2, 3, 4, 5, 1), True, 0.0),
-            ((2, 3, 4, 5, 1), False, 0.0),
+            (tuple(range(1, 13)), False, 50.0),
+            (tuple(range(2, 13)) + (1,), True, 0.0),
+            (tuple(range(2, 13)) + (1,), False, 0.0),
         ):
             with self.subTest(numbers=numbers, is_correct=is_correct):
                 status, created = self._post("/api/practice/session", {
@@ -368,7 +378,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         session = SimulationBackendHandler.practice_sessions[session_id]
         self.assertEqual(session.student_action_sequence, [])
         self.assertEqual(session.student_action_correctness, [])
-        for number in (1, 2, 3, 4, 5):
+        for number in range(1, 13):
             status, _ = self._post(f"/api/practice/session/{session_id}/action", {
                 "actionNumber": number, "isCorrect": True,
             })
@@ -377,8 +387,8 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(submitted["totalScore"], 100.0)
 
-    def test_power_on_self_test_exam_requires_exactly_five_actions(self):
-        for action_count in (0, 4, 6):
+    def test_power_on_self_test_exam_requires_exactly_twelve_actions(self):
+        for action_count in (0, 5, 11, 13):
             with self.subTest(action_count=action_count):
                 status, created = self._post("/api/practice/session", {
                     "practiceType": "powerOnSelfTestExam", "studentid": "student-1", "jobid": "job-1",
@@ -393,6 +403,7 @@ class SimulationBackendServerTests(unittest.TestCase):
                 status, rejected = self._post(f"/api/practice/session/{session_id}/submit", {})
                 self.assertEqual(status, 400)
                 self.assertEqual(rejected["field"], "actionNumber")
+                self.assertIn("exactly 12 actions", rejected["message"])
                 self.assertIn(session_id, SimulationBackendHandler.practice_sessions)
 
     def test_power_on_self_test_exam_action_limit_does_not_record_rejected_step(self):
@@ -416,7 +427,9 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(session.student_action_correctness, [True])
 
     def test_sequence_practice_deducts_by_action_position_and_returns_ids(self):
-        for practice_type in ("inspection2", "inspection4"):
+        for practice_type, action_count, expected_score in (
+            ("inspection2", 17, 88.235), ("inspection4", 33, 93.939),
+        ):
             with self.subTest(practice_type=practice_type):
                 status, created = self._post(
                     "/api/practice/session",
@@ -424,7 +437,9 @@ class SimulationBackendServerTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 200)
 
-                for action_number in (1, 3, 2, 4, 5):
+                action_numbers = list(range(1, action_count + 1))
+                action_numbers[1:3] = [3, 2]
+                for action_number in action_numbers:
                     status, result = self._post(
                         f"/api/practice/session/{created['practiceSessionId']}/action",
                         {"actionNumber": action_number},
@@ -440,29 +455,32 @@ class SimulationBackendServerTests(unittest.TestCase):
                 self.assertEqual(submitted, {
                     "studentId": "student-1",
                     "jobId": "job-1",
-                    "totalScore": 60.0,
+                    "totalScore": expected_score,
                     "resultDelivery": {"status": "skipped", "reason": "callback-not-configured"},
                 })
 
     def test_sequence_practice_requires_the_fixed_action_count_before_submit(self):
-        status, created = self._post(
-            "/api/practice/session",
-            {"practiceType": "inspection4", "studentid": "student-1", "jobid": "job-1"},
-        )
-        self.assertEqual(status, 200)
-        for action_number in (1, 2, 3, 4):
-            status, result = self._post(
-                f"/api/practice/session/{created['practiceSessionId']}/action",
-                {"actionNumber": action_number},
-            )
-            self.assertEqual(status, 200)
+        for practice_type, expected_count in (("inspection2", 17), ("inspection4", 33)):
+            for action_count in (0, 5, expected_count - 1, expected_count + 1):
+                with self.subTest(practice_type=practice_type, action_count=action_count):
+                    status, created = self._post(
+                        "/api/practice/session",
+                        {"practiceType": practice_type, "studentid": "student-1", "jobid": "job-1"},
+                    )
+                    self.assertEqual(status, 200)
+                    session_id = created["practiceSessionId"]
+                    for action_number in range(1, action_count + 1):
+                        status, _ = self._post(
+                            f"/api/practice/session/{session_id}/action",
+                            {"actionNumber": action_number},
+                        )
+                        self.assertEqual(status, 200)
 
-        status, rejected = self._post(
-            f"/api/practice/session/{created['practiceSessionId']}/submit",
-            {},
-        )
-        self.assertEqual(status, 400)
-        self.assertEqual(rejected["field"], "actionNumber")
+                    status, rejected = self._post(f"/api/practice/session/{session_id}/submit", {})
+                    self.assertEqual(status, 400)
+                    self.assertEqual(rejected["field"], "actionNumber")
+                    self.assertIn(f"exactly {expected_count} actions", rejected["message"])
+                    self.assertIn(session_id, SimulationBackendHandler.practice_sessions)
 
     def test_sequence_practice_rejects_invalid_type_and_action_number(self):
         status, rejected = self._post(

@@ -19,6 +19,30 @@ from backend.tests.fixtures import valid_package
 
 
 class SimulationEngineTests(unittest.TestCase):
+    def test_component_11_sends_a_seven_element_vector_to_console_without_power(self):
+        registry = ModuleRegistry.from_builtin_manifest()
+        for value in (0.0, -2.5, 7.0):
+            with self.subTest(value=value):
+                package = valid_package()
+                package['nodes'][0]['parameters']['value'] = value
+                component = package['nodes'][1]
+                component['pythonBinding']['moduleId'] = '11'
+                component['powerInputs'] = []
+                component['outputs'] = [
+                    {'id': 'output-0', 'name': 'output_vector', 'dataType': 'vector', 'vectorLength': 7}
+                ]
+                package['nodes'][2]['type'] = 'display_console'
+                package['nodes'][2]['inputs'] = [
+                    {'name': 'console_input', 'dataType': 'vector', 'vectorLength': 7}
+                ]
+                package['measurementPoints'] = []
+                package['reportedNodeIds'] = ['sim-1', 'scope-1']
+                result = run_simulation(compile_graph(package, registry))
+                for step in result['componentOutputs']['steps']:
+                    for mode in ('actual', 'reference'):
+                        self.assertEqual(step[mode]['sim-1'], {'output_vector': [value] * 7})
+                        self.assertEqual(step[mode]['scope-1'], {'console_input': [value] * 7})
+
     def assertFloatSeriesEqual(self, actual, expected):
         self.assertEqual(len(actual), len(expected))
         for actual_value, expected_value in zip(actual, expected):

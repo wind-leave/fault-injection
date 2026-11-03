@@ -8,12 +8,14 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest",
-    "audit:ui": "node tools/ui_quality_audit.mjs"
+    "audit:ui": "node tools/ui_quality_audit.mjs",
+    "convert:display-console": "node tools/convert_display_console_config.mjs"
   },
   "dependencies": {
     "vue": "^3.5.32"
   },
   "devDependencies": {
+    "@babel/parser": "7.29.2",
     "@vitejs/plugin-vue": "^6.0.5",
     "@vue/test-utils": "^2.4.6",
     "jsdom": "^29.0.2",

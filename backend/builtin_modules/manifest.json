@@ -1,6 +1,14 @@
 {
   "modules": [
     {
+      "moduleId": "11",
+      "importPath": "backend.builtin_modules.signal_fanout7",
+      "entryFunction": "process",
+      "inputs": ["input"],
+      "outputs": ["output_vector"],
+      "parameters": {}
+    },
+    {
       "moduleId": "passthrough",
       "importPath": "backend.builtin_modules.passthrough",
       "entryFunction": "process",

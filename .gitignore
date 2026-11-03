@@ -11,3 +11,6 @@ tmp/
 .uv-cache/
 .ruff_cache/
 /student-practice-result-body-*.json
+.env
+output/
+/docker-images*.tar

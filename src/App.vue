@@ -18,10 +18,14 @@ import ToastHost from './components/dialogs/ToastHost.vue';
 import KnowledgeGraphPage from './components/KnowledgeGraphPage.vue';
 import TestPointAuthoringPage from './components/TestPointAuthoringPage.vue';
 import FaultLocalizationPage from './components/FaultLocalizationPage.vue';
+import RuntimeConfigNotice from './components/RuntimeConfigNotice.vue';
 import { useWorkbenchState } from './composables/useWorkbenchState.js';
 import { mountLegacyRuntime } from './services/legacyRuntimeBootstrap.js';
+import { loadDiscoveredComponents } from './services/discoveredComponentCatalogService.js';
 import { bindStatusBarInteractions, unbindStatusBarInteractions } from './services/statusBarRuntime.js';
 import './services/simulationRuntime.js';
+
+defineProps({ runtimeConfigError: { type: String, default: '' } });
 
 const workbench = useWorkbenchState();
 const rootEl = ref(null);
@@ -195,6 +199,7 @@ onMounted(async () => {
   window.addEventListener('gz:toggle-canvas-floating-controls', toggleCanvasFloatingControls);
   await nextTick();
   mountLegacyRuntime();
+  void loadDiscoveredComponents();
   bindStatusBarInteractions();
   workbench.markReady();
 });
@@ -222,6 +227,7 @@ onBeforeUnmount(() => {
     :data-runtime-ready="workbench.runtimeReady ? 'true' : 'false'"
   >
     <WorkbenchHeader />
+    <RuntimeConfigNotice :message="runtimeConfigError" />
     <main class="workbench-main">
       <LeftPalette :collapsed="isLeftPanelCollapsed" @toggle-collapse="toggleLeftPanel" />
       <button

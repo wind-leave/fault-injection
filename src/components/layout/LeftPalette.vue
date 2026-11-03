@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive } from 'vue';
 import { getElectricalMenuSections, getPaletteGroups, getSimulationMenuSections } from '../../services/componentRegistry.js';
 import { useAuthoredComponentCatalog } from '../../services/authoredComponentCatalogService.js';
+import { loadDiscoveredComponents, useDiscoveredComponentCatalog } from '../../services/discoveredComponentCatalogService.js';
 
 defineProps({
   collapsed: {
@@ -14,6 +15,7 @@ const emit = defineEmits(['toggle-collapse']);
 
 const paletteGroups = getPaletteGroups();
 const authoredCatalog = useAuthoredComponentCatalog();
+const discoveredCatalog = useDiscoveredComponentCatalog();
 const groupOpen = reactive(Object.fromEntries(
   paletteGroups.map((group) => [group.id, group.defaultOpen !== false])
 ));
@@ -24,6 +26,7 @@ const paletteMenuSections = computed(() => {
   // 新建组件已注册到全局组件库；这里只借助目录的响应式变化重新读取组件库，
   // 不能再把 authoredCatalog.components 追加一次，否则会在左栏出现两份。
   void authoredCatalog.components.length;
+  void discoveredCatalog.components;
   const groups = getPaletteGroups();
   const groupComponents = (groupId) => groups.find((group) => group.id === groupId)?.components ?? [];
   return {
@@ -202,6 +205,15 @@ function handleLineToolClick(component) {
       </button>
     </div>
     <div v-show="!collapsed" class="lscroll">
+      <div class="discovered-component-status" data-testid="discovered-component-status">
+        <button type="button" :disabled="discoveredCatalog.loading" @click="loadDiscoveredComponents()">
+          {{ discoveredCatalog.loading ? '正在加载组件…' : '刷新自动组件' }}
+        </button>
+        <p v-if="discoveredCatalog.error" role="status">{{ discoveredCatalog.error }}</p>
+        <p v-for="error in discoveredCatalog.errors" :key="error.fileName" role="status">
+          {{ error.fileName }}：{{ error.message }}
+        </p>
+      </div>
       <template v-for="group in paletteGroups" :key="group.id">
         <div
           class="lgroup-head"
@@ -290,3 +302,9 @@ function handleLineToolClick(component) {
     </div>
   </aside>
 </template>
+
+<style scoped>
+.discovered-component-status { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.discovered-component-status button { font: inherit; font-size: 12px; cursor: pointer; }
+.discovered-component-status p { margin: 6px 0 0; font-size: 12px; overflow-wrap: anywhere; }
+</style>

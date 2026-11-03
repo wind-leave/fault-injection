@@ -72,7 +72,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
     registry = ModuleRegistry.from_manifests([
         ModuleRegistry.builtin_manifest_path(),
         component_registrar.manifest_path,
-    ])
+    ], discover=True)
     sessions = {}
     state_lock = threading.RLock()
     sessions_lock = state_lock
@@ -94,7 +94,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         return ModuleRegistry.from_manifests([
             ModuleRegistry.builtin_manifest_path(),
             self.component_registrar.manifest_path,
-        ])
+        ], discover=True)
 
     def _send_json(self, status_code, payload):
         body = _json_bytes(payload)
@@ -826,6 +826,16 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         run_id = self._new_id("run")
         path = urlparse(self.path).path
+        if path == "/api/components/discovered":
+            registry = type(self).registry
+            self._send_json(200, {
+                "status": "success", "components": registry.discovered_components,
+                "errors": registry.discovery_errors,
+            })
+            return
+        if path == "/healthz":
+            self._send_json(200, {"status": "ok"})
+            return
         practice_status_session_id = self._practice_status_path(path)
         if not practice_status_session_id:
             self._send_not_found(run_id)

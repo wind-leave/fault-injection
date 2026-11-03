@@ -6,7 +6,7 @@ import {
   isRfVectorOutput,
   normalizeSignalSourceProps
 } from './signalSourceDomainService.js';
-import { DISPLAY_CONSOLE_INPUTS, DISPLAY_CONSOLE_PRESETS, createDisplayConsoleConfig, createDisplayConsoleVectorPort } from '../constants/displayConsoleConfig.js';
+import { DISPLAY_CONSOLE_INPUTS, DISPLAY_CONSOLE_PRESETS, DISPLAY_CONSOLE_VECTOR_PORT_ID, createDisplayConsoleConfig, createDisplayConsoleVectorPort } from '../constants/displayConsoleConfig.js';
 
 const SUPPORTED_NODE_TYPES = new Set([
   'signal_source',
@@ -304,8 +304,8 @@ function normalizeDisplayConsoleInputs(node = {}, props = {}) {
       label: portInputs[index]?.label || inputs[index]?.label || names[index]
     }));
     return createDisplayConsoleVectorPort(configured, {
-      id: port?.id || (portIndex === 0 ? 'console-input' : `console-input-${portIndex + 1}`),
-      name: port?.name || (portIndex === 0 ? '七路参数输入' : `七路参数输入 ${portIndex + 1}`)
+      id: port?.id || (portIndex === 0 ? DISPLAY_CONSOLE_VECTOR_PORT_ID : `${DISPLAY_CONSOLE_VECTOR_PORT_ID}-${portIndex + 1}`),
+      name: port?.name
     });
   });
 }
@@ -577,17 +577,7 @@ function normalizeFaultType(fault = {}) {
     || (injectionForm === 'module-variable'
       && Boolean(String(fault.parameterKey ?? fault.targetParameter ?? '').trim()));
 
-  if (['gaussian_noise', 'uniform_white_noise', 'gaussian_colored_noise'].includes(key)) return key;
-  // Preserve communication modes rather than inferring a mode from bias/scale.
-  if (key === 'tamper') return 'data_tamper';
-  if (key === 'dropout' || key === 'packet_loss') return 'random_packet_loss';
-  if (key === 'data_cutoff') return 'signal_cutoff';
-  if (key === 'delay' || key === 'fixed_delay') return 'link_delay';
-
   if (parameterFault) {
-    if (/intermittent/.test(key)) {
-      return 'intermittent';
-    }
     if (/degradation|degrade|scale/.test(key)) {
       return 'parameter_degradation';
     }
@@ -629,10 +619,10 @@ function normalizeFaultType(fault = {}) {
   if (/efficiency/.test(key)) {
     return 'motor_efficiency_loss';
   }
-  if (/^step$|physical_parameter_step|parameter_step/.test(key)) {
+  if (/physical_parameter_step|parameter_step/.test(key)) {
     return 'parameter_step';
   }
-  if (/^drift$|physical_parameter_drift|parameter_drift/.test(key)) {
+  if (/physical_parameter_drift|parameter_drift/.test(key)) {
     return 'parameter_drift';
   }
   if (/physical_parameter_bias|parameter_bias|parameter_scale/.test(key)) {

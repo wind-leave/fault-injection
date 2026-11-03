@@ -183,6 +183,8 @@ class PreparedModuleCall:
 class ModuleRegistry:
     def __init__(self, modules):
         self.modules = {module.module_id: module for module in modules}
+        self.discovered_components = []
+        self.discovery_errors = []
 
     @classmethod
     def from_builtin_manifest(cls):
@@ -197,7 +199,7 @@ class ModuleRegistry:
         return cls.from_manifests([manifest_path])
 
     @classmethod
-    def from_manifests(cls, manifest_paths):
+    def from_manifests(cls, manifest_paths, *, discover=False):
         """Build a registry from the immutable built-ins and persistent custom manifests."""
         modules = []
         module_ids = set()
@@ -224,7 +226,25 @@ class ModuleRegistry:
                         parameters=item.get("parameters", {}),
                     )
                 )
-        return cls(modules)
+        registry = cls(modules)
+        if discover:
+            from backend.component_discovery import REPLACEABLE_ELECTRICAL_MODULE_IDS, discover_components
+
+            replaceable_modules = {
+                module.module_id: module for module in modules
+                if module.module_id in REPLACEABLE_ELECTRICAL_MODULE_IDS
+                and module.import_path.startswith("backend.builtin_modules.")
+            }
+            records, components, errors = discover_components(module_ids, replaceable_modules=replaceable_modules)
+            for item in records:
+                registry.modules[item["moduleId"]] = RegisteredModule(
+                    module_id=item["moduleId"], import_path=item["importPath"],
+                    entry_function=item["entryFunction"], inputs=tuple(item["inputs"]),
+                    outputs=tuple(item["outputs"]), parameters=item["parameters"],
+                )
+            registry.discovered_components = components
+            registry.discovery_errors = errors
+        return registry
 
     def require(self, module_id, field="pythonBinding.moduleId"):
         module = self.modules.get(module_id)

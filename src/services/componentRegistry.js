@@ -1282,48 +1282,30 @@ export const COMPONENT_REGISTRY = {
   }),
   11: createPythonSimulationComponent({
     type: '11',
+    fileName: 'signal_fanout7.py',
     simulationMenu: 'rf-signal',
     label: '11',
-    moduleType: '测试',
-    title: '无输入，按仿真时间输出四路同步脉冲射频数据',
+    moduleType: '信号分发模型',
+    title: '将单路输入复制为长度为七的输出向量，无需电源',
     palette: { icon: 'T', iconClass: 'simulation' },
-    description: '测试',
+    description: '一路标量输入、一路七维向量输出的信号分发组件',
     inputs: [
       {
         portId: 'input-0',
-        name: '射频数据（四组）',
-        varName: 'a',
-        type: 'vector',
-        vectorLength: 4
-      },
-      {
-        portId: 'input-1',
-        name: '射频数据（四组）',
-        varName: 'b',
-        type: 'vector',
-        vectorLength: 4
+        name: '信号输入',
+        varName: 'input'
       }
     ],
-    outputs: [
-      {
-        portId: 'output-0',
-        name: '射频数据（四组）',
-        varName: 'A',
-        type: 'vector',
-        vectorLength: 4,
-        vectorElementNames: ['横滚', '俯仰', '偏航', '偏航']
-      },
-      {
-        portId: 'output-1',
-        name: '射频数据（四组）',
-        varName: 'B',
-        type: 'vector',
-        vectorLength: 4
-      }
-    ],
-    parameters: [
-    ],
-    ffunctionNote: '测试组件',
+    outputs: [{
+      portId: 'output-0',
+      name: '七维向量输出',
+      varName: 'output_vector',
+      type: 'vector',
+      vectorLength: 7,
+      vectorElementNames: Array.from({ length: 7 }, (_, index) => `元素 ${index + 1}`)
+    }],
+    requiresPower: false,
+    ffunctionNote: '一个输出端口，输出长度为 7 的向量，七个元素均等于输入标量，无需电源输入。',
     executionMode: 'backend'
   }),
   rf_limit_amplify_downconvert_split8: createPythonSimulationComponent({
@@ -1375,15 +1357,15 @@ export const COMPONENT_REGISTRY = {
       iconClass: 'subsystem'
     },
     defaults: {
-      name: '子系统块',
-      subsystemId: 'subsystem-block-1',
+      name: '机架A',
+      subsystemId: 'DZDK_A',
       description: '',
       targetCanvasId: ''
     }
   },
-  subsystem_block_2: createBlankSubsystemTemplate('subsystem_block_2', '子系统块 2', 'subsystem-block-2'),
-  subsystem_block_3: createBlankSubsystemTemplate('subsystem_block_3', '子系统块 3', 'subsystem-block-3'),
-  subsystem_block_4: createBlankSubsystemTemplate('subsystem_block_4', '子系统块 4', 'subsystem-block-4'),
+  subsystem_block_2: createBlankSubsystemTemplate('subsystem_block_2', '机架B', 'DZDK_B'),
+  subsystem_block_3: createBlankSubsystemTemplate('subsystem_block_3', '机架C', 'DZDK_C'),
+  subsystem_block_4: createBlankSubsystemTemplate('subsystem_block_4', '机架D', 'DZDK_D'),
   subsystem_in_port: {
     type: 'subsystem_in_port',
     group: 'subsystem',
@@ -1617,48 +1599,6 @@ export const COMPONENT_REGISTRY = {
       consoleType: '射频参数显控',
       inputPortNames: DISPLAY_CONSOLE_INPUTS.map((item) => item.label),
       displayConfig: createDisplayConsoleConfig()
-    }
-  },
-  display_console_1: {
-    type: 'display_console_1',
-    nodeType: 'display_console',
-    templateId: 'display_console_1',
-    group: 'display-control',
-    label: '显控台 1',
-    badge: '显控',
-    className: 'b-display-console',
-    width: 196,
-    height: 118,
-    palette: {
-      icon: '显1',
-      iconClass: 'display-control'
-    },
-    defaults: {
-      name: DISPLAY_CONSOLE_PRESETS.display_console_1.name,
-      consoleType: '射频参数显控',
-      displayConfig: createDisplayConsoleConfig(DISPLAY_CONSOLE_PRESETS.display_console_1),
-      inputPortNames: createDisplayConsoleConfig(DISPLAY_CONSOLE_PRESETS.display_console_1).inputs.map((item) => item.label)
-    }
-  },
-  display_console_2: {
-    type: 'display_console_2',
-    nodeType: 'display_console',
-    templateId: 'display_console_2',
-    group: 'display-control',
-    label: '显控台 2',
-    badge: '显控',
-    className: 'b-display-console',
-    width: 196,
-    height: 118,
-    palette: {
-      icon: '显2',
-      iconClass: 'display-control'
-    },
-    defaults: {
-      name: DISPLAY_CONSOLE_PRESETS.display_console_2.name,
-      consoleType: '射频参数显控',
-      displayConfig: createDisplayConsoleConfig(DISPLAY_CONSOLE_PRESETS.display_console_2),
-      inputPortNames: createDisplayConsoleConfig(DISPLAY_CONSOLE_PRESETS.display_console_2).inputs.map((item) => item.label)
     }
   },
   link_normal: {

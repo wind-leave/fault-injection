@@ -206,7 +206,10 @@ describe('discovered component catalog', () => {
   });
 
   it.each([
-    { ...component },
+    { ...component,
+      inputs: [{ ...component.inputs[0], portId: 'ABC', elementNames: ['A'] }],
+      outputs: [{ ...component.outputs[0], portId: '111' }]
+    },
     { ...component, group: 'electrical', category: '电源变换', paletteMenu: 'power-conversion' },
     { ...component,
       inputs: [{ ...component.inputs[0], type: 'vector', dataType: 'vector', vectorLength: 2 }],
@@ -231,11 +234,19 @@ describe('discovered component catalog', () => {
     expect(validateFlightModelPackage(pkg)).toEqual({ ok: true, errors: [] });
     const restored = applyFlightModelPackage(JSON.parse(JSON.stringify(pkg)));
     expect(restored.ok).toBe(true);
+    expect(restored.snapshot.modelNodes[0].pythonBinding.portMapping.inputs[0]).toMatchObject({
+      portId: definition.inputs[0].portId
+    });
     const executable = buildBackendExecutablePackage(restored.snapshot);
     const exported = executable.nodes.find((item) => item.id === 'auto-gain-1');
     expect(exported.pythonBinding).toMatchObject({ moduleId: 'test_auto_gain', entryFunction: 'process' });
     expect(exported.parameters).toMatchObject({ gain: definition.parameters[0].default });
+    expect(exported.inputs[0]).toMatchObject({ id: definition.inputs[0].portId });
+    if (definition.inputs[0].elementNames) {
+      expect(exported.inputs[0].elementNames).toEqual(definition.inputs[0].elementNames);
+    }
     expect(exported.outputs).toHaveLength(1);
+    expect(exported.outputs[0].id).toBe(definition.outputs[0].portId);
     if (definition.outputs[0].dataType === 'rf_complex_envelope') {
       expect(exported.outputs[0]).toMatchObject({ dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 4 });
     }

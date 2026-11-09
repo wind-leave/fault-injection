@@ -168,7 +168,10 @@ class ComponentDiscoveryTests(unittest.TestCase):
         self.assertEqual(result["state"], {"time": 1})
 
     def test_http_catalog_and_simulation_use_same_discovered_registry(self):
-        self.write_component(metadata={**self.metadata, "group": "electrical", "paletteMenu": "power-conversion"})
+        self.write_component(metadata={
+            **self.metadata, "group": "electrical", "paletteMenu": "power-conversion",
+            "inputs": [{**self.metadata["inputs"][0], "portId": "ABC", "elementNames": ["A"]}],
+        })
         handler = type("DiscoveryTestHandler", (SimulationBackendHandler,), {"registry": self.registry()})
         server = HTTPServer(("127.0.0.1", 0), handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -181,6 +184,9 @@ class ComponentDiscoveryTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertEqual(catalog["components"][0]["moduleId"], "discovered_test_gain")
             self.assertEqual(catalog["components"][0]["group"], "electrical")
+            port = catalog["components"][0]["inputs"][0]
+            self.assertEqual(port["portId"], "ABC")
+            self.assertEqual(port["elementNames"], ["A"])
             self.assertEqual(catalog["errors"], [])
             package = valid_package()
             package["nodes"][1]["pythonBinding"]["moduleId"] = "discovered_test_gain"

@@ -49,6 +49,11 @@ def _ports(items, direction):
         if not isinstance(item, dict):
             raise ValueError(f"{direction} {index + 1} must be a name or object")
         name = _identifier(item.get("varName"), f"{direction}.varName")
+        port_id = item.get("portId", f"{direction}-{index}")
+        if type(port_id) is int:
+            port_id = str(port_id)
+        if not isinstance(port_id, str) or not port_id.strip():
+            raise ValueError(f"{name}.portId must be a non-empty port ID")
         kind = item.get("type", "number")
         if kind not in {"number", "vector"}:
             raise ValueError(f"{name}.type must be number or vector")
@@ -56,7 +61,7 @@ def _ports(items, direction):
         if data_type not in {"number", "float", "vector", "rf_complex_envelope"}:
             raise ValueError(f"unsupported {name}.dataType: {data_type}")
         port = {
-            "portId": f"{direction}-{index}", "varName": name,
+            "portId": port_id.strip(), "varName": name,
             "name": str(item.get("name", name)), "type": "vector" if kind == "vector" else "float",
         }
         if kind == "vector":

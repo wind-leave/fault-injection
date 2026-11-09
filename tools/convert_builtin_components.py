@@ -82,7 +82,7 @@ def _convert_port(port):
         result["dataType"] = "rf_complex_envelope"
     elif port.get("dataType") not in (None, "float", "number", "vector"):
         raise ValueError(f"unsupported port type: {port['dataType']}")
-    for key in ("unit", "side", "sidePosition", "allowsVector", "vectorElementNames", "elementNames"):
+    for key in ("portId", "unit", "side", "sidePosition", "allowsVector", "vectorElementNames", "elementNames"):
         if key in port:
             result[key] = copy.deepcopy(port[key])
     return result

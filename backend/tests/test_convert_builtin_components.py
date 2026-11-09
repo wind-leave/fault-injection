@@ -50,6 +50,18 @@ class ConvertBuiltinComponentsTests(unittest.TestCase):
         self.assertEqual(palette["inputs"][0]["varName"], "signal")
         self.assertEqual(before, {path.name: path.read_bytes() for path in self.source_dir.iterdir()})
 
+    def test_preserves_explicit_port_ids_and_element_names_through_discovery(self):
+        frontend = {"gain": {
+            "inputs": [{"varName": "signal", "portId": "ABC", "elementNames": ["A"]}],
+            "outputs": [{"varName": "result", "portId": 111}],
+        }}
+        report = convert_components(self.root, self.output_dir, frontend=frontend)
+        self.assertEqual(report["summary"]["generated"], 1, report)
+        _, palette = _read_component(self.output_dir / "gain.py", "backend.auto_components")
+        self.assertEqual(palette["inputs"][0]["portId"], "ABC")
+        self.assertEqual(palette["inputs"][0]["elementNames"], ["A"])
+        self.assertEqual(palette["outputs"][0]["portId"], "111")
+
     def test_preserves_numeric_module_id_and_original_frontend_template_id(self):
         self.record["moduleId"] = "11"
         (self.source_dir / "manifest.json").write_text(json.dumps({"modules": [self.record]}), encoding="utf-8")

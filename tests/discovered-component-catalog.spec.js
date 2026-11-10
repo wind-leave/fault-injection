@@ -5,6 +5,7 @@ import { COMPONENT_GROUPS, COMPONENT_REGISTRY } from '../src/services/componentR
 import { registerAuthoredComponent, removeAuthoredComponent } from '../src/services/authoredComponentCatalogService.js';
 import { applyFlightModelPackage, buildFlightModelPackage, validateFlightModelPackage } from '../src/services/flightModelPackageService.js';
 import { buildBackendExecutablePackage } from '../src/services/backendExecutablePackageService.js';
+import { loadPaletteMenuRuntimeConfig, PALETTE_MENU_CONFIG_URL } from '../src/services/paletteMenuRuntimeConfig.js';
 import {
   loadDiscoveredComponents,
   syncDiscoveredComponents,
@@ -87,6 +88,66 @@ describe('discovered component catalog', () => {
       expect(section.find('[data-component="test_auto_gain"]').exists()).toBe(true);
       expect(wrapper.find(`[data-${group === 'simulation' ? 'simulation' : 'electrical'}-menu-section="discovered-category-${category}"]`).exists()).toBe(false);
     } finally { wrapper.unmount(); }
+  });
+
+  it('uses runtime menu order, names, icons and expansion for discovered components', async () => {
+    const menuConfig = {
+      simulation: [
+        { id: 'rf-signal', label: '现场射频', icon: '射', defaultOpen: false },
+        { id: 'signal-processing', label: '现场信号', icon: 'S', defaultOpen: true },
+        { id: 'unused', label: '空菜单', icon: '空', defaultOpen: true }
+      ],
+      electrical: [{ id: 'power-conversion', label: '现场变换', icon: '电', defaultOpen: false }]
+    };
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, json: async () => menuConfig });
+    const loaded = await loadPaletteMenuRuntimeConfig({ fetchImpl });
+    expect(loaded.error).toBe('');
+    expect(fetchImpl).toHaveBeenCalledWith(PALETTE_MENU_CONFIG_URL, expect.objectContaining({ cache: 'no-store' }));
+
+    const wrapper = mount(LeftPalette, { props: { menuConfig: loaded.sections }, attachTo: document.body });
+    try {
+      syncDiscoveredComponents([
+        { ...component, paletteMenu: 'signal-processing' },
+        { ...component, moduleId: 'custom_rf', paletteMenu: 'rf-signal' },
+        { ...component, moduleId: 'custom_source', group: 'electrical', paletteMenu: 'power-source' },
+        { ...component, moduleId: 'custom_converter', group: 'electrical', paletteMenu: 'power-conversion' },
+        { ...component, moduleId: 'custom_other', paletteMenu: 'other', category: '其他分类' }
+      ]);
+      await flushPromises();
+
+      expect(wrapper.findAll('[data-simulation-menu-section]').map((section) => section.attributes('data-simulation-menu-section')))
+        .toEqual(['rf-signal', 'signal-processing', 'other']);
+      expect(wrapper.findAll('[data-electrical-menu-section]').map((section) => section.attributes('data-electrical-menu-section')))
+        .toEqual(['power-conversion', 'power-source']);
+      const rf = wrapper.get('[data-simulation-menu-section="rf-signal"]');
+      const rfHeader = rf.get('button');
+      expect(rfHeader.text()).toContain('现场射频');
+      expect(rfHeader.get('.simulation-menu-section__icon').text()).toBe('射');
+      expect(rfHeader.attributes('aria-expanded')).toBe('false');
+      expect(rf.get('[data-component="custom_rf"]').isVisible()).toBe(false);
+      await rfHeader.trigger('click');
+      expect(rfHeader.attributes('aria-expanded')).toBe('true');
+      expect(rf.get('[data-component="custom_rf"]').isVisible()).toBe(true);
+      expect(wrapper.get('[data-simulation-menu-section="signal-processing"] button').attributes('aria-expanded')).toBe('true');
+      expect(wrapper.get('[data-electrical-menu-section="power-conversion"] button').text()).toContain('现场变换');
+      expect(wrapper.get('[data-electrical-menu-section="power-source"] button').text()).toContain('电源模块');
+    } finally { wrapper.unmount(); }
+  });
+
+  it('uses built-in menus when the optional file is absent or an override is invalid', async () => {
+    expect(await loadPaletteMenuRuntimeConfig({ fetchImpl: async () => ({ ok: false, status: 404 }) }))
+      .toEqual({ sections: {}, error: '' });
+
+    const section = { id: 'rf-signal', label: '现场射频', icon: '射', defaultOpen: false };
+    for (const [simulation, message] of [
+      [[section, section], '菜单 ID 重复'],
+      [[{ ...section, defaultOpen: 'false' }], '必须是布尔值']
+    ]) {
+      const loaded = await loadPaletteMenuRuntimeConfig({
+        fetchImpl: async () => ({ ok: true, json: async () => ({ simulation }) })
+      });
+      expect(loaded).toEqual({ sections: {}, error: expect.stringContaining(message) });
+    }
   });
 
   it('places external electrical components in electrical menus with electrical styling and backend bindings', async () => {

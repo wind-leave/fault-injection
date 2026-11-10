@@ -212,12 +212,8 @@ class ComponentDiscoveryTests(unittest.TestCase):
             thread.join(timeout=5)
             server.server_close()
 
-    def test_empty_default_directory_preserves_builtin_execution(self):
-        directory = Path(__file__).resolve().parents[1] / "auto_components"
-        with patch.object(component_discovery, "COMPONENT_DIRECTORY", directory), patch.object(
-            component_discovery, "COMPONENT_PACKAGE", "backend.auto_components"
-        ):
-            registry = self.registry()
+    def test_empty_directory_preserves_builtin_execution(self):
+        registry = self.registry()
         self.assertEqual(registry.discovery_errors, [])
         self.assertEqual(registry.discovered_components, [])
         original = ModuleRegistry.from_builtin_manifest()

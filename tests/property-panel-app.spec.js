@@ -1310,7 +1310,7 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('opens the protocol fault binding dialog when a normal line is selected', async () => {
+  it('uses the configured line name when binding a protocol fault to a normal line', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
@@ -1320,6 +1320,7 @@ describe('property panel interaction', () => {
     const injector = window.createNode('protocol_fault_injector', 320, 420);
     const edge = {
       id: 'edge-protocol-normal',
+      label: '飞控通信链路',
       lineType: 'normal',
       signalId: 'normal_link_variable',
       sourceNodeId: source.id,
@@ -1348,6 +1349,7 @@ describe('property panel interaction', () => {
 
     const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
     expect(dialog).not.toBeNull();
+    expect(dialog.querySelector('.layered-fault-dialog__target b').textContent).toBe(edge.label);
     const slotOptions = dialog.querySelectorAll('[data-layered-fault-option="slot"]');
     expect(slotOptions).toHaveLength(1);
     expect(slotOptions[0].textContent).toBe('合力');
@@ -1357,6 +1359,14 @@ describe('property panel interaction', () => {
     expect(dialog.querySelector('[data-layered-fault-param="scale"]')).not.toBeNull();
     expect(dialog.querySelector('[data-layered-fault-param="start"]')).not.toBeNull();
     expect(dialog.querySelector('[data-layered-fault-param="duration"]')).not.toBeNull();
+    dialog.querySelector('[data-layered-fault-confirm]').click();
+    await flushRuntime();
+
+    expect(window.__GZ_STATE__.faultTags).toContainEqual(expect.objectContaining({
+      targetId: edge.id,
+      targetName: edge.label,
+      name: `协议层注入 - ${edge.label}`
+    }));
     wrapper.unmount();
   });
 
@@ -1370,6 +1380,7 @@ describe('property panel interaction', () => {
     const injector = window.createNode('protocol_fault_injector', 320, 420);
     const edge = {
       id: 'edge-protocol-vector',
+      label: 'edge-protocol-vector',
       lineType: 'normal',
       signalId: 'rf.command',
       sourceNodeId: source.id,
@@ -1381,20 +1392,25 @@ describe('property panel interaction', () => {
     window.renderModelNodes();
     await flushRuntime();
 
+    const lineName = document.querySelector(`.edge-label[data-edge-id="${edge.id}"]`).textContent;
+    expect(lineName).toContain('→');
     window.beginLayeredFaultBinding(injector.id);
     document.querySelector(`.edge-path[data-edge-id="${edge.id}"]`)
       .dispatchEvent(new MouseEvent('pointerup', { bubbles: true, cancelable: true }));
     await flushRuntime();
 
     const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    expect(dialog.querySelector('.layered-fault-dialog__target b').textContent).toBe(lineName);
     expect(dialog.querySelectorAll('[data-layered-fault-vector-item]')).toHaveLength(0);
     dialog.querySelector('[data-layered-fault-confirm]').click();
     await flushRuntime();
 
     expect(window.__GZ_STATE__.faultInstances).toContainEqual(expect.objectContaining({
       targetKind: 'edge',
-      targetId: edge.id
+      targetId: edge.id,
+      displayName: `协议层注入 - ${lineName}`
     }));
+    expect(edge.injectedFault.name).toBe(`协议层注入 - ${lineName}`);
     expect(window.__GZ_STATE__.faultInstances.find((item) => item.targetId === edge.id))
       .not.toHaveProperty('vectorInjectionScope');
     wrapper.unmount();

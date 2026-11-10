@@ -2,7 +2,6 @@
   "modules": [
     {
       "moduleId": "11",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.signal_fanout7",
       "entryFunction": "process",
       "inputs": ["input"],
@@ -11,7 +10,6 @@
     },
     {
       "moduleId": "passthrough",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.passthrough",
       "entryFunction": "process",
       "inputs": [
@@ -24,7 +22,6 @@
     },
     {
       "moduleId": "gain",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.gain",
       "entryFunction": "process",
       "inputs": [
@@ -44,7 +41,6 @@
     },
     {
       "moduleId": "electrical_ac_power_source",
-      "autoConvert": true,
       "importPath": "backend.builtin_modules.electrical_ac_power_source",
       "entryFunction": "process",
       "inputs": [],
@@ -76,7 +72,6 @@
     },
     {
       "moduleId": "electrical_dc_power_source",
-      "autoConvert": true,
       "importPath": "backend.builtin_modules.electrical_dc_power_source",
       "entryFunction": "process",
       "inputs": [],
@@ -94,7 +89,6 @@
     },
     {
       "moduleId": "electrical_dc_boost",
-      "autoConvert": true,
       "importPath": "backend.builtin_modules.electrical_dc_boost",
       "entryFunction": "process",
       "inputs": [
@@ -120,7 +114,6 @@
     },
     {
       "moduleId": "electrical_ac_dc_matching",
-      "autoConvert": true,
       "importPath": "backend.builtin_modules.electrical_ac_dc_matching",
       "entryFunction": "process",
       "inputs": [
@@ -140,7 +133,6 @@
     },
     {
       "moduleId": "electrical_ground",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.electrical_ground",
       "entryFunction": "process",
       "inputs": [
@@ -151,7 +143,6 @@
     },
     {
       "moduleId": "command_shaper",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.command_shaper",
       "entryFunction": "process",
       "inputs": [
@@ -164,7 +155,6 @@
     },
     {
       "moduleId": "attitude_controller",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.attitude_controller",
       "entryFunction": "process",
       "inputs": [
@@ -177,7 +167,6 @@
     },
     {
       "moduleId": "control_allocator",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.control_allocator",
       "entryFunction": "process",
       "inputs": [
@@ -190,7 +179,6 @@
     },
     {
       "moduleId": "motor_mixer",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.motor_mixer",
       "entryFunction": "process",
       "inputs": [
@@ -206,7 +194,6 @@
     },
     {
       "moduleId": "motor_model",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.motor_model",
       "entryFunction": "process",
       "inputs": [
@@ -219,7 +206,6 @@
     },
     {
       "moduleId": "vehicle_dynamics",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.vehicle_dynamics",
       "entryFunction": "process",
       "inputs": [
@@ -235,7 +221,6 @@
     },
     {
       "moduleId": "imu_gyro",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.imu_gyro",
       "entryFunction": "process",
       "inputs": [
@@ -248,7 +233,6 @@
     },
     {
       "moduleId": "pid_controller",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.pid_controller",
       "entryFunction": "process",
       "inputs": [
@@ -262,7 +246,6 @@
     },
     {
       "moduleId": "control_allocation",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.control_allocation",
       "entryFunction": "process",
       "inputs": [
@@ -284,7 +267,6 @@
     },
     {
       "moduleId": "voltage_drop",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.voltage_drop",
       "entryFunction": "process",
       "inputs": [
@@ -298,7 +280,6 @@
     },
     {
       "moduleId": "motor_actuator",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.motor_actuator",
       "entryFunction": "process",
       "inputs": [
@@ -318,7 +299,6 @@
     },
     {
       "moduleId": "rotor_motor",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rotor_motor",
       "entryFunction": "process",
       "inputs": [
@@ -331,7 +311,6 @@
     },
     {
       "moduleId": "aero_moment",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.aero_moment",
       "entryFunction": "process",
       "inputs": [
@@ -352,7 +331,6 @@
     },
     {
       "moduleId": "six_dof",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.six_dof",
       "entryFunction": "process",
       "inputs": [
@@ -368,7 +346,6 @@
     },
     {
       "moduleId": "sensor_fault_injection",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.sensor_fault_injection",
       "entryFunction": "process",
       "inputs": [
@@ -385,7 +362,6 @@
     },
     {
       "moduleId": "barometer_sensor",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.barometer_sensor",
       "entryFunction": "process",
       "inputs": [
@@ -411,7 +387,6 @@
     },
     {
       "moduleId": "cabinet01_module",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.cabinet01",
       "entryFunction": "process",
       "inputs": [
@@ -424,7 +399,6 @@
     },
     {
       "moduleId": "cabinet02_module",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.cabinet02",
       "entryFunction": "process",
       "inputs": [
@@ -438,7 +412,6 @@
     },
     {
       "moduleId": "cabinet03_module",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.cabinet03",
       "entryFunction": "process",
       "inputs": [
@@ -451,7 +424,6 @@
     },
     {
       "moduleId": "vector2_passthrough",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.vector2_passthrough",
       "entryFunction": "process",
       "inputs": [
@@ -464,7 +436,6 @@
     },
     {
       "moduleId": "scalar_to_vector4",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.scalar_to_vector4",
       "entryFunction": "process",
       "inputs": [
@@ -477,7 +448,6 @@
     },
     {
       "moduleId": "rf_complex_envelope_scalar_source",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_complex_envelope_scalar_source",
       "entryFunction": "process",
       "inputs": [],
@@ -493,7 +463,6 @@
     },
     {
       "moduleId": "rf_complex_envelope_to_vector4",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_complex_envelope_to_vector4",
       "entryFunction": "process",
       "inputs": [
@@ -506,7 +475,6 @@
     },
     {
       "moduleId": "rf_complex_envelope_vector4_power_divider",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_complex_envelope_vector4_power_divider",
       "entryFunction": "process",
       "inputs": [
@@ -519,7 +487,6 @@
     },
     {
       "moduleId": "rf_four_channel_source",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_four_channel_source",
       "entryFunction": "process",
       "inputs": [],
@@ -579,7 +546,6 @@
     },
     {
       "moduleId": "rf_four_output_source",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_four_output_source",
       "entryFunction": "process",
       "inputs": [],
@@ -642,7 +608,6 @@
     },
     {
       "moduleId": "rf_four_port_up_down_converter",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_four_port_up_down_converter",
       "entryFunction": "process",
       "inputs": [
@@ -694,7 +659,6 @@
     },
     {
       "moduleId": "rf_downconverter",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_downconverter",
       "entryFunction": "process",
       "inputs": [
@@ -745,7 +709,6 @@
     },
     {
       "moduleId": "rf_pulse_feature_extractor",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_pulse_feature_extractor",
       "entryFunction": "process",
       "inputs": [
@@ -788,7 +751,6 @@
     },
     {
       "moduleId": "rf_complex_envelope_pulse_feature_extractor",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_complex_envelope_pulse_feature_extractor",
       "entryFunction": "process",
       "inputs": ["input_envelope_vector"],
@@ -802,7 +764,6 @@
     },
     {
       "moduleId": "rf_band_pass_filter",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_band_pass_filter",
       "entryFunction": "process",
       "inputs": ["rf_input"],
@@ -814,7 +775,6 @@
     },
     {
       "moduleId": "rf_complex_envelope_selector",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_complex_envelope_selector",
       "entryFunction": "process",
       "inputs": ["input_1", "input_2"],
@@ -825,7 +785,6 @@
     },
     {
       "moduleId": "rf_complex_envelope_vector4_dual_output_receiver",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_complex_envelope_vector4_dual_output_receiver",
       "entryFunction": "process",
       "inputs": ["input_envelope_vector"],
@@ -834,7 +793,6 @@
     },
     {
       "moduleId": "rf_complex_envelope_gain",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_complex_envelope_gain",
       "entryFunction": "process",
       "inputs": ["input_envelope"],
@@ -845,7 +803,6 @@
     },
     {
       "moduleId": "rf_complex_envelope_limiter",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_complex_envelope_limiter",
       "entryFunction": "process",
       "inputs": ["input_envelope"],
@@ -856,7 +813,6 @@
     },
     {
       "moduleId": "rf_complex_envelope_band_pass_filter",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_complex_envelope_band_pass_filter",
       "entryFunction": "process",
       "inputs": ["input_envelope"],
@@ -868,7 +824,6 @@
     },
     {
       "moduleId": "rf_complex_envelope_amplitude_phase_modulator",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_complex_envelope_amplitude_phase_modulator",
       "entryFunction": "process",
       "inputs": ["input_envelope"],
@@ -880,7 +835,6 @@
     },
     {
       "moduleId": "rf_complex_envelope_downconverter",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_complex_envelope_downconverter",
       "entryFunction": "process",
       "inputs": ["input_envelope"],
@@ -893,7 +847,6 @@
     },
     {
       "moduleId": "rf_complex_envelope_upconverter",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_complex_envelope_upconverter",
       "entryFunction": "process",
       "inputs": ["input_envelope"],
@@ -906,7 +859,6 @@
     },
     {
       "moduleId": "rf_amplitude_phase_modulator",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_amplitude_phase_modulator",
       "entryFunction": "process",
       "inputs": ["input_i", "input_q"],
@@ -919,7 +871,6 @@
     },
     {
       "moduleId": "rf_limit_amplify_downconvert_split8",
-      "autoConvert": false,
       "importPath": "backend.builtin_modules.rf_limit_amplify_downconvert_split8",
       "entryFunction": "process",
       "inputs": [

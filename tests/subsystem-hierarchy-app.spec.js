@@ -269,6 +269,80 @@ describe('subsystem hierarchy app integration', () => {
     expect(document.querySelector('#pd')?.textContent).not.toContain('内部控制组件');
   });
 
+  it('draws nested external stubs on the port side and only fills wired ports', async () => {
+    mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 160, 240);
+    const scope = window.createNode('instrument_scope', 760, 240);
+    const outer = window.createNode('subsystem_block', 420, 240);
+    window.openSubsystemCanvas(outer.id);
+    const inner = window.createNode('subsystem_block', 420, 240);
+    window.openSubsystemCanvas(inner.id);
+    const component = window.createNode('simulation_block', 420, 240);
+    Object.assign(component.props, {
+      requiresPower: false,
+      inputs: [{ name: '右侧输入', side: 'right' }, { name: '空闲输入', side: 'left' }],
+      outputs: [{ name: '左侧输出', side: 'left' }, { name: '空闲输出', side: 'right' }],
+      middleVars: []
+    });
+    window.renderModelNodes();
+    const state = window.__GZ_STATE__;
+    const root = state.canvases['canvas-root'];
+    const child = state.canvases[inner.targetCanvasId];
+    const portElements = (direction) => [...document.querySelectorAll(`#b-${component.id} .node-port--${direction}`)];
+    const stubPath = (role, index) => {
+      const edge = child.edges.find((item) => item.subsystemBoundaryRole === role && (
+        role === 'input' ? item.targetPortIndex === index : item.sourcePortIndex === index
+      ));
+      return document.querySelector(`.edge-path[data-edge-id="${edge.id}"]`);
+    };
+
+    window.goToRootCanvas();
+    window.openSubsystemCanvas(outer.id);
+    window.openSubsystemCanvas(inner.id);
+    await flushRuntime();
+    expect(document.querySelectorAll(`#b-${component.id} .node-port.is-connected`)).toHaveLength(0);
+    expect(stubPath('input', 0)).toBeNull();
+    expect(stubPath('output', 0)).toBeNull();
+
+    window.goToRootCanvas();
+    connectCanvasNodes(root, 'nested-external-input', source.id, outer.id);
+    connectCanvasNodes(root, 'nested-external-output', outer.id, scope.id);
+    window.renderModelNodes();
+    window.openSubsystemCanvas(outer.id);
+    window.openSubsystemCanvas(inner.id);
+    await flushRuntime();
+
+    const [wiredInput, unusedInput] = portElements('input');
+    const [wiredOutput, unusedOutput] = portElements('output');
+    expect(wiredInput.classList.contains('is-connected')).toBe(true);
+    expect(wiredOutput.classList.contains('is-connected')).toBe(true);
+    expect(unusedInput.classList.contains('is-connected')).toBe(false);
+    expect(unusedOutput.classList.contains('is-connected')).toBe(false);
+    expect(stubPath('input', 1)).toBeNull();
+    expect(stubPath('output', 1)).toBeNull();
+
+    const inputX = component.x + Number.parseFloat(wiredInput.style.left);
+    const inputY = component.y + Number.parseFloat(wiredInput.style.top);
+    const outputX = component.x + Number.parseFloat(wiredOutput.style.left);
+    const outputY = component.y + Number.parseFloat(wiredOutput.style.top);
+    expect(stubPath('input', 0)?.getAttribute('d')).toBe(`M ${inputX + 72} ${inputY} L ${inputX} ${inputY}`);
+    expect(stubPath('output', 0)?.getAttribute('d')).toBe(`M ${outputX} ${outputY} L ${outputX - 72} ${outputY}`);
+    dispatchClick(stubPath('output', 0));
+    expect(state.selEdge).toBe('nested-external-output');
+
+    window.goToRootCanvas();
+    window.selectEdge('nested-external-input');
+    window.deleteSelectedEdge();
+    window.openSubsystemCanvas(outer.id);
+    window.openSubsystemCanvas(inner.id);
+    await flushRuntime();
+    expect(portElements('input')[0].classList.contains('is-connected')).toBe(false);
+    expect(portElements('output')[0].classList.contains('is-connected')).toBe(true);
+    expect(stubPath('input', 0)).toBeNull();
+  });
+
   it('binds a protocol fault from an output boundary segment to its external wire', async () => {
     mount(App, { attachTo: document.body });
     await flushRuntime();
@@ -2013,6 +2087,9 @@ describe('subsystem hierarchy app integration', () => {
     expect(subsystemNode.props.interface.outputs).toHaveLength(0);
     expect(childCanvas.edges.some((edge) => edge.id === 'edge-internal-flow-scope')).toBe(true);
     expect(childCanvas.edges.filter((edge) => edge.subsystemBoundaryMapping)).toHaveLength(2);
+    expect(document.querySelector(`#b-${flowNode.id} .node-port--output.is-connected`)).not.toBeNull();
+    const scopeInputs = document.querySelectorAll(`#b-${scopeNode.id} .node-port--input`);
+    expect([...scopeInputs].map((port) => port.classList.contains('is-connected'))).toEqual([true, false]);
 
     window.goToRootCanvas();
     await flushRuntime();

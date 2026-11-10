@@ -25,7 +25,10 @@ import { loadDiscoveredComponents } from './services/discoveredComponentCatalogS
 import { bindStatusBarInteractions, unbindStatusBarInteractions } from './services/statusBarRuntime.js';
 import './services/simulationRuntime.js';
 
-defineProps({ runtimeConfigError: { type: String, default: '' } });
+defineProps({
+  runtimeConfigError: { type: String, default: '' },
+  paletteMenuConfig: { type: Object, default: () => ({}) }
+});
 
 const workbench = useWorkbenchState();
 const rootEl = ref(null);
@@ -229,7 +232,11 @@ onBeforeUnmount(() => {
     <WorkbenchHeader />
     <RuntimeConfigNotice :message="runtimeConfigError" />
     <main class="workbench-main">
-      <LeftPalette :collapsed="isLeftPanelCollapsed" @toggle-collapse="toggleLeftPanel" />
+      <LeftPalette
+        :collapsed="isLeftPanelCollapsed"
+        :menu-config="paletteMenuConfig"
+        @toggle-collapse="toggleLeftPanel"
+      />
       <button
         type="button"
         class="layout-resizer layout-resizer--vertical layout-resizer--left"

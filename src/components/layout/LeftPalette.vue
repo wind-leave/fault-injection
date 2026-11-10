@@ -1,13 +1,17 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive } from 'vue';
-import { getElectricalMenuSections, getPaletteGroups, getSimulationMenuSections } from '../../services/componentRegistry.js';
+import { ELECTRICAL_MENU_SECTIONS, getPaletteGroups, getPaletteMenuSections, SIMULATION_MENU_SECTIONS } from '../../services/componentRegistry.js';
 import { useAuthoredComponentCatalog } from '../../services/authoredComponentCatalogService.js';
 import { useDiscoveredComponentCatalog } from '../../services/discoveredComponentCatalogService.js';
 
-defineProps({
+const props = defineProps({
   collapsed: {
     type: Boolean,
     default: false
+  },
+  menuConfig: {
+    type: Object,
+    default: () => ({})
   }
 });
 
@@ -33,9 +37,17 @@ const paletteMenuSections = computed(() => {
     if (group?.componentsVisible === false) return [];
     return (group?.components ?? []).filter((component) => !group.externalOnly || component.palette?.source === 'external');
   };
+  const groupSections = (groupId, defaults) => {
+    const configured = props.menuConfig[groupId] ?? [];
+    const configuredIds = new Set(configured.map((section) => section.id));
+    return getPaletteMenuSections(groupComponents(groupId), [
+      ...configured,
+      ...defaults.filter((section) => !configuredIds.has(section.id))
+    ]);
+  };
   return {
-    electrical: getElectricalMenuSections(groupComponents('electrical')),
-    simulation: getSimulationMenuSections(groupComponents('simulation'))
+    electrical: groupSections('electrical', ELECTRICAL_MENU_SECTIONS),
+    simulation: groupSections('simulation', SIMULATION_MENU_SECTIONS)
   };
 });
 

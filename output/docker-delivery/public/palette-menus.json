@@ -1,0 +1,10 @@
+{
+  "simulation": [
+    { "id": "signal-processing", "label": "信号处理模型", "icon": "信", "defaultOpen": true },
+    { "id": "rf-signal", "label": "射频信号模型", "icon": "RF", "defaultOpen": true }
+  ],
+  "electrical": [
+    { "id": "power-source", "label": "电源模块", "icon": "源", "defaultOpen": true },
+    { "id": "power-conversion", "label": "电能变换", "icon": "变", "defaultOpen": true }
+  ]
+}

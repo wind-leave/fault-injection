@@ -172,11 +172,17 @@ describe('runtime display-console configuration', () => {
     const pendingConfig = new Promise((resolve) => { resolveConfig = resolve; });
     const importApp = vi.fn(async () => ({ default: 'test-app' }));
     const mountApp = vi.fn();
-    const pending = initializeWorkbench({ loadConfig: () => pendingConfig, importApp, mountApp });
+    const sections = { simulation: [{ id: 'rf-signal', label: '现场射频', icon: '射', defaultOpen: false }] };
+    const pending = initializeWorkbench({
+      loadConfig: () => pendingConfig,
+      loadMenuConfig: async () => ({ sections, error: '' }),
+      importApp,
+      mountApp
+    });
     expect(importApp).not.toHaveBeenCalled();
     resolveConfig({ error: '配置提示' });
     await pending;
-    expect(mountApp).toHaveBeenCalledWith('test-app', { runtimeConfigError: '配置提示' });
+    expect(mountApp).toHaveBeenCalledWith('test-app', { runtimeConfigError: '配置提示', paletteMenuConfig: sections });
   });
 
   it('renders external ports and columns and controls external canvas components using their original IDs', async () => {
@@ -210,6 +216,10 @@ describe('runtime display-console configuration', () => {
     try {
       wrapper = await initializeWorkbench({
         loadConfig: () => loadDisplayConsoleRuntimeConfig({ fetchImpl: async () => ({ ok: true, json: async () => configuration }) }),
+        loadMenuConfig: async () => ({
+          sections: { simulation: [{ id: 'rf-signal', label: '现场射频', icon: '射', defaultOpen: false }] },
+          error: ''
+        }),
         mountApp: (App, props) => mount(App, { props, attachTo: document.body })
       });
       await nextTick();
@@ -225,6 +235,10 @@ describe('runtime display-console configuration', () => {
           parameters: structuredClone(entry.defaults.parameters), requiresPower: false, faultSlots: entry.faultSlots
         };
       }));
+      await nextTick();
+      const rfMenu = wrapper.get('[data-simulation-menu-section="rf-signal"] button');
+      expect(rfMenu.text()).toContain('现场射频');
+      expect(rfMenu.attributes('aria-expanded')).toBe('false');
       window.doCreateBlankWorkspace();
       const source = window.createNode('rf_four_output_source', 100, 100);
       const converter = window.createNode('rf_downconverter', 400, 100);

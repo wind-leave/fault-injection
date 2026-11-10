@@ -842,14 +842,10 @@ function isHiddenSubsystemBoundaryNode(node){
 
 function isHiddenSubsystemBoundaryEdge(edge){
   if(S.activeCanvasId===S.rootCanvasId||!edge){return false;}
-  if(edge.subsystemBoundaryMapping){
-    // Show the short internal segment only when it is the continuation of an
-    // external subsystem wire. It remains one logical connection.
-    return !getLinkedExternalEdgeForSubsystemMapping(edge);
-  }
-  const nodes=getActiveCanvasRecord()?.nodes||[];
-  const boundaryIds=new Set(nodes.filter(node=>isSubsystemBoundaryNodeType(node?.type)).map(node=>node.id));
-  return boundaryIds.has(edge.sourceNodeId)||boundaryIds.has(edge.targetNodeId);
+  const canvas=getActiveCanvasRecord();
+  return (edge.subsystemBoundaryMapping||getSubsystemBoundaryEndpoint(edge,canvas))
+    ?!getLinkedExternalEdgeForSubsystemMapping(edge,canvas)
+    :false;
 }
 
 function syncActiveCanvasViewportFromState(){
@@ -1711,36 +1707,48 @@ function getSubsystemParentCanvas(node){
   return Object.values(S.canvases||{}).find(canvas=>(canvas?.nodes||[]).some(item=>item?.id===node?.id))||null;
 }
 
-function findSubsystemParentInterfaceEdge(node,role,interfacePortId,interfacePortIndex=null){
-  const parentCanvas=getSubsystemParentCanvas(node);
-  const intf=ensureSubsystemInterface(node);
-  const items=role==='input'?intf.inputs:intf.outputs;
-  const portIndex=Number.isInteger(interfacePortIndex)
-    ?interfacePortIndex
-    :items.findIndex(item=>String(item?.id||'')===String(interfacePortId||''));
-  if(!parentCanvas||portIndex<0){return null;}
-  return (parentCanvas.edges||[]).find(edge=>role==='input'
-    ?edge.targetNodeId===node.id&&(edge.targetPortIndex||0)===portIndex
-    :edge.sourceNodeId===node.id&&(edge.sourcePortIndex||0)===portIndex
-  )||null;
+function getSubsystemParentInterfaceEdges(node,role,interfacePortId,interfacePortIndex,parentCanvas=getSubsystemParentCanvas(node)){
+  if(!parentCanvas){return [];}
+  let portIndex=interfacePortIndex;
+  if(!Number.isInteger(portIndex)){
+    const intf=ensureSubsystemInterface(node);
+    const items=role==='input'?intf.inputs:intf.outputs;
+    portIndex=items.findIndex(item=>String(item?.id||'')===String(interfacePortId||''));
+  }
+  if(portIndex<0){return [];}
+  return (parentCanvas.edges||[]).filter(edge=>role==='input'
+    ?edge.targetNodeId===node.id&&Number(edge.targetPortIndex||0)===portIndex
+    :edge.sourceNodeId===node.id&&Number(edge.sourcePortIndex||0)===portIndex
+  );
 }
 
-function getLinkedExternalEdgeForSubsystemMapping(edge){
-  if(!edge?.subsystemBoundaryMapping){return null;}
-  const canvas=getActiveCanvasRecord();
-  const boundary=(canvas?.nodes||[]).find(node=>node?.id===edge.sourceNodeId||node?.id===edge.targetNodeId);
-  if(!boundary||!isSubsystemBoundaryNodeType(boundary.type)){return null;}
+function getSubsystemBoundaryEndpoint(edge,canvas){
+  return (canvas?.nodes||[]).find(node=>
+    (node?.type==='subsystem_in_port'&&node.id===edge?.sourceNodeId)
+    ||(node?.type==='subsystem_out_port'&&node.id===edge?.targetNodeId)
+  );
+}
+
+function getLinkedExternalEdgeForSubsystemMapping(edge,canvas=getActiveCanvasRecord(),visited=new Set()){
+  const boundary=getSubsystemBoundaryEndpoint(edge,canvas);
+  if(!boundary||visited.has(canvas)){return null;}
   const subsystemNode=getSubsystemParentNodeForCanvas(canvas);
   if(!subsystemNode){return null;}
   const parentCanvas=getSubsystemParentCanvas(subsystemNode);
   if(!parentCanvas){return null;}
-  const linkedId=String(edge.linkedExternalEdgeId||'');
-  if(linkedId){
-    const linked=(parentCanvas.edges||[]).find(item=>item.id===linkedId);
+  const role=boundary.type==='subsystem_in_port'?'input':'output';
+  const matches=getSubsystemParentInterfaceEdges(
+    subsystemNode,role,boundary.props?.interfacePortId||edge.interfacePortId,Number(boundary.props?.order),parentCanvas
+  );
+  const preferred=matches.find(item=>item.id===edge.linkedExternalEdgeId);
+  const candidates=preferred?[preferred,...matches.filter(item=>item!==preferred)]:matches;
+  const nextVisited=new Set(visited).add(canvas);
+  for(const parentEdge of candidates){
+    if(!parentEdge.subsystemBoundaryMapping&&!getSubsystemBoundaryEndpoint(parentEdge,parentCanvas)){return parentEdge;}
+    const linked=getLinkedExternalEdgeForSubsystemMapping(parentEdge,parentCanvas,nextVisited);
     if(linked){return linked;}
   }
-  const role=boundary.type==='subsystem_in_port'?'input':'output';
-  return findSubsystemParentInterfaceEdge(subsystemNode,role,edge.interfacePortId||boundary.props?.interfacePortId,Number(boundary.props?.order));
+  return null;
 }
 
 function syncAutomaticSubsystemBoundaryMappings(node,canvas){
@@ -1753,7 +1761,7 @@ function syncAutomaticSubsystemBoundaryMappings(node,canvas){
   intf.inputs.forEach((item,index)=>{
     const boundary=boundaryNodes.find(node=>node.type==='subsystem_in_port'&&Number(node.props?.order)===index);
     if(!boundary||!item.componentNodeId){return;}
-    const externalEdge=findSubsystemParentInterfaceEdge(node,'input',item.id,index);
+    const [externalEdge]=getSubsystemParentInterfaceEdges(node,'input',item.id,index);
     mappingEdges.push({
       id:`edge-${node.id}-auto-input-${index}-${item.id}`,
       lineType:'normal',
@@ -1770,7 +1778,7 @@ function syncAutomaticSubsystemBoundaryMappings(node,canvas){
   intf.outputs.forEach((item,index)=>{
     const boundary=boundaryNodes.find(node=>node.type==='subsystem_out_port'&&Number(node.props?.order)===index);
     if(!boundary||!item.componentNodeId){return;}
-    const externalEdge=findSubsystemParentInterfaceEdge(node,'output',item.id,index);
+    const [externalEdge]=getSubsystemParentInterfaceEdges(node,'output',item.id,index);
     mappingEdges.push({
       id:`edge-${node.id}-auto-output-${index}-${item.id}`,
       lineType:'normal',
@@ -2554,10 +2562,10 @@ function getPortTooltip(port,direction='input'){
 }
 
 function isPortConnected(nodeId,direction,index){
-  if(direction==='input'){
-    return S.modelEdges.some(edge=>edge.targetNodeId===nodeId&&(edge.targetPortIndex||0)===index);
-  }
-  return S.modelEdges.some(edge=>edge.sourceNodeId===nodeId&&(edge.sourcePortIndex||0)===index);
+  return S.modelEdges.some(edge=>(direction==='input'
+    ?edge.targetNodeId===nodeId&&Number(edge.targetPortIndex||0)===index
+    :edge.sourceNodeId===nodeId&&Number(edge.sourcePortIndex||0)===index
+  )&&!isHiddenSubsystemBoundaryEdge(edge));
 }
 
 function getPortTone(node,port,direction){
@@ -2586,7 +2594,7 @@ function syncPythonInputConnectionState(nodeId){
   const node=getNode(nodeId);
   if(!isPythonBoundFlowBlock(node)){return;}
   node.pythonBinding.portMapping.inputs.forEach((port,index)=>{
-    port.connected=S.modelEdges.some(edge=>edge.targetNodeId===nodeId&&(edge.targetPortIndex||0)===index);
+    port.connected=isPortConnected(nodeId,'input',index);
   });
 }
 
@@ -12925,6 +12933,7 @@ renderModelNodes = function(){
       syncSubsystemBoundaryNodes(node);
     }
   });
+  if(parentSubsystemNode){syncAllPythonInputConnectionState();}
   __task3RenderModelNodes();
 };
 
@@ -14560,6 +14569,13 @@ Object.assign(window,{
     return siblingOffset+orderOffset+verticalBias;
   }
 
+  function getPointOutsidePort(port,distance,offset=0){
+    if(port.side==='left') return {x:port.x-distance,y:port.y+offset};
+    if(port.side==='top') return {x:port.x+offset,y:port.y-distance};
+    if(port.side==='bottom') return {x:port.x+offset,y:port.y+distance};
+    return {x:port.x+distance,y:port.y+offset};
+  }
+
   function buildRoutedEdgePath(start,end,offset=0){
     const sx=start.x;
     const sy=start.y;
@@ -14568,19 +14584,11 @@ Object.assign(window,{
     const dx=Math.abs(tx-sx);
     const dy=Math.abs(ty-sy);
     const bend=Math.max(76,Math.min(240,Math.max(dx,dy)*0.48));
-    const controlPoint=(port,isStart)=>{
-      const side=port?.side||'right';
-      const routeOffset=isStart?offset:-offset;
-      if(side==='left') return {x:port.x-bend,y:port.y+routeOffset};
-      if(side==='top') return {x:port.x+routeOffset,y:port.y-bend};
-      if(side==='bottom') return {x:port.x+routeOffset,y:port.y+bend};
-      return {x:port.x+bend,y:port.y+routeOffset};
-    };
     // The spline must leave and enter through the side on which each port is
     // actually drawn.  Signal role (input/output) does not determine the
     // geometry: an output configured on the left must depart to the left.
-    const cp1=controlPoint(start,true);
-    const cp2=controlPoint(end,false);
+    const cp1=getPointOutsidePort(start,bend,offset);
+    const cp2=getPointOutsidePort(end,bend,-offset);
     return `M ${sx} ${sy} C ${cp1.x} ${cp1.y}, ${cp2.x} ${cp2.y}, ${tx} ${ty}`;
   }
 
@@ -14588,25 +14596,17 @@ Object.assign(window,{
     return buildRoutedEdgePath(start,end,0);
   };
 
-  function buildSubsystemBoundaryStubPath(edge,sourceNode,targetNode,sourcePort,targetPort){
-    const sourceIsBoundary=isSubsystemBoundaryNodeType(sourceNode?.type);
-    const targetIsBoundary=isSubsystemBoundaryNodeType(targetNode?.type);
-    const stubLength=72;
-    if(sourceIsBoundary){
-      // External input enters the internal component. Keep the visible stub
-      // attached to that component's input port, rather than to the hidden
-      // subsystem boundary node.
-      const start={x:targetPort.x-stubLength,y:targetPort.y};
-      return {path:`M ${start.x} ${start.y} L ${targetPort.x} ${targetPort.y}`,labelX:(start.x+targetPort.x)/2,labelY:targetPort.y-10};
-    }
-    if(targetIsBoundary){
-      // External output leaves from the internal component, so its stub also
-      // starts at the component's output port.
-      const end={x:sourcePort.x+stubLength,y:sourcePort.y};
-      return {path:`M ${sourcePort.x} ${sourcePort.y} L ${end.x} ${end.y}`,labelX:(sourcePort.x+end.x)/2,labelY:sourcePort.y-10};
-    }
-    const path=buildRoutedEdgePath(sourcePort,targetPort,0);
-    return {path,labelX:(sourcePort.x+targetPort.x)/2,labelY:(sourcePort.y+targetPort.y)/2-10};
+  function buildSubsystemBoundaryStubPath(boundary,sourcePort,targetPort){
+    const isInput=boundary.type==='subsystem_in_port';
+    const port=isInput?targetPort:sourcePort;
+    const outside=getPointOutsidePort(port,72);
+    const start=isInput?outside:port;
+    const end=isInput?port:outside;
+    return {
+      path:`M ${start.x} ${start.y} L ${end.x} ${end.y}`,
+      labelX:(start.x+end.x)/2,
+      labelY:port.side==='bottom'?outside.y+16:Math.min(start.y,end.y)-10
+    };
   }
 
   const canvasEdgeElements=new Map();
@@ -14626,13 +14626,15 @@ Object.assign(window,{
     const sourcePort=getPortInfo(sourceNode,'output',edge.sourcePortIndex||0);
     const targetPort=getPortInfo(targetNode,'input',edge.targetPortIndex||0);
     if(!sourcePort||!targetPort){return false;}
-    const logicalEdge=getLinkedExternalEdgeForSubsystemMapping(edge)||edge;
+    const canvas=getActiveCanvasRecord();
+    const boundary=getSubsystemBoundaryEndpoint(edge,canvas);
+    const logicalEdge=(boundary&&getLinkedExternalEdgeForSubsystemMapping(edge,canvas))||edge;
     const selected=S.selEdge===logicalEdge.id;
     const faulted=Boolean(logicalEdge.injectedFault);
     const lineType=logicalEdge.lineType==='power'?'power':(logicalEdge.lineType==='can'?'can':'normal');
     const routeOffset=getEdgeRouteOffset(edge,sourceNode,targetNode);
-    const geometry=edge.subsystemBoundaryMapping
-      ?buildSubsystemBoundaryStubPath(edge,sourceNode,targetNode,sourcePort,targetPort)
+    const geometry=boundary
+      ?buildSubsystemBoundaryStubPath(boundary,sourcePort,targetPort)
       :{
         path:buildRoutedEdgePath(sourcePort,targetPort,routeOffset),
         labelX:(sourcePort.x+targetPort.x)/2,
@@ -32985,29 +32987,13 @@ function decorateDataflowEdges(){
   function getRuntimeEdge(id){
     const state=getState();
     const activeEdge=state.modelEdges?.find(edge=>edge.id===id);
-    if(activeEdge?.subsystemBoundaryMapping){
+    if(activeEdge){
       const externalEdge=getLinkedExternalEdgeForSubsystemMapping(activeEdge);
       if(externalEdge){return externalEdge;}
     }
     return activeEdge||Object.values(state.canvases||{})
       .flatMap(canvas=>arr(canvas?.edges))
       .find(edge=>edge?.id===id)||null;
-  }
-
-  function getRuntimeNodeName(id){
-    const node=getRuntimeNode(id);
-    return plainText(node?.props?.name||node?.label||node?.id,'');
-  }
-
-  function getEdgeEndpointLabel(edge){
-    const source=getRuntimeNodeName(edge?.sourceNodeId);
-    const target=getRuntimeNodeName(edge?.targetNodeId);
-    if(source&&target) return `${source} -> ${target}`;
-    return source||target||'';
-  }
-
-  function getEdgeDisplayName(edge){
-    return plainText(edge?.label||edge?.signalName||edge?.name||edge?.signalId,getEdgeEndpointLabel(edge)||edge?.id||'连接');
   }
 
   function getTargetByRef(ref={}){
@@ -33683,7 +33669,7 @@ function decorateDataflowEdges(){
       targetKind,
       targetId:target.id,
       hostNodeId:targetKind==='node'?target.id:(target.sourceNodeId||''),
-      targetName:target.props?.name||target.label||target.id,
+      targetName:model.visualInjection.targetName||target.props?.name||target.label||target.id,
       active:true,
       positionMode:'manual',
       expanded:targetKind==='node',
@@ -33757,9 +33743,11 @@ function decorateDataflowEdges(){
     if(!selectedSlots.every(selectedSlot=>getLayeredMathModelsForSlot(layer,selectedSlot).some(item=>item.value===mathModel))){
       return {ok:false,reason:'unsupported-math-model',layer,mathModel};
     }
+    const targetKind=getTargetKind(target);
+    const targetName=getTargetDisplayName(target);
     const model={
       id:options.modelId||`layered-${injector.id}-${target.id}-${slot.id}`.replace(/[^A-Za-z0-9_-]/g,'-'),
-      name:options.name||`${config.label} - ${target.props?.name||target.label||target.id}`,
+      name:options.name||`${config.label} - ${targetName}`,
       layer,
       layerKey:layer,
       modelClass:options.modelClass||config.faultType,
@@ -33768,7 +33756,7 @@ function decorateDataflowEdges(){
       vectorInjectionScope:options.vectorInjectionScope,
       vectorIndex:options.vectorIndex,
       vectorIndices:options.vectorIndices,
-      visualInjection:{targetId:target.id,targetKind:getTargetKind(target)}
+      visualInjection:{targetId:target.id,targetKind,...(targetKind==='edge'?{targetName}:{})}
     };
     const payload=buildLayeredFaultPayload({
       model,
@@ -33814,7 +33802,7 @@ function decorateDataflowEdges(){
     return {
       ok:true,
       targetId:target.id,
-      targetKind:getTargetKind(target),
+      targetKind,
       layer,
       injectionForm:payload.injectionForm||getLayeredInjectionForm(target,layer),
       slotId:slot.id,
@@ -34094,7 +34082,7 @@ function decorateDataflowEdges(){
   }
 
   function getTargetDisplayName(target){
-    if(getTargetKind(target)==='edge') return getEdgeDisplayName(target);
+    if(getTargetKind(target)==='edge') return getEdgeName(target);
     return target?.props?.name||target?.label||target?.id||'目标对象';
   }
 

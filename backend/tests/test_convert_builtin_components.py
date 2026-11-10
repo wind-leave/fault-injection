@@ -132,15 +132,13 @@ class ConvertBuiltinComponentsTests(unittest.TestCase):
                 self.assertFalse((self.output_dir / "gain.py").exists())
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is required to read the real frontend registry")
-    def test_current_policy_converts_only_four_electrical_entries(self):
+    def test_current_manifest_converts_every_component(self):
         report = convert_components(PROJECT_ROOT, self.output_dir)
-        expected = {"electrical_ac_power_source", "electrical_dc_power_source", "electrical_dc_boost", "electrical_ac_dc_matching"}
-        generated = {item["originalModuleId"] for item in report["components"] if item["status"] == "generated"}
         manifest = json.loads((PROJECT_ROOT / "backend/builtin_modules/manifest.json").read_text(encoding="utf-8"))
-        self.assertEqual(generated, expected)
-        self.assertEqual(report["summary"]["excluded"], len(manifest["modules"]) - 4)
-        self.assertEqual(report["summary"]["failed"], 0)
-        self.assertEqual({path.name for path in self.output_dir.glob("*.py") if not path.name.startswith("_")}, {f"{module_id}.py" for module_id in expected})
+        expected = {item["moduleId"] for item in manifest["modules"]}
+        self.assertTrue(all("autoConvert" not in item for item in manifest["modules"]))
+        generated = {item["originalModuleId"] for item in report["components"] if item["status"] == "generated"}
+        self.assertEqual(generated, expected, report)
 
     def test_preserves_builtin_and_custom_menus_for_simulation_and_electrical_components(self):
         cases = [
@@ -223,21 +221,12 @@ class ConvertBuiltinComponentsTests(unittest.TestCase):
                 self.assertEqual((exported[module_id]["paletteMenu"], exported[module_id]["category"]), menu)
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is required to read the real frontend registry")
-    def test_all_builtin_conversion_contracts_match_original_execution_when_enabled(self):
+    def test_all_builtin_conversion_contracts_match_original_execution(self):
         source_root = PROJECT_ROOT / "backend" / "builtin_modules"
         hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in source_root.iterdir() if path.is_file()}
         frontend = read_frontend_metadata(PROJECT_ROOT)
         package = self.root / "converted_test_components"
-        # Keep coverage of scalar/vector/RF interfaces by enabling the entries
-        # only in a temporary manifest; the project's conversion policy stays intact.
-        enabled_root = self.root / "all-enabled"
-        copied_source = enabled_root / "backend" / "builtin_modules"
-        shutil.copytree(source_root, copied_source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-        enabled_manifest = json.loads((copied_source / "manifest.json").read_text(encoding="utf-8"))
-        for item in enabled_manifest["modules"]:
-            item["autoConvert"] = True
-        (copied_source / "manifest.json").write_text(json.dumps(enabled_manifest), encoding="utf-8")
-        report = convert_components(enabled_root, package, frontend=frontend)
+        report = convert_components(PROJECT_ROOT, package, frontend=frontend)
         originals = ModuleRegistry.from_builtin_manifest()
         self.assertEqual(report["summary"]["failed"], 0, report)
         self.assertEqual(report["summary"]["generated"], len(originals.modules))

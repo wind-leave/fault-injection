@@ -30114,12 +30114,18 @@ function decorateDataflowEdges(){
   }
 
   function getDMatrixFaultDisplay(fault){
-    const behaviorLabel=getDMatrixRuntimeBehaviorLabel(fault);
-    const targetParameter=getDMatrixTargetParameterText(fault);
     const title=fault?.name||fault?.displayName||fault?.faultName||fault?.faultModelName||getFaultKey(fault);
+    const edgeId=fault?.targetEdgeId;
+    if(edgeId&&getFaultLayerText(fault)==='协议层'){
+      const edge=getRuntimeEdges().find(item=>item.id===edgeId);
+      const savedName=getConfiguredEdgeName({id:edgeId,label:fault.targetName});
+      return {title,detail:edge?getEdgeName(edge):(savedName||'未找到目标连线')};
+    }
+    const targetParameter=getDMatrixTargetParameterText(fault);
     if(targetParameter){
       return {title,detail:targetParameter};
     }
+    const behaviorLabel=getDMatrixRuntimeBehaviorLabel(fault);
     if(behaviorLabel){
       return {title,detail:behaviorLabel};
     }

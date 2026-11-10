@@ -1893,6 +1893,57 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
+  it('shows the current canvas name for a protocol fault with a saved edge ID as its binding', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 220, 220);
+    const target = window.createNode('simulation_block', 460, 220);
+    source.props.name = 'CAN 发送端';
+    target.props.name = 'CAN 接收端';
+    const state = window.__GZ_STATE__;
+    const edgeId = 'edge-173';
+    state.modelEdges.push({
+      id: edgeId,
+      label: edgeId,
+      lineType: 'can',
+      sourceNodeId: source.id,
+      targetNodeId: target.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0,
+      sourcePort: { displayName: '输出' },
+      targetPort: { displayName: '输入' },
+      injectedFault: { id: 'can-loss', name: 'CAN 丢包故障', layer: 'protocol', bindingObject: edgeId }
+    });
+    state.manualDiagnosticTestPoints = [{
+      pointId: 'tp-can-loss', name: 'CAN 接收测点', edgeId, detects: ['can-loss']
+    }];
+    state.installedDiagnosticTestPointIds = ['tp-can-loss'];
+    window.renderEdges();
+
+    async function expectProtocolFaultAt(name) {
+      window.openFaultLocalization();
+      await flushRuntime();
+      const view = document.querySelector('[data-fault-localization-view]');
+      view.querySelector('[data-fault-localization-state="tp-can-loss"][value="abnormal"]').click();
+      await flushRuntime();
+      view.querySelector('[data-run-fault-localization]').click();
+      await flushRuntime();
+      const candidate = view.querySelector('[data-fault-localization-candidate="can-loss"]');
+      expect(candidate.querySelector('strong').textContent).toBe('CAN 丢包故障');
+      expect(candidate.querySelector('small').textContent).toBe(name);
+      view.querySelector('[data-fault-localization-close]').click();
+      await flushRuntime();
+    }
+
+    await expectProtocolFaultAt('CAN 发送端·输出 → CAN 接收端·输入');
+    window.selectEdge(edgeId);
+    document.getElementById('prop-edge-label').value = '姿态速率 CAN 链路';
+    window.savePropertyPanelTarget();
+    await expectProtocolFaultAt('姿态速率 CAN 链路');
+    wrapper.unmount();
+  });
+
   it('saves phenomena per fault and measurement point and refreshes the live graph', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();

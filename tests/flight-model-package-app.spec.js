@@ -808,7 +808,7 @@ describe('Flight model package app integration', () => {
       await flushRuntime();
 
       expect(importResult).toMatchObject({ ok: true });
-      expect(window.fetch).toHaveBeenCalledWith('http://localhost:3000/model-packages/evtol-small-flight-control-fault-display.json');
+      expect(window.fetch.mock.calls.some(([url]) => String(url).includes('/model-packages/'))).toBe(false);
       expect(window.__GZ_STATE__.sysLoaded).toBe(true);
       expect(window.__GZ_STATE__.modelNodes).toHaveLength(selectedPackage.workbenchSnapshot.modelNodes.length);
       expect(window.__GZ_STATE__.activeModelPackage).toMatchObject({
@@ -862,6 +862,56 @@ describe('Flight model package app integration', () => {
     }
   });
 
+  it('clears the canvas before applying the selected local model JSON', async () => {
+    mockNextJsonFileSelection(JSON.stringify(PACKAGE_FIXTURE));
+    const wrapper = mount(App, { attachTo: document.body });
+    try {
+      await flushRuntime();
+      window.doCreateBlankWorkspace();
+      const previous = window.createNode('simulation_block', 200, 220);
+      previous.props.name = '旧控制器';
+      const scope = window.createNode('instrument_scope', 540, 220);
+      window.__GZ_STATE__.modelEdges.push({
+        id: 'old-edge', sourceNodeId: previous.id, sourcePortIndex: 0,
+        targetNodeId: scope.id, targetPortIndex: 0, lineType: 'normal'
+      });
+      window.__GZ_SIM__.componentOutputs = { time: [1], steps: [{ actual: { [previous.id]: { out: 1 } } }] };
+      expect(previous.id).toBe(PACKAGE_FIXTURE.workbenchSnapshot.modelNodes[0].id);
+
+      const applyPackage = window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__;
+      const applySpy = vi.spyOn(window, '__GZ_APPLY_FLIGHT_MODEL_PACKAGE__').mockImplementation((...args) => {
+        expect(window.__GZ_STATE__.modelNodes).toEqual([]);
+        expect(window.__GZ_STATE__.modelEdges).toEqual([]);
+        expect(window.__GZ_SIM__.componentOutputs).toEqual({ time: [], steps: [] });
+        return applyPackage(...args);
+      });
+
+      expect(await window.doImportSys()).toMatchObject({ ok: true });
+      expect(applySpy).toHaveBeenCalledOnce();
+      expect(window.__GZ_STATE__.modelNodes).toHaveLength(1);
+      expect(window.__GZ_STATE__.modelNodes[0]).toMatchObject({
+        id: previous.id, props: { name: 'Attitude PID' }, pythonBinding: { moduleId: 'attitude_pid' }
+      });
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it('keeps the current canvas when the selected local model JSON fails validation', async () => {
+    mockNextJsonFileSelection(JSON.stringify(MISSING_MODULE_PACKAGE_FIXTURE));
+    const wrapper = mount(App, { attachTo: document.body });
+    try {
+      await flushRuntime();
+      window.doCreateBlankWorkspace();
+      const previous = window.createNode('simulation_block', 200, 220);
+
+      expect(await window.doImportSys()).toMatchObject({ ok: false });
+      expect(window.__GZ_STATE__.modelNodes).toEqual([previous]);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it('restores the import button when the local model JSON picker is cancelled', async () => {
     vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function click() {
       this.dispatchEvent(new Event('cancel'));
@@ -869,6 +919,8 @@ describe('Flight model package app integration', () => {
 
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
+    window.doCreateBlankWorkspace();
+    const previous = window.createNode('simulation_block', 200, 220);
 
     const importButton = document.getElementById('btn-imp-sys');
     const importPromise = window.doImportSys();
@@ -877,6 +929,7 @@ describe('Flight model package app integration', () => {
     expect(importButton?.textContent).toBe('导入系统模型');
     expect(importButton?.disabled).toBe(false);
     await expect(importPromise).resolves.toMatchObject({ ok: false, reason: 'file-selection-cancelled' });
+    expect(window.__GZ_STATE__.modelNodes).toEqual([previous]);
 
     wrapper.unmount();
   });

@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import App from '../src/App.vue';
+import { buildBackendExecutablePackage } from '../src/services/backendExecutablePackageService.js';
+import { syncDiscoveredComponents } from '../src/services/discoveredComponentCatalogService.js';
 import { __resetLegacyRuntimeForTests, restoreStoredWorkbench } from '../src/services/legacyRuntimeBootstrap.js';
 
 function loadPublicPackage(fileName) {
@@ -96,6 +98,42 @@ describe('property panel interaction', () => {
     expect(document.querySelector('.props-fault-action')).not.toBeNull();
 
     wrapper.unmount();
+  });
+
+  it('saves a labeled external component mode selected from buttons', async () => {
+    const wrapper = await mountWorkbench();
+    try {
+      window.doCreateBlankWorkspace();
+      const moduleId = 'external_mode_test';
+      syncDiscoveredComponents([{
+        moduleId, name: '外部模式组件', category: '测试', fileName: `${moduleId}.py`,
+        entryFunction: 'process', requiresPower: false,
+        inputs: [{ portId: 'in', varName: 'signal', name: '输入' }],
+        outputs: [{ portId: 'out', varName: 'adjusted', name: '输出' }],
+        parameters: [{
+          key: 'mode', name: '工作模式', default: 1, control: 'stepper',
+          options: [{ value: 1, label: '直通' }, { value: 2, label: '反相' }]
+        }],
+      }]);
+      window.createNode(moduleId, 220, 220);
+      const node = window.__GZ_STATE__.modelNodes.find((item) => item.templateId === moduleId);
+      window.selectNode(node.id);
+      window.setPropertyPanelTab('parameters');
+      await flushRuntime();
+
+      const buttons = [...document.querySelectorAll('[data-simulation-parameter-mode-key="mode"]')];
+      expect(buttons.map((button) => button.textContent)).toEqual(['直通', '反相']);
+      expect(buttons[0].classList.contains('is-active')).toBe(true);
+      buttons[1].click();
+      expect(buttons[1].classList.contains('is-active')).toBe(true);
+      document.querySelector('[data-property-save-node]').click();
+      await flushRuntime();
+      const executable = buildBackendExecutablePackage({ modelNodes: [node], modelEdges: [] });
+      expect(executable.nodes[0].parameters.mode).toBe(2);
+    } finally {
+      syncDiscoveredComponents([]);
+      wrapper.unmount();
+    }
   });
 
   it('shows module deletion only in the overview below execution mode and above model package status', async () => {

@@ -11,6 +11,7 @@ from unittest.mock import patch
 from backend import component_discovery
 from backend.graph_compiler import compile_graph
 from backend.module_registry import ModuleRegistry, clear_module_call_cache
+from backend.schemas import SimulationBackendError
 from backend.simulation_engine import run_simulation
 from backend.server import SimulationBackendHandler
 from backend.tests.fixtures import valid_package
@@ -76,6 +77,37 @@ class ComponentDiscoveryTests(unittest.TestCase):
         self.assertEqual(len(registry.discovered_components), 1)
         self.assertEqual({item["fileName"] for item in registry.discovery_errors}, {"duplicate.py", "bad_signature.py", "syntax_error.py"})
         self.assertEqual(registry.require("gain").call({"input": 2}, {"gain": 2})["outputs"]["output"], 4)
+
+    def test_labeled_mode_options_are_discovered_and_enforced_at_runtime(self):
+        options = [{"value": 1, "label": "直通"}, {"value": 2, "label": "反相"}]
+        self.write_component(metadata={
+            **self.metadata,
+            "parameters": {
+                "mode": {"type": "integer", "default": 1, "options": options, "control": "stepper"},
+            },
+        }, source='def process(signal, mode):\n    return {"adjusted": signal if mode == 1 else -signal}\n')
+
+        registry = self.registry()
+        self.assertEqual(registry.discovery_errors, [])
+        parameter, = registry.discovered_components[0]["parameters"]
+        self.assertEqual(parameter["control"], "stepper")
+        self.assertEqual(parameter["options"], options)
+        module = registry.require("discovered_test_gain")
+        self.assertEqual(module.call({"signal": 4}, {})["outputs"]["adjusted"], 4)
+        self.assertEqual(module.call({"signal": 4}, {"mode": 2})["outputs"]["adjusted"], -4)
+        with self.assertRaises(SimulationBackendError) as context:
+            module.call({"signal": 4}, {"mode": 3})
+        self.assertEqual(context.exception.error_code, "PARAM_OUT_OF_RANGE")
+
+    def test_enum_without_presentation_settings_keeps_numeric_options(self):
+        self.write_component(metadata={
+            **self.metadata, "parameters": {"gain": {"default": 1, "enum": [1, 2]}},
+        })
+        registry = self.registry()
+        self.assertEqual(registry.discovery_errors, [])
+        parameter, = registry.discovered_components[0]["parameters"]
+        self.assertNotIn("control", parameter)
+        self.assertEqual(parameter["options"], [{"value": 1, "label": "1"}, {"value": 2, "label": "2"}])
 
     def test_metadata_reading_does_not_execute_module_code(self):
         self.write_component(source='raise RuntimeError("not imported during discovery")\ndef process(signal, gain):\n    return {}\n')
@@ -146,6 +178,9 @@ class ComponentDiscoveryTests(unittest.TestCase):
             {**self.metadata, "parameters": {"gain": {"default": 5, "max": 2}}},
             {**self.metadata, "parameters": {"signal": {"default": 1}}},
             {**self.metadata, "parameters": {"gain": {"default": [1], "type": "vector", "vectorLength": 2}}},
+            {**self.metadata, "parameters": {"gain": {"default": 1, "options": [{"value": 2, "label": "二"}]}}},
+            {**self.metadata, "parameters": {"gain": {"default": 1, "enum": [1, 2], "options": [{"value": 1}]}}},
+            {**self.metadata, "parameters": {"gain": {"default": 1, "options": [{"value": 1}, {"value": 1.0}]}}},
             {**self.metadata, "inputs": [], "outputs": []},
         ]
         for metadata in cases:

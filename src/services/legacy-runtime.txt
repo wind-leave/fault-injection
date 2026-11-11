@@ -3745,17 +3745,24 @@ function deleteSelectedNode(){
   toast(`模块“${removedName}”已删除${removedEdges?`，并移除 ${removedEdges} 条连线`:''}${removedPointIds.length?`、${removedPointIds.length} 个测点`:''}`,'s');
 }
 
-function restorePaletteComponent(node){
-  if(!node){return;}
+function getPlacedPaletteKey(node){
+  if(!node){return '';}
   const paletteKey=node.paletteKey||node.templateId||node.pythonBinding?.moduleId||node.type;
   const paletteComponent=window.__GZ_COMPONENT_REGISTRY__?.[paletteKey];
   const isOneShotPaletteComponent=['simulation','electrical','display-control'].includes(paletteComponent?.group)
     ||node.type==='simulation_block'
     ||node.type==='display_console';
-  if(!isOneShotPaletteComponent){return;}
-  if(paletteKey){
-    window.dispatchEvent(new CustomEvent('gz:palette-component-deleted',{detail:{paletteKey}}));
-  }
+  return isOneShotPaletteComponent?paletteKey:'';
+}
+
+function getWorkbenchPaletteNodeLists(){
+  return [S.modelNodes,...Object.values(S.canvases||{}).map(canvas=>canvas?.nodes||[])];
+}
+
+function restorePaletteComponent(node){
+  const paletteKey=getPlacedPaletteKey(node);
+  if(!paletteKey||getWorkbenchPaletteNodeLists().some(nodes=>nodes.some(item=>getPlacedPaletteKey(item)===paletteKey))){return;}
+  window.dispatchEvent(new CustomEvent('gz:palette-component-deleted',{detail:{paletteKey}}));
 }
 
 function deleteSelectedEdge(){
@@ -13806,6 +13813,8 @@ function resetSimulationRuntimeForBlankWorkspace(){
   SIM.datasetName='test';
   SIM.actual=createRuntimeBucket();
   SIM.reference=createRuntimeBucket();
+  SIM.signalSourceOutputs={};
+  SIM.componentOutputs={time:[],steps:[]};
   SIM.scopeWindows={};
   SIM.scopeWindowZ=10;
   if(SIM.spectrumWindow?.timer){clearTimeout(SIM.spectrumWindow.timer);}
@@ -13943,29 +13952,16 @@ restoreSystemModelSnapshot = function(snapshot){
   if(!S.workspaceSource&&!S.activeModelPackage){
     S.workspaceSource='legacy';
   }
+  syncPaletteTemplatesFromWorkspace();
   updateModelPackageStatus();
   updateUI();
   return result;
 };
 
 const __blankWorkspaceApplyFlightModelPackage = window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__;
-function syncPaletteTemplatesFromImportedModel(){
+function syncPaletteTemplatesFromWorkspace(){
   window.dispatchEvent(new CustomEvent('gz:palette-components-reset'));
-  const consumedKeys=new Set();
-  const collectNodes=(nodes)=>{
-    if(!Array.isArray(nodes)){return;}
-    nodes.forEach((node)=>{
-      const paletteKey=node?.paletteKey||node?.templateId;
-      const paletteComponent=paletteKey&&window.__GZ_COMPONENT_REGISTRY__?.[paletteKey];
-      if(paletteComponent&&(['simulation','electrical','display-control'].includes(paletteComponent.group))){
-        consumedKeys.add(paletteKey);
-      }
-    });
-  };
-  collectNodes(S.modelNodes);
-  if(S.canvases&&typeof S.canvases==='object'){
-    Object.values(S.canvases).forEach((canvas)=>collectNodes(canvas?.nodes));
-  }
+  const consumedKeys=new Set(getWorkbenchPaletteNodeLists().flatMap(nodes=>nodes.map(getPlacedPaletteKey)).filter(Boolean));
   consumedKeys.forEach((paletteKey)=>{
     window.dispatchEvent(new CustomEvent('gz:palette-component-created',{detail:{paletteKey}}));
   });
@@ -13975,7 +13971,6 @@ window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__ = function(pkg,prepared){
   const result=__blankWorkspaceApplyFlightModelPackage(pkg,prepared);
   if(result?.ok!==false){
     S.workspaceSource='imported';
-    syncPaletteTemplatesFromImportedModel();
     updateModelPackageStatus();
     updateUI();
   }
@@ -14013,7 +14008,7 @@ doImportSys = async function(){
       return {ok:false,reason:'invalid-json'};
     }
 
-    const result=packageApi.importObject(pkg);
+    const result=packageApi.importObject(pkg,{replaceWorkspace:true});
     if(!result?.ok){
       toast((result?.errors||['飞控模型导入失败']).join('；'),'w');
       return result||{ok:false,reason:'import-failed'};

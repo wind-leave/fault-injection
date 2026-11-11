@@ -262,6 +262,12 @@ class ConvertBuiltinComponentsTests(unittest.TestCase):
             self.assertEqual(rf["inputs"][0]["collectionKind"], "vector")
             self.assertEqual(rf["inputs"][0]["vectorLength"], 4)
             self.assertEqual(by_id["rf_downconverter"]["parameters"]["input_mode"]["enum"], [1, 2])
+            input_mode = next(item for item in definitions["rf_downconverter"]["parameters"] if item["key"] == "input_mode")
+            self.assertEqual(input_mode["control"], "stepper")
+            self.assertEqual(input_mode["options"], [
+                {"value": 1, "label": "模式 1：第一路输入"},
+                {"value": 2, "label": "模式 2：第二路输入"},
+            ])
             self.assertEqual(definitions["electrical_ground"]["outputs"], [])
             self.assertEqual(definitions["electrical_dc_power_source"]["group"], "electrical")
             self.assertEqual(definitions["electrical_dc_power_source"]["paletteMenu"], "power-source")

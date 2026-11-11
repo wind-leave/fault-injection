@@ -104,36 +104,72 @@ def _parameters(items):
         kind = item.get("type", "number")
         if kind not in {"number", "integer"}:
             raise ValueError(f"parameter {name}.type must be number or integer; vector parameters are not supported by the parameter editor")
-        spec = {"type": kind, "default": item.get("default", 0)}
-        values = [spec["default"]]
-        for value in values:
-            _number(value, f"{name}.default")
-            if kind == "integer" and value != int(value):
-                raise ValueError(f"{name}.default must be an integer")
+        default = _number(item.get("default", 0), f"{name}.default")
+        if kind == "integer" and default != int(default):
+            raise ValueError(f"{name}.default must be an integer")
+        spec = {"type": kind, "default": default}
         for bound in ("min", "max"):
             if bound in item:
                 spec[bound] = _number(item[bound], f"{name}.{bound}")
-        if spec.get("min", -math.inf) > spec.get("max", math.inf):
+        minimum = spec.get("min", -math.inf)
+        maximum = spec.get("max", math.inf)
+        if minimum > maximum:
             raise ValueError(f"{name}.min exceeds max")
-        if any(value < spec.get("min", -math.inf) or value > spec.get("max", math.inf) for value in values):
+        if not minimum <= default <= maximum:
             raise ValueError(f"{name}.default is outside min/max")
+        allowed = None
         if "enum" in item:
             allowed = item["enum"]
             if not isinstance(allowed, list) or not allowed:
                 raise ValueError(f"{name}.enum must be a non-empty list")
             for value in allowed:
                 _number(value, f"{name}.enum")
-            if spec["default"] not in allowed:
-                raise ValueError(f"{name}.default must be in enum")
+        options = []
+        if "options" in item:
+            options = _parameter_options(item["options"], name)
+            option_values = [option["value"] for option in options]
+            if allowed is not None and set(option_values) != set(allowed):
+                raise ValueError(f"{name}.options must match enum values")
+            if kind == "integer" and any(value != int(value) for value in option_values):
+                raise ValueError(f"{name}.options values must be integers")
+            if any(not minimum <= value <= maximum for value in option_values):
+                raise ValueError(f"{name}.options contains a value outside min/max")
+            if allowed is None:
+                allowed = option_values
+        if allowed is not None:
+            if default not in allowed:
+                raise ValueError(f"{name}.default must be an allowed value")
             spec["enum"] = allowed
         contracts[name] = spec
         display = {**spec, "key": name, "name": str(item.get("name", name)), "unit": str(item.get("unit", ""))}
         if kind == "integer":
             display["step"] = 1
-        if "enum" in spec:
-            display["options"] = [{"value": value, "label": str(value)} for value in spec["enum"]]
+        if allowed is not None:
+            display["options"] = options or [{"value": value, "label": str(value)} for value in allowed]
+            if item.get("control") == "stepper":
+                display["control"] = "stepper"
         frontend.append(display)
     return contracts, frontend
+
+
+def _parameter_options(items, name):
+    if not isinstance(items, list) or not items:
+        raise ValueError(f"{name}.options must be a non-empty list")
+    options = []
+    seen = set()
+    for index, item in enumerate(items):
+        field = f"{name}.options[{index}]"
+        if not isinstance(item, dict):
+            raise ValueError(f"{field} must be an object")
+        value = _number(item.get("value"), f"{field}.value")
+        if value in seen:
+            raise ValueError(f"{field}.value is duplicated")
+        seen.add(value)
+        label = item.get("label", str(value))
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError(f"{field}.label must be a non-empty string")
+        options.append({"value": value, "label": label.strip()})
+    return options
 
 
 def _read_component(path, package):

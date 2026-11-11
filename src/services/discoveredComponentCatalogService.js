@@ -65,7 +65,7 @@ export function syncDiscoveredComponents(components) {
       executionMode: 'backend',
       sourceKind: 'builtin',
       palette: {
-        ...(original?.palette || { repeatable: true }),
+        ...original?.palette,
         source: 'external',
         visible: true,
         icon: component.icon || (electrical ? '电' : '仿'),

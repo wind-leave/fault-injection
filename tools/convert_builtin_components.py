@@ -124,6 +124,10 @@ def build_metadata(record, template, new_id):
         parameter["name"] = display.get("name", name)
         if display.get("unit"):
             parameter["unit"] = display["unit"]
+        if display.get("options"):
+            parameter["options"] = copy.deepcopy(display["options"])
+        if display.get("control") == "stepper":
+            parameter["control"] = "stepper"
     metadata["parameters"] = parameters
     metadata["faultSlots"] = copy.deepcopy(template.get("faultSlots", []))
     return metadata, warnings

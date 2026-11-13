@@ -47,7 +47,7 @@ Content-Type: application/json; charset=utf-8
 | `200` | 请求成功 |
 | `400` | 请求结构、动作、目标或仿真数据不合法 |
 | `404` | 接口或实践任务不存在 |
-| `410` | 实践任务已超过生命周期或空闲超时 |
+| `410` | 实践任务已达到最长任务时间 |
 | `500` | 后端内部错误 |
 
 ## 2. 完整业务流程
@@ -387,7 +387,7 @@ POST /api/practice/session
 | `displayConsoleControls` | array | 有显控台控制时必填 | `privateData.displayConsoleControls`；用于约束实践动作可修改的组件及参数 |
 | `diagnosticConditions` | array | 有工况规则时必填 | `privateData.diagnosticConditions`；工况切换是可选动作，若学员执行，后端据此刷新实时 D 矩阵与后续排故路径 |
 | `scoringRules` | object | 否 | 可选评分参数，例如 `fullEfficiencySeconds` |
-| `lifecycle` | object | 否 | 最大生命周期和空闲超时配置；缺省时分别为 3600 秒和 900 秒 |
+| `lifecycle` | object | 否 | `maxLifetimeSeconds` 指定从创建会话起计算的最长任务时间，默认 86400 秒（24 小时）。实践任务停用空闲超时，后端忽略旧请求中的 `idleTimeoutSeconds`。 |
 | `resourceLimits` | object | 否 | 最大动作数量等资源限制 |
 | `actionRules` | object | 否 | 更换动作安全规则，例如是否要求断电 |
 
@@ -1073,5 +1073,5 @@ faultLocalization = 30 × setAccuracy
 | `TARGET_NOT_FOUND` | 组件、线缆或故障目标不存在 |
 | `OPERATION_ID_CONFLICT` | 同一实践会话中重复使用 `operationId`，但动作内容与首次请求不同 |
 | `SESSION_NOT_FOUND` | 实践任务不存在、已提交或后端已重启 |
-| `SESSION_EXPIRED` | 实践任务超过生命周期或空闲超时 |
+| `SESSION_EXPIRED` | 实践任务已达到最长任务时间 |
 | `SIMULATION_LIMIT_EXCEEDED` | 动作数、样本数或仿真规模超过限制 |

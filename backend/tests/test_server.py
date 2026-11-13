@@ -3223,11 +3223,45 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(body["simulationSessionId"], created["simulationSessionId"])
         self.assertEqual(body["lifecycle"]["state"], "active")
         self.assertEqual(body["lifecycle"]["actionCount"], 0)
-        self.assertEqual(body["lifecycle"]["maxLifetimeSeconds"], 3600.0)
-        self.assertEqual(body["lifecycle"]["idleTimeoutSeconds"], 900.0)
+        self.assertEqual(body["lifecycle"]["maxLifetimeSeconds"], 86400.0)
+        self.assertIsNone(body["lifecycle"]["idleTimeoutSeconds"])
         self.assertIn("createdAt", body["lifecycle"])
         self.assertIn("lastActivityAt", body["lifecycle"])
         self.assertIn("troubleshootingState", body)
+
+    def test_practice_sessions_expire_at_24_hours_even_with_legacy_idle_timeout(self):
+        for practice_type in (
+            "troubleshooting", "inspection1", "inspection2", "inspection3", "inspection4",
+            "powerOnSelfTestTraining", "powerOnSelfTestExam",
+        ):
+            with self.subTest(practice_type=practice_type):
+                payload = {
+                    "practiceType": practice_type,
+                    "studentid": "student-1",
+                    "jobid": "job-1",
+                    "lifecycle": {"idleTimeoutSeconds": 900},
+                }
+                if practice_type == "troubleshooting":
+                    payload.update({
+                        "simulationPackage": valid_package(),
+                        "dMatrix": sample_d_matrix(),
+                        "targetFaultId": "target-fault",
+                    })
+                status, created = self._post("/api/practice/session", payload)
+                self.assertEqual(status, 200, created)
+                session_id = created["practiceSessionId"]
+                session = SimulationBackendHandler.practice_sessions[session_id]
+
+                SimulationBackendHandler.purge_expired_sessions(now=session.created_at + 86399)
+                self.assertIn(session_id, SimulationBackendHandler.practice_sessions)
+                if session.simulation_session_id:
+                    self.assertIn(session.simulation_session_id, SimulationBackendHandler.sessions)
+
+                SimulationBackendHandler.purge_expired_sessions(now=session.created_at + 86400)
+                self.assertEqual(session.lifecycle_state, "expired")
+                self.assertNotIn(session_id, SimulationBackendHandler.practice_sessions)
+                if session.simulation_session_id:
+                    self.assertNotIn(session.simulation_session_id, SimulationBackendHandler.sessions)
 
     def test_deletes_practice_session_and_bound_simulation_session(self):
         status, created = self._post(

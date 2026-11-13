@@ -32,8 +32,7 @@ from backend.troubleshooting import (
 )
 
 
-DEFAULT_MAX_LIFETIME_SECONDS = 3600.0
-DEFAULT_IDLE_TIMEOUT_SECONDS = 900.0
+DEFAULT_MAX_LIFETIME_SECONDS = 86400.0
 PRACTICE_TYPE_TROUBLESHOOTING = "troubleshooting"
 PRACTICE_TYPE_INSPECTION_1 = "inspection1"
 PRACTICE_TYPE_INSPECTION_2 = "inspection2"
@@ -241,9 +240,6 @@ class SequencePracticeSession:
         self.max_lifetime_seconds = _lifecycle_seconds(
             lifecycle_config, "maxLifetimeSeconds", DEFAULT_MAX_LIFETIME_SECONDS
         )
-        self.idle_timeout_seconds = _lifecycle_seconds(
-            lifecycle_config, "idleTimeoutSeconds", DEFAULT_IDLE_TIMEOUT_SECONDS
-        )
         resource_config = resource_limits if isinstance(resource_limits, dict) else {}
         self.max_actions = _resource_limit_int(resource_config, "maxActions", default_max_actions)
 
@@ -251,11 +247,7 @@ class SequencePracticeSession:
         if self.lifecycle_state != "active":
             return False
         checked_at = time.time() if now is None else float(now)
-        if self.max_lifetime_seconds is not None and checked_at - self.created_at >= self.max_lifetime_seconds:
-            return True
-        if self.idle_timeout_seconds is not None and checked_at - self.last_activity_at >= self.idle_timeout_seconds:
-            return True
-        return False
+        return checked_at - self.created_at >= self.max_lifetime_seconds
 
     def close(self, state, now=None):
         self.lifecycle_state = state
@@ -513,9 +505,6 @@ class PracticeSession:
         self.max_lifetime_seconds = _lifecycle_seconds(
             lifecycle_config, "maxLifetimeSeconds", DEFAULT_MAX_LIFETIME_SECONDS
         )
-        self.idle_timeout_seconds = _lifecycle_seconds(
-            lifecycle_config, "idleTimeoutSeconds", DEFAULT_IDLE_TIMEOUT_SECONDS
-        )
         self.lifecycle_state = "active"
         self.created_at = self.started_at
         self.last_activity_at = self.started_at
@@ -527,11 +516,7 @@ class PracticeSession:
         if self.lifecycle_state != "active":
             return False
         checked_at = time.time() if now is None else now
-        if self.max_lifetime_seconds is not None and checked_at - self.created_at >= self.max_lifetime_seconds:
-            return True
-        if self.idle_timeout_seconds is not None and checked_at - self.last_activity_at >= self.idle_timeout_seconds:
-            return True
-        return False
+        return checked_at - self.created_at >= self.max_lifetime_seconds
 
     def close(self, state, now=None):
         self.lifecycle_state = state
@@ -553,7 +538,7 @@ class PracticeSession:
             "idleSeconds": max(0.0, checked_at - self.last_activity_at),
             "actionCount": len(self.student_actions),
             "maxLifetimeSeconds": self.max_lifetime_seconds,
-            "idleTimeoutSeconds": self.idle_timeout_seconds,
+            "idleTimeoutSeconds": None,
             "maxActions": self.max_actions,
         }
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { COMPONENT_REGISTRY } from '../src/services/componentRegistry.js';
 import { createDisplayConsoleConfig } from '../src/constants/displayConsoleConfig.js';
 import {
   buildBackendExecutablePackage,
@@ -6,6 +7,28 @@ import {
 } from '../src/services/backendExecutablePackageService.js';
 
 describe('backendExecutablePackageService', () => {
+  it('exports component 11 with one input, one seven-element vector output and no power requirement', () => {
+    const component = COMPONENT_REGISTRY['11'];
+    const pkg = buildBackendExecutablePackage({
+      modelNodes: [{
+        id: 'fanout', type: component.nodeType, templateId: '11',
+        props: structuredClone(component.defaults),
+        ports: structuredClone(component.ports),
+        pythonBinding: structuredClone(component.pythonBinding)
+      }],
+      modelEdges: []
+    });
+    const node = pkg.nodes.find((item) => item.id === 'fanout');
+    expect(component.defaults.requiresPower).toBe(false);
+    expect(node.powerInputs).toEqual([]);
+    expect(node.powerOutputs).toEqual([]);
+    expect(node.pythonBinding.moduleId).toBe('11');
+    expect(node.inputs).toHaveLength(1);
+    expect(node.outputs).toEqual([
+      expect.objectContaining({ id: 'output-0', dataType: 'vector', vectorLength: 7 })
+    ]);
+  });
+
   it('exports every configured display-console vector input port', () => {
     const pkg = buildBackendExecutablePackage({
       modelNodes: [{

@@ -74,4 +74,93 @@ describe('RF complex-envelope canvas connections', () => {
 
     wrapper.unmount();
   });
+
+  it('derives the generator shape from a two-element input and updates after disconnecting', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await nextTick();
+    await Promise.resolve();
+    window.doCreateBlankWorkspace();
+
+    const source = window.createNode('XHFSQ', 180, 220);
+    const target = window.createNode('rf_complex_envelope_limiter', 480, 220);
+    target.props.inputs[0].vectorLength = 2;
+    target.pythonBinding.portMapping.inputs[0].vectorLength = 2;
+    target.ports.inputs[0].vectorLength = 2;
+    source.props.rfComplexEnvelopeMode = 'scalar';
+    source.props.rfVectorLength = 99;
+
+    clickPort(source, 'output');
+    clickPort(target, 'input');
+    expect(window.__GZ_STATE__.modelEdges).toHaveLength(1);
+    expect(window.__GZ_STATE__.modelEdges[0].sourcePortMeta).toMatchObject({
+      collectionKind: 'vector', vectorLength: 2
+    });
+    expect(window.getNodePorts(source).outputs[0]).toMatchObject({
+      collectionKind: 'vector', vectorLength: 2
+    });
+
+    const incompatibleTarget = window.createNode('rf_complex_envelope_limiter', 720, 220);
+    clickPort(source, 'output');
+    clickPort(incompatibleTarget, 'input');
+    expect(window.__GZ_STATE__.modelEdges).toHaveLength(1);
+
+    window.__GZ_STATE__.modelEdges.pop();
+    expect(window.getNodePorts(source).outputs[0].collectionKind).toBeUndefined();
+    expect(window.getNodePorts(source).outputs[0].vectorLength).toBeUndefined();
+
+    wrapper.unmount();
+  });
+
+  it('uses the port length for one, three, and sixty-five envelope outputs', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await nextTick();
+    await Promise.resolve();
+
+    for (const length of [1, 3, 65]) {
+      window.doCreateBlankWorkspace();
+      const source = window.createNode('XHFSQ', 180, 220);
+      const target = window.createNode('rf_complex_envelope_limiter', 480, 220);
+      target.props.inputs[0].vectorLength = length;
+      target.pythonBinding.portMapping.inputs[0].vectorLength = length;
+      target.ports.inputs[0].vectorLength = length;
+
+      clickPort(source, 'output');
+      clickPort(target, 'input');
+      expect(window.__GZ_STATE__.modelEdges).toHaveLength(1);
+      expect(window.getNodePorts(source).outputs[0].vectorLength).toBe(length);
+      expect(window.resolveNodeOutput(source.id, 0, 'actual', 0, 0.01, new Map(), new Set()))
+        .toHaveLength(length);
+    }
+
+    wrapper.unmount();
+  });
+
+  it('uses a subsystem external input contract for the generator line', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await nextTick();
+    await Promise.resolve();
+    window.doCreateBlankWorkspace();
+
+    const source = window.createNode('XHFSQ', 180, 220);
+    const subsystem = {
+      id: 'subsystem-vector-2', type: 'subsystem_block', x: 480, y: 220,
+      w: 190, h: 110, props: { name: '子系统', interface: {
+        inputs: [{ id: 'input-1', name: '复数包络输入', type: '复数包络',
+          dataType: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 2 }],
+        outputs: []
+      } }
+    };
+    window.__GZ_STATE__.modelNodes.push(subsystem);
+    clickPort(source, 'output');
+    clickPort(subsystem, 'input');
+
+    expect(window.__GZ_STATE__.modelEdges).toHaveLength(1);
+    expect(window.__GZ_STATE__.modelEdges[0].targetPortMeta).toMatchObject({
+      type: 'rf_complex_envelope', collectionKind: 'vector', vectorLength: 2
+    });
+    expect(window.getNodePorts(source).outputs[0]).toMatchObject({
+      collectionKind: 'vector', vectorLength: 2
+    });
+    wrapper.unmount();
+  });
 });

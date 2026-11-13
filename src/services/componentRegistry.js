@@ -373,8 +373,8 @@ export function createPythonSimulationComponent({
 
 export const COMPONENT_GROUPS = [
   { id: 'signals', label: '系统信号', icon: '信', tone: 'system', defaultOpen: true },
-  { id: 'electrical', label: '电气组件', icon: '电', tone: 'system', defaultOpen: true },
-  { id: 'simulation', label: '仿真组件', icon: '仿', tone: 'system', defaultOpen: true },
+  { id: 'electrical', label: '电气组件', icon: '电', tone: 'system', defaultOpen: true, componentsVisible: true, externalOnly: true },
+  { id: 'simulation', label: '仿真组件', icon: '仿', tone: 'system', defaultOpen: true, componentsVisible: true, externalOnly: true },
   { id: 'subsystem', label: '子系统', icon: '子', tone: 'system', defaultOpen: true },
   { id: 'faults', label: '故障组件', icon: '故', tone: 'fault', defaultOpen: true },
   { id: 'instruments', label: '测量仪器', icon: '测', tone: 'instrument', defaultOpen: true },
@@ -853,89 +853,6 @@ export const COMPONENT_REGISTRY = {
     ffunctionNote: '将单路复数包络复制到固定四路输出，并对每个输出的 I/Q 分量应用 1/2 的幅度系数，实现四路等功率分配。',
     executionMode: 'backend'
   }),
-  DZDK_A: createPythonSimulationComponent({
-    type: 'DZDK_A',
-    moduleId: 'DZDK_A',
-    fileName: 'dzdk_a_filter.py',
-    simulationMenu: 'signal-processing',
-    label: '滤波组件',
-    moduleType: '信号处理模型',
-    title: '一阶低通滤波组件',
-    palette: { icon: 'LPF', iconClass: 'simulation' },
-    description: '对标量输入执行一阶低通滤波',
-    inputs: [{ portId: 'socket01', name: '输入信号', varName: 'socket01' }],
-    outputs: [{ portId: 'socket02', name: '滤波输出', varName: 'socket02' }],
-    parameters: [{ key: 'cutoff_frequency_hz', name: '截止频率', default: 1000, min: 0, unit: 'Hz' }],
-    requiresPower: false,
-    ffunctionNote: '使用截止频率控制的一阶低通滤波器；截止频率为 0 时直接输出输入信号。',
-    executionMode: 'backend'
-  }),
-  DZDK_B: createPythonSimulationComponent({
-    type: 'DZDK_B',
-    moduleId: 'DZDK_B',
-    fileName: 'dzdk_b_limiter.py',
-    simulationMenu: 'signal-processing',
-    label: '限幅组件',
-    moduleType: '信号处理模型',
-    title: '对标量信号执行上下限约束',
-    palette: { icon: 'LIM', iconClass: 'simulation' },
-    description: '将输入信号限制在设定的上下限内',
-    inputs: [{ portId: 'socket01', name: '输入信号', varName: 'socket01' }],
-    outputs: [{ portId: 'socket02', name: '限幅输出', varName: 'socket02' }],
-    parameters: [
-      { key: 'lower_limit', name: '下限', default: -1 },
-      { key: 'upper_limit', name: '上限', default: 1 }
-    ],
-    requiresPower: false,
-    ffunctionNote: '输入低于下限时输出下限，高于上限时输出上限；上下限配置颠倒时自动按数值大小修正。',
-    executionMode: 'backend'
-  }),
-  DZDK_C: createPythonSimulationComponent({
-    type: 'DZDK_C',
-    moduleId: 'DZDK_C',
-    fileName: 'dzdk_c_downconverter.py',
-    simulationMenu: 'rf-signal',
-    label: '下变频组件',
-    moduleType: '射频处理模型',
-    title: '将射频输入下变频为 I/Q 两路中频输出',
-    palette: { icon: '↓RF', iconClass: 'simulation' },
-    description: '单路射频下变频仿真组件',
-    inputs: [{ portId: 'socket01', name: '射频输入', varName: 'socket01', unit: 'V' }],
-    outputs: [
-      { portId: 'socket02', name: '中频 I 输出', varName: 'socket02', unit: 'V' },
-      { portId: 'socket03', name: '中频 Q 输出', varName: 'socket03', unit: 'V' }
-    ],
-    parameters: [
-      { key: 'lo_frequency_hz', name: '本振频率', default: 990000000, min: 0, unit: 'Hz' },
-      { key: 'lo_phase_deg', name: '本振相位', default: 0, min: -360, max: 360, unit: '°' },
-      { key: 'conversion_gain', name: '变频增益', default: 1, min: 0 },
-      { key: 'low_pass_cutoff_hz', name: '低通截止频率', default: 20000000, min: 0, unit: 'Hz' }
-    ],
-    requiresPower: false,
-    ffunctionNote: '射频输入与本振正交混频并低通滤波，分别从 socket02、socket03 输出 I/Q 中频信号。',
-    executionMode: 'backend'
-  }),
-  DZDK_D: createPythonSimulationComponent({
-    type: 'DZDK_D',
-    moduleId: 'DZDK_D',
-    fileName: 'dzdk_d_feature_extractor.py',
-    simulationMenu: 'signal-processing',
-    label: '特征提取组件',
-    moduleType: '信号处理模型',
-    title: '提取滑动窗口的均值、RMS 和峰值特征',
-    palette: { icon: 'FFT', iconClass: 'simulation' },
-    description: '标量信号滑动窗口特征提取组件',
-    inputs: [{ portId: 'socket01', name: '输入信号', varName: 'socket01' }],
-    outputs: [
-      { portId: 'socket02', name: '均值特征', varName: 'socket02' },
-      { portId: 'socket03', name: 'RMS 特征', varName: 'socket03' },
-      { portId: 'socket04', name: '峰值特征', varName: 'socket04' }
-    ],
-    parameters: [{ key: 'window_size', name: '特征窗口长度', default: 32, min: 1, max: 4096, step: 1 }],
-    requiresPower: false,
-    ffunctionNote: '对最近窗口内的输入信号计算均值、均方根和绝对峰值。',
-    executionMode: 'backend'
-  }),
   rf_band_pass_filter: createPythonSimulationComponent({
     type: 'rf_band_pass_filter',
     simulationMenu: 'rf-signal',
@@ -1365,48 +1282,30 @@ export const COMPONENT_REGISTRY = {
   }),
   11: createPythonSimulationComponent({
     type: '11',
+    fileName: 'signal_fanout7.py',
     simulationMenu: 'rf-signal',
     label: '11',
-    moduleType: '测试',
-    title: '无输入，按仿真时间输出四路同步脉冲射频数据',
+    moduleType: '信号分发模型',
+    title: '将单路输入复制为长度为七的输出向量，无需电源',
     palette: { icon: 'T', iconClass: 'simulation' },
-    description: '测试',
+    description: '一路标量输入、一路七维向量输出的信号分发组件',
     inputs: [
       {
         portId: 'input-0',
-        name: '射频数据（四组）',
-        varName: 'a',
-        type: 'vector',
-        vectorLength: 4
-      },
-      {
-        portId: 'input-1',
-        name: '射频数据（四组）',
-        varName: 'b',
-        type: 'vector',
-        vectorLength: 4
+        name: '信号输入',
+        varName: 'input'
       }
     ],
-    outputs: [
-      {
-        portId: 'output-0',
-        name: '射频数据（四组）',
-        varName: 'A',
-        type: 'vector',
-        vectorLength: 4,
-        vectorElementNames: ['横滚', '俯仰', '偏航', '偏航']
-      },
-      {
-        portId: 'output-1',
-        name: '射频数据（四组）',
-        varName: 'B',
-        type: 'vector',
-        vectorLength: 4
-      }
-    ],
-    parameters: [
-    ],
-    ffunctionNote: '测试组件',
+    outputs: [{
+      portId: 'output-0',
+      name: '七维向量输出',
+      varName: 'output_vector',
+      type: 'vector',
+      vectorLength: 7,
+      vectorElementNames: Array.from({ length: 7 }, (_, index) => `元素 ${index + 1}`)
+    }],
+    requiresPower: false,
+    ffunctionNote: '一个输出端口，输出长度为 7 的向量，七个元素均等于输入标量，无需电源输入。',
     executionMode: 'backend'
   }),
   rf_limit_amplify_downconvert_split8: createPythonSimulationComponent({
@@ -1448,7 +1347,7 @@ export const COMPONENT_REGISTRY = {
   subsystem_block: {
     type: 'subsystem_block',
     group: 'subsystem',
-    label: '子系统块',
+    label: '机架A',
     badge: '子系统',
     className: 'b-subsystem',
     width: 180,
@@ -1458,15 +1357,15 @@ export const COMPONENT_REGISTRY = {
       iconClass: 'subsystem'
     },
     defaults: {
-      name: '子系统块',
-      subsystemId: 'subsystem-block-1',
+      name: '机架A',
+      subsystemId: 'DZDK_A',
       description: '',
       targetCanvasId: ''
     }
   },
-  subsystem_block_2: createBlankSubsystemTemplate('subsystem_block_2', '子系统块 2', 'subsystem-block-2'),
-  subsystem_block_3: createBlankSubsystemTemplate('subsystem_block_3', '子系统块 3', 'subsystem-block-3'),
-  subsystem_block_4: createBlankSubsystemTemplate('subsystem_block_4', '子系统块 4', 'subsystem-block-4'),
+  subsystem_block_2: createBlankSubsystemTemplate('subsystem_block_2', '机架B', 'DZDK_B'),
+  subsystem_block_3: createBlankSubsystemTemplate('subsystem_block_3', '机架C', 'DZDK_C'),
+  subsystem_block_4: createBlankSubsystemTemplate('subsystem_block_4', '机架D', 'DZDK_D'),
   subsystem_in_port: {
     type: 'subsystem_in_port',
     group: 'subsystem',
@@ -1700,48 +1599,6 @@ export const COMPONENT_REGISTRY = {
       consoleType: '射频参数显控',
       inputPortNames: DISPLAY_CONSOLE_INPUTS.map((item) => item.label),
       displayConfig: createDisplayConsoleConfig()
-    }
-  },
-  display_console_1: {
-    type: 'display_console_1',
-    nodeType: 'display_console',
-    templateId: 'display_console_1',
-    group: 'display-control',
-    label: '显控台 1',
-    badge: '显控',
-    className: 'b-display-console',
-    width: 196,
-    height: 118,
-    palette: {
-      icon: '显1',
-      iconClass: 'display-control'
-    },
-    defaults: {
-      name: DISPLAY_CONSOLE_PRESETS.display_console_1.name,
-      consoleType: '射频参数显控',
-      displayConfig: createDisplayConsoleConfig(DISPLAY_CONSOLE_PRESETS.display_console_1),
-      inputPortNames: createDisplayConsoleConfig(DISPLAY_CONSOLE_PRESETS.display_console_1).inputs.map((item) => item.label)
-    }
-  },
-  display_console_2: {
-    type: 'display_console_2',
-    nodeType: 'display_console',
-    templateId: 'display_console_2',
-    group: 'display-control',
-    label: '显控台 2',
-    badge: '显控',
-    className: 'b-display-console',
-    width: 196,
-    height: 118,
-    palette: {
-      icon: '显2',
-      iconClass: 'display-control'
-    },
-    defaults: {
-      name: DISPLAY_CONSOLE_PRESETS.display_console_2.name,
-      consoleType: '射频参数显控',
-      displayConfig: createDisplayConsoleConfig(DISPLAY_CONSOLE_PRESETS.display_console_2),
-      inputPortNames: createDisplayConsoleConfig(DISPLAY_CONSOLE_PRESETS.display_console_2).inputs.map((item) => item.label)
     }
   },
   link_normal: {

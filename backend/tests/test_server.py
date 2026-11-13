@@ -131,8 +131,15 @@ class SimulationBackendServerTests(unittest.TestCase):
         connection.close()
         return response.status, json.loads(response_body)
 
+    def test_health_endpoint_is_ready_without_creating_sessions(self):
+        status, result = self._get("/healthz")
+        self.assertEqual(status, 200)
+        self.assertEqual(result, {"status": "ok"})
+        self.assertEqual(SimulationBackendHandler.sessions, {})
+        self.assertEqual(SimulationBackendHandler.practice_sessions, {})
+
     def test_sequence_practice_types_return_student_and_job_ids(self):
-        for practice_type in ("inspection2", "inspection4"):
+        for practice_type, action_count in (("inspection2", 17), ("inspection4", 33)):
             with self.subTest(practice_type=practice_type):
                 status, created = self._post(
                     "/api/practice/session",
@@ -146,7 +153,7 @@ class SimulationBackendServerTests(unittest.TestCase):
                 session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
                 self.assertFalse(hasattr(session, "optimal_action_sequence"))
 
-                for action_number in (1, 2, 3, 4, 5):
+                for action_number in range(1, action_count + 1):
                     action_status, action_result = self._post(
                         f"/api/practice/session/{created['practiceSessionId']}/action",
                         {"actionNumber": action_number},
@@ -167,7 +174,7 @@ class SimulationBackendServerTests(unittest.TestCase):
                 })
 
     def test_fixed_score_practice_types_submit_without_actions(self):
-        for practice_type in ("inspection1", "inspection3"):
+        for practice_type in ("inspection1", "inspection3", "powerOnSelfTestTraining"):
             with self.subTest(practice_type=practice_type):
                 status, created = self._post(
                     "/api/practice/session",
@@ -189,7 +196,7 @@ class SimulationBackendServerTests(unittest.TestCase):
                     "resultDelivery": {"status": "skipped", "reason": "callback-not-configured"},
                 })
 
-    def test_all_inspection_types_post_score_to_student_service(self):
+    def test_all_lightweight_practice_types_post_score_to_student_service(self):
         callback_url = "http://127.0.0.1:9000/student/practice/result"
         with patch.object(
             SimulationBackendHandler,
@@ -200,7 +207,10 @@ class SimulationBackendServerTests(unittest.TestCase):
             callback_response.status = 201
             mocked_urlopen.return_value.__enter__.return_value = callback_response
 
-            for practice_type in ("inspection1", "inspection2", "inspection3", "inspection4"):
+            for practice_type in (
+                "inspection1", "inspection2", "inspection3", "inspection4",
+                "powerOnSelfTestTraining", "powerOnSelfTestExam",
+            ):
                 with self.subTest(practice_type=practice_type):
                     status, created = self._post(
                         "/api/practice/session",
@@ -208,11 +218,17 @@ class SimulationBackendServerTests(unittest.TestCase):
                     )
                     self.assertEqual(status, 200)
                     session = SimulationBackendHandler.practice_sessions[created["practiceSessionId"]]
-                    if practice_type in ("inspection2", "inspection4"):
-                        for action_number in (1, 3, 2, 4, 5):
+                    if practice_type in ("inspection2", "inspection4", "powerOnSelfTestExam"):
+                        action_count = {"inspection2": 17, "inspection4": 33, "powerOnSelfTestExam": 12}[practice_type]
+                        action_numbers = list(range(1, action_count + 1))
+                        action_numbers[1:3] = [3, 2]
+                        for action_number in action_numbers:
+                            action = {"actionNumber": action_number}
+                            if practice_type == "powerOnSelfTestExam":
+                                action["isCorrect"] = action_number != 4
                             action_status, _ = self._post(
                                 f"/api/practice/session/{created['practiceSessionId']}/action",
-                                {"actionNumber": action_number},
+                                action,
                             )
                             self.assertEqual(action_status, 200)
 
@@ -221,8 +237,13 @@ class SimulationBackendServerTests(unittest.TestCase):
                         {},
                     )
                     self.assertEqual(status, 200)
-                    expected_score = 60.0 if practice_type in ("inspection2", "inspection4") else 100.0
+                    expected_score = {
+                        "inspection2": 88.24,
+                        "inspection4": 93.94,
+                        "powerOnSelfTestExam": 79.17,
+                    }.get(practice_type, 100.0)
                     self.assertEqual(submitted["totalScore"], expected_score)
+                    self.assertEqual(set(submitted), {"studentId", "jobId", "totalScore", "resultDelivery"})
                     self.assertEqual(submitted["studentId"], "21")
                     self.assertEqual(submitted["jobId"], "61")
                     self.assertEqual(submitted["resultDelivery"], {
@@ -244,10 +265,13 @@ class SimulationBackendServerTests(unittest.TestCase):
                         },
                     })
 
-            self.assertEqual(mocked_urlopen.call_count, 4)
+            self.assertEqual(mocked_urlopen.call_count, 6)
 
-    def test_inspection_practice_requires_student_and_job_ids(self):
-        for practice_type in ("inspection1", "inspection2", "inspection3", "inspection4"):
+    def test_lightweight_practice_requires_student_and_job_ids(self):
+        for practice_type in (
+            "inspection1", "inspection2", "inspection3", "inspection4",
+            "powerOnSelfTestTraining", "powerOnSelfTestExam",
+        ):
             with self.subTest(practice_type=practice_type):
                 for payload, missing_field in (
                     ({"practiceType": practice_type}, "studentid"),
@@ -258,7 +282,7 @@ class SimulationBackendServerTests(unittest.TestCase):
                     self.assertEqual(rejected["field"], missing_field)
 
     def test_fixed_score_practice_types_reject_actions(self):
-        for practice_type in ("inspection1", "inspection3"):
+        for practice_type in ("inspection1", "inspection3", "powerOnSelfTestTraining"):
             with self.subTest(practice_type=practice_type):
                 status, created = self._post(
                     "/api/practice/session",
@@ -273,8 +297,139 @@ class SimulationBackendServerTests(unittest.TestCase):
                 self.assertEqual(action_status, 400)
                 self.assertEqual(rejected["field"], "actionNumber")
 
+    def test_power_on_self_test_exam_gates_correctness_score_on_step_order(self):
+        for first_action, expected_score in (
+            ({"actionNumber": 1, "isCorrect": True}, 100.0),
+            ({"actionNumber": 1, "isCorrect": False}, 95.83),
+            ({"actionNumber": 2, "isCorrect": True}, 91.67),
+            ({"actionNumber": 2, "isCorrect": False}, 91.67),
+        ):
+            with self.subTest(first_action=first_action):
+                status, created = self._post("/api/practice/session", {
+                    "practiceType": "powerOnSelfTestExam",
+                    "studentid": "student-self-test",
+                    "jobid": "job-self-test",
+                })
+                self.assertEqual(status, 200)
+                self.assertEqual(created["practiceType"], "powerOnSelfTestExam")
+                self.assertNotIn("simulationSessionId", created)
+                self.assertNotIn("optimalActionSequence", created)
+                session_id = created["practiceSessionId"]
+                actions = [first_action] + [
+                    {"actionNumber": number, "isCorrect": True} for number in range(2, 13)
+                ]
+                for action in actions:
+                    action_status, result = self._post(f"/api/practice/session/{session_id}/action", action)
+                    self.assertEqual(action_status, 200)
+                    self.assertEqual(result, {"status": "success"})
+                status, submitted = self._post(f"/api/practice/session/{session_id}/submit", {})
+                self.assertEqual(status, 200)
+                self.assertEqual(submitted, {
+                    "studentId": "student-self-test",
+                    "jobId": "job-self-test",
+                    "totalScore": expected_score,
+                    "resultDelivery": {"status": "skipped", "reason": "callback-not-configured"},
+                })
+                self.assertNotIn(session_id, SimulationBackendHandler.practice_sessions)
+                status, _ = self._post(f"/api/practice/session/{session_id}/submit", {})
+                self.assertEqual(status, 404)
+
+    def test_power_on_self_test_exam_score_extremes(self):
+        for numbers, is_correct, expected_score in (
+            (tuple(range(1, 13)), False, 50.0),
+            (tuple(range(2, 13)) + (1,), True, 0.0),
+            (tuple(range(2, 13)) + (1,), False, 0.0),
+        ):
+            with self.subTest(numbers=numbers, is_correct=is_correct):
+                status, created = self._post("/api/practice/session", {
+                    "practiceType": "powerOnSelfTestExam", "studentid": 21, "jobid": 61,
+                })
+                self.assertEqual(status, 200)
+                session_id = created["practiceSessionId"]
+                for number in numbers:
+                    status, _ = self._post(f"/api/practice/session/{session_id}/action", {
+                        "actionNumber": number, "isCorrect": is_correct,
+                    })
+                    self.assertEqual(status, 200)
+                status, submitted = self._post(f"/api/practice/session/{session_id}/submit", {})
+                self.assertEqual(status, 200)
+                self.assertEqual(submitted["totalScore"], expected_score)
+
+    def test_power_on_self_test_exam_rejects_missing_or_non_boolean_correctness(self):
+        status, created = self._post("/api/practice/session", {
+            "practiceType": "powerOnSelfTestExam", "studentid": "student-1", "jobid": "job-1",
+        })
+        self.assertEqual(status, 200)
+        session_id = created["practiceSessionId"]
+        for payload in [{"actionNumber": 1}] + [
+            {"actionNumber": 1, "isCorrect": value} for value in (None, 0, 1, "true", "false", [], {})
+        ]:
+            with self.subTest(payload=payload):
+                status, rejected = self._post(f"/api/practice/session/{session_id}/action", payload)
+                self.assertEqual(status, 400)
+                self.assertEqual(rejected["field"], "isCorrect")
+        for number in (True, None, 0, -1, 1.5, "1"):
+            with self.subTest(action_number=number):
+                status, rejected = self._post(f"/api/practice/session/{session_id}/action", {
+                    "actionNumber": number, "isCorrect": True,
+                })
+                self.assertEqual(status, 400)
+                self.assertEqual(rejected["field"], "actionNumber")
+        session = SimulationBackendHandler.practice_sessions[session_id]
+        self.assertEqual(session.student_action_sequence, [])
+        self.assertEqual(session.student_action_correctness, [])
+        for number in range(1, 13):
+            status, _ = self._post(f"/api/practice/session/{session_id}/action", {
+                "actionNumber": number, "isCorrect": True,
+            })
+            self.assertEqual(status, 200)
+        status, submitted = self._post(f"/api/practice/session/{session_id}/submit", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(submitted["totalScore"], 100.0)
+
+    def test_power_on_self_test_exam_requires_exactly_twelve_actions(self):
+        for action_count in (0, 5, 11, 13):
+            with self.subTest(action_count=action_count):
+                status, created = self._post("/api/practice/session", {
+                    "practiceType": "powerOnSelfTestExam", "studentid": "student-1", "jobid": "job-1",
+                })
+                self.assertEqual(status, 200)
+                session_id = created["practiceSessionId"]
+                for number in range(1, action_count + 1):
+                    status, _ = self._post(f"/api/practice/session/{session_id}/action", {
+                        "actionNumber": number, "isCorrect": True,
+                    })
+                    self.assertEqual(status, 200)
+                status, rejected = self._post(f"/api/practice/session/{session_id}/submit", {})
+                self.assertEqual(status, 400)
+                self.assertEqual(rejected["field"], "actionNumber")
+                self.assertIn("exactly 12 actions", rejected["message"])
+                self.assertIn(session_id, SimulationBackendHandler.practice_sessions)
+
+    def test_power_on_self_test_exam_action_limit_does_not_record_rejected_step(self):
+        status, created = self._post("/api/practice/session", {
+            "practiceType": "powerOnSelfTestExam", "studentid": "student-1", "jobid": "job-1",
+            "resourceLimits": {"maxActions": 1},
+        })
+        self.assertEqual(status, 200)
+        session_id = created["practiceSessionId"]
+        status, _ = self._post(f"/api/practice/session/{session_id}/action", {
+            "actionNumber": 1, "isCorrect": True,
+        })
+        self.assertEqual(status, 200)
+        status, rejected = self._post(f"/api/practice/session/{session_id}/action", {
+            "actionNumber": 2, "isCorrect": False,
+        })
+        self.assertEqual(status, 400)
+        self.assertEqual(rejected["field"], "resourceLimits.maxActions")
+        session = SimulationBackendHandler.practice_sessions[session_id]
+        self.assertEqual(session.student_action_sequence, [1])
+        self.assertEqual(session.student_action_correctness, [True])
+
     def test_sequence_practice_deducts_by_action_position_and_returns_ids(self):
-        for practice_type in ("inspection2", "inspection4"):
+        for practice_type, action_count, expected_score in (
+            ("inspection2", 17, 88.24), ("inspection4", 33, 93.94),
+        ):
             with self.subTest(practice_type=practice_type):
                 status, created = self._post(
                     "/api/practice/session",
@@ -282,7 +437,9 @@ class SimulationBackendServerTests(unittest.TestCase):
                 )
                 self.assertEqual(status, 200)
 
-                for action_number in (1, 3, 2, 4, 5):
+                action_numbers = list(range(1, action_count + 1))
+                action_numbers[1:3] = [3, 2]
+                for action_number in action_numbers:
                     status, result = self._post(
                         f"/api/practice/session/{created['practiceSessionId']}/action",
                         {"actionNumber": action_number},
@@ -298,29 +455,32 @@ class SimulationBackendServerTests(unittest.TestCase):
                 self.assertEqual(submitted, {
                     "studentId": "student-1",
                     "jobId": "job-1",
-                    "totalScore": 60.0,
+                    "totalScore": expected_score,
                     "resultDelivery": {"status": "skipped", "reason": "callback-not-configured"},
                 })
 
     def test_sequence_practice_requires_the_fixed_action_count_before_submit(self):
-        status, created = self._post(
-            "/api/practice/session",
-            {"practiceType": "inspection4", "studentid": "student-1", "jobid": "job-1"},
-        )
-        self.assertEqual(status, 200)
-        for action_number in (1, 2, 3, 4):
-            status, result = self._post(
-                f"/api/practice/session/{created['practiceSessionId']}/action",
-                {"actionNumber": action_number},
-            )
-            self.assertEqual(status, 200)
+        for practice_type, expected_count in (("inspection2", 17), ("inspection4", 33)):
+            for action_count in (0, 5, expected_count - 1, expected_count + 1):
+                with self.subTest(practice_type=practice_type, action_count=action_count):
+                    status, created = self._post(
+                        "/api/practice/session",
+                        {"practiceType": practice_type, "studentid": "student-1", "jobid": "job-1"},
+                    )
+                    self.assertEqual(status, 200)
+                    session_id = created["practiceSessionId"]
+                    for action_number in range(1, action_count + 1):
+                        status, _ = self._post(
+                            f"/api/practice/session/{session_id}/action",
+                            {"actionNumber": action_number},
+                        )
+                        self.assertEqual(status, 200)
 
-        status, rejected = self._post(
-            f"/api/practice/session/{created['practiceSessionId']}/submit",
-            {},
-        )
-        self.assertEqual(status, 400)
-        self.assertEqual(rejected["field"], "actionNumber")
+                    status, rejected = self._post(f"/api/practice/session/{session_id}/submit", {})
+                    self.assertEqual(status, 400)
+                    self.assertEqual(rejected["field"], "actionNumber")
+                    self.assertIn(f"exactly {expected_count} actions", rejected["message"])
+                    self.assertIn(session_id, SimulationBackendHandler.practice_sessions)
 
     def test_sequence_practice_rejects_invalid_type_and_action_number(self):
         status, rejected = self._post(
@@ -986,9 +1146,8 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["sourceDeviceId"], "passthrough")
         self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["sourcePort"], "socket03")
         self.assertEqual(updated["simulationResult"]["physicalMeasurements"][0]["samples"], [
-            {"time": 0.0, "actual": 1.0},
-            {"time": 0.1, "actual": 1.0},
-            {"time": 0.2, "actual": 1.0},
+            {"time": 0.0, "actual": 1.0, "constantRangeBoundary": "start"},
+            {"time": 0.2, "actual": 1.0, "constantRangeBoundary": "end"},
         ])
         self.assertIn("virtualMeasurements", updated["simulationResult"])
         self.assertEqual(updated["simulationResult"]["virtualMeasurements"][0]["sourcePort"], "socket03")
@@ -1151,7 +1310,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(updated["simulationResult"]["status"], "completed")
         self.assertEqual(
             [sample["actual"] for sample in updated["simulationResult"]["physicalMeasurements"][0]["samples"]],
-            [2.5, 2.5, 2.5],
+            [2.5, 2.5],
         )
         self.assertEqual(
             session.latest_simulation_result["curves"]["channels"]["scope-1.ch1.reference"],
@@ -2379,7 +2538,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(
             [sample["actual"] for sample in adjusted["simulationResult"]["physicalMeasurements"][0]["samples"]],
-            [1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0],
         )
 
         status, measured = self._post(
@@ -2395,7 +2554,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(
             [sample["actual"] for sample in measured["simulationResult"]["physicalMeasurements"][0]["samples"]],
-            [1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0],
         )
 
     def test_replacements_without_faults_rerun_the_full_model_from_zero(self):
@@ -2425,7 +2584,7 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertNotIn("appliedAction", component_result)
         self.assertEqual(
             [sample["time"] for sample in component_result["simulationResult"]["physicalMeasurements"][0]["samples"]],
-            [0.0, 0.1, 0.2],
+            [0.0, 0.2],
         )
         self.assertTrue(component_result["simulationResult"]["summary"]["done"])
 
@@ -2449,9 +2608,88 @@ class SimulationBackendServerTests(unittest.TestCase):
         self.assertEqual(wire_result["normalizedAction"]["targetId"], "edge-source-sim")
         self.assertEqual(
             [sample["time"] for sample in wire_result["simulationResult"]["physicalMeasurements"][0]["samples"]],
-            [0.0, 0.1, 0.2],
+            [0.0, 0.2],
         )
         self.assertTrue(wire_result["simulationResult"]["summary"]["done"])
+
+    def test_both_replacements_refresh_display_console_channels_in_initial_format(self):
+        package = valid_package()
+        vector_port = {"dataType": "vector", "vectorLength": 4}
+        package["nodes"][1]["pythonBinding"]["moduleId"] = "scalar_to_vector4"
+        package["nodes"][1]["outputs"][0].update(vector_port)
+        package["nodes"][2] = {
+            "id": "console", "type": "display_console",
+            "inputs": [
+                {"id": "console-input", "name": "signal", **vector_port},
+                {"id": "console-input-2", "name": "signal", **vector_port},
+            ],
+        }
+        package["edges"][1]["targetNodeId"] = "console"
+        package["nodes"].append({
+            "id": "second-source", "type": "signal_source", "parameters": {"value": [5, 6, 7, 8]},
+            "outputs": [{"id": "out", "name": "out", **vector_port}],
+        })
+        package["edges"].append({
+            "id": "second-console-wire", "sourceNodeId": "second-source", "sourcePortIndex": 0,
+            "targetNodeId": "console", "targetPortIndex": 1,
+        })
+        package["measurementPoints"] = []
+        package["faultInstances"] = [
+            {"faultId": "target-fault", "faultType": "sensor_bias", "targetId": "sim-1",
+             "enabled": True, "startTime": 0, "duration": 0.3, "parameters": {"bias": 4}},
+            {"faultId": "fault-wire", "faultType": "signal_attenuation", "targetId": "edge-sim-scope",
+             "enabled": True, "startTime": 0, "duration": 0.3, "parameters": {"scale": 0.5}},
+        ]
+        channel = {
+            "label": "Second element", "unit": "V", "dataType": "float", "displayScale": 1,
+            "portId": "console-input", "portIndex": 0, "inputIndex": 1,
+            "connected": True, "sourceDeviceId": "sim-1", "sourcePort": "socket03",
+        }
+        device = {
+            "id": "console", "type": "display_console", "displayName": "Console",
+            "channels": {
+                "signal.second": channel,
+                "other.second": {**channel, "portId": "console-input-2", "portIndex": 1,
+                                 "sourceDeviceId": "second-source", "sourcePort": "out"},
+                "unconnected": {**channel, "connected": False, "sourceDeviceId": None, "sourcePort": None},
+            },
+            "controlState": {"targetComponentId": None, "parameters": [], "targets": []},
+        }
+        actions = [
+            ({"operationId": "repair-component", "actionType": "replaceComponent",
+              "target": {"type": "component", "id": "scalar_to_vector4"}}, 0.5),
+            ({"operationId": "repair-wire", "actionType": "replaceWire",
+              "sourceDeviceId": "scalar_to_vector4", "sourcePort": "socket03",
+              "targetDeviceId": "console", "targetPort": "console-input"}, 1.0),
+        ]
+        for creation_fields in (
+            {"simulationPackage": {**package, "displayConsoleDevices": [device]}},
+            {"simulationPackage": package, "renderData": {"devices": [device]}},
+        ):
+            status, created = self._post("/api/practice/session", {
+                **creation_fields, "dMatrix": sample_d_matrix(), "targetFaultId": "target-fault",
+            })
+            self.assertEqual(status, 200, created)
+            session_id = created["practiceSessionId"]
+            for action, value in actions:
+                with self.subTest(action=action["actionType"], legacy="renderData" in creation_fields):
+                    status, response = self._post(f"/api/practice/session/{session_id}/action", action)
+                    self.assertEqual(status, 200, response)
+                    self.assertIn("physicalMeasurements", response["simulationResult"])
+                    self.assertEqual(response["renderData"], {"devices": [{
+                        **device,
+                        "channels": {
+                            "signal.second": {**channel, "series": [
+                                {"t": 0.0, "value": value, "constantRangeBoundary": "start"},
+                                {"t": 0.2, "value": value, "constantRangeBoundary": "end"},
+                            ]},
+                            "other.second": {**device["channels"]["other.second"], "series": [
+                                {"t": 0.0, "value": 6, "constantRangeBoundary": "start"},
+                                {"t": 0.2, "value": 6, "constantRangeBoundary": "end"},
+                            ]},
+                            "unconnected": {**device["channels"]["unconnected"], "series": []},
+                        },
+                    }]})
 
     def test_replace_wire_uses_four_endpoint_binding_for_all_private_edges(self):
         package = valid_package()
@@ -2545,6 +2783,84 @@ class SimulationBackendServerTests(unittest.TestCase):
             result["normalizedAction"]["targetIds"],
             ["edge-source-sim", "edge-sim-scope"],
         )
+
+    def test_rf_practice_repairs_return_complex_envelope_measurement_values(self):
+        package = {
+            "schemaVersion": 1,
+            "packageId": "rf-practice-measurement",
+            "simulationConfig": {"duration": 3e-6, "stepSize": 1e-6},
+            "nodes": [
+                {
+                    "id": "rf-source", "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "rf_complex_envelope_scalar_source", "entryFunction": "process"},
+                    "parameters": {"center_frequency_hz": 20e9},
+                    "outputs": [{"id": "output-0", "name": "output_envelope", "dataType": "rf_complex_envelope"}],
+                },
+                {
+                    "id": "rf-vector", "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "rf_complex_envelope_to_vector4", "entryFunction": "process"},
+                    "inputs": [{"id": "input-0", "name": "input_envelope", "dataType": "rf_complex_envelope"}],
+                    "outputs": [{"id": "output-0", "name": "envelope_vector", "dataType": "rf_complex_envelope", "vectorLength": 4}],
+                },
+                {
+                    "id": "rf-receiver", "type": "simulation_block",
+                    "pythonBinding": {"moduleId": "rf_complex_envelope_vector4_dual_output_receiver", "entryFunction": "process"},
+                    "inputs": [{"id": "input-0", "name": "input_envelope_vector", "dataType": "rf_complex_envelope", "vectorLength": 4}],
+                    "outputs": [{"id": "output-0", "name": "output_envelope_vector_1", "dataType": "rf_complex_envelope", "vectorLength": 4}],
+                },
+            ],
+            "edges": [
+                {"id": "edge-rf", "sourceNodeId": "rf-source", "sourcePortIndex": 0,
+                 "targetNodeId": "rf-vector", "targetPortIndex": 0},
+                {"id": "edge-rf-vector", "sourceNodeId": "rf-vector", "sourcePortIndex": 0,
+                 "targetNodeId": "rf-receiver", "targetPortIndex": 0},
+            ],
+            "faultInstances": [],
+            "measurementPoints": [],
+            "reportedNodeIds": [],
+        }
+        matrix = sample_d_matrix()
+        matrix["points"][0].update({"edgeId": "edge-rf", "pointType": "physical"})
+        matrix["points"][1].update({"edgeId": "edge-rf-vector", "pointType": "virtual", "vectorIndex": 2})
+        matrix["points"][2].update({
+            "edgeId": "public-rf-wire", "pointType": "physical",
+            "sourceDeviceId": "external-rf-source", "sourcePort": "output-0",
+            "targetDeviceId": "rf-subsystem", "targetPort": "input-0",
+        })
+        status, created = self._post("/api/practice/session", {
+            "simulationPackage": package,
+            "dMatrix": matrix,
+            "targetFaultId": "target-fault",
+            "connectionBindings": [{
+                "sourceDeviceId": "external-rf-source", "sourcePort": "output-0",
+                "targetDeviceId": "rf-subsystem", "targetPort": "input-0",
+                "backingEdgeIds": ["edge-rf"],
+            }],
+        })
+        self.assertEqual(status, 200)
+        session_id = created["practiceSessionId"]
+
+        actions = [
+            {"operationId": "replace-rf-component", "actionType": "replaceComponent",
+             "target": {"type": "component", "id": "rf_complex_envelope_scalar_source"}},
+            {"operationId": "replace-rf-wire", "actionType": "replaceWire",
+             "sourceDeviceId": "rf_complex_envelope_scalar_source", "sourcePort": "output-0",
+             "targetDeviceId": "rf_complex_envelope_to_vector4", "targetPort": "input-0"},
+        ]
+        for action in actions:
+            with self.subTest(action=action["actionType"]):
+                status, response = self._post(f"/api/practice/session/{session_id}/action", action)
+                self.assertEqual(status, 200, response)
+                measurement = response["simulationResult"]["physicalMeasurements"][0]
+                actual = measurement["samples"][0]["actual"]
+                self.assertIsInstance(actual, dict)
+                self.assertGreater(actual["i"], 0)
+                self.assertEqual(actual["q"], 0)
+                self.assertEqual(actual["referenceFrequencyHz"], 20e9)
+                vector_actual = response["simulationResult"]["virtualMeasurements"][0]["samples"][0]["actual"]
+                self.assertEqual(vector_actual, actual)
+                public_wire_actual = response["simulationResult"]["physicalMeasurements"][1]["samples"][0]["actual"]
+                self.assertEqual(public_wire_actual, actual)
 
     def test_submit_returns_complete_practice_evaluation_report(self):
         package = valid_package()
@@ -2692,10 +3008,11 @@ class SimulationBackendServerTests(unittest.TestCase):
             self.assertEqual(status, 200)
             status, submitted = self._post(
                 f"/api/practice/session/{created['practiceSessionId']}/submit",
-                {"finalTargetIds": ["sim-1"]},
+                {"finalTargetIds": ["sim-1", "extra-1", "extra-2", "extra-3", "extra-4", "extra-5", "extra-6"]},
             )
 
         self.assertEqual(status, 200)
+        self.assertEqual(submitted["evaluationReport"]["totalScore"], 24.29)
         self.assertNotIn("runId", submitted)
         self.assertNotIn("metrics", submitted)
         self.assertEqual(submitted["resultDelivery"], {

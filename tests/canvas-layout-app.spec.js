@@ -966,7 +966,7 @@ describe('canvas layout cleanup', () => {
     wrapper.unmount();
   });
 
-  it('lets dragged nodes reach the visible top of the canvas stage', async () => {
+  it('lets dragged nodes continue past the original top and left edges', async () => {
     const wrapper = mount(App, { attachTo: document.body });
     await flushRuntime();
 
@@ -980,11 +980,18 @@ describe('canvas layout cleanup', () => {
     expect(node.y).toBeGreaterThan(24);
 
     dispatchPointer(nodeEl, 'pointerdown', { pointerId: 41, clientX: 420, clientY: 260 });
-    dispatchPointer(viewport, 'pointermove', { pointerId: 41, clientX: 420, clientY: -260 });
-    dispatchPointer(viewport, 'pointerup', { pointerId: 41, clientX: 420, clientY: -260 });
+    dispatchPointer(viewport, 'pointermove', { pointerId: 41, clientX: -180, clientY: -260 });
+    dispatchPointer(viewport, 'pointerup', { pointerId: 41, clientX: -180, clientY: -260 });
     await flushRuntime();
 
-    expect(node.y).toBe(24);
+    expect(node.x).toBeLessThan(0);
+    expect(node.y).toBeLessThan(0);
+    const stage = document.getElementById('canvas-stage');
+    const [minX, minY] = document.getElementById('edge-layer').getAttribute('viewBox').split(' ').map(Number);
+    expect(minX).toBeLessThan(node.x);
+    expect(minY).toBeLessThan(node.y);
+    expect(stage.style.getPropertyValue('--canvas-content-shift-x')).toBe(`${-minX}px`);
+    expect(stage.style.getPropertyValue('--canvas-content-shift-y')).toBe(`${-minY}px`);
 
     wrapper.unmount();
   });
@@ -1043,9 +1050,10 @@ describe('canvas layout cleanup', () => {
     const stage = document.getElementById('canvas-stage');
     expect(stage.style.transform).toBe('none');
     expect(Number(stage.style.zoom)).toBeCloseTo(window.__GZ_STATE__.canvasScale);
-    expect(Number.parseFloat(stage.style.left) * window.__GZ_STATE__.canvasScale)
+    const [minX, minY] = document.getElementById('edge-layer').getAttribute('viewBox').split(' ').map(Number);
+    expect((Number.parseFloat(stage.style.left) - minX) * window.__GZ_STATE__.canvasScale)
       .toBeCloseTo(window.__GZ_STATE__.canvasOffsetX);
-    expect(Number.parseFloat(stage.style.top) * window.__GZ_STATE__.canvasScale)
+    expect((Number.parseFloat(stage.style.top) - minY) * window.__GZ_STATE__.canvasScale)
       .toBeCloseTo(window.__GZ_STATE__.canvasOffsetY);
     wrapper.unmount();
   });
@@ -1098,6 +1106,55 @@ describe('canvas layout cleanup', () => {
     expect(Number.parseInt(stage.style.width, 10)).toBeGreaterThan(2400);
     expect(Number.parseInt(stage.style.height, 10)).toBeGreaterThan(1500);
     expect(document.getElementById('edge-layer')?.getAttribute('viewBox')).toBe(`0 0 ${stage.style.width.replace('px', '')} ${stage.style.height.replace('px', '')}`);
+
+    wrapper.unmount();
+  });
+
+  it('keeps extending the workspace while panning left and up', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+    const viewport = document.getElementById('canvas-viewport');
+    const stage = document.getElementById('canvas-stage');
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 900 },
+      clientHeight: { configurable: true, value: 640 }
+    });
+
+    dispatchPointer(viewport, 'pointerdown', { pointerId: 44, clientX: 200, clientY: 200 });
+    dispatchPointer(viewport, 'pointermove', { pointerId: 44, clientX: 2100, clientY: 1700 });
+    dispatchPointer(viewport, 'pointerup', { pointerId: 44, clientX: 2100, clientY: 1700 });
+    await flushRuntime();
+
+    const [minX, minY, width, height] = document.getElementById('edge-layer').getAttribute('viewBox').split(' ').map(Number);
+    expect(minX).toBeLessThan(0);
+    expect(minY).toBeLessThan(0);
+    expect(width).toBeGreaterThan(2400);
+    expect(height).toBeGreaterThan(1500);
+    expect(window.__GZ_STATE__.canvasOffsetX).toBeGreaterThan(900);
+    expect(window.__GZ_STATE__.canvasOffsetY).toBeGreaterThan(640);
+    expect(stage.style.width).toBe(`${width}px`);
+    expect(stage.style.height).toBe(`${height}px`);
+
+    wrapper.unmount();
+  });
+
+  it('restores nodes placed in negative canvas coordinates', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+    const node = window.createNode('flow_block', -700, -500);
+    const original = { x: node.x, y: node.y };
+    expect(original.x).toBeLessThan(0);
+    expect(original.y).toBeLessThan(0);
+
+    window.dispatchEvent(new Event('pagehide'));
+    openDefaultBlankWorkspace();
+    expect(restoreStoredWorkbench()).toBe(true);
+    expect(window.__GZ_STATE__.modelNodes.find((item) => item.id === node.id)).toMatchObject(original);
+    const [minX, minY] = document.getElementById('edge-layer').getAttribute('viewBox').split(' ').map(Number);
+    expect(minX).toBeLessThan(original.x);
+    expect(minY).toBeLessThan(original.y);
 
     wrapper.unmount();
   });
@@ -1833,6 +1890,57 @@ describe('canvas layout cleanup', () => {
     expect(document.querySelector('[data-d-matrix-view]')).not.toBeNull();
 
     window.buildDetectionMatrixModel = originalBuilder;
+    wrapper.unmount();
+  });
+
+  it('shows the current canvas name for a protocol fault with a saved edge ID as its binding', async () => {
+    const wrapper = mount(App, { attachTo: document.body });
+    await flushRuntime();
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 220, 220);
+    const target = window.createNode('simulation_block', 460, 220);
+    source.props.name = 'CAN 发送端';
+    target.props.name = 'CAN 接收端';
+    const state = window.__GZ_STATE__;
+    const edgeId = 'edge-173';
+    state.modelEdges.push({
+      id: edgeId,
+      label: edgeId,
+      lineType: 'can',
+      sourceNodeId: source.id,
+      targetNodeId: target.id,
+      sourcePortIndex: 0,
+      targetPortIndex: 0,
+      sourcePort: { displayName: '输出' },
+      targetPort: { displayName: '输入' },
+      injectedFault: { id: 'can-loss', name: 'CAN 丢包故障', layer: 'protocol', bindingObject: edgeId }
+    });
+    state.manualDiagnosticTestPoints = [{
+      pointId: 'tp-can-loss', name: 'CAN 接收测点', edgeId, detects: ['can-loss']
+    }];
+    state.installedDiagnosticTestPointIds = ['tp-can-loss'];
+    window.renderEdges();
+
+    async function expectProtocolFaultAt(name) {
+      window.openFaultLocalization();
+      await flushRuntime();
+      const view = document.querySelector('[data-fault-localization-view]');
+      view.querySelector('[data-fault-localization-state="tp-can-loss"][value="abnormal"]').click();
+      await flushRuntime();
+      view.querySelector('[data-run-fault-localization]').click();
+      await flushRuntime();
+      const candidate = view.querySelector('[data-fault-localization-candidate="can-loss"]');
+      expect(candidate.querySelector('strong').textContent).toBe('CAN 丢包故障');
+      expect(candidate.querySelector('small').textContent).toBe(name);
+      view.querySelector('[data-fault-localization-close]').click();
+      await flushRuntime();
+    }
+
+    await expectProtocolFaultAt('CAN 发送端·输出 → CAN 接收端·输入');
+    window.selectEdge(edgeId);
+    document.getElementById('prop-edge-label').value = '姿态速率 CAN 链路';
+    window.savePropertyPanelTarget();
+    await expectProtocolFaultAt('姿态速率 CAN 链路');
     wrapper.unmount();
   });
 

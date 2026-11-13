@@ -1,7 +1,9 @@
 import copy
+import math
 import threading
 import time
 from datetime import datetime, timezone
+from dataclasses import replace
 from itertools import combinations
 
 from backend.diagnostic_knowledge import (
@@ -20,6 +22,7 @@ from backend.practice_scoring import (
     evaluate_path_quality,
     evaluate_practice_submission_score,
     grade_for_score,
+    round_practice_total_score,
 )
 from backend.practice_report import build_practice_evaluation_report
 from backend.schemas import SimulationBackendError
@@ -36,20 +39,26 @@ PRACTICE_TYPE_INSPECTION_1 = "inspection1"
 PRACTICE_TYPE_INSPECTION_2 = "inspection2"
 PRACTICE_TYPE_INSPECTION_3 = "inspection3"
 PRACTICE_TYPE_INSPECTION_4 = "inspection4"
+PRACTICE_TYPE_POWER_ON_SELF_TEST_TRAINING = "powerOnSelfTestTraining"
+PRACTICE_TYPE_POWER_ON_SELF_TEST_EXAM = "powerOnSelfTestExam"
 SUPPORTED_PRACTICE_TYPES = {
     PRACTICE_TYPE_TROUBLESHOOTING,
     PRACTICE_TYPE_INSPECTION_1,
     PRACTICE_TYPE_INSPECTION_2,
     PRACTICE_TYPE_INSPECTION_3,
     PRACTICE_TYPE_INSPECTION_4,
+    PRACTICE_TYPE_POWER_ON_SELF_TEST_TRAINING,
+    PRACTICE_TYPE_POWER_ON_SELF_TEST_EXAM,
 }
 INTERNAL_OPTIMAL_ACTION_SEQUENCES = {
-    PRACTICE_TYPE_INSPECTION_2: (1, 2, 3, 4, 5),
-    PRACTICE_TYPE_INSPECTION_4: (1, 2, 3, 4, 5),
+    PRACTICE_TYPE_INSPECTION_2: tuple(range(1, 18)),
+    PRACTICE_TYPE_INSPECTION_4: tuple(range(1, 34)),
+    PRACTICE_TYPE_POWER_ON_SELF_TEST_EXAM: tuple(range(1, 13)),
 }
 FIXED_SCORE_PRACTICE_TYPES = {
     PRACTICE_TYPE_INSPECTION_1,
     PRACTICE_TYPE_INSPECTION_3,
+    PRACTICE_TYPE_POWER_ON_SELF_TEST_TRAINING,
 }
 
 
@@ -63,6 +72,44 @@ def _clone(value):
 
 def _arr(value):
     return value if isinstance(value, list) else []
+
+
+def _public_signal_value(value):
+    """Use the same scalar, vector and I/Q envelope values as the task export."""
+    if isinstance(value, list):
+        return [_public_signal_value(item) for item in value]
+    if isinstance(value, dict):
+        i = value.get("i", value.get("re"))
+        q = value.get("q", value.get("im"))
+        frequency = value.get("referenceFrequencyHz")
+        if all(isinstance(item, (int, float)) and not isinstance(item, bool) and math.isfinite(item)
+               for item in (i, q, frequency)):
+            return {"i": i, "q": q, "referenceFrequencyHz": frequency}
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+        return value
+    return None
+
+
+def _compact_measurement_samples(samples, value_key="actual"):
+    if len(samples) < 3:
+        return samples
+    compact = []
+
+    def append_run(start, end):
+        if start == end:
+            compact.append({**samples[start], "constantRangeBoundary": "single"})
+        else:
+            compact.append({**samples[start], "constantRangeBoundary": "start"})
+            compact.append({**samples[end], "constantRangeBoundary": "end"})
+
+    run_start = 0
+    for index in range(1, len(samples)):
+        if samples[index][value_key] != samples[index - 1][value_key]:
+            append_run(run_start, index - 1)
+            run_start = index
+    append_run(run_start, len(samples) - 1)
+    return compact
 
 
 def _text(value, fallback=""):
@@ -150,13 +197,13 @@ def normalize_practice_type(value):
         raise SimulationBackendError(
             "INVALID_SCHEMA",
             "practiceType",
-            "practiceType must be troubleshooting, inspection1, inspection2, inspection3, or inspection4",
+            "practiceType must be one of: " + ", ".join(sorted(SUPPORTED_PRACTICE_TYPES)),
         )
     return practice_type
 
 
 class SequencePracticeSession:
-    """Lightweight practice session for the four inspection task types."""
+    """Lightweight practice session for inspection and power-on self-test tasks."""
 
     is_sequence_practice = True
 
@@ -177,9 +224,10 @@ class SequencePracticeSession:
             raise SimulationBackendError(
                 "INVALID_SCHEMA",
                 "practiceType",
-                "sequence practice requires inspection1, inspection2, inspection3, or inspection4",
+                "sequence practice requires an inspection or power-on self-test practiceType",
             )
         self.student_action_sequence = []
+        self.student_action_correctness = []
         self.studentid = _text(studentid)
         self.jobid = _text(jobid)
         self.lock = threading.RLock()
@@ -257,6 +305,13 @@ class SequencePracticeSession:
                 "actionNumber",
                 "actionNumber must be a positive integer",
             )
+        is_correct = action.get("isCorrect")
+        if self.practice_type == PRACTICE_TYPE_POWER_ON_SELF_TEST_EXAM and not isinstance(is_correct, bool):
+            raise SimulationBackendError(
+                "INVALID_SCHEMA",
+                "isCorrect",
+                "isCorrect must be a boolean for powerOnSelfTestExam",
+            )
         if len(self.student_action_sequence) >= self.max_actions:
             raise SimulationBackendError(
                 "SIMULATION_LIMIT_EXCEEDED",
@@ -264,6 +319,8 @@ class SequencePracticeSession:
                 "practice action count is outside the allowed range",
             )
         self.student_action_sequence.append(action_number)
+        if self.practice_type == PRACTICE_TYPE_POWER_ON_SELF_TEST_EXAM:
+            self.student_action_correctness.append(is_correct)
         self.last_activity_at = time.time()
         return {"status": "success"}
 
@@ -280,11 +337,22 @@ class SequencePracticeSession:
             raise SimulationBackendError(
                 "INVALID_SCHEMA",
                 "actionNumber",
-                f"inspection practice requires exactly {len(expected)} actions before submission",
+                f"{self.practice_type} requires exactly {len(expected)} actions before submission",
             )
-        mismatch_count = sum(1 for expected_number, actual_number in zip(expected, actual) if expected_number != actual_number)
-        deduction_per_step = 100.0 / len(expected)
-        total_score = _round_score(max(0.0, 100.0 - (mismatch_count * deduction_per_step)))
+        if self.practice_type == PRACTICE_TYPE_POWER_ON_SELF_TEST_EXAM:
+            # Order is a prerequisite: correctness earns the remaining half only
+            # when this action matches the expected step at its submitted position.
+            earned_half_steps = sum(
+                1 + int(is_correct)
+                for expected_number, actual_number, is_correct in zip(
+                    expected, actual, self.student_action_correctness
+                )
+                if expected_number == actual_number
+            )
+            total_score = round_practice_total_score(100 * earned_half_steps / (2 * len(expected)))
+        else:
+            correct_count = sum(expected_number == actual_number for expected_number, actual_number in zip(expected, actual))
+            total_score = round_practice_total_score(100 * correct_count / len(expected))
         self.submitted_at = time.time()
         self.close("submitted", now=self.submitted_at)
         return {"studentId": self.studentid, "jobId": self.jobid, "totalScore": total_score}
@@ -339,12 +407,20 @@ class PracticeSession:
         default_max_actions=200,
         studentid="",
         jobid="",
+        display_console_devices=None,
     ):
         self.practice_session_id = practice_session_id
         self.simulation_session_id = simulation_session_id
         self.simulation_session = simulation_session
         self.model_graph = _clone(model_graph) if isinstance(model_graph, dict) else {}
         self.connection_bindings = _normalize_connection_bindings(connection_bindings)
+        self.display_console_devices = [
+            device for device in (
+                _arr(self.model_graph.get("displayConsoleDevices")) or _arr(display_console_devices)
+            )
+            if isinstance(device, dict) and device.get("type") == "display_console"
+            and isinstance(device.get("id"), str) and device["id"]
+        ]
         self.studentid = _text(studentid)
         self.jobid = _text(jobid)
         # Practice actions and direct simulation steps touch the same runtime.
@@ -366,6 +442,7 @@ class PracticeSession:
             normalized_target_fault_ids[0] if normalized_target_fault_ids else ""
         )
         self.troubleshooting = TroubleshootingSession(d_matrix, primary_target_fault_id)
+        self._record_measurement_source_nodes()
         matrix_fault_ids = {
             _fault_id(row)
             for row in _arr(self.troubleshooting.d_matrix.get("rows"))
@@ -513,6 +590,30 @@ class PracticeSession:
         channel = _text(point.get("channel"), edge_id)
         edge = next((item for item in graph.edges if item.id == edge_id), None)
 
+        if edge is None:
+            endpoints = (
+                _text(point.get("sourceDeviceId")),
+                _text(point.get("sourcePort")),
+                _text(point.get("targetDeviceId")),
+                _text(point.get("targetPort")),
+            )
+            if all(endpoints):
+                public_binding = next(
+                    (
+                        item for item in self.connection_bindings
+                        if tuple(item[key] for key in (
+                            "sourceDeviceId", "sourcePort", "targetDeviceId", "targetPort"
+                        )) == endpoints
+                    ),
+                    None,
+                )
+                if public_binding is not None:
+                    edges_by_id = {item.id: item for item in graph.edges}
+                    edge = next(
+                        (edges_by_id[edge_id] for edge_id in public_binding["backingEdgeIds"] if edge_id in edges_by_id),
+                        None,
+                    )
+
         if edge is None and channel:
             binding = next((item for item in graph.measurements if item.id == channel), None)
             if binding is not None:
@@ -539,6 +640,15 @@ class PracticeSession:
             "",
         )
         if not source_node_id:
+            for candidate in source_candidates:
+                matches = [
+                    node_id for node_id, node in graph.nodes.items()
+                    if candidate and _component_module_id(node) == candidate
+                ]
+                if len(matches) == 1:
+                    source_node_id = matches[0]
+                    break
+        if not source_node_id:
             source_node_id = _text(edge.source_node_id) if edge is not None else ""
         if not source_node_id:
             source_node_id = next((candidate for candidate in source_candidates if candidate), "")
@@ -551,6 +661,28 @@ class PracticeSession:
             else:
                 source_port = "output" if edge.source_port_index == 0 else f"output-{edge.source_port_index + 1}"
         return source_node_id, source_device_id, source_port, channel, edge
+
+    def _record_measurement_source_nodes(self):
+        """Record the sources used by the public measurement and console results."""
+        graph = self.simulation_session.graph
+        source_ids = set()
+        for point in _arr((self.troubleshooting.d_matrix or {}).get("points")):
+            source_node_id, *_ = self._measurement_source_for_point(point)
+            if source_node_id in graph.nodes:
+                source_ids.add(source_node_id)
+        for device in self.display_console_devices:
+            channels = device.get("channels")
+            if isinstance(channels, dict):
+                source_ids.update(
+                    _text(channel.get("sourceDeviceId"))
+                    for channel in channels.values() if isinstance(channel, dict)
+                )
+        source_ids.intersection_update(graph.nodes)
+        if not source_ids.issubset(graph.recorded_node_ids):
+            self.simulation_session.graph = replace(
+                graph,
+                reported_node_ids=graph.reported_node_ids | source_ids,
+            )
 
     def _measurement_endpoint_pairs_by_direction(self, point):
         source_node_id, source_device_id, source_port, channel, edge = self._measurement_source_for_point(point)
@@ -708,18 +840,29 @@ class PracticeSession:
         )
         return module_id if module_count == 1 else node_id
 
-    def _measurement_actual_value(self, simulation_result, sample_index, channel, source_device_id, source_port, edge):
+    def _measurement_actual_value(self, simulation_result, sample_index, channel, source_node_id, source_device_id, source_port, edge, point):
+        def selected_value(raw):
+            value = _public_signal_value(raw)
+            if isinstance(value, list):
+                try:
+                    index = int(point.get("vectorIndex", 0))
+                except (TypeError, ValueError):
+                    index = 0
+                return value[max(0, min(index, len(value) - 1))] if value else None
+            return value
+
         channels = ((simulation_result or {}).get("curves") or {}).get("channels") or {}
         curve_values = channels.get(f"{channel}.actual")
         if isinstance(curve_values, list) and sample_index < len(curve_values):
-            value = curve_values[sample_index]
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
+            value = selected_value(curve_values[sample_index])
+            if value is not None:
                 return value
 
         steps = ((simulation_result or {}).get("componentOutputs") or {}).get("steps") or []
-        if sample_index >= len(steps) or not source_device_id:
+        if sample_index >= len(steps) or not (source_node_id or source_device_id):
             return None
-        outputs = ((steps[sample_index].get("actual") or {}).get(source_device_id) or {})
+        actual_outputs = steps[sample_index].get("actual") or {}
+        outputs = actual_outputs.get(source_node_id) or actual_outputs.get(source_device_id) or {}
         keys = [source_port]
         if edge is not None:
             source_node = self.simulation_session.graph.nodes.get(edge.source_node_id)
@@ -730,11 +873,11 @@ class PracticeSession:
                 f"output-{edge.source_port_index}",
             ])
         for key in keys:
-            value = outputs.get(key)
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
+            value = selected_value(outputs.get(key))
+            if value is not None:
                 return value
         return next(
-            (value for value in outputs.values() if isinstance(value, (int, float)) and not isinstance(value, bool)),
+            (value for raw in outputs.values() if (value := selected_value(raw)) is not None),
             None,
         )
 
@@ -748,11 +891,12 @@ class PracticeSession:
                 {
                     "time": time_value,
                     "actual": self._measurement_actual_value(
-                        simulation_result, index, channel, source_node_id, source_port, edge
+                        simulation_result, index, channel, source_node_id, source_device_id, source_port, edge, point
                     ),
                 }
                 for index, time_value in enumerate(times)
             ]
+            samples = _compact_measurement_samples(samples)
             source_vector_element_name = _text(point.get("sourceVectorElementName"))
             target_vector_element_name = _text(point.get("targetVectorElementName"))
             points_by_type[point_type(self.troubleshooting.d_matrix, point_code)].append({
@@ -791,6 +935,98 @@ class PracticeSession:
                 "values": _clone(self._current_condition_values()),
             },
         }
+
+    def _display_console_channel_series(self, console_id, channel, steps):
+        if not channel.get("connected"):
+            return []
+        port_index = channel.get("portIndex")
+        input_index = channel.get("inputIndex")
+        if any(type(index) is not int or index < 0 for index in (port_index, input_index)):
+            return []
+
+        graph = self.simulation_session.graph
+        console = graph.nodes.get(console_id)
+        console_output = (
+            console.output_names[port_index]
+            if console is not None and console.type == "display_console" and port_index < len(console.input_ports)
+            else None
+        )
+
+        source_id = _text(channel.get("sourceDeviceId"))
+        source = graph.nodes.get(source_id)
+        source_port = _text(channel.get("sourcePort"))
+        source_output = (
+            source.output_names[source.output_port_ids.index(source_port)]
+            if source is not None and source_port in source.output_port_ids
+            else None
+        )
+
+        samples = []
+        for step in steps:
+            outputs = step.get("actual") or {}
+            console_outputs = outputs.get(console_id) or {}
+            if console_output is not None and console_output in console_outputs:
+                vector = console_outputs[console_output]
+            else:
+                vector = (outputs.get(source_id) or {}).get(source_output)
+            value = vector[input_index] if isinstance(vector, list) and input_index < len(vector) else None
+            samples.append({"t": step["time"], "value": self._display_console_series_value(value)})
+        return _compact_measurement_samples(samples, value_key="value")
+
+    @staticmethod
+    def _display_console_series_value(value):
+        if isinstance(value, list):
+            return [PracticeSession._display_console_series_value(item) for item in value]
+        if isinstance(value, (int, float)) and math.isfinite(value):
+            return value
+        return None
+
+    def _build_display_console_render_data(self, simulation_result):
+        steps = _arr((simulation_result.get("componentOutputs") or {}).get("steps"))
+        devices = []
+        for definition in self.display_console_devices:
+            device = {
+                key: _clone(definition[key])
+                for key in ("id", "displayName", "type", "measurementPorts", "controlState")
+                if key in definition
+            }
+            channels = definition.get("channels")
+            device["channels"] = {}
+            for channel_id, channel in (channels.items() if isinstance(channels, dict) else ()):
+                if not isinstance(channel, dict):
+                    continue
+                device["channels"][channel_id] = {
+                    **{key: channel[key] for key in (
+                        "label", "unit", "dataType", "displayScale", "portId", "portIndex",
+                        "inputIndex", "connected", "sourceDeviceId", "sourcePort",
+                    ) if key in channel},
+                    "series": self._display_console_channel_series(device["id"], channel, steps),
+                }
+            control_state = device.get("controlState")
+            if isinstance(control_state, dict):
+                for target in [control_state, *_arr(control_state.get("targets"))]:
+                    if not isinstance(target, dict):
+                        continue
+                    node = self.simulation_session.graph.nodes.get(_text(target.get("targetComponentId")))
+                    if node is None:
+                        continue
+                    for parameter in _arr(target.get("parameters")):
+                        key = _text(parameter.get("key")) if isinstance(parameter, dict) else ""
+                        if key in node.parameters:
+                            value = node.parameters[key]
+                            parameter["value"] = value
+                            parameter["displayValue"] = self._display_console_parameter_value(parameter, value)
+            devices.append(device)
+        return {"devices": devices}
+
+    @staticmethod
+    def _display_console_parameter_value(parameter, value):
+        frequency_factors = {"hz": 1, "khz": 1e3, "mhz": 1e6, "ghz": 1e9}
+        base = frequency_factors.get(_text(parameter.get("unit")).lower())
+        display = frequency_factors.get(_text(parameter.get("displayUnit")).lower())
+        if base and display and isinstance(value, (int, float)):
+            return value * base / display
+        return value
 
     def _component_display_name(self, component_id):
         component_id = _text(component_id)
@@ -2425,6 +2661,8 @@ class PracticeSession:
                     else {}
                 ),
             }
+            if action_record.get("actionType") in {"replaceComponent", "replaceWire"}:
+                result["renderData"] = self._build_display_console_render_data(simulation_result)
             if resolved_component_node_id:
                 result["normalizedAction"]["resolvedTarget"] = {
                     "type": "component",

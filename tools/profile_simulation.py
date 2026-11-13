@@ -1,7 +1,7 @@
 """Profile one executable simulation package without changing runtime behavior.
 
 Usage: python tools/profile_simulation.py package.json --steps 10000 --batch 1000
-The package must be the JSON produced by buildBackendExecutablePackage.
+The input may be an executable model or an exported 3D practice task package.
 """
 
 import argparse
@@ -160,7 +160,7 @@ def _run(package, steps, batch, *, profile):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("package", type=Path, help="Executable package JSON")
+    parser.add_argument("package", type=Path, help="Executable model or exported 3D practice task package JSON")
     parser.add_argument("--steps", type=int, default=10000)
     parser.add_argument("--batch", type=int, default=1000)
     parser.add_argument("--baseline-only", action="store_true", help="skip instrumented rerun")
@@ -169,6 +169,10 @@ def main():
         parser.error("--steps and --batch must be positive")
 
     package = json.loads(args.package.read_text(encoding="utf-8"))
+    if package.get("kind") == "3d-practice-task-package":
+        package = (package.get("privateData") or {}).get("executableModel")
+        if not isinstance(package, dict):
+            parser.error("practice task package has no privateData.executableModel")
     # Warm imported component modules and cached call signatures before timing.
     _run(package, 1, 1, profile=False)
     baseline = _run(package, args.steps, args.batch, profile=False)

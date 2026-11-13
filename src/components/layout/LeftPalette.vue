@@ -1,12 +1,17 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive } from 'vue';
-import { getElectricalMenuSections, getPaletteGroups, getSimulationMenuSections } from '../../services/componentRegistry.js';
+import { ELECTRICAL_MENU_SECTIONS, getPaletteGroups, getPaletteMenuSections, SIMULATION_MENU_SECTIONS } from '../../services/componentRegistry.js';
 import { useAuthoredComponentCatalog } from '../../services/authoredComponentCatalogService.js';
+import { useDiscoveredComponentCatalog } from '../../services/discoveredComponentCatalogService.js';
 
-defineProps({
+const props = defineProps({
   collapsed: {
     type: Boolean,
     default: false
+  },
+  menuConfig: {
+    type: Object,
+    default: () => ({})
   }
 });
 
@@ -14,6 +19,7 @@ const emit = defineEmits(['toggle-collapse']);
 
 const paletteGroups = getPaletteGroups();
 const authoredCatalog = useAuthoredComponentCatalog();
+const discoveredCatalog = useDiscoveredComponentCatalog();
 const groupOpen = reactive(Object.fromEntries(
   paletteGroups.map((group) => [group.id, group.defaultOpen !== false])
 ));
@@ -24,11 +30,24 @@ const paletteMenuSections = computed(() => {
   // 新建组件已注册到全局组件库；这里只借助目录的响应式变化重新读取组件库，
   // 不能再把 authoredCatalog.components 追加一次，否则会在左栏出现两份。
   void authoredCatalog.components.length;
+  void discoveredCatalog.components;
   const groups = getPaletteGroups();
-  const groupComponents = (groupId) => groups.find((group) => group.id === groupId)?.components ?? [];
+  const groupComponents = (groupId) => {
+    const group = groups.find((item) => item.id === groupId);
+    if (group?.componentsVisible === false) return [];
+    return (group?.components ?? []).filter((component) => !group.externalOnly || component.palette?.source === 'external');
+  };
+  const groupSections = (groupId, defaults) => {
+    const configured = props.menuConfig[groupId] ?? [];
+    const configuredIds = new Set(configured.map((section) => section.id));
+    return getPaletteMenuSections(groupComponents(groupId), [
+      ...configured,
+      ...defaults.filter((section) => !configuredIds.has(section.id))
+    ]);
+  };
   return {
-    electrical: getElectricalMenuSections(groupComponents('electrical')),
-    simulation: getSimulationMenuSections(groupComponents('simulation'))
+    electrical: groupSections('electrical', ELECTRICAL_MENU_SECTIONS),
+    simulation: groupSections('simulation', SIMULATION_MENU_SECTIONS)
   };
 });
 
@@ -202,6 +221,16 @@ function handleLineToolClick(component) {
       </button>
     </div>
     <div v-show="!collapsed" class="lscroll">
+      <div
+        v-if="discoveredCatalog.error || discoveredCatalog.errors.length"
+        class="discovered-component-status"
+        data-testid="discovered-component-status"
+      >
+        <p v-if="discoveredCatalog.error" role="status">{{ discoveredCatalog.error }}</p>
+        <p v-for="error in discoveredCatalog.errors" :key="error.fileName" role="status">
+          {{ error.fileName }}：{{ error.message }}
+        </p>
+      </div>
       <template v-for="group in paletteGroups" :key="group.id">
         <div
           class="lgroup-head"
@@ -290,3 +319,8 @@ function handleLineToolClick(component) {
     </div>
   </aside>
 </template>
+
+<style scoped>
+.discovered-component-status { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.discovered-component-status p { margin: 6px 0 0; font-size: 12px; overflow-wrap: anywhere; }
+</style>

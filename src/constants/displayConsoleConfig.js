@@ -1,7 +1,7 @@
-// 显控台字段配置。
-// 直接修改 DISPLAY_CONSOLE_PRESETS 中对应显控台的 inputs / fields /
-// controls / sharedParameters 即可。
-// inputs 的键依次对应向量元素 1–7：centerFrequency、repetitionPeriod、pulseWidth、
+// 显控台内置回退配置。日常部署修改 public/config/display-console.json。
+// 启动时先加载并校验外部 JSON，再导入组件注册表；加载失败时保留本文件的默认值。
+// JSON 可覆盖本文件四个 DISPLAY_CONSOLE_* 数据导出，函数按加载后的数据工作。
+// 默认 inputs 的键依次对应向量元素 1–7：centerFrequency、repetitionPeriod、pulseWidth、
 // amplitude、band、waveform、modulation。每路的 generateMeasurementPoint 独立控制自动测点：
 // true（或省略）= 连线后自动设置；false = 不自动设置。可在各显控台预设中分别修改。
 // 仅修改显示名称时也可使用字符串，例如 centerFrequency: '中心频率（MHz）'。
@@ -17,14 +17,14 @@ export const DISPLAY_CONSOLE_INPUTS = [
   { key: 'modulation', label: '调制方式编码', type: 'float', generateMeasurementPoint: true }
 ];
 
-export const DISPLAY_CONSOLE_VECTOR_PORT_ID = 'console-input';
+export let DISPLAY_CONSOLE_VECTOR_PORT_ID = 'console-input';
 
 export function createDisplayConsoleVectorPort(inputs = DISPLAY_CONSOLE_INPUTS, port = {}) {
   const vectorElementNames = DISPLAY_CONSOLE_INPUTS.map((input, index) =>
     String(inputs[index]?.label || input.label));
   return {
     id: String(port.id || DISPLAY_CONSOLE_VECTOR_PORT_ID),
-    name: String(port.name || '七路参数输入'),
+    name: String(port.name || (DISPLAY_CONSOLE_INPUTS.length === 7 ? '七路参数输入' : `${DISPLAY_CONSOLE_INPUTS.length}路参数输入`)),
     dataType: 'vector',
     vectorLength: DISPLAY_CONSOLE_INPUTS.length,
     vectorElementNames,
@@ -51,8 +51,9 @@ export const DISPLAY_CONSOLE_COLUMNS = [
   { key: 'remark', label: '备注', value: '--' }
 ];
 
-// 每个对象就是左侧一个显控台。可选的 ports 数组定义多个七元向量输入端口；
-// 每个端口对应显控台表格的一行，必须给出稳定且互不重复的 id，可用 name 和 inputs 覆盖该行名称及七路配置。
+// 每个对象就是左侧一个显控台。可选的 ports 数组定义多个向量输入端口；
+// 每个端口对应表格一行，向量长度由 DISPLAY_CONSOLE_INPUTS 决定。
+// 必须给出稳定且互不重复的 id，可用 name 和 inputs 覆盖该行名称及元素配置。
 // 例如 ports: [{ id: 'console-input', name: '通道 A' }, { id: 'console-input-2', name: '通道 B' }]。
 // 未配置 ports 时保持原有的单端口行为。
 // 复制一个对象并改成 display_console_3，即可新增显控台 3。
@@ -309,7 +310,7 @@ export function createDisplayConsoleConfig(preset = {}) {
     inputs,
     ports: configuredPorts.map((port, index) => ({
       id: String(port?.id || (index === 0 ? DISPLAY_CONSOLE_VECTOR_PORT_ID : `${DISPLAY_CONSOLE_VECTOR_PORT_ID}-${index + 1}`)),
-      name: String(port?.name || (index === 0 ? '七路参数输入' : `七路参数输入 ${index + 1}`)),
+      name: String(port?.name || `${DISPLAY_CONSOLE_INPUTS.length === 7 ? '七路参数输入' : `${DISPLAY_CONSOLE_INPUTS.length}路参数输入`}${index === 0 ? '' : ` ${index + 1}`}`),
       inputs: resolveInputs(port?.inputs, inputs)
     })),
     columns: DISPLAY_CONSOLE_COLUMNS.map((column) => ({
@@ -331,4 +332,15 @@ export function createDisplayConsoleConfig(preset = {}) {
       }))
       : []
   };
+}
+
+// Called only after the complete runtime document has been validated. Preserve
+// array/object identities for all existing importers and the legacy runtime.
+export function applyDisplayConsoleConfiguration(configuration) {
+  const next = JSON.parse(JSON.stringify(configuration));
+  DISPLAY_CONSOLE_INPUTS.splice(0, DISPLAY_CONSOLE_INPUTS.length, ...next.DISPLAY_CONSOLE_INPUTS);
+  DISPLAY_CONSOLE_COLUMNS.splice(0, DISPLAY_CONSOLE_COLUMNS.length, ...next.DISPLAY_CONSOLE_COLUMNS);
+  DISPLAY_CONSOLE_VECTOR_PORT_ID = next.DISPLAY_CONSOLE_VECTOR_PORT_ID;
+  for (const key of Object.keys(DISPLAY_CONSOLE_PRESETS)) delete DISPLAY_CONSOLE_PRESETS[key];
+  Object.assign(DISPLAY_CONSOLE_PRESETS, next.DISPLAY_CONSOLE_PRESETS);
 }

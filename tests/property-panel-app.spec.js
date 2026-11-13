@@ -5,7 +5,9 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import App from '../src/App.vue';
-import { __resetLegacyRuntimeForTests } from '../src/services/legacyRuntimeBootstrap.js';
+import { buildBackendExecutablePackage } from '../src/services/backendExecutablePackageService.js';
+import { syncDiscoveredComponents } from '../src/services/discoveredComponentCatalogService.js';
+import { __resetLegacyRuntimeForTests, restoreStoredWorkbench } from '../src/services/legacyRuntimeBootstrap.js';
 
 function loadPublicPackage(fileName) {
   const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -96,6 +98,42 @@ describe('property panel interaction', () => {
     expect(document.querySelector('.props-fault-action')).not.toBeNull();
 
     wrapper.unmount();
+  });
+
+  it('saves a labeled external component mode selected from buttons', async () => {
+    const wrapper = await mountWorkbench();
+    try {
+      window.doCreateBlankWorkspace();
+      const moduleId = 'external_mode_test';
+      syncDiscoveredComponents([{
+        moduleId, name: '外部模式组件', category: '测试', fileName: `${moduleId}.py`,
+        entryFunction: 'process', requiresPower: false,
+        inputs: [{ portId: 'in', varName: 'signal', name: '输入' }],
+        outputs: [{ portId: 'out', varName: 'adjusted', name: '输出' }],
+        parameters: [{
+          key: 'mode', name: '工作模式', default: 1, control: 'stepper',
+          options: [{ value: 1, label: '直通' }, { value: 2, label: '反相' }]
+        }],
+      }]);
+      window.createNode(moduleId, 220, 220);
+      const node = window.__GZ_STATE__.modelNodes.find((item) => item.templateId === moduleId);
+      window.selectNode(node.id);
+      window.setPropertyPanelTab('parameters');
+      await flushRuntime();
+
+      const buttons = [...document.querySelectorAll('[data-simulation-parameter-mode-key="mode"]')];
+      expect(buttons.map((button) => button.textContent)).toEqual(['直通', '反相']);
+      expect(buttons[0].classList.contains('is-active')).toBe(true);
+      buttons[1].click();
+      expect(buttons[1].classList.contains('is-active')).toBe(true);
+      document.querySelector('[data-property-save-node]').click();
+      await flushRuntime();
+      const executable = buildBackendExecutablePackage({ modelNodes: [node], modelEdges: [] });
+      expect(executable.nodes[0].parameters.mode).toBe(2);
+    } finally {
+      syncDiscoveredComponents([]);
+      wrapper.unmount();
+    }
   });
 
   it('shows module deletion only in the overview below execution mode and above model package status', async () => {
@@ -1310,7 +1348,7 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
-  it('opens the protocol fault binding dialog when a normal line is selected', async () => {
+  it('uses the configured line name when binding a protocol fault to a normal line', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
@@ -1320,6 +1358,7 @@ describe('property panel interaction', () => {
     const injector = window.createNode('protocol_fault_injector', 320, 420);
     const edge = {
       id: 'edge-protocol-normal',
+      label: '飞控通信链路',
       lineType: 'normal',
       signalId: 'normal_link_variable',
       sourceNodeId: source.id,
@@ -1348,6 +1387,7 @@ describe('property panel interaction', () => {
 
     const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
     expect(dialog).not.toBeNull();
+    expect(dialog.querySelector('.layered-fault-dialog__target b').textContent).toBe(edge.label);
     const slotOptions = dialog.querySelectorAll('[data-layered-fault-option="slot"]');
     expect(slotOptions).toHaveLength(1);
     expect(slotOptions[0].textContent).toBe('合力');
@@ -1357,6 +1397,14 @@ describe('property panel interaction', () => {
     expect(dialog.querySelector('[data-layered-fault-param="scale"]')).not.toBeNull();
     expect(dialog.querySelector('[data-layered-fault-param="start"]')).not.toBeNull();
     expect(dialog.querySelector('[data-layered-fault-param="duration"]')).not.toBeNull();
+    dialog.querySelector('[data-layered-fault-confirm]').click();
+    await flushRuntime();
+
+    expect(window.__GZ_STATE__.faultTags).toContainEqual(expect.objectContaining({
+      targetId: edge.id,
+      targetName: edge.label,
+      name: `协议层注入 - ${edge.label}`
+    }));
     wrapper.unmount();
   });
 
@@ -1370,6 +1418,7 @@ describe('property panel interaction', () => {
     const injector = window.createNode('protocol_fault_injector', 320, 420);
     const edge = {
       id: 'edge-protocol-vector',
+      label: 'edge-protocol-vector',
       lineType: 'normal',
       signalId: 'rf.command',
       sourceNodeId: source.id,
@@ -1381,43 +1430,38 @@ describe('property panel interaction', () => {
     window.renderModelNodes();
     await flushRuntime();
 
+    const lineName = document.querySelector(`.edge-label[data-edge-id="${edge.id}"]`).textContent;
+    expect(lineName).toContain('→');
     window.beginLayeredFaultBinding(injector.id);
     document.querySelector(`.edge-path[data-edge-id="${edge.id}"]`)
       .dispatchEvent(new MouseEvent('pointerup', { bubbles: true, cancelable: true }));
     await flushRuntime();
 
     const dialog = document.querySelector('[data-layered-fault-binding-dialog]');
+    expect(dialog.querySelector('.layered-fault-dialog__target b').textContent).toBe(lineName);
     expect(dialog.querySelectorAll('[data-layered-fault-vector-item]')).toHaveLength(0);
     dialog.querySelector('[data-layered-fault-confirm]').click();
     await flushRuntime();
 
     expect(window.__GZ_STATE__.faultInstances).toContainEqual(expect.objectContaining({
       targetKind: 'edge',
-      targetId: edge.id
+      targetId: edge.id,
+      displayName: `协议层注入 - ${lineName}`
     }));
+    expect(edge.injectedFault.name).toBe(`协议层注入 - ${lineName}`);
     expect(window.__GZ_STATE__.faultInstances.find((item) => item.targetId === edge.id))
       .not.toHaveProperty('vectorInjectionScope');
     wrapper.unmount();
   });
 
-  it('uses an attenuation default when electrical attenuation is bound to a component output', async () => {
+  it('uses an attenuation default when electrical attenuation is bound to a signal source output', async () => {
     const wrapper = await mountWorkbench();
 
     window.doCreateBlankWorkspace();
-    const source = window.createNode('signal_source', 180, 220);
-    const sensor = window.createNode('barometer_sensor', 480, 220);
+    const sensor = window.createNode('signal_source', 480, 220);
     const injector = window.createNode('electrical_fault_injector', 320, 420);
-    const state = window.__GZ_STATE__;
-    source.props.amplitude = '1';
-    source.props.frequency = '1';
-    state.modelEdges.push({
-      id: 'edge-source-barometer',
-      lineType: 'normal',
-      sourceNodeId: source.id,
-      targetNodeId: sensor.id,
-      sourcePortIndex: 0,
-      targetPortIndex: 0
-    });
+    sensor.props.amplitude = '1';
+    sensor.props.frequency = '1';
     await flushRuntime();
 
     const outputSlot = window.getLayeredFaultSlotsForTarget(sensor)
@@ -2065,8 +2109,9 @@ describe('property panel interaction', () => {
     globallyInjectedCards[0].querySelector('[data-edge-testpoint-name]').value = 'Controller output monitor A';
     globallyInjectedCards[0].querySelector('[data-edge-testpoint-name]').dispatchEvent(new Event('input', { bubbles: true }));
     globallyInjectedCards[0].querySelector('[data-edge-testpoint-vector-index]').value = '2';
-    globallyInjectedCards[0].querySelector('[data-edge-testpoint-fault="source_bias"]').checked = true;
-    globallyInjectedCards[0].querySelector('[data-edge-testpoint-fault="source_bias"]').dispatchEvent(new Event('change', { bubbles: true }));
+    globallyInjectedCards[0].querySelectorAll('[data-edge-testpoint-fault]').forEach((input) => {
+      input.checked = input.dataset.edgeTestpointFault === 'source_bias';
+    });
     globallyInjectedCards[0].querySelector('[data-save-edge-testpoint]').click();
     await flushRuntime();
 
@@ -2081,8 +2126,9 @@ describe('property panel interaction', () => {
     const refreshedCards = Array.from(document.querySelectorAll('[data-edge-testpoint-card]'));
     refreshedCards[1].querySelector('[data-edge-testpoint-name]').value = 'Controller output monitor B';
     refreshedCards[1].querySelector('[data-edge-testpoint-name]').dispatchEvent(new Event('input', { bubbles: true }));
-    refreshedCards[1].querySelector('[data-edge-testpoint-fault="source_noise"]').checked = true;
-    refreshedCards[1].querySelector('[data-edge-testpoint-fault="source_noise"]').dispatchEvent(new Event('change', { bubbles: true }));
+    refreshedCards[1].querySelectorAll('[data-edge-testpoint-fault]').forEach((input) => {
+      input.checked = input.dataset.edgeTestpointFault === 'source_noise';
+    });
     refreshedCards[1].querySelector('[data-save-edge-testpoint]').click();
     await flushRuntime();
 
@@ -2278,7 +2324,7 @@ describe('property panel interaction', () => {
     window.setPropertyPanelTab('faults');
     await flushRuntime();
 
-    expect(document.querySelector('.props-protocol-action')).not.toBeNull();
+    expect(document.querySelector('.props-protocol-action')).toBeNull();
     expect(document.querySelector('[data-fault-binding-id="edge-fault-can-delay"]')).not.toBeNull();
     expect(pd()?.textContent).toContain('delay');
     expect(pd()?.textContent).toContain('latency');
@@ -2926,6 +2972,30 @@ describe('property panel interaction', () => {
     expect(rows.map((row) => row.querySelector('.display-console-table__column--center-frequency')?.textContent)).toEqual(['12', '25']);
     expect(rows.map((row) => row.querySelector('.display-console-table__column--serial-number')?.textContent)).toEqual(['1', '2']);
 
+    const readTableRows = () => Array.from(document.querySelectorAll('[data-display-console-table] tbody tr'),
+      (row) => Array.from(row.querySelectorAll('td'), (cell) => cell.textContent));
+    const normalRows = readTableRows();
+    window.__GZ_SIM__.hasSamples = true;
+    window.__GZ_SIM__.time = 10;
+    window.__GZ_SIM__.actual.edgeStates['edge-console-a'].lastOutput[0] = 0;
+    window.openDisplayConsolePanel(displayConsole.id);
+    expect(readTableRows()[0]).toEqual(Array(16).fill('--'));
+    expect(readTableRows()[1][1]).toBe('25');
+    expect(readTableRows()[1][0]).toBe('2');
+
+    window.__GZ_SIM__.actual.edgeStates['edge-console-a'].lastOutput[0] = 12e6;
+    window.refreshDisplayConsolePanel();
+    expect(readTableRows()[0].slice(0, 14)).toEqual(normalRows[0].slice(0, 14));
+    expect(readTableRows()[0][14]).toBe('10 s');
+    expect(readTableRows()[0][15]).toBe(normalRows[0][15]);
+
+    window.__GZ_SIM__.actual.edgeStates['edge-console-b'].lastOutput[0] = 0;
+    window.refreshDisplayConsolePanel();
+    expect(readTableRows()[0][1]).toBe('12');
+    expect(readTableRows()[1]).toEqual(Array(16).fill('--'));
+    window.__GZ_SIM__.actual.edgeStates['edge-console-b'].lastOutput[0] = 25e6;
+    window.refreshDisplayConsolePanel();
+
     const points = window.buildDiagnosticTestPointModel({ includeAllCanvases: true }).positions
       .filter((point) => point.displayConsoleInput && point.nodeId === displayConsole.id);
     expect(points.filter((point) => point.targetPortIndex === 0).map((point) => point.vectorIndex)).toEqual([1, 2, 3, 4, 5, 6]);
@@ -3532,6 +3602,44 @@ describe('property panel interaction', () => {
     wrapper.unmount();
   });
 
+  it('keeps the selected spectrum frequency field active when a drag ends outside it', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const spectrum = window.createNode('instrument_spectrum', 420, 240);
+    spectrum.props.frequencyRange = '0Hz-32Hz';
+    spectrum.props.autoFrequencyRange = 'off';
+    window.openSpectrumInstrument(spectrum.id);
+    await flushRuntime();
+
+    const assertRangeSelectionStays = (key, otherKey) => {
+      const input = document.querySelector(`[data-spectrum-config="${key}"]`);
+      const other = document.querySelector(`[data-spectrum-config="${otherKey}"]`);
+      const group = input.closest('.spectrum-window__config-range');
+      expect(group.tagName).toBe('DIV');
+      expect(input.closest('label')).toBeNull();
+      let capturedPointerId = null;
+      input.setPointerCapture = pointerId => { capturedPointerId = pointerId; };
+      dispatchPointer(input, 'pointerdown', { pointerId: 47 });
+      expect(capturedPointerId).toBe(47);
+      input.focus();
+      input.select();
+      group.click();
+      expect(document.activeElement).toBe(input);
+      expect(input.selectionStart).toBe(0);
+      expect(input.selectionEnd).toBe(input.value.length);
+      expect(document.activeElement).not.toBe(other);
+    };
+
+    assertRangeSelectionStays('frequencyRangeEnd', 'frequencyRangeStart');
+    const tuningMode = document.querySelector('[data-spectrum-config="tuningMode"]');
+    tuningMode.value = 'centerSpan';
+    tuningMode.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    assertRangeSelectionStays('frequencySpan', 'centerFrequency');
+
+    wrapper.unmount();
+  });
+
   it('keeps a manually entered center/span range for a complex-envelope spectrum analyzer', async () => {
     const wrapper = await mountWorkbench();
     window.doCreateBlankWorkspace();
@@ -3574,6 +3682,134 @@ describe('property panel interaction', () => {
     expect(spectrum.props.frequencyRange).toBe('19999990000Hz-20000010000Hz');
     expect(document.querySelector('[data-spectrum-config="centerFrequency"]')?.value).toBe('20');
     expect(document.querySelector('[data-spectrum-config="frequencySpan"]')?.value).toBe('0.00002');
+    wrapper.unmount();
+  });
+
+  it('keeps a manually tuned RF center before spectrum samples arrive', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const spectrum = window.createNode('instrument_spectrum', 420, 240);
+    spectrum.props.tuningMode = 'centerSpan';
+    spectrum.props.centerFrequencyUnit = 'GHz';
+    spectrum.props.frequencySpanUnit = 'MHz';
+    spectrum.props.frequencyRange = '0Hz-32Hz';
+    window.openSpectrumInstrument(spectrum.id);
+    await flushRuntime();
+
+    const center = document.querySelector('[data-spectrum-config="centerFrequency"]');
+    const span = document.querySelector('[data-spectrum-config="frequencySpan"]');
+    center.value = '20';
+    span.value = '10';
+    center.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+
+    expect(spectrum.props.frequencyRange).toBe('19995000000Hz-20005000000Hz');
+    expect(document.querySelector('[data-spectrum-config="centerFrequency"]')?.value).toBe('20');
+    expect(document.querySelector('[data-spectrum-config="frequencySpan"]')?.value).toBe('10');
+    expect(document.querySelector('[data-spectrum-axis="x"]')?.textContent).toContain('20.005');
+    wrapper.unmount();
+  });
+
+  it('keeps an e-9 center frequency after a connected analyzer redraws', async () => {
+    const wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const source = window.createNode('signal_source', 260, 240);
+    const spectrum = window.createNode('instrument_spectrum', 540, 240);
+    const canvas = window.getActiveCanvasRecord();
+    canvas.edges.push(window.makeTask5Edge(
+      'normal', source.id, spectrum.id, 0, 0,
+      window.getNodePorts(source).outputs[0],
+      window.getNodePorts(spectrum).inputs[0], null
+    ));
+    window.__GZ_SIM__.actual.instrumentSamples[spectrum.id] = Array.from({ length: 64 }, (_, index) => ({
+      t: index / 64,
+      actual: { i: 1, q: 0, referenceFrequencyHz: 1e-9 }
+    }));
+    Object.assign(spectrum.props, {
+      tuningMode: 'centerSpan',
+      autoFrequencyRange: 'off',
+      centerFrequencyUnit: 'Hz',
+      frequencySpanUnit: 'Hz',
+      frequencyRange: '0Hz-32Hz'
+    });
+    window.openSpectrumInstrument(spectrum.id);
+    await flushRuntime();
+
+    const center = document.querySelector('[data-spectrum-config="centerFrequency"]');
+    const span = document.querySelector('[data-spectrum-config="frequencySpan"]');
+    center.value = '1e-9';
+    span.value = '1e-9';
+    center.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+
+    expect(spectrum.props.frequencyRange).toBe('5e-10Hz-1.5e-9Hz');
+    expect(document.querySelector('[data-spectrum-config="centerFrequency"]')?.value).toBe('1e-9');
+    expect(document.querySelector('[data-spectrum-config="frequencySpan"]')?.value).toBe('1e-9');
+    expect(document.querySelector('[data-spectrum-window]')?.dataset.spectrumRange).toBe('5e-10-1.5e-9');
+    window.renderSpectrumInstrument({ rebuild: true });
+    expect(document.querySelector('[data-spectrum-config="centerFrequency"]')?.value).toBe('1e-9');
+    const nextCenter = document.querySelector('[data-spectrum-config="centerFrequency"]');
+    nextCenter.value = '2e-9';
+    nextCenter.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    expect(spectrum.props.frequencyRange).toBe('1.5e-9Hz-2.5e-9Hz');
+    expect(document.querySelector('[data-spectrum-config="centerFrequency"]')?.value).toBe('2e-9');
+    const restoredCenter = document.querySelector('[data-spectrum-config="centerFrequency"]');
+    restoredCenter.value = '1e-9';
+    restoredCenter.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    const tuningMode = document.querySelector('[data-spectrum-config="tuningMode"]');
+    tuningMode.value = 'startStop';
+    tuningMode.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    expect(document.querySelector('[data-spectrum-config="frequencyRangeStart"]')?.value).toBe('5e-10');
+    expect(document.querySelector('[data-spectrum-config="frequencyRangeEnd"]')?.value).toBe('1.5e-9');
+    const end = document.querySelector('[data-spectrum-config="frequencyRangeEnd"]');
+    end.value = '2e-9';
+    end.dispatchEvent(new Event('change', { bubbles: true }));
+    await flushRuntime();
+    expect(spectrum.props.frequencyRange).toBe('5e-10Hz-2e-9Hz');
+    wrapper.unmount();
+  });
+
+  it('restores the spectrum center after the page closes and reopens', async () => {
+    let wrapper = await mountWorkbench();
+    window.doCreateBlankWorkspace();
+    const spectrum = window.createNode('instrument_spectrum', 420, 240);
+    Object.assign(spectrum.props, {
+      tuningMode: 'centerSpan',
+      autoFrequencyRange: 'off',
+      centerFrequencyUnit: 'Hz',
+      frequencySpanUnit: 'Hz',
+      frequencyRange: '0Hz-32Hz'
+    });
+    window.openSpectrumInstrument(spectrum.id);
+    const center = document.querySelector('[data-spectrum-config="centerFrequency"]');
+    const span = document.querySelector('[data-spectrum-config="frequencySpan"]');
+    center.value = '1e-9';
+    span.value = '1e-9';
+    center.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(document.querySelector('[data-spectrum-config="centerFrequency"]')?.value).toBe('1e-9');
+
+    window.dispatchEvent(new Event('pagehide'));
+    expect(window.localStorage.getItem('gz-workbench-system-model')).toContain('5e-10Hz-1.5e-9Hz');
+    wrapper.unmount();
+    document.body.innerHTML = '';
+    __resetLegacyRuntimeForTests();
+
+    wrapper = await mountWorkbench();
+    expect(restoreStoredWorkbench()).toBe(true);
+    const restored = window.__GZ_STATE__.modelNodes.find((node) => node.id === spectrum.id);
+    expect(restored?.props).toMatchObject({
+      tuningMode: 'centerSpan',
+      autoFrequencyRange: 'off',
+      centerFrequencyUnit: 'Hz',
+      frequencySpanUnit: 'Hz',
+      frequencyRange: '5e-10Hz-1.5e-9Hz'
+    });
+    window.openSpectrumInstrument(restored.id);
+    expect(document.querySelector('[data-spectrum-config="centerFrequency"]')?.value).toBe('1e-9');
+    expect(document.querySelector('[data-spectrum-config="frequencySpan"]')?.value).toBe('1e-9');
     wrapper.unmount();
   });
 

@@ -1,5 +1,4 @@
-import { createApp } from 'vue';
-import App from './App.vue';
+import { initializeWorkbench } from './bootstrap.js';
 import './styles/tokens.css';
 import './styles/base.css';
 import './styles/layout.css';
@@ -8,4 +7,4 @@ import './styles/dialogs.css';
 import './styles/console-redesign.css';
 import './styles/ibm-workbench.css';
 
-createApp(App).mount('#app');
+void initializeWorkbench();

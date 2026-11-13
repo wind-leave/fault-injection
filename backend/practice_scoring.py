@@ -1,3 +1,6 @@
+from decimal import Decimal, ROUND_HALF_UP
+
+
 def _clone(value):
     if isinstance(value, dict):
         return {key: _clone(item) for key, item in value.items()}
@@ -12,6 +15,10 @@ def _arr(value):
 
 def _round_score(value):
     return round(float(value), 3)
+
+
+def round_practice_total_score(value):
+    return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 def _text(value, fallback=""):
@@ -401,7 +408,7 @@ def evaluate_practice_submission_score(
         "efficiency": efficiency,
         "safetyCompliance": safety,
     }
-    score = sum(score_breakdown.values())
+    score = round_practice_total_score(sum(Decimal(str(value)) for value in score_breakdown.values()))
     deductions = []
     if not correct:
         deductions.append({

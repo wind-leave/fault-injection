@@ -18,6 +18,22 @@ https://blank1cheng.github.io/uav-fault-platform/
 
 ## 本地运行
 
+使用容器部署时，参见 [Docker 部署说明](docs/Docker部署说明.md)。项目提供 `Dockerfile`、`compose.yaml` 和 Nginx 配置，可通过 `docker compose up -d --build` 构建并启动前后端，默认访问 `http://127.0.0.1:8080/`。
+
+Docker 交付包使用 `deploy/compose.delivery.yaml` 和 `deploy/docker.delivery.env.example`，交付时分别改名为 `compose.yaml`、`.env`；交付目录中的 `backend/` 直接放外部组件，`public/` 直接放显控 JSON。源码构建使用项目根目录的 Compose 配置，打包复制关系见 [离线交付说明](docs/Docker部署说明.md#6-导出到离线电脑)。
+
+仓库已直接提供 [Docker 运行交付目录](output/docker-delivery/README.md)，包含可运行的 `compose.yaml`、仅含公开默认值的 `.env`、空的外部组件包及显控配置。构建镜像并将 `docker-images.tar` 放入该目录后，即可整体复制到目标机器。
+
+Compose 默认把宿主机 `backend/auto_components/` 挂载为自动组件目录，支持仿真组件和电气组件（`group: "electrical"`）。新增或修改 Python 文件后，重启后端并刷新页面。显控台完整配置位于 `public/config/display-console.json`，覆盖 `DISPLAY_CONSOLE_INPUTS`、`DISPLAY_CONSOLE_VECTOR_PORT_ID`、`DISPLAY_CONSOLE_COLUMNS`、`DISPLAY_CONSOLE_PRESETS` 四个数据导出，包含公共输入维度、列定义、输入端口、受控组件和共享参数，保存后刷新浏览器生效，无需重新构建镜像。可通过 `.env` 的 `GZ_AUTO_COMPONENTS_DIR` / `GZ_DISPLAY_CONFIG_DIR` 更换目录。首次部署本次功能需要重新构建镜像，离线交付时须同时携带这两个外部目录。
+
+其他版本的 JS 显控台配置可用 `node tools/convert_display_console_config.mjs --input <源文件>` 转换，默认生成 `output/display-console.json`；使用方式见 [显控台配置转换](docs/显控台配置转换.md)。
+
+源码版的左侧二级菜单可在 `public/config/palette-menus.json` 修改。Docker 交付版使用 [交付目录中的菜单配置](output/docker-delivery/public/palette-menus.json)，编辑后刷新页面。
+
+当前左侧“电气组件”和“仿真组件”只显示外部自动发现组件，内置组件隐藏。前后端内置定义和计算代码仍保留；同 ID 外部组件优先替换内置定义与计算实现，移除外部文件后回退到隐藏的内置版本。转换默认保留原 `moduleId` 和前端 `templateId`，原显控台绑定可继续按原标识匹配。显示规则位于 `src/services/componentRegistry.js` 的 `COMPONENT_GROUPS`：`componentsVisible` 控制整个分组内容，`externalOnly` 控制是否只显示外部组件。
+
+默认自动组件目录只包含包初始化文件。在项目根目录运行 `python tools/convert_builtin_components.py --output-dir backend/auto_components`，即可把 `backend/builtin_modules/manifest.json` 中的组件全部生成到该目录。重新生成时可以添加 `--overwrite` 替换已有文件。
+
 Windows 可双击项目根目录的 `启动故障注入平台.cmd`，脚本会启动前端与后端，待两者就绪后自动打开浏览器。关闭分别标有 Frontend 和 Backend 的命令窗口即可停止服务。若前端依赖尚未安装，脚本会先执行 `npm ci`。
 
 进入项目目录后执行：
@@ -77,6 +93,8 @@ https://<user>.github.io/uav-fault-platform/
 7. 人工添加测点后，可进入测点诊断流程。
 
 ## 主要目录
+
+新增 Python 计算组件可使用[组件自动发现流程](docs/Python组件自动发现.md)：在 `backend/auto_components/` 添加一个带 `COMPONENT` 声明的 `.py` 文件，重启后端并刷新页面即可出现在组件库，无需手改白名单或前端注册表。
 
 - `src/`：Vue 入口、运行时桥接、界面片段和样式。
 - `public/model-packages/`：演示模型包。
@@ -152,7 +170,7 @@ The request can contain `dMatrix` plus either `targetFaultId` (legacy single-fau
 
 Choose **查看知识图谱** in the D-matrix page header at any time to open the full-screen graph explorer. The graph is rebuilt from the current canvas components, wires, injected faults, measurement points, and manual D-matrix relations whenever those records change. It supports node and relation filters, manual D-matrix `0/1` detectability display, search, zoom/pan, and adjacent-relation details.
 
-Each D-matrix row exposes the same fault enabled state as the canvas fault parameter inspector. Changing either control updates the other. **生成组合路径** uses every enabled row as the target fault set, while every D-matrix row remains in the diagnostic candidate universe. The resulting request may contain one fault or multiple faults without a separate row-selection column. Replacement actions are emitted only after the available measurement points uniquely isolate the target set; otherwise the path stops after measurement and lists the unresolved candidates.
+Each D-matrix row exposes the same fault enabled state as the canvas fault parameter inspector. Changing either control updates the other. **生成排故路径** uses every enabled row as the target fault set, while every D-matrix row remains in the diagnostic candidate universe. The resulting request may contain one fault or multiple faults without a separate row-selection column. Replacement actions are emitted only after the available measurement points uniquely isolate the target set; otherwise the path stops after measurement and lists the unresolved candidates.
 
 Enabling or disabling a fault does not reorder existing D-matrix fault rows or measurement-point columns; newly added faults and points are appended. **保存仿真结果** stores the combined troubleshooting path for all enabled faults together with the de-duplicated key measurement points used by that path. The backend knowledge-graph plan is preferred, with a local manual-D-matrix fallback when the planning service is unavailable.
 

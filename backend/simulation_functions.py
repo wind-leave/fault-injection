@@ -750,8 +750,8 @@ def _estimate_envelope_baseband_frequency(samples, sample_period):
 def extract_complex_envelope_pulse_features(
     input_envelope,
     fft_size=1024.0,
-    adc_full_scale=1.0,
-    envelope_threshold_adc=12.0,
+    adc_full_scale=0.3,
+    envelope_threshold_adc=6.0,
     envelope_smoothing=1.0,
     time=0.0,
     dt=0.0,

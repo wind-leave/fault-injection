@@ -44,7 +44,7 @@ def _json_bytes(payload):
 def _practice_identity_field(payload, field, required=False):
     """Normalize an external practice-task identifier.
 
-    Inspection tasks require both identifiers; troubleshooting keeps them
+    Inspection and power-on self-test tasks require both identifiers; troubleshooting keeps them
     optional for existing clients. Supplied values are retained until submit.
     """
     if field not in payload:
@@ -72,7 +72,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
     registry = ModuleRegistry.from_manifests([
         ModuleRegistry.builtin_manifest_path(),
         component_registrar.manifest_path,
-    ])
+    ], discover=True)
     sessions = {}
     state_lock = threading.RLock()
     sessions_lock = state_lock
@@ -94,7 +94,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
         return ModuleRegistry.from_manifests([
             ModuleRegistry.builtin_manifest_path(),
             self.component_registrar.manifest_path,
-        ])
+        ], discover=True)
 
     def _send_json(self, status_code, payload):
         body = _json_bytes(payload)
@@ -615,6 +615,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
                 if not target_fault_id:
                     target_fault_id = target_fault_ids[0]
             simulation_session = SimulationSession(graph, run_id=run_id)
+            render_data = payload.get("renderData")
             session = PracticeSession(
                 practice_session_id,
                 simulation_session_id,
@@ -638,6 +639,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
                 default_max_actions=self.default_max_practice_actions,
                 studentid=studentid,
                 jobid=jobid,
+                display_console_devices=render_data.get("devices") if isinstance(render_data, dict) else None,
             )
             result = session.initial_response()
         except Exception:
@@ -826,6 +828,16 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         run_id = self._new_id("run")
         path = urlparse(self.path).path
+        if path == "/api/components/discovered":
+            registry = type(self).registry
+            self._send_json(200, {
+                "status": "success", "components": registry.discovered_components,
+                "errors": registry.discovery_errors,
+            })
+            return
+        if path == "/healthz":
+            self._send_json(200, {"status": "ok"})
+            return
         practice_status_session_id = self._practice_status_path(path)
         if not practice_status_session_id:
             self._send_not_found(run_id)

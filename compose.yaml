@@ -1,0 +1,45 @@
+name: gz-fault-platform
+
+services:
+  backend:
+    image: gz-fault-backend:${GZ_IMAGE_TAG:-local}
+    build:
+      context: .
+      target: backend
+    restart: unless-stopped
+    environment:
+      GZ_COMPONENT_DATA_DIR: /data/components
+      PRACTICE_RESULT_CALLBACK_URL: ${PRACTICE_RESULT_CALLBACK_URL:-}
+      GZ_COMPONENT_REGISTRATION_TOKEN: ${GZ_COMPONENT_REGISTRATION_TOKEN:-}
+    volumes:
+      - component-data:/data/components
+      - type: bind
+        source: ${GZ_AUTO_COMPONENTS_DIR:-./backend/auto_components}
+        target: /app/backend/auto_components
+        read_only: true
+        bind:
+          create_host_path: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    image: gz-fault-frontend:${GZ_IMAGE_TAG:-local}
+    build:
+      context: .
+      target: frontend
+    restart: unless-stopped
+    ports:
+      - "${GZ_BIND_ADDRESS:-127.0.0.1}:${GZ_HTTP_PORT:-8080}:80"
+    volumes:
+      - type: bind
+        source: ${GZ_DISPLAY_CONFIG_DIR:-./public/config}
+        target: /usr/share/nginx/html/config
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  component-data:

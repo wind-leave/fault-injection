@@ -28,6 +28,10 @@ class ExecutableNode:
             if self.type == "display_console" and self.input_ports
             else tuple(self.outputs or ("output",))
         )
+        if self.type == "display_console" and len(set(output_names)) != len(output_names):
+            # Console traces are keyed by output name, so duplicate labels
+            # would otherwise overwrite the signal from the preceding port.
+            output_names = tuple(f"input-{index}" for index in range(len(output_names)))
         module_outputs = tuple(self.module.outputs or ()) if self.module is not None else ()
         object.__setattr__(self, "output_names", output_names)
         object.__setattr__(self, "module_input_bindings", tuple(enumerate(self.module.inputs)) if self.module is not None else ())

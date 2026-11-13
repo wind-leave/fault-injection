@@ -80,15 +80,6 @@ export function restoreStoredWorkbench() {
     state.faultLoaded = Boolean(state.importedFaultModels?.length);
     state.faultModels = state.importedFaultModels?.length ?? 0;
     window.buildDiagnosticTestPointModel?.({ includeAllCanvases: true });
-    window.dispatchEvent(new CustomEvent('gz:palette-components-reset'));
-    const consumed = new Set(Object.values(state.canvases ?? {})
-      .flatMap((canvas) => canvas.nodes ?? [])
-      .map((node) => node.paletteKey || node.templateId)
-      .filter((key) => ['simulation', 'electrical', 'display-control']
-        .includes(COMPONENT_REGISTRY[key]?.group)));
-    consumed.forEach((paletteKey) => {
-      window.dispatchEvent(new CustomEvent('gz:palette-component-created', { detail: { paletteKey } }));
-    });
     window.updateUI?.();
     return true;
   } catch (error) {
@@ -284,9 +275,9 @@ export function mountLegacyRuntime() {
     validate(pkg) {
       return validateFlightModelPackage(pkg);
     },
-    importObject(pkg) {
+    importObject(pkg, { replaceWorkspace = false } = {}) {
       const result = applyFlightModelPackage(pkg, {
-        existingSnapshot: createWorkbenchSnapshot(window.__GZ_STATE__ ?? {})
+        existingSnapshot: replaceWorkspace ? null : createWorkbenchSnapshot(window.__GZ_STATE__ ?? {})
       });
       if (!result.ok) {
         return result;
@@ -294,6 +285,13 @@ export function mountLegacyRuntime() {
 
       try {
         if (typeof window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__ === 'function') {
+          if (replaceWorkspace) {
+            const simulation = window.__GZ_SIM__;
+            if (simulation?.running || simulation?.backendSessionId || simulation?.backendStepPending) {
+              void window.simStop?.();
+            }
+            window.doCreateBlankWorkspace({ silent: true, preserveStoredWorkbench: true });
+          }
           window.__GZ_APPLY_FLIGHT_MODEL_PACKAGE__(pkg, result);
         }
       } catch (error) {

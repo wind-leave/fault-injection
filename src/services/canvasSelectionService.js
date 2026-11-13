@@ -10,6 +10,64 @@ export function getEdge(state = {}, id = '') {
   return list(state.modelEdges).find((edge) => edge?.id === id);
 }
 
+function distanceToSegment(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  const ratio = lengthSquared
+    ? Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared))
+    : 0;
+  return Math.hypot(point.x - start.x - ratio * dx, point.y - start.y - ratio * dy);
+}
+
+export function rankCanvasEdgesByClientPoint(paths, options = {}) {
+  const { clientX, clientY, stagePoint, scale = 1, threshold = 14 } = options;
+  if (!stagePoint || !Number.isFinite(stagePoint.x) || !Number.isFinite(stagePoint.y)) return [];
+  const zoom = Math.max(Number(scale) || 1, 0.001);
+  const nearestById = new Map();
+
+  for (const path of paths) {
+    const id = path?.dataset?.edgeId;
+    if (!id || typeof path.getTotalLength !== 'function' || typeof path.getPointAtLength !== 'function') continue;
+    const bounds = path.getBoundingClientRect?.();
+    if (bounds && (bounds.width > 0 || bounds.height > 0) && (
+      clientX < bounds.left - threshold || clientX > bounds.right + threshold ||
+      clientY < bounds.top - threshold || clientY > bounds.bottom + threshold
+    )) continue;
+
+    try {
+      const total = path.getTotalLength();
+      if (!Number.isFinite(total) || total < 0) continue;
+      const sampleCount = Math.max(1, Math.ceil(total * zoom / 8));
+      let previous = path.getPointAtLength(0);
+      let distance = Math.hypot(stagePoint.x - previous.x, stagePoint.y - previous.y);
+      for (let index = 1; index <= sampleCount; index += 1) {
+        const current = path.getPointAtLength(total * index / sampleCount);
+        distance = Math.min(distance, distanceToSegment(stagePoint, previous, current));
+        previous = current;
+      }
+      const screenDistance = distance * zoom;
+      if (screenDistance <= threshold && screenDistance < (nearestById.get(id) ?? Infinity)) {
+        nearestById.set(id, screenDistance);
+      }
+    } catch {
+      // A path being replaced during an incremental render is not selectable.
+    }
+  }
+
+  return [...nearestById].map(([id, distance]) => ({ id, distance }))
+    .sort((a, b) => a.distance - b.distance || a.id.localeCompare(b.id));
+}
+
+export function chooseCanvasEdgeForClick(nearby, previous = {}, click = {}, fallbackId = '') {
+  const closest = nearby[0]?.distance ?? Infinity;
+  const ambiguous = nearby.filter((item) => item.distance <= closest + 5);
+  const repeated = click.time - previous.time < 1400 &&
+    Math.hypot(click.x - previous.x, click.y - previous.y) <= 6;
+  const previousIndex = ambiguous.findIndex((item) => item.id === previous.id);
+  return ambiguous[repeated && previousIndex >= 0 ? (previousIndex + 1) % ambiguous.length : 0]?.id || fallbackId;
+}
+
 export function clearCanvasSelectionState(state = {}) {
   state.selBlk = null;
   state.selEdge = null;

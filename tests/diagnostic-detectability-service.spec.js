@@ -20,6 +20,8 @@ describe('diagnostic detectability defaults', () => {
       .toEqual(['source-output', 'middle-output']);
     expect([...affectedEdgeIds({ id: 'local-fault', targetEdgeId: 'source-output', canPropagate: false }, edges)])
       .toEqual(['source-output']);
+    expect([...affectedEdgeIds({ id: 'parameter-fault', targetNodeId: 'source', layer: 'physical', propagationMode: 'localParameter', canPropagate: false }, edges)])
+      .toEqual(['source-output', 'middle-output']);
   });
 
   it('keeps manual yes/no changes while assigning defaults to faults added later', () => {
@@ -33,5 +35,29 @@ describe('diagnostic detectability defaults', () => {
     const newFault = { id: 'later', targetNodeId: 'middle' };
     expect(effectiveDetects(point, [firstFault, unrelatedFault, newFault], edges))
       .toEqual(['unrelated-fault', 'later']);
+  });
+
+  it('carries detectability across a subsystem boundary in both directions', () => {
+    const subsystemEdges = [
+      { id: 'outside-input', sourceNodeId: 'source', targetNodeId: 'subsystem', targetPortIndex: 0 },
+      { id: 'inside-input', sourceNodeId: 'boundary-in', targetNodeId: 'internal-a', subsystemBoundaryMapping: true, subsystemBoundaryRole: 'input', linkedExternalEdgeId: 'outside-input' },
+      { id: 'inside-wire', sourceNodeId: 'internal-a', targetNodeId: 'internal-b' },
+      { id: 'inside-output', sourceNodeId: 'internal-b', targetNodeId: 'boundary-out', subsystemBoundaryMapping: true, subsystemBoundaryRole: 'output', linkedExternalEdgeId: 'outside-output' },
+      { id: 'outside-output', sourceNodeId: 'subsystem', targetNodeId: 'scope', sourcePortIndex: 0 },
+      { id: 'unrelated', sourceNodeId: 'other', targetNodeId: 'other-scope' }
+    ];
+    expect([...affectedEdgeIds({ id: 'internal-fault', targetNodeId: 'internal-a' }, subsystemEdges)])
+      .toEqual(expect.arrayContaining(['inside-wire', 'inside-output', 'outside-output']));
+    expect(effectiveDetects({ edgeId: 'outside-output', detectabilityMode: 'auto' }, [
+      { id: 'internal-fault', targetNodeId: 'internal-a' }
+    ], subsystemEdges)).toEqual(['internal-fault']);
+    expect(effectiveDetects({ edgeId: 'inside-wire', detectabilityMode: 'auto' }, [
+      { id: 'outside-fault', targetEdgeId: 'outside-input' }
+    ], subsystemEdges)).toEqual(['outside-fault']);
+    expect(effectiveDetects({ edgeId: 'unrelated', detectabilityMode: 'auto' }, [
+      { id: 'internal-fault', targetNodeId: 'internal-a' }
+    ], subsystemEdges)).toEqual([]);
+    expect([...affectedEdgeIds({ id: 'declared-fault', affectedEdges: ['inside-output'] }, subsystemEdges)])
+      .toEqual(['inside-output', 'outside-output']);
   });
 });

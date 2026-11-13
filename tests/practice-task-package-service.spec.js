@@ -471,6 +471,30 @@ describe('practiceTaskPackageService', () => {
     }]);
   });
 
+  it('passes initialization channel definitions to practice sessions without copying initial samples', () => {
+    const consoleDevice = {
+      id: 'console-1', type: 'display_console', displayName: '显控台',
+      channels: {
+        'console-input.frequency': {
+          label: '频率', unit: 'MHz', dataType: 'float', displayScale: 1e-6,
+          portId: 'console-input', portIndex: 0, inputIndex: 1,
+          connected: true, sourceDeviceId: 'source-1', sourcePort: 'out',
+          series: [{ t: 0, value: 42 }]
+        }
+      }
+    };
+    const result = buildPracticeTaskPackage({
+      renderData: { devices: [consoleDevice, { id: 'source-1', type: 'signal_source' }], connections: [] }
+    });
+
+    const channelId = 'console-input.frequency';
+    const { series, ...definition } = consoleDevice.channels[channelId];
+    expect(result.publicData.renderData.devices[0].channels[channelId].series).toEqual(series);
+    expect(result.privateData.executableModel.displayConsoleDevices).toEqual([
+      { ...consoleDevice, channels: { [channelId]: definition } }
+    ]);
+  });
+
   it('binds a vector measurement point to its selected named element', () => {
     const result = buildPracticeTaskPackage({
       dMatrix: {

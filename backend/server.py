@@ -615,6 +615,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
                 if not target_fault_id:
                     target_fault_id = target_fault_ids[0]
             simulation_session = SimulationSession(graph, run_id=run_id)
+            render_data = payload.get("renderData")
             session = PracticeSession(
                 practice_session_id,
                 simulation_session_id,
@@ -638,6 +639,7 @@ class SimulationBackendHandler(BaseHTTPRequestHandler):
                 default_max_actions=self.default_max_practice_actions,
                 studentid=studentid,
                 jobid=jobid,
+                display_console_devices=render_data.get("devices") if isinstance(render_data, dict) else None,
             )
             result = session.initial_response()
         except Exception:

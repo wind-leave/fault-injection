@@ -2612,6 +2612,85 @@ class SimulationBackendServerTests(unittest.TestCase):
         )
         self.assertTrue(wire_result["simulationResult"]["summary"]["done"])
 
+    def test_both_replacements_refresh_display_console_channels_in_initial_format(self):
+        package = valid_package()
+        vector_port = {"dataType": "vector", "vectorLength": 4}
+        package["nodes"][1]["pythonBinding"]["moduleId"] = "scalar_to_vector4"
+        package["nodes"][1]["outputs"][0].update(vector_port)
+        package["nodes"][2] = {
+            "id": "console", "type": "display_console",
+            "inputs": [
+                {"id": "console-input", "name": "signal", **vector_port},
+                {"id": "console-input-2", "name": "signal", **vector_port},
+            ],
+        }
+        package["edges"][1]["targetNodeId"] = "console"
+        package["nodes"].append({
+            "id": "second-source", "type": "signal_source", "parameters": {"value": [5, 6, 7, 8]},
+            "outputs": [{"id": "out", "name": "out", **vector_port}],
+        })
+        package["edges"].append({
+            "id": "second-console-wire", "sourceNodeId": "second-source", "sourcePortIndex": 0,
+            "targetNodeId": "console", "targetPortIndex": 1,
+        })
+        package["measurementPoints"] = []
+        package["faultInstances"] = [
+            {"faultId": "target-fault", "faultType": "sensor_bias", "targetId": "sim-1",
+             "enabled": True, "startTime": 0, "duration": 0.3, "parameters": {"bias": 4}},
+            {"faultId": "fault-wire", "faultType": "signal_attenuation", "targetId": "edge-sim-scope",
+             "enabled": True, "startTime": 0, "duration": 0.3, "parameters": {"scale": 0.5}},
+        ]
+        channel = {
+            "label": "Second element", "unit": "V", "dataType": "float", "displayScale": 1,
+            "portId": "console-input", "portIndex": 0, "inputIndex": 1,
+            "connected": True, "sourceDeviceId": "sim-1", "sourcePort": "socket03",
+        }
+        device = {
+            "id": "console", "type": "display_console", "displayName": "Console",
+            "channels": {
+                "signal.second": channel,
+                "other.second": {**channel, "portId": "console-input-2", "portIndex": 1,
+                                 "sourceDeviceId": "second-source", "sourcePort": "out"},
+                "unconnected": {**channel, "connected": False, "sourceDeviceId": None, "sourcePort": None},
+            },
+            "controlState": {"targetComponentId": None, "parameters": [], "targets": []},
+        }
+        actions = [
+            ({"operationId": "repair-component", "actionType": "replaceComponent",
+              "target": {"type": "component", "id": "scalar_to_vector4"}}, 0.5),
+            ({"operationId": "repair-wire", "actionType": "replaceWire",
+              "sourceDeviceId": "scalar_to_vector4", "sourcePort": "socket03",
+              "targetDeviceId": "console", "targetPort": "console-input"}, 1.0),
+        ]
+        for creation_fields in (
+            {"simulationPackage": {**package, "displayConsoleDevices": [device]}},
+            {"simulationPackage": package, "renderData": {"devices": [device]}},
+        ):
+            status, created = self._post("/api/practice/session", {
+                **creation_fields, "dMatrix": sample_d_matrix(), "targetFaultId": "target-fault",
+            })
+            self.assertEqual(status, 200, created)
+            session_id = created["practiceSessionId"]
+            for action, value in actions:
+                with self.subTest(action=action["actionType"], legacy="renderData" in creation_fields):
+                    status, response = self._post(f"/api/practice/session/{session_id}/action", action)
+                    self.assertEqual(status, 200, response)
+                    self.assertIn("physicalMeasurements", response["simulationResult"])
+                    self.assertEqual(response["renderData"], {"devices": [{
+                        **device,
+                        "channels": {
+                            "signal.second": {**channel, "series": [
+                                {"t": 0.0, "value": value, "constantRangeBoundary": "start"},
+                                {"t": 0.2, "value": value, "constantRangeBoundary": "end"},
+                            ]},
+                            "other.second": {**device["channels"]["other.second"], "series": [
+                                {"t": 0.0, "value": 6, "constantRangeBoundary": "start"},
+                                {"t": 0.2, "value": 6, "constantRangeBoundary": "end"},
+                            ]},
+                            "unconnected": {**device["channels"]["unconnected"], "series": []},
+                        },
+                    }]})
+
     def test_replace_wire_uses_four_endpoint_binding_for_all_private_edges(self):
         package = valid_package()
         package["faultInstances"] = [

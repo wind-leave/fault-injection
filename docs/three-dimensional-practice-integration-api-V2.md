@@ -287,6 +287,7 @@ POST /api/practice/session/{practiceSessionId}/submit
 | `executableModel.edges` | 模型连接和线缆 |
 | `executableModel.faultInstances` | 初始故障实例 |
 | `executableModel.measurementPoints` | 后端仿真曲线测量通道定义 |
+| `executableModel.displayConsoleDevices` | 显控台设备与通道定义，与初始化的 `renderData.devices` 对应，供后端在更换后生成新的 `series` |
 | `connectionBindings` | 公开连线到私有可执行连线的映射；以四个端点字段作为唯一键，`backingEdgeIds` 保存该公开连线对应的全部私有边，不使用 `publicConnectionId` |
 | `targetFaultId` | 本次实践的真实目标故障，实践过程中属于后端私有答案；没有选择实践故障时为 `null` |
 | `targetFaultIds` | 本次实践的真实目标故障集合；单故障时为单元素数组，多故障时保存全部目标故障 |
@@ -374,6 +375,7 @@ POST /api/practice/session
 | --- | --- | --- | --- |
 | `practiceType` | string | 否 | `troubleshooting`、`inspection1`、`inspection2`、`inspection3`、`inspection4`、`powerOnSelfTestTraining` 或 `powerOnSelfTestExam`；缺省为 `troubleshooting` |
 | `simulationPackage` | object | 是 | `privateData.executableModel` |
+| `renderData` | object | 否 | 旧导出包缺少 `simulationPackage.displayConsoleDevices` 时，可传入 `publicData.renderData`，后端从 `devices` 中读取显控台定义 |
 | `connectionBindings` | array | 否 | `privateData.connectionBindings`；后端据此将一次公开连线更换应用到全部私有可执行边。省略或传空数组时从 `simulationPackage.connectionBindings` 读取；旧导出包若两处都没有映射，需要重新导出或显式传入映射 |
 | `dMatrix` | object | 是 | `privateData.dMatrix` |
 | `studentid` | string/number | 检查及通电自检任务必填 | 学员标识；排故任务在最终 `evaluationReport` 中以 `studentId` 返回，检查及通电自检任务在最终响应顶层以 `studentId` 返回 |
@@ -675,6 +677,30 @@ POST /api/practice/session/{practiceSessionId}/action
   "practiceSessionId": "practice-xxxxxxxxxxxx",
   "simulationSessionId": "session-xxxxxxxxxxxx",
   "normalizedAction": {},
+  "renderData": {
+    "devices": [
+      {
+        "id": "display-console-1",
+        "displayName": "显控台 1",
+        "type": "display_console",
+        "channels": {
+          "amplitude": {
+            "label": "幅度",
+            "unit": "",
+            "dataType": "float",
+            "displayScale": 1,
+            "portId": "console-input",
+            "portIndex": 0,
+            "inputIndex": 3,
+            "connected": true,
+            "sourceDeviceId": "attitude-command",
+            "sourcePort": "command",
+            "series": [{ "t": 0.0, "value": 0.06 }, { "t": 0.1, "value": 0.07 }]
+          }
+        }
+      }
+    ]
+  },
   "simulationResult": {
     "status": "completed",
     "simulationConfig": {
@@ -712,7 +738,9 @@ POST /api/practice/session/{practiceSessionId}/action
 }
 ```
 
-`simulationResult` 与导出包的 `initialSimulationResult` 使用相同的测点时序表示：按物理、虚拟测点分别返回来源信息和 `{ time, actual }` 样本；复数包络保留 I/Q 与参考频率，连续不变区间使用 `constantRangeBoundary` 的起点和终点表示。响应还返回当前 `diagnosticContext.values`，以便三维端确认本次重跑所用工况。不返回原始 `curves`、`componentOutputs`、`events` 或 `metrics`。
+`replaceComponent` 和 `replaceWire` 成功时，顶层 `renderData.devices` 返回显控台设备。设备 ID、通道键、通道字段和 `series` 的 `{ t, value }` 结构与任务包 `publicData.renderData.devices` 一致，`series` 使用本次重跑数据。已配置的 `measurementPorts` 和 `controlState` 随设备返回。三维端可按设备 `id` 更新对应显控台。会话没有显控台定义时，`devices` 为空数组。
+
+`simulationResult` 按物理、虚拟测点分别返回来源信息和 `{ time, actual }` 样本。复数包络保留 I/Q 与参考频率，连续不变区间使用 `constantRangeBoundary` 的起点和终点表示。`diagnosticContext.values` 记录本次重跑所用工况。
 
 ## 6. 提交最终实践结果
 

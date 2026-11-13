@@ -751,6 +751,19 @@ export function buildPracticeTaskPackage(input = {}) {
     input.exportMeasurementPoints,
     connectionBindings
   );
+  const renderData = buildMeasurementPortDeclarations(input.renderData, initialMeasurementData);
+  const displayConsoleDevices = renderData.devices
+    .filter((device) => device.type === 'display_console')
+    .map((device) => ({
+      ...device,
+      channels: Object.fromEntries(Object.entries(device.channels ?? {}).map(([id, channel]) => {
+        const { series, ...definition } = channel;
+        return [id, definition];
+      }))
+    }));
+  if (displayConsoleDevices.length) {
+    executableModel.displayConsoleDevices = displayConsoleDevices;
+  }
 
   return {
     schemaVersion: 1,
@@ -760,7 +773,7 @@ export function buildPracticeTaskPackage(input = {}) {
     meta: savedMeta,
     publicData: {
       modelRevision: Number.isInteger(input.modelRevision) ? input.modelRevision : 0,
-      renderData: buildMeasurementPortDeclarations(input.renderData, initialMeasurementData),
+      renderData,
       initialSimulationResult: {
         status: savedMeta.status ?? 'completed',
         simulationConfig: clone(savedSimulationConfig),

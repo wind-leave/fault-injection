@@ -90,7 +90,7 @@ def _public_signal_value(value):
     return None
 
 
-def _compact_measurement_samples(samples):
+def _compact_measurement_samples(samples, value_key="actual"):
     if len(samples) < 3:
         return samples
     compact = []
@@ -104,7 +104,7 @@ def _compact_measurement_samples(samples):
 
     run_start = 0
     for index in range(1, len(samples)):
-        if samples[index]["actual"] != samples[index - 1]["actual"]:
+        if samples[index][value_key] != samples[index - 1][value_key]:
             append_run(run_start, index - 1)
             run_start = index
     append_run(run_start, len(samples) - 1)
@@ -407,12 +407,20 @@ class PracticeSession:
         default_max_actions=200,
         studentid="",
         jobid="",
+        display_console_devices=None,
     ):
         self.practice_session_id = practice_session_id
         self.simulation_session_id = simulation_session_id
         self.simulation_session = simulation_session
         self.model_graph = _clone(model_graph) if isinstance(model_graph, dict) else {}
         self.connection_bindings = _normalize_connection_bindings(connection_bindings)
+        self.display_console_devices = [
+            device for device in (
+                _arr(self.model_graph.get("displayConsoleDevices")) or _arr(display_console_devices)
+            )
+            if isinstance(device, dict) and device.get("type") == "display_console"
+            and isinstance(device.get("id"), str) and device["id"]
+        ]
         self.studentid = _text(studentid)
         self.jobid = _text(jobid)
         # Practice actions and direct simulation steps touch the same runtime.
@@ -655,13 +663,21 @@ class PracticeSession:
         return source_node_id, source_device_id, source_port, channel, edge
 
     def _record_measurement_source_nodes(self):
-        """Include D-matrix sources in full rerun outputs for practice results."""
+        """Record the sources used by the public measurement and console results."""
         graph = self.simulation_session.graph
         source_ids = set()
         for point in _arr((self.troubleshooting.d_matrix or {}).get("points")):
             source_node_id, *_ = self._measurement_source_for_point(point)
             if source_node_id in graph.nodes:
                 source_ids.add(source_node_id)
+        for device in self.display_console_devices:
+            channels = device.get("channels")
+            if isinstance(channels, dict):
+                source_ids.update(
+                    _text(channel.get("sourceDeviceId"))
+                    for channel in channels.values() if isinstance(channel, dict)
+                )
+        source_ids.intersection_update(graph.nodes)
         if not source_ids.issubset(graph.recorded_node_ids):
             self.simulation_session.graph = replace(
                 graph,
@@ -919,6 +935,98 @@ class PracticeSession:
                 "values": _clone(self._current_condition_values()),
             },
         }
+
+    def _display_console_channel_series(self, console_id, channel, steps):
+        if not channel.get("connected"):
+            return []
+        port_index = channel.get("portIndex")
+        input_index = channel.get("inputIndex")
+        if any(type(index) is not int or index < 0 for index in (port_index, input_index)):
+            return []
+
+        graph = self.simulation_session.graph
+        console = graph.nodes.get(console_id)
+        console_output = (
+            console.output_names[port_index]
+            if console is not None and console.type == "display_console" and port_index < len(console.input_ports)
+            else None
+        )
+
+        source_id = _text(channel.get("sourceDeviceId"))
+        source = graph.nodes.get(source_id)
+        source_port = _text(channel.get("sourcePort"))
+        source_output = (
+            source.output_names[source.output_port_ids.index(source_port)]
+            if source is not None and source_port in source.output_port_ids
+            else None
+        )
+
+        samples = []
+        for step in steps:
+            outputs = step.get("actual") or {}
+            console_outputs = outputs.get(console_id) or {}
+            if console_output is not None and console_output in console_outputs:
+                vector = console_outputs[console_output]
+            else:
+                vector = (outputs.get(source_id) or {}).get(source_output)
+            value = vector[input_index] if isinstance(vector, list) and input_index < len(vector) else None
+            samples.append({"t": step["time"], "value": self._display_console_series_value(value)})
+        return _compact_measurement_samples(samples, value_key="value")
+
+    @staticmethod
+    def _display_console_series_value(value):
+        if isinstance(value, list):
+            return [PracticeSession._display_console_series_value(item) for item in value]
+        if isinstance(value, (int, float)) and math.isfinite(value):
+            return value
+        return None
+
+    def _build_display_console_render_data(self, simulation_result):
+        steps = _arr((simulation_result.get("componentOutputs") or {}).get("steps"))
+        devices = []
+        for definition in self.display_console_devices:
+            device = {
+                key: _clone(definition[key])
+                for key in ("id", "displayName", "type", "measurementPorts", "controlState")
+                if key in definition
+            }
+            channels = definition.get("channels")
+            device["channels"] = {}
+            for channel_id, channel in (channels.items() if isinstance(channels, dict) else ()):
+                if not isinstance(channel, dict):
+                    continue
+                device["channels"][channel_id] = {
+                    **{key: channel[key] for key in (
+                        "label", "unit", "dataType", "displayScale", "portId", "portIndex",
+                        "inputIndex", "connected", "sourceDeviceId", "sourcePort",
+                    ) if key in channel},
+                    "series": self._display_console_channel_series(device["id"], channel, steps),
+                }
+            control_state = device.get("controlState")
+            if isinstance(control_state, dict):
+                for target in [control_state, *_arr(control_state.get("targets"))]:
+                    if not isinstance(target, dict):
+                        continue
+                    node = self.simulation_session.graph.nodes.get(_text(target.get("targetComponentId")))
+                    if node is None:
+                        continue
+                    for parameter in _arr(target.get("parameters")):
+                        key = _text(parameter.get("key")) if isinstance(parameter, dict) else ""
+                        if key in node.parameters:
+                            value = node.parameters[key]
+                            parameter["value"] = value
+                            parameter["displayValue"] = self._display_console_parameter_value(parameter, value)
+            devices.append(device)
+        return {"devices": devices}
+
+    @staticmethod
+    def _display_console_parameter_value(parameter, value):
+        frequency_factors = {"hz": 1, "khz": 1e3, "mhz": 1e6, "ghz": 1e9}
+        base = frequency_factors.get(_text(parameter.get("unit")).lower())
+        display = frequency_factors.get(_text(parameter.get("displayUnit")).lower())
+        if base and display and isinstance(value, (int, float)):
+            return value * base / display
+        return value
 
     def _component_display_name(self, component_id):
         component_id = _text(component_id)
@@ -2553,6 +2661,8 @@ class PracticeSession:
                     else {}
                 ),
             }
+            if action_record.get("actionType") in {"replaceComponent", "replaceWire"}:
+                result["renderData"] = self._build_display_console_render_data(simulation_result)
             if resolved_component_node_id:
                 result["normalizedAction"]["resolvedTarget"] = {
                     "type": "component",

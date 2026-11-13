@@ -473,7 +473,7 @@ POST /api/practice/session
 }
 ```
 
-第二、第四类检查任务的动作总数固定：外舱检查考试（`inspection2`）为 17 步，标准顺序为 `1、2、…、17`；内舱检查考试（`inspection4`）为 33 步，标准顺序为 `1、2、…、33`。后端按提交位置与该类型内部预置的最优序号路径逐项比较，仅对错序位置扣分；每个位置分别占 `100/17`、`100/33` 分。最终提交时，已接收动作数必须与内部路径长度一致，少交或多交均拒绝提交；总分计算完成后保留三位小数。
+第二、第四类检查任务的动作总数固定：外舱检查考试（`inspection2`）为 17 步，标准顺序为 `1、2、…、17`；内舱检查考试（`inspection4`）为 33 步，标准顺序为 `1、2、…、33`。后端按提交位置与该类型内部预置的最优序号路径逐项比较，仅对错序位置扣分；每个位置分别占 `100/17`、`100/33` 分。最终提交时，已接收动作数必须与内部路径长度一致，少交或多交均拒绝提交；总分计算完成后四舍五入保留两位小数。
 
 `inspection1`、`inspection3` 和 `powerOnSelfTestTraining` 不需要、也不接受动作提交。三维端负责训练引导，在训练完成后直接调用最终提交接口。
 
@@ -502,7 +502,7 @@ POST /api/practice/session
 | 否 | `true` | 0 分 |
 | 否 | `false` | 0 分 |
 
-最终总分为 12 步得分之和，汇总后保留三位小数，不对每步提前取整。全部顺序正确但操作均不正确时为 50 分；全部错序时，无论操作是否正确均为 0 分。例如依次收到 `(1,true)、(3,true)、(2,false)、(4,false)`，再按顺序收到第 5 至 12 步且 `isCorrect` 均为 `true`，总分为 `9×(100/12)+50/12=79.167` 分。
+最终总分为 12 步得分之和，汇总后四舍五入保留两位小数，不对每步提前取整。全部顺序正确但操作均不正确时为 50 分；全部错序时，无论操作是否正确均为 0 分。例如依次收到 `(1,true)、(3,true)、(2,false)、(4,false)`，再按顺序收到第 5 至 12 步且 `isCorrect` 均为 `true`，总分为 `9×(100/12)+50/12≈79.17` 分。
 
 成功动作响应仍只有 `{"status":"success"}`。缺少或错误类型的 `isCorrect` 返回 `400 INVALID_SCHEMA`，`field` 为 `isCorrect`，该消息不计入已接收步骤。最终提交前必须恰好接收 12 步，不足或超出 12 步时拒绝提交。通电自检考试新增字段只适用于该类型，原内外舱检查考试继续仅提交 `actionNumber`，评分规则保持原样。
 
@@ -821,7 +821,7 @@ POST /api/practice/session/{practiceSessionId}/submit
 
 提交成功后，后端自动将实践任务标记为已提交，计算评分并移除实践会话及其关联仿真会话。该 `practiceSessionId` 不能再用于动作、查询或重复提交。最终提交响应不包含 `runId` 和 `metrics`；`resultDelivery` 仅用于确认向学生服务投递结果的状态。
 
-七类任务最终提交后均向学生服务回调。发送到学生服务的 body 仅包含外层 `studentId`、`jobId` 和 `evaluationReport`；不发送 `practiceSessionId` 或 `simulationSessionId`，且报告内不重复包含身份字段。四类检查及两类通电自检任务的 `evaluationReport` 沿用 `totalScore`、`submittedAt` 和 `totalDurationSeconds`，不新增分项评分或操作正确性字段，例如：
+七类任务最终提交后均向学生服务回调。最终总分四舍五入保留两位小数，提交响应和回调使用同一数值，字段类型为 JSON number。发送到学生服务的 body 仅包含外层 `studentId`、`jobId` 和 `evaluationReport`；不发送 `practiceSessionId` 或 `simulationSessionId`，且报告内不重复包含身份字段。四类检查及两类通电自检任务的 `evaluationReport` 沿用 `totalScore`、`submittedAt` 和 `totalDurationSeconds`，不新增分项评分或操作正确性字段，例如：
 
 ```json
 {
@@ -1047,11 +1047,7 @@ faultLocalization = 30 × setAccuracy
 - `reason`：扣分原因。
 - `improvementSuggestion`：针对该扣分项的改进建议。
 
-所有 `deductionAnalysis[].deductedPoints` 之和等于：
-
-```text
-100 - totalScore
-```
+分项扣分保留原精度。按最终总分计算的扣分为 `100 - totalScore`，与分项扣分之和可能相差一次总分舍入的量。
 
 `improvementSuggestions` 为全部扣分项建议去重后的汇总。无扣分时，返回保持当前排故策略的建议。
 

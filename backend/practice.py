@@ -22,6 +22,7 @@ from backend.practice_scoring import (
     evaluate_path_quality,
     evaluate_practice_submission_score,
     grade_for_score,
+    round_practice_total_score,
 )
 from backend.practice_report import build_practice_evaluation_report
 from backend.schemas import SimulationBackendError
@@ -348,11 +349,10 @@ class SequencePracticeSession:
                 )
                 if expected_number == actual_number
             )
-            total_score = _round_score(100.0 * earned_half_steps / (2 * len(expected)))
+            total_score = round_practice_total_score(100 * earned_half_steps / (2 * len(expected)))
         else:
-            mismatch_count = sum(1 for expected_number, actual_number in zip(expected, actual) if expected_number != actual_number)
-            deduction_per_step = 100.0 / len(expected)
-            total_score = _round_score(max(0.0, 100.0 - (mismatch_count * deduction_per_step)))
+            correct_count = sum(expected_number == actual_number for expected_number, actual_number in zip(expected, actual))
+            total_score = round_practice_total_score(100 * correct_count / len(expected))
         self.submitted_at = time.time()
         self.close("submitted", now=self.submitted_at)
         return {"studentId": self.studentid, "jobId": self.jobid, "totalScore": total_score}

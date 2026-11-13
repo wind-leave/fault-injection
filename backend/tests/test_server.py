@@ -238,9 +238,9 @@ class SimulationBackendServerTests(unittest.TestCase):
                     )
                     self.assertEqual(status, 200)
                     expected_score = {
-                        "inspection2": 88.235,
-                        "inspection4": 93.939,
-                        "powerOnSelfTestExam": 79.167,
+                        "inspection2": 88.24,
+                        "inspection4": 93.94,
+                        "powerOnSelfTestExam": 79.17,
                     }.get(practice_type, 100.0)
                     self.assertEqual(submitted["totalScore"], expected_score)
                     self.assertEqual(set(submitted), {"studentId", "jobId", "totalScore", "resultDelivery"})
@@ -300,9 +300,9 @@ class SimulationBackendServerTests(unittest.TestCase):
     def test_power_on_self_test_exam_gates_correctness_score_on_step_order(self):
         for first_action, expected_score in (
             ({"actionNumber": 1, "isCorrect": True}, 100.0),
-            ({"actionNumber": 1, "isCorrect": False}, 95.833),
-            ({"actionNumber": 2, "isCorrect": True}, 91.667),
-            ({"actionNumber": 2, "isCorrect": False}, 91.667),
+            ({"actionNumber": 1, "isCorrect": False}, 95.83),
+            ({"actionNumber": 2, "isCorrect": True}, 91.67),
+            ({"actionNumber": 2, "isCorrect": False}, 91.67),
         ):
             with self.subTest(first_action=first_action):
                 status, created = self._post("/api/practice/session", {
@@ -428,7 +428,7 @@ class SimulationBackendServerTests(unittest.TestCase):
 
     def test_sequence_practice_deducts_by_action_position_and_returns_ids(self):
         for practice_type, action_count, expected_score in (
-            ("inspection2", 17, 88.235), ("inspection4", 33, 93.939),
+            ("inspection2", 17, 88.24), ("inspection4", 33, 93.94),
         ):
             with self.subTest(practice_type=practice_type):
                 status, created = self._post(
@@ -3008,10 +3008,11 @@ class SimulationBackendServerTests(unittest.TestCase):
             self.assertEqual(status, 200)
             status, submitted = self._post(
                 f"/api/practice/session/{created['practiceSessionId']}/submit",
-                {"finalTargetIds": ["sim-1"]},
+                {"finalTargetIds": ["sim-1", "extra-1", "extra-2", "extra-3", "extra-4", "extra-5", "extra-6"]},
             )
 
         self.assertEqual(status, 200)
+        self.assertEqual(submitted["evaluationReport"]["totalScore"], 24.29)
         self.assertNotIn("runId", submitted)
         self.assertNotIn("metrics", submitted)
         self.assertEqual(submitted["resultDelivery"], {
